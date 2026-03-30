@@ -133,7 +133,11 @@ function doPost(e) {
         result = excluirProcesso(data.id);
         break;
       case 'salvarRespostas':
-        result = salvarRespostas(data.respostas);
+        // Parsear scores se vier como string JSON
+        if (data.scores && typeof data.scores === 'string') {
+          data.scores = JSON.parse(data.scores);
+        }
+        result = salvarRespostas(data);
         break;
       default:
         result = { error: 'Action não reconhecida: ' + action };
@@ -215,12 +219,42 @@ function excluirArea(rowIndex) {
 // ============================================================
 function getProcessos() {
   try {
-    const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
+    const ss = _getSS();
+    const sheet = ss.getSheetByName(ABA_PROCESSOS);
     if (!sheet) return [];
     const data = sheet.getDataRange().getValues();
-    return data.slice(1).filter(r => r[0]).map((r, i) => ({
-      id: i + 2, area: r[0], processo: r[1], responsavel: r[2], descricao: r[3], dependencia: r[4], rto: r[5], rpo: r[6], mtpd: r[7], biaHomologada: r[8]
-    }));
+
+    // Carregar scores e respostas mais recentes da aba de respostas
+    const scores = {};
+    const respostas = {};
+    const sheetResp = ss.getSheetByName(ABA_RESPOSTAS);
+    if (sheetResp) {
+      const allRows = sheetResp.getDataRange().getValues();
+      const headers = allRows[0]; // linha de cabeçalho
+      const rows = allRows.slice(1);
+      rows.sort((a, b) => new Date(b[0]) - new Date(a[0]));
+      rows.forEach(r => {
+        const key = r[2] + '||' + r[3];
+        if (!scores[key]) {
+          scores[key] = Number(r[r.length - 2]) || 0;
+          const resp = [];
+          for (let c = 4; c < r.length - 2; c++) {
+            resp.push(Number(r[c]) || 0);
+          }
+          respostas[key] = resp;
+        }
+      });
+    }
+
+    return data.slice(1).filter(r => r[0]).map((r, i) => {
+      const key = r[0] + '||' + r[1];
+      return {
+        id: i + 2, area: r[0], processo: r[1], responsavel: r[2], descricao: r[3],
+        dependencia: r[4], rto: r[5], rpo: r[6], mtpd: r[7], biaHomologada: r[8],
+        score: scores[key] || 0,
+        respostas: respostas[key] || {}
+      };
+    });
   } catch(err) { Logger.log('getProcessos ERROR: %s', err.message); return []; }
 }
 
@@ -263,9 +297,25 @@ function getProcessosPorArea(area) {
   const ultimasResp = {};
   if (sheetResp) {
     const rows = sheetResp.getDataRange().getValues().slice(1);
+    // Ordenar por timestamp decrescente para pegar a mais recente
+    rows.sort((a, b) => new Date(b[0]) - new Date(a[0]));
+    
     rows.forEach(r => {
       const key = r[2] + '||' + r[3];
-      ultimasResp[key] = r;
+      // Só armazena se ainda não tiver (primeira = mais recente)
+      if (!ultimasResp[key]) {
+        ultimasResp[key] = {
+          timestamp: r[0],
+          email: r[1],
+          scores: {},
+          scoreTotal: r[r.length - 2],
+          tier: r[r.length - 1]
+        };
+        // Mapear respostas individuais
+        perguntas.forEach((perg, i) => {
+          ultimasResp[key].scores[perg.pergunta] = Number(r[4 + i]) || 0;
+        });
+      }
     });
   }
 
@@ -274,15 +324,24 @@ function getProcessosPorArea(area) {
     .map(p => {
       const key = p.area + '||' + p.processo;
       const resp = ultimasResp[key];
-      const scoresAtuais = {};
-      perguntas.forEach((perg, i) => {
-        scoresAtuais[perg.pergunta] = resp ? (Number(resp[4 + i]) || null) : null;
-      });
-      return { linha: p.id, area: p.area, processo: p.processo, scoresAtuais };
+      
+      return {
+        linha: p.id,
+        area: p.area,
+        processo: p.processo,
+        descricao: p.descricao,
+        ultimaAvaliacao: resp ? {
+          timestamp: resp.timestamp,
+          email: resp.email,
+          scores: resp.scores,
+          scoreTotal: resp.scoreTotal,
+          tier: resp.tier
+        } : null
+      };
     });
 }
 
-function salvarRespostas(respostas) {
+function salvarRespostas(data) {
   const ss = _getSS();
   const email = Session.getActiveUser().getEmail();
   const timestamp = new Date();
@@ -295,6 +354,10 @@ function salvarRespostas(respostas) {
     sheetResp.setFrozenRows(1);
   }
 
+  // Se data.respostas existe, usar (formato antigo)
+  // Senão, data já é o objeto com area, processo, scores (formato novo)
+  const respostas = data.respostas || [data];
+  
   respostas.forEach(resp => {
     const valores = perguntas.map(p => resp.scores[p.pergunta] || 0);
     const score = valores.reduce((a, b) => a + b, 0);
@@ -324,10 +387,9 @@ function getResumoRespostas() {
 function _getSS() { return SpreadsheetApp.getActiveSpreadsheet(); }
 
 function _calcularTier(score) {
-  if (score >= 17) return 'Crítico';
-  if (score >= 12) return 'Alto';
-  if (score >= 7)  return 'Médio';
-  return 'Baixo';
+  if (score >= 12) return 'Tier 1 (Crítico)';
+  if (score >= 6)  return 'Tier 2 (Essencial)';
+  return 'Tier 3 (Suporte)';
 }
 
 function _getConfigGestores() {
