@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cadastrar Áreas em Lote</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; max-width: 800px; margin: 0 auto; }
+        button { padding: 10px 20px; font-size: 16px; cursor: pointer; background: #4285f4; color: white; border: none; border-radius: 4px; }
+        button:hover { background: #357ae8; }
+        #status { margin-top: 20px; padding: 10px; border-radius: 4px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        .progress { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <h1>Cadastrar Áreas em Lote</h1>
+    <button onclick="cadastrarAreas()">Cadastrar Todas as Áreas</button>
+    <div id="status"></div>
+
+    <script src="config.js"></script>
+    <script src="api.js"></script>
+    <script>
+        const areas = [
+            { nome: "Desenvolvimento ContWeb", responsavel: "Sávio Pierre", email: "", solucao: "Gestão Contábil" },
+            { nome: "Desenvolvimento Fisco", responsavel: "João Rolim", email: "", solucao: "Gestão Contábil" },
+            { nome: "Desenvolvimento Pessoal", responsavel: "Marília Paiva", email: "", solucao: "Gestão de Pessoal" },
+            { nome: "Produto Contábeis Gestão", responsavel: "Rafael de Paula Nunes", email: "", solucao: "Gestão Contábil" },
+            { nome: "Produto Fisco", responsavel: "Dinara Lima", email: "", solucao: "Gestão Contábil" },
+            { nome: "Produto Pessoal e Conecta", responsavel: "Layanna Quaresma", email: "", solucao: "Gestão Contábil" },
+            { nome: "Desenvolvimento Corporativo Gestão de Pes", responsavel: "Thiago Nogueira", email: "", solucao: "Gestão de Pessoas" },
+            { nome: "Produto Corporativo", responsavel: "Ciro Monteiro", email: "", solucao: "Gestão de Pessoas" },
+            { nome: "Desenvolvimento Financeiro", responsavel: "Ana Paula", email: "", solucao: "Gestão Financeira" },
+            { nome: "Produto Fortes Financeiro", responsavel: "Geordiânia Oliveira", email: "", solucao: "Gestão Financeira" },
+            { nome: "Administrativo", responsavel: "Neileny Barreto", email: "", solucao: "Outras" },
+            { nome: "Audiovisual", responsavel: "Thiago Lima", email: "", solucao: "Outras" },
+            { nome: "Comercial Contábil", responsavel: "Mônica Pinho", email: "", solucao: "Outras" },
+            { nome: "Comercial Corporativo", responsavel: "Allan Rodrigues Lima", email: "", solucao: "Outras" },
+            { nome: "Comunicação Interna", responsavel: "Juliana Saraiva", email: "", solucao: "Outras" },
+            { nome: "Contabilidade", responsavel: "Fabiana Mendonça", email: "", solucao: "Outras" },
+            { nome: "Controladoria", responsavel: "Glauber Bezerra", email: "", solucao: "Outras" },
+            { nome: "Departamento Pessoal", responsavel: "Ana Flávia", email: "", solucao: "Outras" },
+            { nome: "Desenvolvimento P&D", responsavel: "Sávio Pierre", email: "", solucao: "Outras" },
+            { nome: "Desenvolvimento TBL", responsavel: "Gleyson Matos", email: "", solucao: "Outras" },
+            { nome: "Financeiro", responsavel: "Fabiana Alves", email: "", solucao: "Outras" },
+            { nome: "Implantação", responsavel: "Denisa dos Santos Ribeiro", email: "", solucao: "Outras" },
+            { nome: "Inteligência de Negócios", responsavel: "Jadson Oliveira", email: "", solucao: "Outras" },
+            { nome: "Inteligência em Educação - NIE", responsavel: "Glícia Esmeraldo", email: "", solucao: "Outras" },
+            { nome: "Jornada do Colaborador", responsavel: "Lillian Costa", email: "", solucao: "Outras" },
+            { nome: "Marketing e Pré-Vendas", responsavel: "Helaine de Queiroz Tahim", email: "", solucao: "Outras" },
+            { nome: "Produto Contweb", responsavel: "Ramon Lima", email: "", solucao: "Outras" },
+            { nome: "Relacionamento", responsavel: "Raquel Alves da Silva", email: "", solucao: "Outras" },
+            { nome: "Segurança da Informação", responsavel: "Gabriel Fortes", email: "", solucao: "Outras" },
+            { nome: "Suporte e Entrega T&L", responsavel: "Bruna Silva", email: "", solucao: "Outras" },
+            { nome: "Suporte N1", responsavel: "Eliane Araújo", email: "", solucao: "Outras" },
+            { nome: "Suporte N2", responsavel: "Kassia Sousa", email: "", solucao: "Outras" },
+            { nome: "Tecnologia", responsavel: "Paulo Teixeira", email: "", solucao: "Outras" },
+            { nome: "TI", responsavel: "Kaique Branco Xavier", email: "", solucao: "Outras" }
+        ];
+
+        async function cadastrarAreas() {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = 'progress';
+            statusDiv.innerHTML = 'Cadastrando áreas...';
+
+            let sucesso = 0;
+            let erro = 0;
+            const erros = [];
+
+            for (let i = 0; i < areas.length; i++) {
+                const area = areas[i];
+                statusDiv.innerHTML = `Cadastrando ${i + 1}/${areas.length}: ${area.nome}...`;
+
+                try {
+                    await API.salvarArea({
+                        nome: area.nome,
+                        responsavel: area.responsavel,
+                        email: area.email,
+                        solucao: area.solucao
+                    });
+                    sucesso++;
+                } catch (e) {
+                    erro++;
+                    erros.push(`${area.nome}: ${e.message}`);
+                    console.error(`Erro ao cadastrar ${area.nome}:`, e);
+                }
+
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+
+            statusDiv.className = sucesso === areas.length ? 'success' : 'error';
+            statusDiv.innerHTML = `
+                <strong>Cadastro concluído!</strong><br>
+                ✓ Sucesso: ${sucesso}<br>
+                ${erro > 0 ? `✗ Erros: ${erro}<br><br><details><summary>Ver erros</summary><pre style="font-size:11px;margin-top:8px;">${erros.join('\n')}</pre></details>` : ''}
+            `;
+        }
+    </script>
+</body>
+</html>
