@@ -249,10 +249,10 @@ function getProcessos() {
     return data.slice(1).filter(r => r[0]).map((r, i) => {
       const key = r[0] + '||' + r[1];
       return {
-        id: i + 2, area: r[0], processo: r[1], responsavel: r[2], descricao: r[3],
-        dependencia: r[4], rto: r[5], rpo: r[6], mtpd: r[7], biaHomologada: r[8],
+        id: i + 2, area: r[0], processo: r[1], descricao: r[2],
+        dependencia: r[3], rto: r[4], rpo: r[5], mtpd: r[6], biaHomologada: r[7], tier: r[8] || '',
         score: scores[key] || 0,
-        respostas: respostas[key] || {}
+        respostas: respostas[key] || []
       };
     });
   } catch(err) { Logger.log('getProcessos ERROR: %s', err.message); return []; }
@@ -261,11 +261,12 @@ function getProcessos() {
 function salvarProcesso(p) {
   const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
   if (p.id) {
-    sheet.getRange(p.id, 1, 1, 9).setValues([[p.area, p.processo, p.responsavel, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada]]);
+    sheet.getRange(p.id, 1, 1, 8).setValues([[p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada]]);
+    return { success: true, id: Number(p.id) };
   } else {
-    sheet.appendRow([p.area, p.processo, p.responsavel, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada]);
+    sheet.appendRow([p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '']);
+    return { success: true, id: sheet.getLastRow() };
   }
-  return { success: true };
 }
 
 function excluirProcesso(rowIndex) {
@@ -354,14 +355,28 @@ function salvarRespostas(data) {
     sheetResp.setFrozenRows(1);
   }
 
-  // Se data.respostas existe, usar (formato antigo)
-  // Senão, data já é o objeto com area, processo, scores (formato novo)
   const respostas = data.respostas || [data];
   
   respostas.forEach(resp => {
     const valores = perguntas.map(p => resp.scores[p.pergunta] || 0);
     const score = valores.reduce((a, b) => a + b, 0);
-    sheetResp.appendRow([timestamp, email, resp.area, resp.processo, ...valores, score, _calcularTier(score)]);
+    const tier = _calcularTier(score);
+    const rto = _calcularRTO(tier);
+    sheetResp.appendRow([timestamp, email, resp.area, resp.processo, ...valores, score, tier]);
+    
+    // Atualizar Tier e RTO na aba Processos
+    const sheetProc = ss.getSheetByName(ABA_PROCESSOS);
+    if (sheetProc) {
+      const rows = sheetProc.getDataRange().getValues();
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][0]).trim().toLowerCase() === String(resp.area).trim().toLowerCase() &&
+            String(rows[i][1]).trim().toLowerCase() === String(resp.processo).trim().toLowerCase()) {
+          sheetProc.getRange(i + 1, 5).setValue(rto);
+          sheetProc.getRange(i + 1, 9).setValue(tier);
+          break;
+        }
+      }
+    }
   });
 
   return { success: true, total: respostas.length };
@@ -390,6 +405,12 @@ function _calcularTier(score) {
   if (score >= 12) return 'Tier 1 (Crítico)';
   if (score >= 6)  return 'Tier 2 (Essencial)';
   return 'Tier 3 (Suporte)';
+}
+
+function _calcularRTO(tier) {
+  if (tier === 'Tier 1 (Crítico)')  return '< 4 horas';
+  if (tier === 'Tier 2 (Essencial)') return '4h a 24 horas';
+  return '> 24 horas';
 }
 
 function _getConfigGestores() {
@@ -446,27 +467,26 @@ function _criarAbaAreas(ss) {
 function _criarAbaProcessos(ss) {
   if (ss.getSheetByName(ABA_PROCESSOS)) return;
   const sheet = ss.insertSheet(ABA_PROCESSOS);
-  sheet.appendRow(['Área', 'Processo de Negócio', 'Responsável', 'Descrição do Impacto', 'Dependência Crítica', 'RTO', 'RPO', 'MTPD', 'BIA Homologada']);
+  sheet.appendRow(['Área', 'Processo de Negócio', 'Descrição do Impacto', 'Dependência Crítica', 'RTO', 'RPO', 'MTPD', 'BIA Homologada']);
   [
-    ['Segurança da Informação', 'Gestão de Identidades e Acessos (IAM)', 'gestor.si@empresa.com', 'Interrupção total de trabalho', 'Servidores de Diretório', '< 1 hora', '< 30 minutos', 'Não', 'Não'],
-    ['Segurança da Informação', 'Gestão de Vulnerabilidades (AppSec)', 'gestor.si@empresa.com', 'Falhas de segurança', 'Scanners de vulnerabilidade', '24 a 48 horas', '24 horas', 'Não', 'Não'],
-    ['Segurança da Informação', 'Gestão de Backups e Recuperação de Desastres (DRP)', 'gestor.si@empresa.com', 'Perda de dados', 'Solução de Backup', '4 a 8 horas', 'Variável', 'Não', 'Em homologação'],
-    ['Segurança da Informação', 'Monitoramento e Detecção de Incidentes (SOC/SIEM)', 'gestor.si@empresa.com', 'Detecção tardia de incidentes', 'SIEM', '2 a 4 horas', 'Próximo de zero', 'Não', 'Sim'],
-    ['TI / Infraestrutura', 'Gestão de Servidores e Cloud', 'gestor.ti@empresa.com', 'Indisponibilidade de sistemas', 'Infraestrutura Cloud', '2 a 4 horas', '1 hora', 'Não', 'Não'],
-    ['TI / Infraestrutura', 'Gestão de Rede e Conectividade', 'gestor.ti@empresa.com', 'Perda de conectividade', 'Links de Internet', '1 a 2 horas', 'Imediato', 'Não', 'Não'],
-    ['Financeiro', 'Faturamento e Cobrança', 'gestor.fin@empresa.com', 'Perda de receita', 'Sistema ERP', '4 horas', '24 horas', 'Não', 'Não'],
-    ['Financeiro', 'Contas a Pagar', 'gestor.fin@empresa.com', 'Atraso em pagamentos', 'Sistema Financeiro', '8 horas', '24 horas', 'Não', 'Não'],
-    ['RH', 'Folha de Pagamento', 'gestor.rh@empresa.com', 'Atraso no pagamento de salários', 'Sistema de RH', '24 horas', '48 horas', 'Não', 'Não'],
-    ['RH', 'Admissão e Demissão', 'gestor.rh@empresa.com', 'Atraso em processos de RH', 'Sistema de RH', '48 horas', '72 horas', 'Não', 'Não'],
+    ['Segurança da Informação', 'Gestão de Identidades e Acessos (IAM)', 'Interrupção total de trabalho', 'Servidores de Diretório', '< 1 hora', '< 30 minutos', 'Não', 'Não'],
+    ['Segurança da Informação', 'Gestão de Vulnerabilidades (AppSec)', 'Falhas de segurança', 'Scanners de vulnerabilidade', '24 a 48 horas', '24 horas', 'Não', 'Não'],
+    ['Segurança da Informação', 'Gestão de Backups e Recuperação de Desastres (DRP)', 'Perda de dados', 'Solução de Backup', '4 a 8 horas', 'Variável', 'Não', 'Em homologação'],
+    ['Segurança da Informação', 'Monitoramento e Detecção de Incidentes (SOC/SIEM)', 'Detecção tardia de incidentes', 'SIEM', '2 a 4 horas', 'Próximo de zero', 'Não', 'Sim'],
+    ['TI / Infraestrutura', 'Gestão de Servidores e Cloud', 'Indisponibilidade de sistemas', 'Infraestrutura Cloud', '2 a 4 horas', '1 hora', 'Não', 'Não'],
+    ['TI / Infraestrutura', 'Gestão de Rede e Conectividade', 'Perda de conectividade', 'Links de Internet', '1 a 2 horas', 'Imediato', 'Não', 'Não'],
+    ['Financeiro', 'Faturamento e Cobrança', 'Perda de receita', 'Sistema ERP', '4 horas', '24 horas', 'Não', 'Não'],
+    ['Financeiro', 'Contas a Pagar', 'Atraso em pagamentos', 'Sistema Financeiro', '8 horas', '24 horas', 'Não', 'Não'],
+    ['RH', 'Folha de Pagamento', 'Atraso no pagamento de salários', 'Sistema de RH', '24 horas', '48 horas', 'Não', 'Não'],
+    ['RH', 'Admissão e Demissão', 'Atraso em processos de RH', 'Sistema de RH', '48 horas', '72 horas', 'Não', 'Não'],
   ].forEach(r => sheet.appendRow(r));
-  sheet.getRange(1, 1, 1, 9).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+  sheet.getRange(1, 1, 1, 8).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
   sheet.setColumnWidth(1, 180);
   sheet.setColumnWidth(2, 280);
-  sheet.setColumnWidth(3, 200);
-  sheet.setColumnWidth(4, 250);
-  sheet.setColumnWidth(5, 200);
-  sheet.setColumnWidths(6, 3, 100);
-  sheet.setColumnWidth(9, 120);
+  sheet.setColumnWidth(3, 250);
+  sheet.setColumnWidth(4, 200);
+  sheet.setColumnWidths(5, 3, 100);
+  sheet.setColumnWidth(8, 120);
   sheet.setFrozenRows(1);
 }
 

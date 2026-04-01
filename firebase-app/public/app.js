@@ -310,8 +310,9 @@ async function processos() {
           <tr>
             <th onclick="ordenarProcessos('area')" style="cursor:pointer;width:10%;">Área <span id="sort-area"></span></th>
             <th onclick="ordenarProcessos('processo')" style="cursor:pointer;width:14%;">Processo de Negócio <span id="sort-processo"></span></th>
-            <th onclick="ordenarProcessos('status')" style="cursor:pointer;width:8%;">Status <span id="sort-status"></span></th>
             <th onclick="ordenarProcessos('responsavel')" style="cursor:pointer;width:9%;">Responsável <span id="sort-responsavel"></span></th>
+            <th onclick="ordenarProcessos('status')" style="cursor:pointer;width:8%;">Status da Avaliação <span id="sort-status"></span></th>
+            <th onclick="ordenarProcessos('score')" style="cursor:pointer;width:6%;">Score <span id="sort-score"></span></th>
             <th onclick="ordenarProcessos('solucao')" style="cursor:pointer;width:8%;">Solução <span id="sort-solucao"></span></th>
             <th style="width:6%;text-align:center;">Ações</th>
           </tr>
@@ -446,7 +447,7 @@ function renderizarProcessos() {
   });
   
   // Atualizar indicadores de ordenação
-  ['area', 'processo', 'status', 'responsavel', 'solucao', 'biaHomologada'].forEach(col => {
+  ['area', 'processo', 'status', 'score', 'responsavel', 'solucao', 'biaHomologada'].forEach(col => {
     const el = document.getElementById(`sort-${col}`);
     if (el) {
       if (col === processosOrdenacao.coluna) {
@@ -464,8 +465,9 @@ function renderizarProcessos() {
         return `<tr style="cursor:pointer;" onclick="verDetalhesProcesso(${p.id})">
         <td>${p.area}</td>
         <td><strong>${p.processo}</strong></td>
-        <td><span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.8em;font-weight:600;color:white;background:${statusColor};">${status}</span></td>
         <td>${p.responsavelArea || p.responsavel || ''}</td>
+        <td><span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.8em;font-weight:600;color:white;background:${statusColor};">${status}</span></td>
+        <td style="text-align:center;font-weight:700;color:${p.score > 0 ? statusColor : '#bbb'};font-size:0.95em;">${p.score > 0 ? p.score : '-'}</td>
         <td>${p.solucao || ''}</td>
         <td style="text-align:center;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="avaliarProcesso(${p.id})" title="Avaliar">
@@ -521,7 +523,14 @@ window.abrirModalProcesso = (p) => {
   document.getElementById('fRPO').value = p ? p.rpo : '';
   document.getElementById('fMTPD').value = p ? p.mtpd : '';
   document.getElementById('fBiaHomologada').value = p ? p.biaHomologada : '';
-  document.getElementById('modalTitulo').textContent = p ? 'Editar Processo' : 'Novo Processo';
+  
+  const titulo = p ? 'Editar Processo' : 'Novo Processo';
+  const scoreHtml = p && p.score > 0 ? (() => {
+    const status = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : 'Tier 3 (Suporte)';
+    const cor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : '#1565c0';
+    return `<span style="margin-left:12px;font-size:0.82em;font-weight:600;padding:3px 10px;border-radius:10px;background:${cor};color:white;vertical-align:middle;">${status} &bull; Score ${p.score}</span>`;
+  })() : '';
+  document.getElementById('modalTitulo').innerHTML = titulo + scoreHtml;
   document.getElementById('modal').classList.add('open');
 };
 
@@ -532,7 +541,6 @@ window.salvarProcesso = async () => {
     id: document.getElementById('fId').value ? Number(document.getElementById('fId').value) : null,
     area: document.getElementById('fArea').value.trim(),
     processo: document.getElementById('fProcesso').value.trim(),
-    responsavel: '',
     descricao: document.getElementById('fDescricao').value.trim(),
     dependencia: document.getElementById('fDependencia').value.trim(),
     rto: document.getElementById('fRTO').value.trim(),
@@ -547,12 +555,24 @@ window.salvarProcesso = async () => {
   if (!p.processo) return showToast('Informe o processo.', '#e65100');
   
   try {
-    console.log('Chamando API.salvarProcesso...');
     const result = await API.salvarProcesso(p);
-    console.log('Resultado:', result);
     fecharModal();
     showToast('✅ Salvo!', '#2e7d32');
-    processos();
+    // Atualizar localmente sem recarregar do backend
+    const area = window.areasDisponiveis.find(a => a.nome === p.area);
+    const pEnriquecido = { ...p, responsavelArea: area ? area.responsavel : '', solucao: area ? area.solucao : '', score: 0, respostas: [] };
+    if (p.id) {
+      const idx = window.processosData.findIndex(x => x.id === p.id);
+      if (idx !== -1) {
+        pEnriquecido.score = window.processosData[idx].score;
+        pEnriquecido.respostas = window.processosData[idx].respostas;
+        window.processosData[idx] = pEnriquecido;
+      }
+    } else {
+      pEnriquecido.id = result.id || Date.now();
+      window.processosData.push(pEnriquecido);
+    }
+    renderizarProcessos();
   } catch (err) {
     console.error('Erro ao salvar processo:', err);
     showToast('❌ Erro ao salvar: ' + err.message, '#c62828');
@@ -563,7 +583,8 @@ window.excluirProcesso = async (id) => {
   if (!confirm('Excluir este processo?')) return;
   await API.excluirProcesso(id);
   showToast('🗑️ Excluído.', '#555');
-  processos();
+  window.processosData = window.processosData.filter(p => p.id !== id);
+  renderizarProcessos();
 };
 
 window.verDetalhesProcesso = (id) => {
