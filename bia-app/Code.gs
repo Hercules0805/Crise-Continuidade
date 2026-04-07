@@ -250,7 +250,7 @@ function getProcessos() {
       const key = r[0] + '||' + r[1];
       return {
         id: i + 2, area: r[0], processo: r[1], descricao: r[2],
-        dependencia: r[3], rto: r[4], rpo: r[5], mtpd: r[6], biaHomologada: r[7], tier: r[8] || '',
+        dependencia: r[3], rto: r[4], rpo: r[5], mtpd: r[6], biaHomologada: r[7], tier: r[8] || '', bcpStatus: r[9] || '',
         score: scores[key] || 0,
         respostas: respostas[key] || []
       };
@@ -261,10 +261,10 @@ function getProcessos() {
 function salvarProcesso(p) {
   const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
   if (p.id) {
-    sheet.getRange(p.id, 1, 1, 8).setValues([[p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada]]);
+    sheet.getRange(p.id, 1, 1, 10).setValues([[p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '']]);
     return { success: true, id: Number(p.id) };
   } else {
-    sheet.appendRow([p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '']);
+    sheet.appendRow([p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '']);
     return { success: true, id: sheet.getLastRow() };
   }
 }

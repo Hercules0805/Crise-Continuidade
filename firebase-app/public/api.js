@@ -2,20 +2,22 @@
 // API CLIENT - Comunicação com Google Apps Script
 // ============================================================
 
+const _cache = {};
+
 const API = {
   async get(action, params = {}) {
     try {
+      const cacheKey = action + JSON.stringify(params);
+      if (_cache[cacheKey]) return _cache[cacheKey];
+
       const url = new URL(API_URL);
       url.searchParams.append('action', action);
       Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-      
-      console.log('API GET:', url.toString());
       const res = await fetch(url);
-      console.log('Response status:', res.status);
       const text = await res.text();
-      console.log('Response text:', text);
       const data = JSON.parse(text);
       if (data.error) throw new Error(data.error);
+      _cache[cacheKey] = data;
       return data;
     } catch (err) {
       console.error('API GET Error:', err);
@@ -23,38 +25,20 @@ const API = {
     }
   },
 
+  invalidate(...actions) {
+    actions.forEach(a => { Object.keys(_cache).filter(k => k.startsWith(a)).forEach(k => delete _cache[k]); });
+  },
+
   async post(action, body) {
     try {
-      const url = API_URL;
-      console.log('API POST:', url);
-      console.log('Action:', action);
-      console.log('Body:', body);
-      
-      // Usar FormData nativo para multipart/form-data
       const formData = new FormData();
       formData.append('action', action);
-      
-      // Adicionar todos os campos do body
       Object.entries(body).forEach(([key, value]) => {
-        if (value !== null && value !== undefined) {
-          formData.append(key, String(value));
-        }
+        if (value !== null && value !== undefined) formData.append(key, String(value));
       });
-      
-      console.log('Enviando FormData com action:', action);
-      
-      const res = await fetch(url, {
-        method: 'POST',
-        body: formData,
-      });
-      
-      console.log('Response status:', res.status);
+      const res = await fetch(API_URL, { method: 'POST', body: formData });
       const text = await res.text();
-      console.log('Response text:', text);
-      
       const data = JSON.parse(text);
-      console.log('Response data:', data);
-      
       if (data.error) throw new Error(data.error);
       return data;
     } catch (err) {

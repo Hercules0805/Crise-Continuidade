@@ -311,8 +311,10 @@ async function processos() {
             <th onclick="ordenarProcessos('area')" style="cursor:pointer;width:10%;">Área <span id="sort-area"></span></th>
             <th onclick="ordenarProcessos('processo')" style="cursor:pointer;width:14%;">Processo de Negócio <span id="sort-processo"></span></th>
             <th onclick="ordenarProcessos('responsavel')" style="cursor:pointer;width:9%;">Responsável <span id="sort-responsavel"></span></th>
-            <th onclick="ordenarProcessos('status')" style="cursor:pointer;width:8%;">Status da Avaliação <span id="sort-status"></span></th>
+            <th onclick="ordenarProcessos('biaHomologada')" style="cursor:pointer;width:8%;">BIA Status <span id="sort-biaHomologada"></span></th>
+            <th onclick="ordenarProcessos('status')" style="cursor:pointer;width:8%;">Tier <span id="sort-status"></span></th>
             <th onclick="ordenarProcessos('score')" style="cursor:pointer;width:6%;">Score <span id="sort-score"></span></th>
+            <th onclick="ordenarProcessos('bcpStatus')" style="cursor:pointer;width:8%;">BCP Status <span id="sort-bcpStatus"></span></th>
             <th onclick="ordenarProcessos('solucao')" style="cursor:pointer;width:8%;">Solução <span id="sort-solucao"></span></th>
             <th style="width:6%;text-align:center;">Ações</th>
           </tr>
@@ -328,8 +330,8 @@ async function processos() {
       </div>
     </div></div>
     <div class="modal-overlay" id="modalAvaliar"><div class="modal" onclick="event.stopPropagation()" style="max-width:700px;max-height:90vh;overflow-y:auto;">
-      <h3>Avaliar Processo</h3>
-      <p id="modalAvaliarNome" style="color:#666;margin-bottom:20px;font-size:0.95em;"></p>
+      <h3 id="modalAvaliarTitulo">Avaliar Processo</h3>
+      <p id="modalAvaliarNome" style="color:#888;margin-bottom:20px;font-size:0.88em;letter-spacing:0.2px;"></p>
       <input type="hidden" id="qProcessoId">
       <input type="hidden" id="qArea">
       <input type="hidden" id="qProcesso">
@@ -358,13 +360,23 @@ async function processos() {
           <select id="fArea" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;"></select>
         </div>
         <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Homologada</label>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Status</label>
           <select id="fBiaHomologada" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
             <option value="">Selecione...</option>
-            <option>Sim</option>
-            <option>Não</option>
-            <option>Em homologação</option>
+            <option>Avaliado</option>
+            <option>Não avaliado</option>
+          </select>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BCP Status</label>
+          <select id="fBcpStatus" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
+            <option value="">Selecione...</option>
+            <option>Não avaliado</option>
             <option>Não necessário</option>
+            <option>Em elaboração</option>
+            <option>Documentado</option>
           </select>
         </div>
       </div>
@@ -440,6 +452,10 @@ function renderizarProcessos() {
   
   // Ordenar
   data.sort((a, b) => {
+    if (processosOrdenacao.coluna === 'score' || processosOrdenacao.coluna === 'status') {
+      const diff = (a.score || 0) - (b.score || 0);
+      return processosOrdenacao.direcao === 'asc' ? diff : -diff;
+    }
     const valA = (a[processosOrdenacao.coluna] || '').toString().toLowerCase();
     const valB = (b[processosOrdenacao.coluna] || '').toString().toLowerCase();
     const comparacao = valA.localeCompare(valB);
@@ -466,8 +482,10 @@ function renderizarProcessos() {
         <td>${p.area}</td>
         <td><strong>${p.processo}</strong></td>
         <td>${p.responsavelArea || p.responsavel || ''}</td>
+        <td>${p.biaHomologada ? `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:white;background:${p.biaHomologada === 'Avaliado' ? '#2e7d32' : '#999'}">${p.biaHomologada}</span>` : ''}</td>
         <td><span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.8em;font-weight:600;color:white;background:${statusColor};">${status}</span></td>
         <td style="text-align:center;font-weight:700;color:${p.score > 0 ? statusColor : '#bbb'};font-size:0.95em;">${p.score > 0 ? p.score : '-'}</td>
+        <td>${p.bcpStatus ? (() => { const c = p.bcpStatus === 'Documentado' ? '#2e7d32' : p.bcpStatus === 'Em elaboração' ? '#f57c00' : p.bcpStatus === 'Não necessário' ? '#1565c0' : '#999'; return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:white;background:${c}">${p.bcpStatus}</span>`; })() : ''}</td>
         <td>${p.solucao || ''}</td>
         <td style="text-align:center;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="avaliarProcesso(${p.id})" title="Avaliar">
@@ -490,7 +508,7 @@ function renderizarProcessos() {
         </td>
       </tr>`;
       }).join('')
-    : `<tr><td colspan="6" style="text-align:center;color:#999;padding:40px;">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
+    : `<tr><td colspan="8" style="text-align:center;color:#999;padding:40px;">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
 }
 
 window.filtrarPorArea = (area) => {
@@ -523,6 +541,7 @@ window.abrirModalProcesso = (p) => {
   document.getElementById('fRPO').value = p ? p.rpo : '';
   document.getElementById('fMTPD').value = p ? p.mtpd : '';
   document.getElementById('fBiaHomologada').value = p ? p.biaHomologada : '';
+  document.getElementById('fBcpStatus').value = p ? (p.bcpStatus || '') : '';
   
   const titulo = p ? 'Editar Processo' : 'Novo Processo';
   const scoreHtml = p && p.score > 0 ? (() => {
@@ -547,6 +566,7 @@ window.salvarProcesso = async () => {
     rpo: document.getElementById('fRPO').value.trim(),
     mtpd: document.getElementById('fMTPD').value.trim(),
     biaHomologada: document.getElementById('fBiaHomologada').value.trim(),
+    bcpStatus: document.getElementById('fBcpStatus').value.trim(),
   };
   
   console.log('Dados do processo a salvar:', p);
@@ -633,7 +653,8 @@ window.avaliarProcesso = (id) => {
   document.getElementById('qProcessoId').value = p.id;
   document.getElementById('qArea').value = p.area;
   document.getElementById('qProcesso').value = p.processo;
-  document.getElementById('modalAvaliarNome').textContent = `${p.area} > ${p.processo}`;
+  document.getElementById('modalAvaliarNome').textContent = p.area;
+  document.getElementById('modalAvaliarTitulo').textContent = p.processo;
   const container = document.getElementById('perguntas-container');
   container.innerHTML = window.processosPerguntas.map((perg, i) => `
     <div style="margin-bottom:32px;padding:20px;background:#f8f9fa;border-radius:8px;border-left:4px solid #1a237e;">
@@ -1026,6 +1047,7 @@ window.salvarAvaliacaoProcesso = async () => {
     if (window.processosPerguntas) {
       fecharModalAvaliar();
       showToast('✅ Avaliação salva com sucesso!', '#2e7d32');
+      API.invalidate('getProcessos');
       processos();
     } else {
       fecharModalQuestionario();
