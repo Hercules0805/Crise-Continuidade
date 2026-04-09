@@ -29,16 +29,18 @@ function showToast(msg, bg) {
 async function perguntas() {
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Perguntas do Questionário</h2><p class="page-sub">Gerencie as perguntas exibidas no formulário BIA</p></div>
+      <div><h2>Perguntas do Questionário</h2><p class="page-sub">Gerencie as perguntas e as opções de resposta por categoria</p></div>
       <button class="btn btn-primary" onclick="abrirModalPergunta()">+ Nova Pergunta</button>
     </div>
     <div class="loading" id="loading">⏳ Carregando...</div>
     <div id="lista"></div>
+    <div id="lista-respostas" style="margin-top:32px;"></div>
     <div class="modal-overlay" id="modal"><div class="modal" onclick="event.stopPropagation()">
       <h3 id="modalTitulo">Nova Pergunta</h3>
       <input type="hidden" id="fId">
       <label>Categoria</label>
       <select id="fCategoria">
+        <option>Geral</option>
         <option>Impacto na Operação e Missão</option>
         <option>Impacto Financeiro</option>
         <option>Impacto Jurídico e Regulatório</option>
@@ -88,6 +90,12 @@ async function perguntas() {
   }).join('');
   
   window.perguntasData = data;
+
+  // Carregar e renderizar config de respostas
+  const configRespostas = await API.getConfigRespostas();
+  window.configRespostasData = configRespostas;
+  renderizarConfigRespostas(configRespostas);
+
   } catch (err) {
     console.error('Erro ao carregar perguntas:', err);
     document.getElementById('loading').innerHTML = `
@@ -111,6 +119,153 @@ window.abrirModalPergunta = (p) => {
 
 window.editarPergunta = (id) => abrirModalPergunta(window.perguntasData.find(p => p.id === id));
 window.fecharModal = () => document.getElementById('modal').classList.remove('open');
+
+function renderizarConfigRespostas(config) {
+  const cats = Object.keys(config);
+  const CAT_CORES = {
+    '_default': { bg: '#455a64', fg: 'white' },
+    'Geral': { bg: '#37474f', fg: 'white' },
+    'Impacto na Operação e Missão': { bg: '#1a237e', fg: 'white' },
+    'Impacto Financeiro': { bg: '#c62828', fg: 'white' },
+    'Impacto Jurídico e Regulatório': { bg: '#e65100', fg: 'white' },
+    'Impacto Reputacional': { bg: '#00838f', fg: 'white' },
+  };
+  document.getElementById('lista-respostas').innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <div>
+        <h3 style="font-size:1.1em;font-weight:700;color:#1a237e;margin:0 0 4px;">Opções de Resposta por Categoria</h3>
+        <p style="font-size:0.85em;color:#888;margin:0;">Personalize os rótulos e pontuações exibidos no questionário</p>
+      </div>
+      <button class="btn btn-primary" onclick="abrirModalConfigResposta()">+ Nova Opção</button>
+    </div>
+    ${cats.map(cat => {
+      const cor = CAT_CORES[cat] || { bg: '#555', fg: 'white' };
+      const itens = config[cat];
+      return `<div class="group-card" style="margin-bottom:16px;">
+        <div class="group-header" style="background:${cor.bg};color:${cor.fg};display:flex;justify-content:space-between;align-items:center;">
+          <span>${cat === '_default' ? 'Padrão (todas as categorias)' : cat}</span>
+        </div>
+        ${itens.map((op, idx) => `
+          <div class="list-row">
+            <div class="list-row-main" style="display:flex;align-items:center;gap:12px;">
+              <span style="display:inline-block;padding:3px 12px;border-radius:12px;font-size:0.82em;font-weight:700;color:white;background:${op.cor};min-width:24px;text-align:center;">${op.valor}</span>
+              <span style="font-weight:600;color:#333;">${op.label}</span>
+            </div>
+            <div class="list-row-actions">
+              <button class="btn-icon" onclick="editarConfigResposta('${cat}', ${idx})" title="Editar">✏️</button>
+              <button class="btn-icon" onclick="excluirConfigResposta('${cat}', ${idx})" title="Excluir">🗑️</button>
+            </div>
+          </div>`).join('')}
+      </div>`;
+    }).join('')}
+    <div class="modal-overlay" id="modalConfigResposta"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
+      <h3 id="modalConfigRespostaTitulo" style="font-size:1.1em;font-weight:700;color:#1a237e;border-bottom:2px solid #e8eaf6;padding-bottom:12px;margin-bottom:20px;">Nova Opção de Resposta</h3>
+      <input type="hidden" id="crRowIndex">
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria</label>
+        <select id="crCategoria" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
+          <option value="_default">Padrão (todas as categorias)</option>
+          <option>Geral</option>
+          <option>Impacto na Operação e Missão</option>
+          <option>Impacto Financeiro</option>
+          <option>Impacto Jurídico e Regulatório</option>
+          <option>Impacto Reputacional</option>
+        </select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:14px;margin-bottom:14px;">
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Pontuação</label>
+          <input type="number" id="crValor" min="0" max="10" placeholder="Ex: 3" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Rótulo</label>
+          <input type="text" id="crLabel" placeholder="Ex: Alto impacto" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Cor do texto</label>
+          <input type="color" id="crCor" value="#c62828" style="width:100%;height:40px;border:1.5px solid #e0e0e0;border-radius:7px;cursor:pointer;">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Cor de fundo</label>
+          <input type="color" id="crBackground" value="#ffebee" style="width:100%;height:40px;border:1.5px solid #e0e0e0;border-radius:7px;cursor:pointer;">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalConfigResposta()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarConfigResposta()">Salvar</button>
+      </div>
+    </div></div>
+  `;
+}
+
+window.abrirModalConfigResposta = (cat, idx) => {
+  const isEdit = cat !== undefined && idx !== undefined;
+  document.getElementById('modalConfigRespostaTitulo').textContent = isEdit ? 'Editar Opção' : 'Nova Opção de Resposta';
+  if (isEdit) {
+    const op = window.configRespostasData[cat][idx];
+    // Calcular rowIndex real na planilha (header + posição)
+    let rowIndex = 2;
+    for (const c of Object.keys(window.configRespostasData)) {
+      if (c === cat) { rowIndex += idx; break; }
+      rowIndex += window.configRespostasData[c].length;
+    }
+    document.getElementById('crRowIndex').value = rowIndex;
+    document.getElementById('crCategoria').value = cat;
+    document.getElementById('crValor').value = op.valor;
+    document.getElementById('crLabel').value = op.label;
+    document.getElementById('crCor').value = op.cor;
+    document.getElementById('crBackground').value = op.background;
+  } else {
+    document.getElementById('crRowIndex').value = '';
+    document.getElementById('crCategoria').value = '_default';
+    document.getElementById('crValor').value = '';
+    document.getElementById('crLabel').value = '';
+    document.getElementById('crCor').value = '#c62828';
+    document.getElementById('crBackground').value = '#ffebee';
+  }
+  document.getElementById('modalConfigResposta').classList.add('open');
+};
+
+window.editarConfigResposta = (cat, idx) => abrirModalConfigResposta(cat, idx);
+
+window.fecharModalConfigResposta = () => document.getElementById('modalConfigResposta').classList.remove('open');
+
+window.salvarConfigResposta = async () => {
+  const rowIndex = document.getElementById('crRowIndex').value;
+  const d = {
+    categoria: document.getElementById('crCategoria').value,
+    valor: document.getElementById('crValor').value,
+    label: document.getElementById('crLabel').value.trim(),
+    cor: document.getElementById('crCor').value,
+    background: document.getElementById('crBackground').value,
+  };
+  if (!d.valor || !d.label) return showToast('Preencha pontuação e rótulo.', '#e65100');
+  if (rowIndex) d.rowIndex = rowIndex;
+  await API.salvarConfigResposta(d);
+  API.invalidate('getConfigRespostas');
+  fecharModalConfigResposta();
+  showToast('✅ Salvo!', '#2e7d32');
+  const config = await API.getConfigRespostas();
+  window.configRespostasData = config;
+  renderizarConfigRespostas(config);
+};
+
+window.excluirConfigResposta = async (cat, idx) => {
+  if (!confirm('Excluir esta opção?')) return;
+  let rowIndex = 2;
+  for (const c of Object.keys(window.configRespostasData)) {
+    if (c === cat) { rowIndex += idx; break; }
+    rowIndex += window.configRespostasData[c].length;
+  }
+  await API.excluirConfigResposta({ rowIndex });
+  API.invalidate('getConfigRespostas');
+  showToast('🗑️ Excluído.', '#555');
+  const config = await API.getConfigRespostas();
+  window.configRespostasData = config;
+  renderizarConfigRespostas(config);
+};
 
 window.salvarPergunta = async () => {
   const p = {
@@ -316,7 +471,7 @@ async function processos() {
             <th onclick="ordenarProcessos('score')" style="cursor:pointer;width:6%;">Score <span id="sort-score"></span></th>
             <th onclick="ordenarProcessos('bcpStatus')" style="cursor:pointer;width:8%;">BCP Status <span id="sort-bcpStatus"></span></th>
             <th onclick="ordenarProcessos('solucao')" style="cursor:pointer;width:8%;">Solução <span id="sort-solucao"></span></th>
-            <th style="width:6%;text-align:center;">Ações</th>
+            <th style="width:10%;text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
@@ -329,12 +484,31 @@ async function processos() {
         <button class="btn btn-ghost" onclick="fecharModalDetalhes()">Fechar</button>
       </div>
     </div></div>
-    <div class="modal-overlay" id="modalAvaliar"><div class="modal" onclick="event.stopPropagation()" style="max-width:700px;max-height:90vh;overflow-y:auto;">
-      <h3 id="modalAvaliarTitulo">Avaliar Processo</h3>
+    <div class="modal-overlay" id="modalEnviar"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
+      <h3 style="font-size:1.1em;font-weight:700;color:#1a237e;border-bottom:2px solid #e8eaf6;padding-bottom:12px;margin-bottom:20px;">Enviar Questionário por E-mail</h3>
+      <input type="hidden" id="enviarProcessoId">
+      <p id="enviarProcessoNome" style="font-size:0.9em;color:#555;margin-bottom:20px;"></p>
+      <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">E-mail do Respondente</label>
+      <input type="email" id="enviarEmail" placeholder="nome@empresa.com" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;margin-bottom:8px;">
+      <p style="font-size:0.8em;color:#888;margin-bottom:20px;">O respondente receberá um link único válido por 7 dias.</p>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalEnviar()">Cancelar</button>
+        <button class="btn btn-primary" onclick="enviarConvite()">Enviar</button>
+      </div>
+    </div></div>
+    <div class="modal-overlay" id="modalAvaliar"><div class="modal" onclick="event.stopPropagation()" style="max-width:860px;max-height:90vh;overflow-y:auto;position:relative;">
+      <h3 id="modalAvaliarTitulo" style="padding-right:32px;">Avaliar Processo</h3>
+      <button onclick="fecharModalAvaliar()" style="position:absolute;top:20px;right:20px;background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       <p id="modalAvaliarNome" style="color:#888;margin-bottom:20px;font-size:0.88em;letter-spacing:0.2px;"></p>
       <input type="hidden" id="qProcessoId">
       <input type="hidden" id="qArea">
       <input type="hidden" id="qProcesso">
+      <div style="background:#f0f4ff;border-left:4px solid #1a237e;border-radius:0 7px 7px 0;padding:14px 18px;margin-bottom:24px;">
+        <div style="font-size:0.78em;font-weight:700;color:#1a237e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Premissas da Avaliação</div>
+        <ul style="margin:0;padding-left:18px;">
+          <li style="font-size:0.88em;color:#333;line-height:1.6;">O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.</li>
+        </ul>
+      </div>
       <div id="perguntas-container"></div>
       <div style="background:linear-gradient(135deg,#1a237e,#283593);padding:20px;border-radius:8px;margin:20px 0;color:white;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -417,6 +591,7 @@ async function processos() {
 
   const [processos, areas, perguntas] = await Promise.all([API.getProcessos(), API.getAreas(), API.getPerguntas()]);
   window.processosPerguntas = perguntas.filter(p => p.ativa);
+  try { window.configRespostas = await API.getConfigRespostas(); } catch(e) { window.configRespostas = null; }
   
   // Preencher filtro de áreas
   const filtroArea = document.getElementById('filtroArea');
@@ -487,10 +662,16 @@ function renderizarProcessos() {
         <td style="text-align:center;font-weight:700;color:${p.score > 0 ? statusColor : '#bbb'};font-size:0.95em;">${p.score > 0 ? p.score : '-'}</td>
         <td>${p.bcpStatus ? (() => { const c = p.bcpStatus === 'Documentado' ? '#2e7d32' : p.bcpStatus === 'Em elaboração' ? '#f57c00' : p.bcpStatus === 'Não necessário' ? '#1565c0' : '#999'; return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:white;background:${c}">${p.bcpStatus}</span>`; })() : ''}</td>
         <td>${p.solucao || ''}</td>
-        <td style="text-align:center;" onclick="event.stopPropagation();">
+        <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="avaliarProcesso(${p.id})" title="Avaliar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a237e" stroke-width="2">
               <path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+            </svg>
+          </button>
+          <button class="btn-icon" onclick="abrirModalEnviar(${p.id})" title="Enviar por e-mail">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2">
+              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
+              <polyline points="22,6 12,13 2,6"></polyline>
             </svg>
           </button>
           <button class="btn-icon" onclick="editarProcesso(${p.id})" title="Editar">
@@ -656,26 +837,54 @@ window.avaliarProcesso = (id) => {
   document.getElementById('modalAvaliarNome').textContent = p.area;
   document.getElementById('modalAvaliarTitulo').textContent = p.processo;
   const container = document.getElementById('perguntas-container');
-  container.innerHTML = window.processosPerguntas.map((perg, i) => `
-    <div style="margin-bottom:32px;padding:20px;background:#f8f9fa;border-radius:8px;border-left:4px solid #1a237e;">
-      <div style="font-weight:600;color:#1a237e;margin-bottom:6px;font-size:0.95em;">${perg.pergunta}</div>
-      <div style="font-size:0.85em;color:#666;margin-bottom:16px;line-height:1.5;">${perg.descricao || ''}</div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
-        <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;" onmouseover="this.style.borderColor='#c62828'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
-          <input type="radio" name="pergunta${i}" value="3" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#c62828';this.parentElement.style.background='#ffebee';" style="margin-right:8px;width:18px;height:18px;"><span style="color:#c62828;font-weight:600;font-size:0.9em;">Alto (3)</span>
-        </label>
-        <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;" onmouseover="this.style.borderColor='#f57c00'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
-          <input type="radio" name="pergunta${i}" value="2" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#f57c00';this.parentElement.style.background='#fff3e0';" style="margin-right:8px;width:18px;height:18px;"><span style="color:#f57c00;font-weight:600;font-size:0.9em;">Médio (2)</span>
-        </label>
-        <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;" onmouseover="this.style.borderColor='#2e7d32'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
-          <input type="radio" name="pergunta${i}" value="1" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#2e7d32';this.parentElement.style.background='#e8f5e9';" style="margin-right:8px;width:18px;height:18px;"><span style="color:#2e7d32;font-weight:600;font-size:0.9em;">Baixo (1)</span>
-        </label>
-        <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;" onmouseover="this.style.borderColor='#757575'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
-          <input type="radio" name="pergunta${i}" value="0" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#757575';this.parentElement.style.background='#f5f5f5';" style="margin-right:8px;width:18px;height:18px;"><span style="color:#757575;font-weight:600;font-size:0.9em;">N/A (0)</span>
-        </label>
+  const OPCOES_RESPOSTA = window.configRespostas || {
+    'Geral': [
+      {valor:'3',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},
+      {valor:'2',label:'Acontece com alguma frequência',cor:'#f57c00',background:'#fff3e0'},
+      {valor:'1',label:'Acontece raramente',cor:'#2e7d32',background:'#e8f5e9'},
+      {valor:'0',label:'Nunca aconteceu',cor:'#757575',background:'#f5f5f5'}
+    ],
+    '_default': [
+      {valor:'3',label:'Alto (3)',cor:'#c62828',background:'#ffebee'},
+      {valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},
+      {valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},
+      {valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}
+    ]
+  };
+  const CAT_CORES_AVALIAR = {
+    'Geral': '#37474f', 'Impacto na Operação e Missão': '#1a237e',
+    'Impacto Financeiro': '#c62828', 'Impacto Jurídico e Regulatório': '#e65100', 'Impacto Reputacional': '#00838f'
+  };
+  const pergsOrdenadas = [
+    ...window.processosPerguntas.filter(p => p.categoria === 'Geral'),
+    ...window.processosPerguntas.filter(p => p.categoria !== 'Geral'),
+  ];
+  const gruposCats = [];
+  const vistosCats = {};
+  pergsOrdenadas.forEach(p => { if (!vistosCats[p.categoria]) { vistosCats[p.categoria] = true; gruposCats.push(p.categoria); } });
+  container.innerHTML = gruposCats.map(cat => {
+    const cor = CAT_CORES_AVALIAR[cat] || '#555';
+    const itensCat = pergsOrdenadas.filter(p => p.categoria === cat);
+    return `<div style="margin-bottom:20px;">
+      <div style="background:${cor};color:white;padding:8px 16px;border-radius:7px 7px 0 0;font-size:0.8em;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">${cat}</div>
+      <div style="border:1.5px solid ${cor};border-top:none;border-radius:0 0 7px 7px;overflow:hidden;">
+        ${itensCat.map(perg => {
+          const i = window.processosPerguntas.indexOf(perg);
+          return `<div style="padding:16px 20px;background:#fafafa;border-bottom:1px solid #f0f0f0;">
+            <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${perg.pergunta}</div>
+            <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+              ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default']).map(op => `
+                <label style="display:flex;align-items:center;padding:9px 10px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;" onmouseover="this.style.borderColor='${op.cor}'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
+                  <input type="radio" name="pergunta${i}" value="${op.valor}" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='${op.cor}';this.parentElement.style.background='${op.background}';" style="margin-right:7px;width:15px;height:15px;">
+                  <span style="color:${op.cor};font-weight:600;font-size:0.87em;">${op.label}</span>
+                </label>`).join('')}
+            </div>
+          </div>`;
+        }).join('')}
       </div>
-    </div>
-  `).join('');
+    </div>`;
+  }).join('');
   calcularScore();
   // Pré-selecionar respostas anteriores
   if (p.respostas && p.respostas.length > 0) {
@@ -695,6 +904,39 @@ window.avaliarProcesso = (id) => {
 };
 
 window.fecharModalAvaliar = () => document.getElementById('modalAvaliar').classList.remove('open');
+
+window.abrirModalEnviar = (id) => {
+  const p = window.processosData.find(proc => proc.id === id);
+  if (!p) return;
+  document.getElementById('enviarProcessoId').value = id;
+  document.getElementById('enviarProcessoNome').textContent = `${p.area} › ${p.processo}`;
+  document.getElementById('enviarEmail').value = '';
+  document.getElementById('modalEnviar').classList.add('open');
+};
+
+window.fecharModalEnviar = () => document.getElementById('modalEnviar').classList.remove('open');
+
+window.enviarConvite = async () => {
+  const id = document.getElementById('enviarProcessoId').value;
+  const email = document.getElementById('enviarEmail').value.trim();
+  if (!email) return showToast('Informe o e-mail do respondente.', '#e65100');
+  const p = window.processosData.find(proc => proc.id === Number(id));
+  if (!p) return;
+  try {
+    const formData = new FormData();
+    formData.append('action', 'gerarToken');
+    formData.append('area', p.area);
+    formData.append('processo', p.processo);
+    formData.append('email', email);
+    const res = await fetch(API_URL, { method: 'POST', body: formData });
+    const result = await res.json();
+    if (result.error) throw new Error(result.error);
+    fecharModalEnviar();
+    showToast('✅ Convite enviado para ' + email, '#2e7d32');
+  } catch(err) {
+    showToast('❌ Erro: ' + err.message, '#c62828');
+  }
+};
 
 // ============================================================
 // PÁGINA: ADMIN (Painel)
@@ -796,6 +1038,44 @@ async function admin() {
             <span style="font-weight:700;color:#999;min-width:24px;text-align:right;">${pendentes}</span>
           </div>
         </div>
+      </div>
+    </div>
+
+    <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+      <div style="font-weight:600;color:#333;margin-bottom:6px;">Matriz de Calor</div>
+      <div style="font-size:0.82em;color:#999;margin-bottom:16px;">Score por processo — quanto maior o score, mais crítico</div>
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;">
+          <thead>
+            <tr style="background:#f5f5f5;">
+              <th style="padding:10px 12px;text-align:left;font-size:0.8em;color:#555;font-weight:600;min-width:140px;">Área</th>
+              <th style="padding:10px 12px;text-align:left;font-size:0.8em;color:#555;font-weight:600;">Processo</th>
+              <th style="padding:10px 12px;text-align:center;font-size:0.8em;color:#555;font-weight:600;width:70px;">Score</th>
+              <th style="padding:10px 12px;text-align:left;font-size:0.8em;color:#555;font-weight:600;">Calor</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${[...processos].sort((a,b) => (b.score||0) - (a.score||0)).map(p => {
+              const s = p.score || 0;
+              const pct = Math.min(Math.round(s / 24 * 100), 100);
+              const bg = s >= 12 ? '#c62828' : s >= 6 ? '#f57c00' : s > 0 ? '#1565c0' : '#e0e0e0';
+              const label = s >= 12 ? 'Tier 1' : s >= 6 ? 'Tier 2' : s > 0 ? 'Tier 3' : 'Pendente';
+              return `<tr style="border-top:1px solid #f0f0f0;">
+                <td style="padding:10px 12px;font-size:0.85em;color:#555;">${p.area}</td>
+                <td style="padding:10px 12px;font-size:0.88em;font-weight:500;">${p.processo}</td>
+                <td style="padding:10px 12px;text-align:center;font-weight:700;color:${s > 0 ? bg : '#bbb'};">${s > 0 ? s : '-'}</td>
+                <td style="padding:10px 16px;">
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="flex:1;background:#f0f0f0;border-radius:20px;height:12px;overflow:hidden;min-width:80px;">
+                      <div style="width:${pct}%;background:${bg};height:100%;border-radius:20px;"></div>
+                    </div>
+                    <span style="font-size:0.78em;font-weight:600;color:${s > 0 ? bg : '#bbb'};min-width:55px;">${label}</span>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
       </div>
     </div>
 

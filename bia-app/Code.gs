@@ -3,11 +3,13 @@
 // Retorna JSON para o frontend no Firebase Hosting
 // ============================================================
 
-const ABA_PERGUNTAS  = 'Perguntas';
-const ABA_AREAS      = 'Áreas';
-const ABA_PROCESSOS  = 'Processos';
-const ABA_RESPOSTAS  = 'Respostas BIA';
-const ABA_CONFIG     = 'Config Gestores';
+const ABA_PERGUNTAS      = 'Perguntas';
+const ABA_AREAS          = 'Áreas';
+const ABA_PROCESSOS      = 'Processos';
+const ABA_RESPOSTAS      = 'Respostas BIA';
+const ABA_CONFIG         = 'Config Gestores';
+const ABA_TOKENS         = 'Tokens';
+const ABA_CONFIG_RESPOSTAS = 'Config Respostas';
 
 const PERGUNTAS_DEFAULT = [
   ['Impacto na Operação e Missão', 'Em caso de interrupção do processo, qual o impacto no produto final?',    'O processo é essencial para a entrega do produto final?'],
@@ -50,6 +52,12 @@ function doGet(e) {
         break;
       case 'getResumoRespostas':
         result = getResumoRespostas();
+        break;
+      case 'validarToken':
+        result = validarToken(e.parameter.token);
+        break;
+      case 'getConfigRespostas':
+        result = getConfigRespostas();
         break;
       default:
         result = { error: 'Action não especificada' };
@@ -133,11 +141,21 @@ function doPost(e) {
         result = excluirProcesso(data.id);
         break;
       case 'salvarRespostas':
-        // Parsear scores se vier como string JSON
-        if (data.scores && typeof data.scores === 'string') {
-          data.scores = JSON.parse(data.scores);
-        }
+        if (data.scores && typeof data.scores === 'string') data.scores = JSON.parse(data.scores);
         result = salvarRespostas(data);
+        break;
+      case 'salvarRespostasToken':
+        if (data.scores && typeof data.scores === 'string') data.scores = JSON.parse(data.scores);
+        result = salvarRespostasToken(data);
+        break;
+      case 'gerarToken':
+        result = gerarTokenAvaliacao(data);
+        break;
+      case 'salvarConfigResposta':
+        result = salvarConfigResposta(data);
+        break;
+      case 'excluirConfigResposta':
+        result = excluirConfigResposta(data);
         break;
       default:
         result = { error: 'Action não reconhecida: ' + action };
@@ -230,15 +248,18 @@ function getProcessos() {
     const sheetResp = ss.getSheetByName(ABA_RESPOSTAS);
     if (sheetResp) {
       const allRows = sheetResp.getDataRange().getValues();
-      const headers = allRows[0]; // linha de cabeçalho
+      const headers = allRows[0];
+      const areaCol = headers.indexOf('Área');
+      const procCol = headers.indexOf('Processo');
+      const scoreCol = headers.lastIndexOf('Score');
       const rows = allRows.slice(1);
       rows.sort((a, b) => new Date(b[0]) - new Date(a[0]));
       rows.forEach(r => {
-        const key = r[2] + '||' + r[3];
+        const key = r[areaCol] + '||' + r[procCol];
         if (!scores[key]) {
-          scores[key] = Number(r[r.length - 2]) || 0;
+          scores[key] = Number(r[scoreCol]) || 0;
           const resp = [];
-          for (let c = 4; c < r.length - 2; c++) {
+          for (let c = areaCol + 2; c < scoreCol; c++) {
             resp.push(Number(r[c]) || 0);
           }
           respostas[key] = resp;
@@ -394,6 +415,174 @@ function getResumoRespostas() {
     if (ts > resumo[email].ultimaResposta) resumo[email].ultimaResposta = ts;
   });
   return Object.values(resumo);
+}
+
+function autorizarGmail() {
+  GmailApp.getInboxThreads(0, 1);
+  return 'Gmail autorizado com sucesso!';
+}
+
+// ============================================================
+// TOKENS DE AVALIAÇÃO
+// ============================================================
+function gerarTokenAvaliacao(data) {
+  const ss = _getSS();
+  let sheet = ss.getSheetByName(ABA_TOKENS);
+  if (!sheet) {
+    sheet = ss.insertSheet(ABA_TOKENS);
+    sheet.appendRow(['Token', 'Área', 'Processo', 'Email', 'Criado em', 'Expira em', 'Usado']);
+    sheet.getRange(1,1,1,7).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+  const token = Utilities.getUuid();
+  const agora = new Date();
+  const expira = new Date(agora.getTime() + 7 * 24 * 60 * 60 * 1000);
+  sheet.appendRow([token, data.area, data.processo, data.email, agora, expira, false]);
+
+  const link = 'https://bia-forte-2025.web.app/avaliar.html?token=' + token;
+  const assunto = 'BIA — Avaliação de Processo: ' + data.processo;
+  const corpo = `Olá,
+
+Você foi convidado(a) para avaliar o processo de negócio abaixo no sistema BIA (Business Impact Analysis):
+
+Área: ${data.area}
+Processo: ${data.processo}
+
+Clique no link abaixo para responder o questionário:
+${link}
+
+Este link é válido por 7 dias e pode ser usado apenas uma vez.
+
+Atenciosamente,
+Equipe BIA`;
+
+  GmailApp.sendEmail(data.email, assunto, corpo);
+  return { success: true, token, link };
+}
+
+function validarToken(token) {
+  if (!token) return { error: 'Token não informado.' };
+  const sheet = _getSS().getSheetByName(ABA_TOKENS);
+  if (!sheet) return { error: 'Token inválido.' };
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === token) {
+      if (rows[i][6] === true) return { error: 'Este link já foi utilizado.' };
+      if (new Date() > new Date(rows[i][5])) return { error: 'Este link expirou.' };
+      const perguntas = getPerguntas().filter(p => p.ativa);
+      return { area: rows[i][1], processo: rows[i][2], perguntas };
+    }
+  }
+  return { error: 'Link inválido ou expirado.' };
+}
+
+function salvarRespostasToken(data) {
+  const ss = _getSS();
+  // Validar token
+  const sheetTokens = ss.getSheetByName(ABA_TOKENS);
+  if (!sheetTokens) return { error: 'Token inválido.' };
+  const rows = sheetTokens.getDataRange().getValues();
+  let tokenRow = -1;
+  let area = '', processo = '';
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === data.token) {
+      if (rows[i][6] === true) return { error: 'Este link já foi utilizado.' };
+      if (new Date() > new Date(rows[i][5])) return { error: 'Este link expirou.' };
+      tokenRow = i + 1;
+      area = rows[i][1];
+      processo = rows[i][2];
+      break;
+    }
+  }
+  if (tokenRow === -1) return { error: 'Token inválido.' };
+
+  // Salvar resposta
+  const timestamp = new Date();
+  const perguntas = getPerguntas().filter(p => p.ativa);
+  let sheetResp = ss.getSheetByName(ABA_RESPOSTAS);
+  if (!sheetResp) {
+    sheetResp = ss.insertSheet(ABA_RESPOSTAS);
+    sheetResp.appendRow(['Timestamp', 'Respondente', 'Cargo', 'Área', 'Processo', ...perguntas.map(p => p.pergunta), 'Score', 'Tier']);
+    sheetResp.setFrozenRows(1);
+  }
+  const valores = perguntas.map(p => data.scores[p.pergunta] || 0);
+  const score = valores.reduce((a, b) => a + b, 0);
+  const tier = _calcularTier(score);
+  const rto = _calcularRTO(tier);
+  sheetResp.appendRow([timestamp, data.nome || '', data.cargo || '', area, processo, ...valores, score, tier]);
+
+  // Atualizar Tier e RTO na aba Processos
+  const sheetProc = ss.getSheetByName(ABA_PROCESSOS);
+  if (sheetProc) {
+    const procRows = sheetProc.getDataRange().getValues();
+    for (let i = 1; i < procRows.length; i++) {
+      if (String(procRows[i][0]).trim().toLowerCase() === String(area).trim().toLowerCase() &&
+          String(procRows[i][1]).trim().toLowerCase() === String(processo).trim().toLowerCase()) {
+        sheetProc.getRange(i + 1, 5).setValue(rto);
+        sheetProc.getRange(i + 1, 9).setValue(tier);
+        break;
+      }
+    }
+  }
+
+  // Marcar token como usado
+  sheetTokens.getRange(tokenRow, 7).setValue(true);
+  return { success: true };
+}
+
+// ============================================================
+// CONFIG RESPOSTAS POR CATEGORIA
+// ============================================================
+function getConfigRespostas() {
+  const ss = _getSS();
+  let sheet = ss.getSheetByName(ABA_CONFIG_RESPOSTAS);
+  if (!sheet) {
+    // Criar aba com defaults
+    sheet = ss.insertSheet(ABA_CONFIG_RESPOSTAS);
+    sheet.appendRow(['Categoria', 'Valor', 'Label', 'Cor', 'Background']);
+    sheet.getRange(1,1,1,5).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    const defaults = [
+      ['_default', '3', 'Alto (3)', '#c62828', '#ffebee'],
+      ['_default', '2', 'Médio (2)', '#f57c00', '#fff3e0'],
+      ['_default', '1', 'Baixo (1)', '#2e7d32', '#e8f5e9'],
+      ['_default', '0', 'N/A (0)', '#757575', '#f5f5f5'],
+      ['Geral', '3', 'Acontece o tempo todo', '#c62828', '#ffebee'],
+      ['Geral', '2', 'Acontece com alguma frequência', '#f57c00', '#fff3e0'],
+      ['Geral', '1', 'Acontece raramente', '#2e7d32', '#e8f5e9'],
+      ['Geral', '0', 'Nunca aconteceu', '#757575', '#f5f5f5'],
+    ];
+    defaults.forEach(r => sheet.appendRow(r));
+    sheet.setColumnWidths(1, 5, 180);
+  }
+  const rows = sheet.getDataRange().getValues().slice(1);
+  const config = {};
+  rows.forEach(r => {
+    const cat = r[0];
+    if (!config[cat]) config[cat] = [];
+    config[cat].push({ valor: String(r[1]), label: r[2], cor: r[3], background: r[4] });
+  });
+  return config;
+}
+
+function salvarConfigResposta(data) {
+  const ss = _getSS();
+  let sheet = ss.getSheetByName(ABA_CONFIG_RESPOSTAS);
+  if (!sheet) { getConfigRespostas(); sheet = ss.getSheetByName(ABA_CONFIG_RESPOSTAS); }
+  if (data.rowIndex) {
+    sheet.getRange(Number(data.rowIndex), 1, 1, 5).setValues([[data.categoria, data.valor, data.label, data.cor, data.background]]);
+  } else {
+    sheet.appendRow([data.categoria, data.valor, data.label, data.cor, data.background]);
+  }
+  return { success: true };
+}
+
+function excluirConfigResposta(data) {
+  const ss = _getSS();
+  const sheet = ss.getSheetByName(ABA_CONFIG_RESPOSTAS);
+  if (!sheet) return { error: 'Aba não encontrada.' };
+  sheet.deleteRow(Number(data.rowIndex));
+  return { success: true };
 }
 
 // ============================================================

@@ -55,6 +55,8 @@ const API = {
   getProcessosPorArea: (area) => API.get('getProcessosPorArea', { area }),
   getResumoRespostas: () => API.get('getResumoRespostas'),
 
+  getConfigRespostas: () => API.get('getConfigRespostas'),
+
   salvarPergunta: (p) => API.post('salvarPergunta', p),
   excluirPergunta: (id) => API.post('excluirPergunta', { id }),
   salvarArea: (a) => API.post('salvarArea', a),
@@ -62,4 +64,6 @@ const API = {
   salvarProcesso: (p) => API.post('salvarProcesso', p),
   excluirProcesso: (id) => API.post('excluirProcesso', { id }),
   salvarRespostas: (respostas) => API.post('salvarRespostas', { respostas }),
+  salvarConfigResposta: (d) => API.post('salvarConfigResposta', d),
+  excluirConfigResposta: (d) => API.post('excluirConfigResposta', d),
 };

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BIA - Avaliação de Processo</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { background: #f5f6fa; }
+    .avaliar-container { max-width: 860px; margin: 40px auto; padding: 0 20px 60px; }
+    .avaliar-header { background: linear-gradient(135deg, #1a237e, #283593); color: white; border-radius: 12px; padding: 28px 32px; margin-bottom: 28px; }
+    .avaliar-header h1 { font-size: 1.3em; margin: 0 0 6px; }
+    .avaliar-header p { margin: 0; opacity: 0.8; font-size: 0.9em; }
+    .card { background: white; border-radius: 10px; padding: 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 20px; }
+    .field-group { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    .field label { display: block; font-size: 0.78em; font-weight: 700; color: #444; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 5px; }
+    .field input { width: 100%; padding: 9px 12px; border: 1.5px solid #e0e0e0; border-radius: 7px; font-size: 0.93em; box-sizing: border-box; }
+    .field input:focus { border-color: #1a237e; outline: none; box-shadow: 0 0 0 3px rgba(26,35,126,0.08); }
+    .btn-submit { background: #1a237e; color: white; border: none; padding: 12px 32px; border-radius: 7px; font-size: 1em; font-weight: 600; cursor: pointer; width: 100%; margin-top: 8px; }
+    .btn-submit:hover { background: #283593; }
+    .score-box { background: linear-gradient(135deg,#1a237e,#283593); padding: 20px; border-radius: 8px; margin: 20px 0; color: white; display: flex; justify-content: space-between; align-items: center; }
+    .score-num { font-size: 2.5em; font-weight: 700; }
+    .tier-badge { font-weight: 700; font-size: 1.1em; padding: 6px 16px; background: rgba(255,255,255,0.2); border-radius: 20px; }
+    #estado-loading, #estado-erro, #estado-sucesso { text-align: center; padding: 60px 20px; }
+    #estado-erro h2 { color: #c62828; }
+    #estado-sucesso h2 { color: #2e7d32; }
+  </style>
+</head>
+<body>
+  <div class="avaliar-container">
+    <div class="avaliar-header">
+      <h1>📋 BIA — Avaliação de Processo</h1>
+      <p>Business Impact Analysis · Fortes Tecnologia</p>
+    </div>
+
+    <div id="estado-loading" class="card">⏳ Validando link de avaliação...</div>
+    <div id="estado-erro" class="card" style="display:none;"></div>
+    <div id="estado-sucesso" class="card" style="display:none;"></div>
+    <div id="estado-form" style="display:none;">
+      <div class="card">
+        <div style="font-size:0.82em;color:#888;margin-bottom:4px;" id="info-area"></div>
+        <div style="font-size:1.2em;font-weight:700;color:#1a237e;" id="info-processo"></div>
+      </div>
+
+      <div class="card">
+        <div style="font-weight:600;color:#333;margin-bottom:16px;">Dados do Respondente</div>
+        <div class="field-group">
+          <div class="field">
+            <label>Nome completo *</label>
+            <input type="text" id="respondente-nome" placeholder="Seu nome completo">
+          </div>
+          <div class="field">
+            <label>Cargo / Função</label>
+            <input type="text" id="respondente-cargo" placeholder="Ex: Gerente de TI">
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="background:#f0f4ff;border-left:4px solid #1a237e;border-radius:0 7px 7px 0;padding:14px 18px;margin-bottom:24px;">
+          <div style="font-size:0.78em;font-weight:700;color:#1a237e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Premissas da Avaliação</div>
+          <ul style="margin:0;padding-left:18px;">
+            <li style="font-size:0.88em;color:#333;line-height:1.6;">O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.</li>
+          </ul>
+        </div>
+        <div id="perguntas-container"></div>
+        <div class="score-box">
+          <div>
+            <div style="font-weight:600;font-size:1em;margin-bottom:4px;">Score Total</div>
+            <div style="font-size:0.85em;opacity:0.7;">Classificação automática</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="score-num" id="scoreTotal">0</div>
+            <div class="tier-badge" id="scoreTier">-</div>
+          </div>
+        </div>
+        <button class="btn-submit" onclick="enviarAvaliacao()">✅ Enviar Avaliação</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="config.js"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    let dadosToken = null;
+    let perguntas = [];
+
+    function showToast(msg, bg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.style.background = bg; t.style.display = 'block';
+      setTimeout(() => t.style.display = 'none', 3500);
+    }
+
+    async function init() {
+      if (!token) return mostrarErro('Link inválido. Nenhum token encontrado.');
+      try {
+        const url = new URL(API_URL);
+        url.searchParams.append('action', 'validarToken');
+        url.searchParams.append('token', token);
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.error) return mostrarErro(data.error);
+        dadosToken = data;
+        perguntas = data.perguntas;
+        renderizar();
+      } catch(e) {
+        mostrarErro('Erro ao validar o link. Tente novamente.');
+      }
+    }
+
+    function mostrarErro(msg) {
+      document.getElementById('estado-loading').style.display = 'none';
+      const el = document.getElementById('estado-erro');
+      el.style.display = 'block';
+      el.innerHTML = `<h2>❌ Link inválido</h2><p style="color:#666;">${msg}</p>`;
+    }
+
+    function renderizar() {
+      document.getElementById('estado-loading').style.display = 'none';
+      document.getElementById('estado-form').style.display = 'block';
+      document.getElementById('info-area').textContent = dadosToken.area;
+      document.getElementById('info-processo').textContent = dadosToken.processo;
+
+      const CAT_CORES = {
+        'Geral': '#37474f', 'Impacto na Operação e Missão': '#1a237e',
+        'Impacto Financeiro': '#c62828', 'Impacto Jurídico e Regulatório': '#e65100', 'Impacto Reputacional': '#00838f'
+      };
+      const pergsOrdenadas = [...perguntas.filter(p => p.categoria === 'Geral'), ...perguntas.filter(p => p.categoria !== 'Geral')];
+      const grupos = []; const vistos = {};
+      pergsOrdenadas.forEach(p => { if (!vistos[p.categoria]) { vistos[p.categoria] = true; grupos.push(p.categoria); } });
+
+      document.getElementById('perguntas-container').innerHTML = grupos.map(cat => {
+        const cor = CAT_CORES[cat] || '#555';
+        const itens = pergsOrdenadas.filter(p => p.categoria === cat);
+        return `<div style="margin-bottom:20px;">
+          <div style="background:${cor};color:white;padding:8px 16px;border-radius:7px 7px 0 0;font-size:0.8em;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">${cat}</div>
+          <div style="border:1.5px solid ${cor};border-top:none;border-radius:0 0 7px 7px;overflow:hidden;">
+            ${itens.map(perg => {
+              const i = perguntas.indexOf(perg);
+              return `<div style="padding:16px 20px;background:#fafafa;border-bottom:1px solid #f0f0f0;">
+                <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${perg.pergunta}</div>
+                <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+                  ${[['3','Alto (3)','#c62828','#ffebee'],['2','Médio (2)','#f57c00','#fff3e0'],['1','Baixo (1)','#2e7d32','#e8f5e9'],['0','N/A (0)','#757575','#f5f5f5']].map(([val,label,cor2,bg2]) => `
+                  <label style="display:flex;align-items:center;padding:9px 10px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;" onmouseover="this.style.borderColor='${cor2}'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
+                    <input type="radio" name="pergunta${i}" value="${val}" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='${cor2}';this.parentElement.style.background='${bg2}';" style="margin-right:7px;width:15px;height:15px;">
+                    <span style="color:${cor2};font-weight:600;font-size:0.87em;">${label}</span>
+                  </label>`).join('')}
+                </div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    function calcularScore() {
+      let total = 0;
+      perguntas.forEach((p, i) => {
+        const sel = document.querySelector(`input[name="pergunta${i}"]:checked`);
+        if (sel) total += parseInt(sel.value);
+      });
+      document.getElementById('scoreTotal').textContent = total;
+      const tier = total >= 12 ? 'Tier 1 (Crítico)' : total >= 6 ? 'Tier 2 (Essencial)' : total > 0 ? 'Tier 3 (Suporte)' : '-';
+      const cor = total >= 12 ? '#ffcdd2' : total >= 6 ? '#ffe0b2' : total > 0 ? '#bbdefb' : 'rgba(255,255,255,0.2)';
+      const tierEl = document.getElementById('scoreTier');
+      tierEl.textContent = tier;
+      tierEl.style.background = cor;
+      tierEl.style.color = total > 0 ? '#1a237e' : 'white';
+    }
+
+    async function enviarAvaliacao() {
+      const nome = document.getElementById('respondente-nome').value.trim();
+      if (!nome) return showToast('Informe seu nome completo.', '#e65100');
+      const cargo = document.getElementById('respondente-cargo').value.trim();
+      const scores = {};
+      let todasRespondidas = true;
+      perguntas.forEach((p, i) => {
+        const sel = document.querySelector(`input[name="pergunta${i}"]:checked`);
+        if (sel) scores[p.pergunta] = parseInt(sel.value);
+        else todasRespondidas = false;
+      });
+      if (!todasRespondidas) return showToast('Por favor, responda todas as perguntas.', '#e65100');
+      try {
+        const formData = new FormData();
+        formData.append('action', 'salvarRespostasToken');
+        formData.append('token', token);
+        formData.append('nome', nome);
+        formData.append('cargo', cargo);
+        formData.append('scores', JSON.stringify(scores));
+        const res = await fetch(API_URL, { method: 'POST', body: formData });
+        const result = await res.json();
+        if (result.error) throw new Error(result.error);
+        document.getElementById('estado-form').style.display = 'none';
+        const el = document.getElementById('estado-sucesso');
+        el.style.display = 'block';
+        el.innerHTML = `<h2>✅ Avaliação enviada!</h2><p style="color:#666;">Obrigado, <strong>${nome}</strong>. Sua avaliação foi registrada com sucesso.</p>`;
+      } catch(e) {
+        showToast('❌ Erro ao enviar: ' + e.message, '#c62828');
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
