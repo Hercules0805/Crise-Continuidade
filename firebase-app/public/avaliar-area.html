@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BIA - Avaliação de Área</title>
+  <link rel="stylesheet" href="styles.css">
+  <style>
+    body { background: #f5f6fa; }
+    .avaliar-container { max-width: 1000px; margin: 40px auto; padding: 0 20px 60px; }
+    .avaliar-header { background: linear-gradient(135deg, #1a237e, #283593); color: white; border-radius: 12px; padding: 28px 32px; margin-bottom: 28px; }
+    .avaliar-header h1 { font-size: 1.3em; margin: 0 0 6px; }
+    .avaliar-header p { margin: 0; opacity: 0.8; font-size: 0.9em; }
+    .card { background: white; border-radius: 10px; padding: 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 20px; }
+    .field-group { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    .field label { display: block; font-size: 0.78em; font-weight: 700; color: #444; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 5px; }
+    .field input { width: 100%; padding: 9px 12px; border: 1.5px solid #e0e0e0; border-radius: 7px; font-size: 0.93em; box-sizing: border-box; }
+    .field input:focus { border-color: #1a237e; outline: none; }
+    .processo-nav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+    .processo-nav-btn { padding: 6px 14px; border-radius: 20px; border: 2px solid #e0e0e0; background: white; font-size: 0.82em; font-weight: 600; cursor: pointer; transition: all 0.2s; color: #555; }
+    .processo-nav-btn.ativo { border-color: #1a237e; background: #1a237e; color: white; }
+    .processo-nav-btn.respondido { border-color: #2e7d32; background: #e8f5e9; color: #2e7d32; }
+    .btn-nav { padding: 10px 24px; border-radius: 7px; font-weight: 600; font-size: 0.93em; cursor: pointer; border: none; }
+    .btn-prev { background: white; color: #555; border: 1.5px solid #ddd; }
+    .btn-next { background: #1a237e; color: white; }
+    .btn-next:hover { background: #283593; }
+    .btn-submit { background: #2e7d32; color: white; padding: 12px 32px; border-radius: 7px; font-size: 1em; font-weight: 600; cursor: pointer; border: none; width: 100%; margin-top: 8px; }
+    .score-box { background: linear-gradient(135deg,#1a237e,#283593); padding: 16px 20px; border-radius: 8px; margin: 16px 0; color: white; display: flex; justify-content: space-between; align-items: center; }
+    .progresso { background: #f0f0f0; border-radius: 20px; height: 8px; margin-bottom: 20px; overflow: hidden; }
+    .progresso-bar { background: linear-gradient(90deg, #1a237e, #3949ab); height: 100%; border-radius: 20px; transition: width 0.4s; }
+    #estado-loading, #estado-erro, #estado-sucesso { text-align: center; padding: 60px 20px; }
+    #estado-erro h2 { color: #c62828; }
+    #estado-sucesso h2 { color: #2e7d32; }
+  </style>
+</head>
+<body>
+  <div class="avaliar-container">
+    <div class="avaliar-header">
+      <h1>📋 BIA — Avaliação de Processos</h1>
+      <p id="header-area">Business Impact Analysis · Fortes Tecnologia</p>
+    </div>
+
+    <div id="estado-loading" class="card">⏳ Validando link de avaliação...</div>
+    <div id="estado-erro" class="card" style="display:none;"></div>
+    <div id="estado-sucesso" class="card" style="display:none;"></div>
+
+    <div id="estado-form" style="display:none;">
+      <div class="card">
+        <div style="font-weight:600;color:#333;margin-bottom:16px;">Dados do Respondente</div>
+        <div class="field-group">
+          <div class="field">
+            <label>Nome completo *</label>
+            <input type="text" id="respondente-nome" placeholder="Seu nome completo">
+          </div>
+          <div class="field">
+            <label>Cargo / Função</label>
+            <input type="text" id="respondente-cargo" placeholder="Ex: Gerente de TI">
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <div>
+            <div style="font-weight:600;color:#333;" id="processo-titulo"></div>
+            <div style="font-size:0.82em;color:#888;margin-top:2px;" id="processo-contador"></div>
+          </div>
+        </div>
+        <div class="progresso"><div class="progresso-bar" id="progresso-bar"></div></div>
+        <div class="processo-nav" id="processo-nav"></div>
+
+        <div style="background:#f0f4ff;border-left:4px solid #1a237e;border-radius:0 7px 7px 0;padding:14px 18px;margin-bottom:24px;">
+          <div style="font-size:0.78em;font-weight:700;color:#1a237e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Premissas da Avaliação</div>
+          <ul style="margin:0;padding-left:18px;">
+            <li style="font-size:0.88em;color:#333;line-height:1.6;">O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.</li>
+          </ul>
+        </div>
+
+        <div id="perguntas-container"></div>
+
+        <div class="score-box">
+          <div>
+            <div style="font-weight:600;font-size:1em;">Score deste processo</div>
+            <div style="font-size:0.82em;opacity:0.7;" id="score-tier-label">-</div>
+          </div>
+          <div style="font-size:2.5em;font-weight:700;" id="scoreTotal">0</div>
+        </div>
+
+        <div style="display:flex;gap:12px;margin-top:8px;">
+          <button class="btn-nav btn-prev" id="btn-prev" onclick="navegarProcesso(-1)">← Anterior</button>
+          <button class="btn-nav btn-next" id="btn-next" onclick="navegarProcesso(1)" style="flex:1;">Próximo →</button>
+        </div>
+        <button class="btn-submit" id="btn-submit" style="display:none;" onclick="enviarAvaliacao()">✅ Enviar Avaliação Completa</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="config.js"></script>
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    let dadosToken = null;
+    let perguntas = [];
+    let processos = [];
+    let processoAtual = 0;
+    let respostas = {}; // { processoNome: { pergunta: valor } }
+    let configRespostas = null;
+
+    function showToast(msg, bg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg; t.style.background = bg; t.style.display = 'block';
+      setTimeout(() => t.style.display = 'none', 3500);
+    }
+
+    async function init() {
+      if (!token) return mostrarErro('Link inválido.');
+      try {
+        const url = new URL(API_URL);
+        url.searchParams.append('action', 'validarTokenArea');
+        url.searchParams.append('token', token);
+        const res = await fetch(url);
+        const data = await res.json();
+        if (data.error) return mostrarErro(data.error);
+        dadosToken = data;
+        perguntas = data.perguntas;
+        processos = data.processos;
+
+        // Carregar config de respostas
+        try {
+          const urlCfg = new URL(API_URL);
+          urlCfg.searchParams.append('action', 'getConfigRespostas');
+          const resCfg = await fetch(urlCfg);
+          configRespostas = await resCfg.json();
+        } catch(e) { configRespostas = null; }
+
+        document.getElementById('header-area').textContent = 'Área: ' + data.area + ' · ' + processos.length + ' processo(s)';
+        renderizar();
+      } catch(e) {
+        mostrarErro('Erro ao validar o link.');
+      }
+    }
+
+    function mostrarErro(msg) {
+      document.getElementById('estado-loading').style.display = 'none';
+      const el = document.getElementById('estado-erro');
+      el.style.display = 'block';
+      el.innerHTML = `<h2>❌ Link inválido</h2><p style="color:#666;">${msg}</p>`;
+    }
+
+    function renderizar() {
+      document.getElementById('estado-loading').style.display = 'none';
+      document.getElementById('estado-form').style.display = 'block';
+      renderizarNav();
+      renderizarProcesso();
+    }
+
+    function renderizarNav() {
+      document.getElementById('processo-nav').innerHTML = processos.map((p, i) => {
+        const respondido = respostas[p.processo] && Object.keys(respostas[p.processo]).length === perguntas.length;
+        return `<button class="processo-nav-btn ${i === processoAtual ? 'ativo' : respondido ? 'respondido' : ''}" onclick="irParaProcesso(${i})">${i+1}. ${p.processo.length > 25 ? p.processo.substring(0,25)+'...' : p.processo}</button>`;
+      }).join('');
+    }
+
+    function renderizarProcesso() {
+      const p = processos[processoAtual];
+      document.getElementById('processo-titulo').textContent = p.processo;
+      document.getElementById('processo-contador').textContent = `Processo ${processoAtual+1} de ${processos.length}`;
+      document.getElementById('progresso-bar').style.width = ((processoAtual+1)/processos.length*100) + '%';
+
+      const CAT_CORES = {
+        'Geral': '#37474f', 'Impacto na Operação e Missão': '#1a237e',
+        'Impacto Financeiro': '#c62828', 'Impacto Jurídico e Regulatório': '#e65100', 'Impacto Reputacional': '#00838f'
+      };
+      const OPCOES_DEFAULT = {
+        '_default': [{valor:'3',label:'Alto (3)',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}],
+        'Geral': [{valor:'3',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Acontece com alguma frequência',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Acontece raramente',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'Nunca aconteceu',cor:'#757575',background:'#f5f5f5'}]
+      };
+      const opcoes = configRespostas || OPCOES_DEFAULT;
+
+      const pergsOrdenadas = [...perguntas.filter(p => p.categoria === 'Geral'), ...perguntas.filter(p => p.categoria !== 'Geral')];
+      const grupos = []; const vistos = {};
+      pergsOrdenadas.forEach(p => { if (!vistos[p.categoria]) { vistos[p.categoria] = true; grupos.push(p.categoria); } });
+
+      document.getElementById('perguntas-container').innerHTML = grupos.map(cat => {
+        const cor = CAT_CORES[cat] || '#555';
+        const itens = pergsOrdenadas.filter(q => q.categoria === cat);
+        const ops = (opcoes[cat] || opcoes['_default'] || OPCOES_DEFAULT['_default']).slice().sort((a,b) => Number(b.valor) - Number(a.valor));
+        return `<div style="margin-bottom:20px;">
+          <div style="background:${cor};color:white;padding:8px 16px;border-radius:7px 7px 0 0;font-size:0.8em;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">${cat}</div>
+          <div style="border:1.5px solid ${cor};border-top:none;border-radius:0 0 7px 7px;overflow:hidden;">
+            ${itens.map(perg => {
+              const i = perguntas.indexOf(perg);
+              const valorSalvo = respostas[p.processo] && respostas[p.processo][perg.pergunta] !== undefined ? respostas[p.processo][perg.pergunta] : null;
+              return `<div style="padding:20px 24px;background:#fafafa;border-bottom:1px solid #f0f0f0;">
+                <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${perg.pergunta}</div>
+                <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+                  ${ops.map(op => {
+                    const checked = valorSalvo !== null && String(valorSalvo) === String(op.valor);
+                    const style = checked ? `border-color:${op.cor};background:${op.background};` : '';
+                    return `<label style="display:flex;align-items:flex-start;padding:12px 14px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer;min-height:56px;${style}" onmouseover="this.style.borderColor='${op.cor}'" onmouseout="if(!this.querySelector('input').checked){this.style.borderColor='#e0e0e0';this.style.background='white';}">
+                      <input type="radio" name="perg_${i}" value="${op.valor}" ${checked?'checked':''} onchange="onRespostaChange(${i},'${perg.pergunta.replace(/'/g,"\\'")}',this.value,'${op.cor}','${op.background}')" style="margin-right:8px;margin-top:2px;width:15px;height:15px;flex-shrink:0;">
+                      <span style="color:${op.cor};font-weight:600;font-size:0.85em;line-height:1.4;">${op.label}</span>
+                    </label>`;
+                  }).join('')}
+                </div>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+      }).join('');
+
+      calcularScore();
+      atualizarBotoes();
+    }
+
+    function onRespostaChange(i, pergunta, valor, cor, bg) {
+      const p = processos[processoAtual];
+      if (!respostas[p.processo]) respostas[p.processo] = {};
+      respostas[p.processo][pergunta] = parseInt(valor);
+      // Atualizar visual
+      const labels = document.querySelectorAll(`input[name="perg_${i}"]`);
+      labels.forEach(inp => {
+        inp.parentElement.style.borderColor = '#e0e0e0';
+        inp.parentElement.style.background = 'white';
+      });
+      const sel = document.querySelector(`input[name="perg_${i}"]:checked`);
+      if (sel) { sel.parentElement.style.borderColor = cor; sel.parentElement.style.background = bg; }
+      calcularScore();
+      renderizarNav();
+    }
+
+    function calcularScore() {
+      const p = processos[processoAtual];
+      const resp = respostas[p.processo] || {};
+      const total = Object.values(resp).reduce((a,b) => a+b, 0);
+      document.getElementById('scoreTotal').textContent = total;
+      const tier = total >= 12 ? 'Tier 1 (Crítico)' : total >= 6 ? 'Tier 2 (Essencial)' : total > 0 ? 'Tier 3 (Suporte)' : '-';
+      document.getElementById('score-tier-label').textContent = tier;
+    }
+
+    function atualizarBotoes() {
+      document.getElementById('btn-prev').style.display = processoAtual === 0 ? 'none' : 'block';
+      const isUltimo = processoAtual === processos.length - 1;
+      document.getElementById('btn-next').style.display = isUltimo ? 'none' : 'block';
+      document.getElementById('btn-submit').style.display = isUltimo ? 'block' : 'none';
+    }
+
+    function navegarProcesso(dir) {
+      const novoIdx = processoAtual + dir;
+      if (novoIdx < 0 || novoIdx >= processos.length) return;
+      processoAtual = novoIdx;
+      renderizarNav();
+      renderizarProcesso();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function irParaProcesso(idx) {
+      processoAtual = idx;
+      renderizarNav();
+      renderizarProcesso();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    async function enviarAvaliacao() {
+      const nome = document.getElementById('respondente-nome').value.trim();
+      if (!nome) return showToast('Informe seu nome completo.', '#e65100');
+
+      // Verificar se todos os processos foram respondidos
+      const naoRespondidos = processos.filter(p => {
+        const resp = respostas[p.processo] || {};
+        return Object.keys(resp).length < perguntas.length;
+      });
+      if (naoRespondidos.length > 0) {
+        return showToast(`Ainda há ${naoRespondidos.length} processo(s) sem resposta completa.`, '#e65100');
+      }
+
+      try {
+        const payload = processos.map(p => ({ area: p.area, processo: p.processo, scores: respostas[p.processo] || {} }));
+        const formData = new FormData();
+        formData.append('action', 'salvarRespostasArea');
+        formData.append('token', token);
+        formData.append('nome', nome);
+        formData.append('cargo', document.getElementById('respondente-cargo').value.trim());
+        formData.append('respostas', JSON.stringify(payload));
+        const res = await fetch(API_URL, { method: 'POST', body: formData });
+        const result = await res.json();
+        if (result.error) throw new Error(result.error);
+        document.getElementById('estado-form').style.display = 'none';
+        const el = document.getElementById('estado-sucesso');
+        el.style.display = 'block';
+        el.innerHTML = `<h2>✅ Avaliação enviada!</h2><p style="color:#666;">Obrigado, <strong>${nome}</strong>. Todos os ${processos.length} processos foram avaliados com sucesso.</p>`;
+      } catch(e) {
+        showToast('❌ Erro ao enviar: ' + e.message, '#c62828');
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

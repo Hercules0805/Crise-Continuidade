@@ -13,7 +13,7 @@ const API = {
       const url = new URL(API_URL);
       url.searchParams.append('action', action);
       Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-      const res = await fetch(url);
+      const res = await fetch(url, { redirect: 'follow' });
       const text = await res.text();
       const data = JSON.parse(text);
       if (data.error) throw new Error(data.error);

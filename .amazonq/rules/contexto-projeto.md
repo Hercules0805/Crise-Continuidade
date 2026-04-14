@@ -29,7 +29,7 @@ clasp push --force
 
 ## Configuração
 - URL da API do GAS fica em: `firebase-app/public/config.js` → constante `API_URL`
-- URL atual da API: `https://script.google.com/macros/s/AKfycbw8TTHtxo_xsRxkKUhtwbLjMDPK-34RofueliY40yvMPCpBsc0xr100mpGPavZlKZeH/exec`
+- URL atual da API: `https://script.google.com/macros/s/AKfycbw0SWYHNXkniFksa0SJl5ypT-I3ic2KnU7zH3EKc2dhlzwnfcazKF3xA1NCthV2-oa0/exec`
 - Script ID do clasp: `1W74gvNEPO6ENL7OsiDEdgiI-sv775iho7JfSMmmOtt77ibQK_MShgLb8`
 
 ## Fluxo completo de atualização do backend
@@ -76,6 +76,8 @@ clasp push --force
 ### Tela: Processos
 - Tabela com colunas: Área, Processo, Responsável, BIA Status, Tier, Score, BCP Status, Solução, Ações
 - Ações por processo: Avaliar (checklist), Enviar por e-mail (envelope), Editar, Excluir
+- Botão "Enviar Questionário para Área" (aparece ao filtrar por área) — envia para o e-mail do responsável cadastrado
+- Botão "Enviar Relatório da Área" (aparece ao filtrar por área) — envia e-mail HTML com resumo e tabela de scores
 - Clicar na linha abre modal de detalhes
 - Filtro por área
 - Ordenação por qualquer coluna (score/tier ordenam numericamente)
@@ -84,13 +86,14 @@ clasp push --force
 ### Modal de Avaliação
 - Perguntas agrupadas por categoria com cabeçalho colorido
 - Categoria "Geral" sempre primeiro
-- Opções de resposta personalizadas por categoria (vindas do backend)
+- Opções de resposta personalizadas por categoria (vindas do backend via Config Respostas)
 - Pré-carrega respostas anteriores ao reabrir
 - Botão X para fechar no topo
 - Seção de premissas no topo
 - Score e Tier calculados em tempo real
+- Botão "Exportar PDF" que abre janela de impressão formatada
 
-### Envio por E-mail (Token)
+### Envio por E-mail (Token individual)
 - Botão envelope na tabela de processos
 - Gera token UUID, salva na aba Tokens, envia e-mail via GmailApp
 - Link: `https://bia-forte-2025.web.app/avaliar.html?token=XYZ`
@@ -98,10 +101,23 @@ clasp push --force
 - Página `avaliar.html` para o stakeholder responder
 - Grava nome, cargo, data do respondente
 
+### Envio por E-mail (Token de Área)
+- Botão "Enviar Questionário para Área" no filtro de área
+- Gera token UUID com processo `_AREA_`, envia e-mail para o responsável da área
+- Link: `https://bia-forte-2025.web.app/avaliar-area.html?token=XYZ`
+- Página `avaliar-area.html` com navegação entre processos, barra de progresso
+- Grava todas as respostas de uma vez ao finalizar
+
+### Relatório por Área
+- Botão "Enviar Relatório da Área" no filtro de área
+- Envia e-mail HTML com cards de resumo (total, avaliados, tiers) e tabela de processos com scores
+- Função `gerarRelatorioArea` no backend
+
 ### Tela: Perguntas
 - Gerenciamento de perguntas por categoria
 - Seção de Opções de Resposta por Categoria (abaixo das perguntas)
 - Permite cadastrar rótulos e pontuações customizados por categoria
+- Cores definidas automaticamente pela pontuação (3=vermelho, 2=laranja, 1=verde, 0=cinza)
 
 ### Tela: Painel
 - Cards de resumo: Total, Avaliados, Pendentes, Tier 1
@@ -128,3 +144,10 @@ clasp push --force
 - `https://www.googleapis.com/auth/script.external_request`
 - `https://www.googleapis.com/auth/gmail.send`
 - `https://mail.google.com/`
+- `https://www.googleapis.com/auth/drive`
+- `https://www.googleapis.com/auth/documents`
+
+## Páginas do Frontend
+- `index.html` — aplicação principal (SPA)
+- `avaliar.html` — avaliação individual via token
+- `avaliar-area.html` — avaliação de todos os processos de uma área via token

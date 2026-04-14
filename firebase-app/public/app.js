@@ -92,7 +92,25 @@ async function perguntas() {
   window.perguntasData = data;
 
   // Carregar e renderizar config de respostas
-  const configRespostas = await API.getConfigRespostas();
+  let configRespostas = {};
+  try {
+    configRespostas = await API.getConfigRespostas();
+  } catch(e) {
+    configRespostas = {
+      '_default': [
+        {valor:'3',label:'Alto (3)',cor:'#c62828',background:'#ffebee'},
+        {valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},
+        {valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},
+        {valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}
+      ],
+      'Geral': [
+        {valor:'3',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},
+        {valor:'2',label:'Acontece com alguma frequência',cor:'#f57c00',background:'#fff3e0'},
+        {valor:'1',label:'Acontece raramente',cor:'#2e7d32',background:'#e8f5e9'},
+        {valor:'0',label:'Nunca aconteceu',cor:'#757575',background:'#f5f5f5'}
+      ]
+    };
+  }
   window.configRespostasData = configRespostas;
   renderizarConfigRespostas(configRespostas);
 
@@ -172,7 +190,7 @@ function renderizarConfigRespostas(config) {
           <option>Impacto Reputacional</option>
         </select>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 2fr;gap:14px;margin-bottom:14px;">
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:14px;margin-bottom:20px;">
         <div>
           <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Pontuação</label>
           <input type="number" id="crValor" min="0" max="10" placeholder="Ex: 3" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
@@ -182,16 +200,8 @@ function renderizarConfigRespostas(config) {
           <input type="text" id="crLabel" placeholder="Ex: Alto impacto" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:20px;">
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Cor do texto</label>
-          <input type="color" id="crCor" value="#c62828" style="width:100%;height:40px;border:1.5px solid #e0e0e0;border-radius:7px;cursor:pointer;">
-        </div>
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Cor de fundo</label>
-          <input type="color" id="crBackground" value="#ffebee" style="width:100%;height:40px;border:1.5px solid #e0e0e0;border-radius:7px;cursor:pointer;">
-        </div>
-      </div>
+      <input type="hidden" id="crCor" value="#c62828">
+      <input type="hidden" id="crBackground" value="#ffebee">
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalConfigResposta()">Cancelar</button>
         <button class="btn btn-primary" onclick="salvarConfigResposta()">Salvar</button>
@@ -234,12 +244,15 @@ window.fecharModalConfigResposta = () => document.getElementById('modalConfigRes
 
 window.salvarConfigResposta = async () => {
   const rowIndex = document.getElementById('crRowIndex').value;
+  const valor = document.getElementById('crValor').value;
+  const CORES = { '3': ['#c62828','#ffebee'], '2': ['#f57c00','#fff3e0'], '1': ['#2e7d32','#e8f5e9'], '0': ['#757575','#f5f5f5'] };
+  const [cor, background] = CORES[valor] || ['#555','#f5f5f5'];
   const d = {
     categoria: document.getElementById('crCategoria').value,
-    valor: document.getElementById('crValor').value,
+    valor,
     label: document.getElementById('crLabel').value.trim(),
-    cor: document.getElementById('crCor').value,
-    background: document.getElementById('crBackground').value,
+    cor,
+    background,
   };
   if (!d.valor || !d.label) return showToast('Preencha pontuação e rótulo.', '#e65100');
   if (rowIndex) d.rowIndex = rowIndex;
@@ -452,11 +465,19 @@ async function processos() {
       <div><h2>Processos de Negócio</h2><p class="page-sub">Cadastre os processos críticos de cada área</p></div>
       <button class="btn btn-primary" onclick="abrirModalProcesso()">+ Novo Processo</button>
     </div>
-    <div style="margin-bottom:16px;">
-      <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Área:</label>
-      <select id="filtroArea" onchange="filtrarPorArea(this.value)" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
-        <option value="">Todas as áreas</option>
-      </select>
+    <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;">
+      <div style="flex:1;">
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Área:</label>
+        <select id="filtroArea" onchange="filtrarPorArea(this.value)" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
+          <option value="">Todas as áreas</option>
+        </select>
+      </div>
+      <button id="btnEnviarArea" onclick="enviarParaArea()" style="display:none;padding:9px 18px;background:#1565c0;color:white;border:none;border-radius:7px;font-weight:600;font-size:0.88em;cursor:pointer;">
+        ✉️ Enviar Questionário para Área
+      </button>
+      <button id="btnRelatorioArea" onclick="enviarRelatorioArea()" style="display:none;padding:9px 18px;background:#2e7d32;color:white;border:none;border-radius:7px;font-weight:600;font-size:0.88em;cursor:pointer;">
+        📄 Enviar Relatório da Área
+      </button>
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table" id="lista" style="display:none;">
@@ -496,7 +517,7 @@ async function processos() {
         <button class="btn btn-primary" onclick="enviarConvite()">Enviar</button>
       </div>
     </div></div>
-    <div class="modal-overlay" id="modalAvaliar"><div class="modal" onclick="event.stopPropagation()" style="max-width:860px;max-height:90vh;overflow-y:auto;position:relative;">
+    <div class="modal-overlay" id="modalAvaliar"><div class="modal" onclick="event.stopPropagation()" style="max-width:1000px;max-height:92vh;overflow-y:auto;position:relative;">
       <h3 id="modalAvaliarTitulo" style="padding-right:32px;">Avaliar Processo</h3>
       <button onclick="fecharModalAvaliar()" style="position:absolute;top:20px;right:20px;background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       <p id="modalAvaliarNome" style="color:#888;margin-bottom:20px;font-size:0.88em;letter-spacing:0.2px;"></p>
@@ -522,6 +543,7 @@ async function processos() {
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalAvaliar()">Cancelar</button>
+        <button class="btn btn-ghost" onclick="imprimirAvaliacao()" style="color:#1565c0;border-color:#1565c0;">🖨️ Exportar PDF</button>
         <button class="btn btn-primary" onclick="salvarAvaliacaoProcesso()">Salvar Avaliação</button>
       </div>
     </div></div>
@@ -694,7 +716,53 @@ function renderizarProcessos() {
 
 window.filtrarPorArea = (area) => {
   processosFiltroArea = area;
+  const btn = document.getElementById('btnEnviarArea');
+  if (btn) btn.style.display = area ? 'block' : 'none';
+  const btnRel = document.getElementById('btnRelatorioArea');
+  if (btnRel) btnRel.style.display = area ? 'block' : 'none';
   renderizarProcessos();
+};
+
+window.enviarRelatorioArea = async () => {
+  const area = processosFiltroArea;
+  if (!area) return;
+  const areaObj = window.areasDisponiveis.find(a => a.nome === area);
+  if (!areaObj || !areaObj.email) return showToast('E-mail do responsável não cadastrado para esta área.', '#e65100');
+  if (!confirm(`Enviar relatório de "${area}" para ${areaObj.responsavel} (${areaObj.email})?`)) return;
+  try {
+    showToast('⏳ Gerando relatório...', '#1565c0');
+    const formData = new FormData();
+    formData.append('action', 'gerarRelatorioArea');
+    formData.append('area', area);
+    formData.append('email', areaObj.email);
+    const res = await fetch(API_URL, { method: 'POST', body: formData });
+    const result = await res.json();
+    if (result.error) throw new Error(result.error);
+    showToast('✅ Relatório enviado para ' + areaObj.email, '#2e7d32');
+  } catch(err) {
+    showToast('❌ Erro: ' + err.message, '#c62828');
+  }
+};
+
+window.enviarParaArea = async () => {
+  const area = processosFiltroArea;
+  if (!area) return;
+  const areaObj = window.areasDisponiveis.find(a => a.nome === area);
+  if (!areaObj || !areaObj.email) return showToast('E-mail do responsável não cadastrado para esta área.', '#e65100');
+  if (!confirm(`Enviar questionário para ${areaObj.responsavel} (${areaObj.email})?`)) return;
+  try {
+    const formData = new FormData();
+    formData.append('action', 'gerarTokenArea');
+    formData.append('area', area);
+    formData.append('email', areaObj.email);
+    formData.append('nomeResponsavel', areaObj.responsavel || '');
+    const res = await fetch(API_URL, { method: 'POST', body: formData });
+    const result = await res.json();
+    if (result.error) throw new Error(result.error);
+    showToast('✅ Questionário enviado para ' + areaObj.email, '#2e7d32');
+  } catch(err) {
+    showToast('❌ Erro: ' + err.message, '#c62828');
+  }
 };
 
 window.ordenarProcessos = (coluna) => {
@@ -870,14 +938,14 @@ window.avaliarProcesso = (id) => {
       <div style="border:1.5px solid ${cor};border-top:none;border-radius:0 0 7px 7px;overflow:hidden;">
         ${itensCat.map(perg => {
           const i = window.processosPerguntas.indexOf(perg);
-          return `<div style="padding:16px 20px;background:#fafafa;border-bottom:1px solid #f0f0f0;">
+          return `<div style="padding:20px 24px;background:#fafafa;border-bottom:1px solid #f0f0f0;">
             <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${perg.pergunta}</div>
             <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
-              ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default']).map(op => `
-                <label style="display:flex;align-items:center;padding:9px 10px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;" onmouseover="this.style.borderColor='${op.cor}'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
-                  <input type="radio" name="pergunta${i}" value="${op.valor}" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='${op.cor}';this.parentElement.style.background='${op.background}';" style="margin-right:7px;width:15px;height:15px;">
-                  <span style="color:${op.cor};font-weight:600;font-size:0.87em;">${op.label}</span>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+              ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default']).slice().sort((a,b) => Number(b.valor) - Number(a.valor)).map(op => `
+                <label style="display:flex;align-items:flex-start;padding:12px 14px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer;min-height:56px;" onmouseover="this.style.borderColor='${op.cor}'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
+                  <input type="radio" name="pergunta${i}" value="${op.valor}" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='${op.cor}';this.parentElement.style.background='${op.background}';" style="margin-right:8px;margin-top:2px;width:15px;height:15px;flex-shrink:0;">
+                  <span style="color:${op.cor};font-weight:600;font-size:0.85em;line-height:1.4;">${op.label}</span>
                 </label>`).join('')}
             </div>
           </div>`;
@@ -905,6 +973,79 @@ window.avaliarProcesso = (id) => {
 
 window.fecharModalAvaliar = () => document.getElementById('modalAvaliar').classList.remove('open');
 
+window.imprimirAvaliacao = () => {
+  const titulo = document.getElementById('modalAvaliarTitulo').textContent;
+  const area = document.getElementById('modalAvaliarNome').textContent;
+  const scoreTotal = document.getElementById('scoreTotal').textContent;
+  const scoreTier = document.getElementById('scoreTier').textContent;
+
+  // Coletar respostas selecionadas
+  const pergs = window.processosPerguntas || window.questionarioPerguntas || [];
+  const CAT_CORES = {
+    'Geral': '#37474f', 'Impacto na Operação e Missão': '#1a237e',
+    'Impacto Financeiro': '#c62828', 'Impacto Jurídico e Regulatório': '#e65100', 'Impacto Reputacional': '#00838f'
+  };
+  const OPCOES = window.configRespostas || {};
+  const pergsOrdenadas = [...pergs.filter(p => p.categoria === 'Geral'), ...pergs.filter(p => p.categoria !== 'Geral')];
+  const grupos = []; const vistos = {};
+  pergsOrdenadas.forEach(p => { if (!vistos[p.categoria]) { vistos[p.categoria] = true; grupos.push(p.categoria); } });
+
+  const conteudoHtml = grupos.map(cat => {
+    const cor = CAT_CORES[cat] || '#555';
+    const itens = pergsOrdenadas.filter(p => p.categoria === cat);
+    const ops = ((OPCOES[cat] || OPCOES['_default']) || [
+      {valor:'3',label:'Alto (3)',cor:'#c62828',background:'#ffebee'},
+      {valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},
+      {valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},
+      {valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}
+    ]).slice().sort((a,b) => Number(b.valor) - Number(a.valor));
+
+    return '<div style="margin-bottom:20px;">' +
+      '<div style="background:' + cor + ';color:white;padding:8px 16px;font-size:11px;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;border-radius:6px 6px 0 0;">' + cat + '</div>' +
+      '<div style="border:1.5px solid ' + cor + ';border-top:none;border-radius:0 0 6px 6px;overflow:hidden;">' +
+      itens.map((perg, idx) => {
+        const i = pergs.indexOf(perg);
+        const sel = document.querySelector('input[name="pergunta' + i + '"]:checked');
+        const valSel = sel ? String(sel.value) : null;
+        console.log('perg', i, perg.pergunta.substring(0,30), 'valSel:', valSel);
+        return '<div style="padding:14px 16px;background:#fafafa;border-bottom:1px solid #f0f0f0;">' +
+          '<div style="font-weight:600;font-size:13px;margin-bottom:3px;">' + perg.pergunta + '</div>' +
+          '<div style="font-size:11px;color:#888;margin-bottom:10px;">' + (perg.descricao || '') + '</div>' +
+          '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">' +
+          ops.map(op => {
+            const selecionada = valSel === String(op.valor);
+            const bg = selecionada ? op.background : 'white';
+            const borda = selecionada ? op.cor : '#e0e0e0';
+            const bw = selecionada ? '2.5px' : '1.5px';
+            return '<div style="border:' + bw + ' solid ' + borda + ';border-radius:6px;padding:8px 10px;background:' + bg + ';">' +
+              '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid ' + op.cor + ';background:' + (selecionada ? op.cor : 'white') + ';margin-right:6px;vertical-align:middle;"></span>' +
+              '<span style="color:' + op.cor + ';font-weight:' + (selecionada ? '700' : '600') + ';font-size:11px;">' + op.label + '</span>' +
+              '</div>';
+          }).join('') +
+          '</div></div>';
+      }).join('') +
+      '</div></div>';
+  }).join('');
+
+  const janela = window.open('', '_blank');
+  janela.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>BIA - ${titulo}</title>
+    <style>body{font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:32px;color:#1a1a2e;}h1{color:#1a237e;font-size:20px;margin-bottom:4px;}.rodape{margin-top:32px;text-align:center;font-size:11px;color:#999;border-top:1px solid #eee;padding-top:16px;}@media print{body{padding:16px;}}</style>
+    </head><body>
+    <h1>${titulo}</h1>
+    <div style="color:#888;font-size:13px;margin-bottom:24px;">${area}</div>
+    <div style="background:#f0f4ff;border-left:4px solid #1a237e;padding:12px 16px;margin-bottom:24px;font-size:13px;border-radius:0 6px 6px 0;">
+      <strong>&#128203; Premissa:</strong> O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.
+    </div>
+    ${conteudoHtml}
+    <div style="background:#1a237e;color:white;padding:16px 20px;border-radius:8px;margin-top:24px;display:flex;justify-content:space-between;align-items:center;">
+      <div><div style="font-size:14px;font-weight:600;">Score Total</div></div>
+      <div style="text-align:right;"><div style="font-size:36px;font-weight:700;">${scoreTotal}</div><div style="background:rgba(255,255,255,0.2);padding:4px 14px;border-radius:20px;font-weight:700;font-size:13px;">${scoreTier}</div></div>
+    </div>
+    <div class="rodape">Relatório gerado pelo Sistema BIA &middot; Fortes Tecnologia &middot; ${new Date().toLocaleDateString('pt-BR')}</div>
+    <script>window.onload=()=>{window.print();}<\/script></body></html>`);
+  janela.document.close();
+};
+
 window.abrirModalEnviar = (id) => {
   const p = window.processosData.find(proc => proc.id === id);
   if (!p) return;
@@ -917,10 +1058,10 @@ window.abrirModalEnviar = (id) => {
 window.fecharModalEnviar = () => document.getElementById('modalEnviar').classList.remove('open');
 
 window.enviarConvite = async () => {
-  const id = document.getElementById('enviarProcessoId').value;
+  const processoId = document.getElementById('enviarProcessoId').value;
   const email = document.getElementById('enviarEmail').value.trim();
   if (!email) return showToast('Informe o e-mail do respondente.', '#e65100');
-  const p = window.processosData.find(proc => proc.id === Number(id));
+  const p = window.processosData.find(proc => proc.id === Number(processoId));
   if (!p) return;
   try {
     const formData = new FormData();

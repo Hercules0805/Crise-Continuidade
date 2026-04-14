@@ -56,6 +56,9 @@ function doGet(e) {
       case 'validarToken':
         result = validarToken(e.parameter.token);
         break;
+      case 'validarTokenArea':
+        result = validarTokenArea(e.parameter.token);
+        break;
       case 'getConfigRespostas':
         result = getConfigRespostas();
         break;
@@ -148,8 +151,18 @@ function doPost(e) {
         if (data.scores && typeof data.scores === 'string') data.scores = JSON.parse(data.scores);
         result = salvarRespostasToken(data);
         break;
+      case 'salvarRespostasArea':
+        if (data.respostas && typeof data.respostas === 'string') data.respostas = JSON.parse(data.respostas);
+        result = salvarRespostasArea(data);
+        break;
       case 'gerarToken':
         result = gerarTokenAvaliacao(data);
+        break;
+      case 'gerarTokenArea':
+        result = gerarTokenArea(data);
+        break;
+      case 'gerarRelatorioArea':
+        result = gerarRelatorioArea(data);
         break;
       case 'salvarConfigResposta':
         result = salvarConfigResposta(data);
@@ -403,6 +416,54 @@ function salvarRespostas(data) {
   return { success: true, total: respostas.length };
 }
 
+function salvarRespostasArea(data) {
+  const ss = _getSS();
+  const sheetTokens = ss.getSheetByName(ABA_TOKENS);
+  if (!sheetTokens) return { error: 'Token inválido.' };
+  const rows = sheetTokens.getDataRange().getValues();
+  let tokenRow = -1;
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === data.token && rows[i][2] === '_AREA_') {
+      if (rows[i][6] === true) return { error: 'Este link já foi utilizado.' };
+      tokenRow = i + 1;
+      break;
+    }
+  }
+  if (tokenRow === -1) return { error: 'Token inválido.' };
+
+  const timestamp = new Date();
+  const perguntas = getPerguntas().filter(p => p.ativa);
+  let sheetResp = ss.getSheetByName(ABA_RESPOSTAS);
+  if (!sheetResp) {
+    sheetResp = ss.insertSheet(ABA_RESPOSTAS);
+    sheetResp.appendRow(['Timestamp', 'Respondente', 'Cargo', 'Área', 'Processo', ...perguntas.map(p => p.pergunta), 'Score', 'Tier']);
+    sheetResp.setFrozenRows(1);
+  }
+
+  data.respostas.forEach(resp => {
+    const valores = perguntas.map(p => resp.scores[p.pergunta] || 0);
+    const score = valores.reduce((a, b) => a + b, 0);
+    const tier = _calcularTier(score);
+    const rto = _calcularRTO(tier);
+    sheetResp.appendRow([timestamp, data.nome || '', data.cargo || '', resp.area, resp.processo, ...valores, score, tier]);
+    const sheetProc = ss.getSheetByName(ABA_PROCESSOS);
+    if (sheetProc) {
+      const procRows = sheetProc.getDataRange().getValues();
+      for (let i = 1; i < procRows.length; i++) {
+        if (String(procRows[i][0]).trim().toLowerCase() === String(resp.area).trim().toLowerCase() &&
+            String(procRows[i][1]).trim().toLowerCase() === String(resp.processo).trim().toLowerCase()) {
+          sheetProc.getRange(i + 1, 5).setValue(rto);
+          sheetProc.getRange(i + 1, 9).setValue(tier);
+          break;
+        }
+      }
+    }
+  });
+
+  sheetTokens.getRange(tokenRow, 7).setValue(true);
+  return { success: true, total: data.respostas.length };
+}
+
 function getResumoRespostas() {
   const sheet = _getSS().getSheetByName(ABA_RESPOSTAS);
   if (!sheet) return [];
@@ -419,12 +480,150 @@ function getResumoRespostas() {
 
 function autorizarGmail() {
   GmailApp.getInboxThreads(0, 1);
-  return 'Gmail autorizado com sucesso!';
+  return 'Gmail autorizado!';
+}
+
+function autorizarDrive() {
+  DriveApp.getRootFolder().getName();
+  return 'Drive autorizado!';
+}
+
+// ============================================================
+// RELATÓRIO DE ÁREA
+// ============================================================
+function gerarRelatorioArea(data) {
+  try {
+    const area = data.area;
+    const email = data.email;
+    if (!area || !email) return { error: 'Área e e-mail são obrigatórios.' };
+
+    const processos = getProcessos().filter(p => p.area === area);
+    if (processos.length === 0) return { error: 'Nenhum processo encontrado para esta área.' };
+
+    const agora = new Date();
+    const dataFormatada = Utilities.formatDate(agora, Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm');
+
+    const avaliados = processos.filter(p => p.score > 0).length;
+    const tier1 = processos.filter(p => p.score >= 12).length;
+    const tier2 = processos.filter(p => p.score >= 6 && p.score < 12).length;
+    const tier3 = processos.filter(p => p.score > 0 && p.score < 6).length;
+    const pendentes = processos.length - avaliados;
+
+    const corTier = (score) => score >= 12 ? '#c62828' : score >= 6 ? '#f57c00' : score > 0 ? '#1565c0' : '#999';
+    const labelTier = (p) => p.tier || (p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.score > 0 ? 'Tier 3 (Suporte)' : 'Pendente');
+
+    const linhasTabela = processos.map(p =>
+      '<tr>' +
+      '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;">' + p.processo + '</td>' +
+      '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;text-align:center;font-weight:700;color:' + corTier(p.score) + ';font-size:14px;">' + (p.score > 0 ? p.score : '-') + '</td>' +
+      '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;text-align:center;"><span style="background:' + corTier(p.score) + ';color:white;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;">' + labelTier(p) + '</span></td>' +
+      '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;">' + (p.rto || '-') + '</td>' +
+      '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;">' + (p.biaHomologada || '-') + '</td>' +
+      '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;">' + (p.bcpStatus || '-') + '</td>' +
+      '</tr>'
+    ).join('');
+
+    const htmlBody =
+      '<div style="font-family:Arial,sans-serif;max-width:800px;margin:0 auto;">' +
+      '<div style="background:#1a237e;padding:28px 32px;border-radius:8px 8px 0 0;">' +
+      '<h1 style="color:white;margin:0;font-size:22px;">Relatório BIA</h1>' +
+      '<p style="color:rgba(255,255,255,0.8);margin:6px 0 0;font-size:14px;">Área: ' + area + ' &middot; Gerado em ' + dataFormatada + '</p>' +
+      '</div>' +
+      '<div style="background:#f5f6fa;padding:24px 32px;">' +
+      '<table style="width:100%;border-collapse:collapse;margin-bottom:24px;">' +
+      '<tr>' +
+      '<td style="background:white;border-radius:8px;padding:16px;text-align:center;border-top:4px solid #1a237e;"><div style="font-size:28px;font-weight:700;color:#1a237e;">' + processos.length + '</div><div style="font-size:12px;color:#666;">Total</div></td>' +
+      '<td style="width:8px;"></td>' +
+      '<td style="background:white;border-radius:8px;padding:16px;text-align:center;border-top:4px solid #2e7d32;"><div style="font-size:28px;font-weight:700;color:#2e7d32;">' + avaliados + '</div><div style="font-size:12px;color:#666;">Avaliados</div></td>' +
+      '<td style="width:8px;"></td>' +
+      '<td style="background:white;border-radius:8px;padding:16px;text-align:center;border-top:4px solid #c62828;"><div style="font-size:28px;font-weight:700;color:#c62828;">' + tier1 + '</div><div style="font-size:12px;color:#666;">Tier 1</div></td>' +
+      '<td style="width:8px;"></td>' +
+      '<td style="background:white;border-radius:8px;padding:16px;text-align:center;border-top:4px solid #f57c00;"><div style="font-size:28px;font-weight:700;color:#f57c00;">' + tier2 + '</div><div style="font-size:12px;color:#666;">Tier 2</div></td>' +
+      '<td style="width:8px;"></td>' +
+      '<td style="background:white;border-radius:8px;padding:16px;text-align:center;border-top:4px solid #1565c0;"><div style="font-size:28px;font-weight:700;color:#1565c0;">' + tier3 + '</div><div style="font-size:12px;color:#666;">Tier 3</div></td>' +
+      '<td style="width:8px;"></td>' +
+      '<td style="background:white;border-radius:8px;padding:16px;text-align:center;border-top:4px solid #999;"><div style="font-size:28px;font-weight:700;color:#999;">' + pendentes + '</div><div style="font-size:12px;color:#666;">Pendentes</div></td>' +
+      '</tr></table>' +
+      '<div style="background:white;border-radius:8px;overflow:hidden;">' +
+      '<table style="width:100%;border-collapse:collapse;">' +
+      '<thead><tr style="background:#1a237e;">' +
+      '<th style="padding:12px;text-align:left;color:white;font-size:12px;">PROCESSO</th>' +
+      '<th style="padding:12px;text-align:center;color:white;font-size:12px;">SCORE</th>' +
+      '<th style="padding:12px;text-align:center;color:white;font-size:12px;">TIER</th>' +
+      '<th style="padding:12px;text-align:left;color:white;font-size:12px;">RTO</th>' +
+      '<th style="padding:12px;text-align:left;color:white;font-size:12px;">BIA STATUS</th>' +
+      '<th style="padding:12px;text-align:left;color:white;font-size:12px;">BCP STATUS</th>' +
+      '</tr></thead>' +
+      '<tbody>' + linhasTabela + '</tbody>' +
+      '</table></div></div>' +
+      '<div style="background:#e8eaf6;padding:16px 32px;border-radius:0 0 8px 8px;text-align:center;">' +
+      '<p style="color:#666;font-size:12px;margin:0;">Relatório gerado automaticamente pelo Sistema BIA &middot; Fortes Tecnologia</p>' +
+      '</div></div>';
+
+    GmailApp.sendEmail(email, 'BIA - Relatorio de Processos: ' + area, 'Relatorio em anexo.', { htmlBody: htmlBody });
+    return { success: true };
+  } catch(err) {
+    Logger.log('gerarRelatorioArea ERROR: ' + err.message);
+    return { error: err.message };
+  }
 }
 
 // ============================================================
 // TOKENS DE AVALIAÇÃO
 // ============================================================
+function gerarTokenArea(data) {
+  const ss = _getSS();
+  let sheet = ss.getSheetByName(ABA_TOKENS);
+  if (!sheet) {
+    sheet = ss.insertSheet(ABA_TOKENS);
+    sheet.appendRow(['Token', 'Área', 'Processo', 'Email', 'Criado em', 'Expira em', 'Usado']);
+    sheet.getRange(1,1,1,7).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+  const token = Utilities.getUuid();
+  const agora = new Date();
+  const expira = new Date(agora.getTime() + 7 * 24 * 60 * 60 * 1000);
+  // Gravar token com processo vazio para indicar que é de área inteira
+  sheet.appendRow([token, data.area, '_AREA_', data.email, agora, expira, false]);
+
+  const link = 'https://bia-forte-2025.web.app/avaliar-area.html?token=' + token;
+  const assunto = 'BIA — Avaliação de Processos: ' + data.area;
+  const corpo = `Olá, ${data.nomeResponsavel || ''},
+
+Você foi convidado(a) para avaliar os processos de negócio da área abaixo no sistema BIA:
+
+Área: ${data.area}
+
+Clique no link abaixo para responder o questionário de todos os processos:
+${link}
+
+Este link é válido por 7 dias e pode ser usado apenas uma vez.
+
+Atenciosamente,
+Equipe SI - Fortes Tecnologia`;
+
+  GmailApp.sendEmail(data.email, assunto, corpo);
+  return { success: true, token, link };
+}
+
+function validarTokenArea(token) {
+  if (!token) return { error: 'Token não informado.' };
+  const sheet = _getSS().getSheetByName(ABA_TOKENS);
+  if (!sheet) return { error: 'Token inválido.' };
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === token && rows[i][2] === '_AREA_') {
+      if (rows[i][6] === true) return { error: 'Este link já foi utilizado.' };
+      if (new Date() > new Date(rows[i][5])) return { error: 'Este link expirou.' };
+      const area = rows[i][1];
+      const processos = getProcessos().filter(p => p.area === area);
+      const perguntas = getPerguntas().filter(p => p.ativa);
+      return { area, processos, perguntas };
+    }
+  }
+  return { error: 'Link inválido ou expirado.' };
+}
+
 function gerarTokenAvaliacao(data) {
   const ss = _getSS();
   let sheet = ss.getSheetByName(ABA_TOKENS);
@@ -443,7 +642,7 @@ function gerarTokenAvaliacao(data) {
   const assunto = 'BIA — Avaliação de Processo: ' + data.processo;
   const corpo = `Olá,
 
-Você foi convidado(a) para avaliar o processo de negócio abaixo no sistema BIA (Business Impact Analysis):
+Você foi convidado(a) para avaliar o processo de negócio abaixo no sistema BIA:
 
 Área: ${data.area}
 Processo: ${data.processo}
@@ -454,26 +653,10 @@ ${link}
 Este link é válido por 7 dias e pode ser usado apenas uma vez.
 
 Atenciosamente,
-Equipe BIA`;
+Equipe SI - Fortes Tecnologia`;
 
   GmailApp.sendEmail(data.email, assunto, corpo);
   return { success: true, token, link };
-}
-
-function validarToken(token) {
-  if (!token) return { error: 'Token não informado.' };
-  const sheet = _getSS().getSheetByName(ABA_TOKENS);
-  if (!sheet) return { error: 'Token inválido.' };
-  const rows = sheet.getDataRange().getValues();
-  for (let i = 1; i < rows.length; i++) {
-    if (rows[i][0] === token) {
-      if (rows[i][6] === true) return { error: 'Este link já foi utilizado.' };
-      if (new Date() > new Date(rows[i][5])) return { error: 'Este link expirou.' };
-      const perguntas = getPerguntas().filter(p => p.ativa);
-      return { area: rows[i][1], processo: rows[i][2], perguntas };
-    }
-  }
-  return { error: 'Link inválido ou expirado.' };
 }
 
 function salvarRespostasToken(data) {
