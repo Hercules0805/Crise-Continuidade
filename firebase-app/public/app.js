@@ -942,11 +942,14 @@ window.avaliarProcesso = (id) => {
             <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${perg.pergunta}</div>
             <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
-              ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default']).slice().sort((a,b) => Number(b.valor) - Number(a.valor)).map(op => `
-                <label style="display:flex;align-items:flex-start;padding:12px 14px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer;min-height:56px;" onmouseover="this.style.borderColor='${op.cor}'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
-                  <input type="radio" name="pergunta${i}" value="${op.valor}" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='${op.cor}';this.parentElement.style.background='${op.background}';" style="margin-right:8px;margin-top:2px;width:15px;height:15px;flex-shrink:0;">
-                  <span style="color:${op.cor};font-weight:600;font-size:0.85em;line-height:1.4;">${op.label}</span>
-                </label>`).join('')}
+              ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default'] || [{valor:'3',label:'Crítico',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Alto',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Moderado',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'Baixo',cor:'#757575',background:'#f5f5f5'}]).slice().sort((a,b) => Number(b.valor) - Number(a.valor)).map(op => {
+                const opCor = (op.cor && op.cor !== 'undefined') ? op.cor : ({'3':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'}[String(op.valor)] || '#555');
+                const opBg = (op.background && op.background !== 'undefined') ? op.background : ({'3':'#ffebee','2':'#fff3e0','1':'#e8f5e9','0':'#f5f5f5'}[String(op.valor)] || '#f5f5f5');
+                return `
+                <label style="display:flex;align-items:flex-start;padding:12px 14px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer;min-height:56px;">
+                  <input type="radio" name="pergunta${i}" value="${op.valor}" data-cor="${opCor}" data-bg="${opBg}" data-label="${op.label}" onchange="calcularScore();atualizarEstiloOpcoes(this);" style="margin-right:8px;margin-top:2px;width:15px;height:15px;flex-shrink:0;">
+                  <span style="color:${opCor};font-weight:600;font-size:0.85em;line-height:1.4;">${op.label}</span>
+                </label>`;}).join('')}
             </div>
           </div>`;
         }).join('')}
@@ -962,6 +965,7 @@ window.avaliarProcesso = (id) => {
         const radio = document.querySelector(`input[name="pergunta${i}"][value="${val}"]`);
         if (radio) {
           radio.checked = true;
+          atualizarEstiloOpcoes(radio);
           radio.dispatchEvent(new Event('change'));
         }
       }
@@ -1018,8 +1022,8 @@ window.imprimirAvaliacao = () => {
             const borda = selecionada ? op.cor : '#e0e0e0';
             const bw = selecionada ? '2.5px' : '1.5px';
             return '<div style="border:' + bw + ' solid ' + borda + ';border-radius:6px;padding:8px 10px;background:' + bg + ';">' +
-              '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid ' + op.cor + ';background:' + (selecionada ? op.cor : 'white') + ';margin-right:6px;vertical-align:middle;"></span>' +
-              '<span style="color:' + op.cor + ';font-weight:' + (selecionada ? '700' : '600') + ';font-size:11px;">' + op.label + '</span>' +
+              '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;border:2px solid ' + op.cor + ';background:' + (selecionada ? op.cor : 'white') + ';margin-right:6px;vertical-align:middle;flex-shrink:0;"></span>' +
+              '<span style="color:' + op.cor + ';font-weight:' + (selecionada ? '700' : '600') + ';font-size:11px;">' + (selecionada ? '✔ ' : '') + op.label + '</span>' +
               '</div>';
           }).join('') +
           '</div></div>';
@@ -1029,7 +1033,7 @@ window.imprimirAvaliacao = () => {
 
   const janela = window.open('', '_blank');
   janela.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>BIA - ${titulo}</title>
-    <style>body{font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:32px;color:#1a1a2e;}h1{color:#1a237e;font-size:20px;margin-bottom:4px;}.rodape{margin-top:32px;text-align:center;font-size:11px;color:#999;border-top:1px solid #eee;padding-top:16px;}@media print{body{padding:16px;}}</style>
+    <style>body{font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:32px;color:#1a1a2e;}h1{color:#1a237e;font-size:20px;margin-bottom:4px;}.rodape{margin-top:32px;text-align:center;font-size:11px;color:#999;border-top:1px solid #eee;padding-top:16px;}@media print{body{padding:16px;}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}}</style>
     </head><body>
     <h1>${titulo}</h1>
     <div style="color:#888;font-size:13px;margin-bottom:24px;">${area}</div>
@@ -1402,6 +1406,28 @@ window.abrirModalAvaliacaoProcesso = (processoId, area, processo) => {
   
   calcularScore();
   document.getElementById('modalQuestionario').classList.add('open');
+};
+
+window.atualizarEstiloOpcoes = (radio) => {
+  const grupo = radio.parentElement.parentElement;
+  const CORES_FALLBACK = {'3':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'};
+  const BGS_FALLBACK = {'3':'#ffebee','2':'#fff3e0','1':'#e8f5e9','0':'#f5f5f5'};
+  grupo.querySelectorAll('input[type="radio"]').forEach(r => {
+    const label = r.parentElement;
+    const span = label.querySelector('span');
+    const cor = (r.dataset.cor && r.dataset.cor !== 'undefined') ? r.dataset.cor : (CORES_FALLBACK[r.value] || '#555');
+    const bg = (r.dataset.bg && r.dataset.bg !== 'undefined') ? r.dataset.bg : (BGS_FALLBACK[r.value] || '#f5f5f5');
+    const lbl = (r.dataset.label && r.dataset.label !== 'undefined') ? r.dataset.label : (span ? span.textContent.replace(String.fromCharCode(10004)+' ','') : '');
+    const sel = r.checked;
+    label.style.borderColor = sel ? cor : '#e0e0e0';
+    label.style.borderWidth = sel ? '2.5px' : '2px';
+    label.style.background = sel ? bg : 'white';
+    if (span) {
+      span.style.color = cor;
+      span.style.fontWeight = sel ? '700' : '600';
+      span.textContent = (sel ? String.fromCharCode(10004)+' ' : '') + lbl;
+    }
+  });
 };
 
 window.calcularScore = () => {

@@ -8,6 +8,8 @@
 
 ## Deploy
 
+> 🤖 **REGRA DO AGENTE**: Sempre que o agente modificar arquivos do frontend (`firebase-app/public/`), deve executar automaticamente o deploy do Firebase ao final. Sempre que o agente modificar `bia-app/Code.gs`, deve executar automaticamente o `clasp push --force` ao final. Não aguardar instrução do usuário para isso.
+
 ### Firebase (frontend)
 ```
 cd firebase-app
