@@ -168,10 +168,10 @@
       document.getElementById('processo-contador').textContent = `Processo ${processoAtual+1} de ${processos.length}`;
       document.getElementById('progresso-bar').style.width = ((processoAtual+1)/processos.length*100) + '%';
 
-      const CAT_CORES = {
-        'Geral': '#37474f', 'Impacto na Operação e Missão': '#1a237e',
-        'Impacto Financeiro': '#c62828', 'Impacto Jurídico e Regulatório': '#e65100', 'Impacto Reputacional': '#00838f'
-      };
+      const CAT_CORES_PALETTE = ['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1b9a','#00695c','#1565c0','#4e342e','#558b2f'];
+      const CAT_CORES = {};
+      const pergsOrdenadosTemp = [...perguntas.filter(p => p.categoria === 'Geral'), ...perguntas.filter(p => p.categoria !== 'Geral')];
+      [...new Set(pergsOrdenadosTemp.map(p => p.categoria))].forEach((c, idx) => { CAT_CORES[c] = CAT_CORES_PALETTE[idx % CAT_CORES_PALETTE.length]; });
       const OPCOES_DEFAULT = {
         '_default': [{valor:'3',label:'Alto (3)',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}],
         'Geral': [{valor:'3',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Acontece com alguma frequência',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Acontece raramente',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'Nunca aconteceu',cor:'#757575',background:'#f5f5f5'}]

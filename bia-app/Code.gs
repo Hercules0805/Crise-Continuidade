@@ -602,7 +602,12 @@ Este link é válido por 7 dias e pode ser usado apenas uma vez.
 Atenciosamente,
 Equipe SI - Fortes Tecnologia`;
 
-  GmailApp.sendEmail(data.email, assunto, corpo);
+  try {
+    GmailApp.sendEmail(data.email, assunto, corpo);
+  } catch(emailErr) {
+    Logger.log('gerarTokenArea EMAIL ERROR: ' + emailErr.message);
+    return { error: 'Token gerado, mas falha ao enviar e-mail: ' + emailErr.message };
+  }
   return { success: true, token, link };
 }
 
@@ -655,7 +660,12 @@ Este link é válido por 7 dias e pode ser usado apenas uma vez.
 Atenciosamente,
 Equipe SI - Fortes Tecnologia`;
 
-  GmailApp.sendEmail(data.email, assunto, corpo);
+  try {
+    GmailApp.sendEmail(data.email, assunto, corpo);
+  } catch(emailErr) {
+    Logger.log('gerarTokenAvaliacao EMAIL ERROR: ' + emailErr.message);
+    return { error: 'Token gerado, mas falha ao enviar e-mail: ' + emailErr.message };
+  }
   return { success: true, token, link };
 }
 

@@ -39,13 +39,7 @@ async function perguntas() {
       <h3 id="modalTitulo">Nova Pergunta</h3>
       <input type="hidden" id="fId">
       <label>Categoria</label>
-      <select id="fCategoria">
-        <option>Geral</option>
-        <option>Impacto na Operação e Missão</option>
-        <option>Impacto Financeiro</option>
-        <option>Impacto Jurídico e Regulatório</option>
-        <option>Impacto Reputacional</option>
-      </select>
+      <select id="fCategoria"></select>
       <label>Pergunta</label>
       <input type="text" id="fPergunta" placeholder="Ex: Qual o impacto no produto final?">
       <label>Descrição / Ajuda</label>
@@ -90,6 +84,12 @@ async function perguntas() {
   }).join('');
   
   window.perguntasData = data;
+
+  // Popular dropdown de categorias dinamicamente
+  const cats = [...new Set(data.map(p => p.categoria))].sort();
+  const selCat = document.getElementById('fCategoria');
+  selCat.innerHTML = cats.map(c => `<option>${c}</option>`).join('');
+  window.categoriasDisponiveis = cats;
 
   // Carregar e renderizar config de respostas
   let configRespostas = {};
@@ -183,11 +183,7 @@ function renderizarConfigRespostas(config) {
         <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria</label>
         <select id="crCategoria" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
           <option value="_default">Padrão (todas as categorias)</option>
-          <option>Geral</option>
-          <option>Impacto na Operação e Missão</option>
-          <option>Impacto Financeiro</option>
-          <option>Impacto Jurídico e Regulatório</option>
-          <option>Impacto Reputacional</option>
+          ${(window.categoriasDisponiveis || []).map(c => `<option>${c}</option>`).join('')}
         </select>
       </div>
       <div style="display:grid;grid-template-columns:1fr 2fr;gap:14px;margin-bottom:20px;">
@@ -919,10 +915,11 @@ window.avaliarProcesso = (id) => {
       {valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}
     ]
   };
-  const CAT_CORES_AVALIAR = {
-    'Geral': '#37474f', 'Impacto na Operação e Missão': '#1a237e',
-    'Impacto Financeiro': '#c62828', 'Impacto Jurídico e Regulatório': '#e65100', 'Impacto Reputacional': '#00838f'
-  };
+  const CAT_CORES_PALETTE = ['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1b9a','#00695c','#1565c0','#4e342e','#558b2f'];
+  const CAT_CORES_AVALIAR = {};
+  [...new Set(window.processosPerguntas.map(p => p.categoria))].forEach((c, i) => {
+    CAT_CORES_AVALIAR[c] = CAT_CORES_PALETTE[i % CAT_CORES_PALETTE.length];
+  });
   const pergsOrdenadas = [
     ...window.processosPerguntas.filter(p => p.categoria === 'Geral'),
     ...window.processosPerguntas.filter(p => p.categoria !== 'Geral'),
@@ -985,10 +982,9 @@ window.imprimirAvaliacao = () => {
 
   // Coletar respostas selecionadas
   const pergs = window.processosPerguntas || window.questionarioPerguntas || [];
-  const CAT_CORES = {
-    'Geral': '#37474f', 'Impacto na Operação e Missão': '#1a237e',
-    'Impacto Financeiro': '#c62828', 'Impacto Jurídico e Regulatório': '#e65100', 'Impacto Reputacional': '#00838f'
-  };
+  const CAT_CORES_PALETTE_PDF = ['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1b9a','#00695c','#1565c0','#4e342e','#558b2f'];
+  const CAT_CORES = {};
+  [...new Set(pergs.map(p => p.categoria))].forEach((c, i) => { CAT_CORES[c] = CAT_CORES_PALETTE_PDF[i % CAT_CORES_PALETTE_PDF.length]; });
   const OPCOES = window.configRespostas || {};
   const pergsOrdenadas = [...pergs.filter(p => p.categoria === 'Geral'), ...pergs.filter(p => p.categoria !== 'Geral')];
   const grupos = []; const vistos = {};
