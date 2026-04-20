@@ -197,11 +197,13 @@
                 <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
                   ${ops.map(op => {
+                    const opCor = (op.cor && op.cor !== 'undefined') ? op.cor : ({'3':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'}[String(op.valor)] || '#555');
+                    const opBg = (op.background && op.background !== 'undefined') ? op.background : ({'3':'#ffebee','2':'#fff3e0','1':'#e8f5e9','0':'#f5f5f5'}[String(op.valor)] || '#f5f5f5');
                     const checked = valorSalvo !== null && String(valorSalvo) === String(op.valor);
-                    const style = checked ? `border-color:${op.cor};background:${op.background};` : '';
-                    return `<label style="display:flex;align-items:flex-start;padding:12px 14px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer;min-height:56px;${style}" onmouseover="this.style.borderColor='${op.cor}'" onmouseout="if(!this.querySelector('input').checked){this.style.borderColor='#e0e0e0';this.style.background='white';}">
-                      <input type="radio" name="perg_${i}" value="${op.valor}" ${checked?'checked':''} onchange="onRespostaChange(${i},'${perg.pergunta.replace(/'/g,"\\'")}',this.value,'${op.cor}','${op.background}')" style="margin-right:8px;margin-top:2px;width:15px;height:15px;flex-shrink:0;">
-                      <span style="color:${op.cor};font-weight:600;font-size:0.85em;line-height:1.4;">${op.label}</span>
+                    const style = checked ? `border-color:${opCor};background:${opBg};` : '';
+                    return `<label style="display:flex;align-items:flex-start;padding:12px 14px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer;min-height:56px;${style}" onmouseover="this.style.borderColor='${opCor}'" onmouseout="if(!this.querySelector('input').checked){this.style.borderColor='#e0e0e0';this.style.background='white';}">
+                      <input type="radio" name="perg_${i}" value="${op.valor}" ${checked?'checked':''} onchange="onRespostaChange(${i},'${perg.pergunta.replace(/'/g,"\\'")}',this.value,'${opCor}','${opBg}')" style="margin-right:8px;margin-top:2px;width:15px;height:15px;flex-shrink:0;">
+                      <span style="color:${opCor};font-weight:600;font-size:0.85em;line-height:1.4;">${op.label}</span>
                     </label>`;
                   }).join('')}
                 </div>
