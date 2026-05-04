@@ -9,6 +9,8 @@ const ABA_PROCESSOS      = 'Processos';
 const ABA_RESPOSTAS      = 'Respostas BIA';
 const ABA_TOKENS         = 'Tokens';
 const ABA_CONFIG_RESPOSTAS = 'Config Respostas';
+const ABA_CONFIG_PERFIS  = 'Config Perfis';
+const NOTIFICACAO_EMAIL  = 'herculesoliveira@fortestecnologia.com.br';
 
 const PERGUNTAS_DEFAULT = [
   ['Impacto na Operação e Missão', 'Em caso de interrupção do processo, qual o impacto no produto final?',    'O processo é essencial para a entrega do produto final?'],
@@ -57,6 +59,9 @@ function doGet(e) {
         break;
       case 'getConfigRespostas':
         result = getConfigRespostas();
+        break;
+      case 'getPerfil':
+        result = getPerfil(e.parameter.email);
         break;
       default:
         result = { error: 'Action não especificada' };
@@ -269,11 +274,12 @@ function getProcessos() {
         if (!scores[key]) {
           scores[key] = Number(r[scoreCol]) || 0;
           avaliados[key] = true;
-          const resp = [];
+          // Mapear respostas por nome da pergunta
+          const respMap = {};
           for (let c = areaCol + 2; c < scoreCol; c++) {
-            resp.push(Number(r[c]) || 0);
+            if (headers[c]) respMap[headers[c]] = Number(r[c]) || 0;
           }
-          respostas[key] = resp;
+          respostas[key] = respMap;
         }
       });
     }
@@ -282,7 +288,7 @@ function getProcessos() {
       const key = r[0] + '||' + r[1];
       return {
         id: i + 2, area: r[0], processo: r[1], descricao: r[2],
-        dependencia: r[3], rto: r[4], rpo: r[5], mtpd: r[6], biaHomologada: r[7], tier: r[8] || '', bcpStatus: r[9] || '',
+        dependencia: r[3], rto: r[4], rpo: r[5], mtpd: r[6], biaHomologada: r[7], tier: r[8] || '', bcpStatus: r[9] || '', descricaoFuncional: r[10] || '',
         score: scores[key] || 0,
         avaliado: avaliados[key] || false,
         respostas: respostas[key] || []
@@ -294,10 +300,10 @@ function getProcessos() {
 function salvarProcesso(p) {
   const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
   if (p.id) {
-    sheet.getRange(p.id, 1, 1, 10).setValues([[p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '']]);
+    sheet.getRange(p.id, 1, 1, 11).setValues([[p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '', p.descricaoFuncional || '']]);
     return { success: true, id: Number(p.id) };
   } else {
-    sheet.appendRow([p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '']);
+    sheet.appendRow([p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '', p.descricaoFuncional || '']);
     return { success: true, id: sheet.getLastRow() };
   }
 }
@@ -382,6 +388,7 @@ function salvarRespostas(data) {
     const tier = _calcularTier(score);
     const rto = _calcularRTO(tier);
     sheetResp.appendRow([timestamp, email, '', resp.area, resp.processo, ...valores, score, tier]);
+    _enviarNotificacaoAvaliacao(resp.area, resp.processo, email, score, tier);
     
     // Atualizar Tier e RTO na aba Processos
     const sheetProc = ss.getSheetByName(ABA_PROCESSOS);
@@ -431,6 +438,7 @@ function salvarRespostasArea(data) {
     const tier = _calcularTier(score);
     const rto = _calcularRTO(tier);
     sheetResp.appendRow([timestamp, data.nome || '', data.cargo || '', resp.area, resp.processo, ...valores, score, tier]);
+    _enviarNotificacaoAvaliacao(resp.area, resp.processo, data.nome || '', score, tier);
     const sheetProc = ss.getSheetByName(ABA_PROCESSOS);
     if (sheetProc) {
       const procRows = sheetProc.getDataRange().getValues();
@@ -682,6 +690,7 @@ function salvarRespostasToken(data) {
   const tier = _calcularTier(score);
   const rto = _calcularRTO(tier);
   sheetResp.appendRow([timestamp, data.nome || '', data.cargo || '', area, processo, ...valores, score, tier]);
+  _enviarNotificacaoAvaliacao(area, processo, data.nome || data.token, score, tier);
 
   // Atualizar Tier e RTO na aba Processos
   const sheetProc = ss.getSheetByName(ABA_PROCESSOS);
@@ -700,6 +709,120 @@ function salvarRespostasToken(data) {
   // Marcar token como usado
   sheetTokens.getRange(tokenRow, 7).setValue(true);
   return { success: true };
+}
+
+// ============================================================
+// NOTIFICAÇÃO DE AVALIAÇÃO
+// ============================================================
+function _enviarNotificacaoAvaliacao(area, processo, respondente, score, tier) {
+  try {
+    const corTier = tier === 'Tier 1 (Crítico)' ? '#c62828' : tier === 'Tier 2 (Essencial)' ? '#f57c00' : '#1565c0';
+    const htmlBody =
+      '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">' +
+      '<div style="background:#1a237e;padding:24px 32px;border-radius:8px 8px 0 0;">' +
+      '<h1 style="color:white;margin:0;font-size:18px;">BIA — Processo Avaliado</h1>' +
+      '</div>' +
+      '<div style="background:#f5f6fa;padding:24px 32px;border-radius:0 0 8px 8px;">' +
+      '<table style="width:100%;border-collapse:collapse;background:white;border-radius:8px;overflow:hidden;">' +
+      '<tr><td style="padding:12px 16px;font-size:13px;color:#666;border-bottom:1px solid #f0f0f0;">Respondente</td><td style="padding:12px 16px;font-size:13px;font-weight:600;border-bottom:1px solid #f0f0f0;">' + respondente + '</td></tr>' +
+      '<tr><td style="padding:12px 16px;font-size:13px;color:#666;border-bottom:1px solid #f0f0f0;">Área</td><td style="padding:12px 16px;font-size:13px;font-weight:600;border-bottom:1px solid #f0f0f0;">' + area + '</td></tr>' +
+      '<tr><td style="padding:12px 16px;font-size:13px;color:#666;border-bottom:1px solid #f0f0f0;">Processo</td><td style="padding:12px 16px;font-size:13px;font-weight:600;border-bottom:1px solid #f0f0f0;">' + processo + '</td></tr>' +
+      '<tr><td style="padding:12px 16px;font-size:13px;color:#666;border-bottom:1px solid #f0f0f0;">Score</td><td style="padding:12px 16px;font-size:15px;font-weight:700;color:#1a237e;border-bottom:1px solid #f0f0f0;">' + score + '</td></tr>' +
+      '<tr><td style="padding:12px 16px;font-size:13px;color:#666;">Tier</td><td style="padding:12px 16px;"><span style="background:' + corTier + ';color:white;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;">' + tier + '</span></td></tr>' +
+      '</table>' +
+      '<div style="text-align:center;margin:24px 0 8px;">' +
+      '<a href="https://bia-forte-2025.web.app" style="background:#1a237e;color:white;padding:10px 28px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;">Ver no Sistema BIA</a>' +
+      '</div>' +
+      '<p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Notificação automática do Sistema BIA · Fortes Tecnologia</p>' +
+      '</div></div>';
+    GmailApp.sendEmail(NOTIFICACAO_EMAIL, 'BIA — Avaliação: ' + processo + ' (' + tier + ')', '', { htmlBody: htmlBody });
+  } catch(err) {
+    Logger.log('_enviarNotificacaoAvaliacao ERROR: ' + err.message);
+  }
+}
+
+// ============================================================
+// LEMBRETES DIÁRIOS
+// ============================================================
+function enviarLembretes() {
+  const ss = _getSS();
+  const areas = getAreas();
+  const processos = getProcessos();
+  const perguntas = getPerguntas().filter(p => p.ativa);
+  const totalPerguntas = perguntas.length;
+  const link = 'https://bia-forte-2025.web.app';
+
+  areas.forEach(area => {
+    if (!area.email) return;
+    const procs = processos.filter(p => p.area === area.nome);
+    const pendentes = procs.filter(p => {
+      if (!p.avaliado) return true; // nunca avaliado
+      // avaliacao parcial: nem todas as perguntas respondidas
+      const respondidas = p.respostas ? Object.keys(p.respostas).length : 0;
+      return respondidas < totalPerguntas;
+    });
+    if (pendentes.length === 0) return;
+
+    const assunto = 'BIA — Lembrete: você tem processos com avaliação pendente';
+    const corpo =
+      '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">' +
+      '<div style="background:#1a237e;padding:24px 32px;border-radius:8px 8px 0 0;">' +
+      '<h1 style="color:white;margin:0;font-size:20px;">BIA — Avaliação Pendente</h1>' +
+      '</div>' +
+      '<div style="background:#f5f6fa;padding:24px 32px;border-radius:0 0 8px 8px;">' +
+      '<p style="color:#333;font-size:14px;">Olá, <strong>' + (area.responsavel || '') + '</strong>!</p>' +
+      '<p style="color:#555;font-size:14px;line-height:1.6;">Você possui <strong>' + pendentes.length + ' processo(s)</strong> da área <strong>' + area.nome + '</strong> com avaliação BIA pendente ou incompleta.</p>' +
+      '<p style="color:#555;font-size:14px;line-height:1.6;">Acesse o sistema para completar as avaliações:</p>' +
+      '<div style="text-align:center;margin:28px 0;">' +
+      '<a href="' + link + '" style="background:#1a237e;color:white;padding:12px 32px;border-radius:8px;text-decoration:none;font-weight:600;font-size:14px;">Acessar o Sistema BIA</a>' +
+      '</div>' +
+      '<p style="color:#999;font-size:12px;text-align:center;">Este é um lembrete automático do Sistema BIA · Fortes Tecnologia</p>' +
+      '</div></div>';
+
+    try {
+      GmailApp.sendEmail(area.email, assunto, '', { htmlBody: corpo });
+      Logger.log('Lembrete enviado para: ' + area.email + ' (' + pendentes.length + ' pendentes)');
+    } catch(err) {
+      Logger.log('Erro ao enviar lembrete para ' + area.email + ': ' + err.message);
+    }
+  });
+}
+
+// ============================================================
+// PERFIS DE ACESSO
+// ============================================================
+function getPerfil(email) {
+  if (!email) return { perfil: 'gestor', area: null };
+  const ss = _getSS();
+  let sheet = ss.getSheetByName(ABA_CONFIG_PERFIS);
+  if (!sheet) sheet = _criarAbaConfigPerfis(ss);
+  const rows = sheet.getDataRange().getValues().slice(1);
+  const row = rows.find(r => String(r[0]).trim().toLowerCase() === email.trim().toLowerCase());
+  const perfil = row ? String(row[1]).trim().toLowerCase() : 'gestor';
+
+  // Se gestor, buscar a area vinculada ao email na aba Areas
+  let area = null;
+  if (perfil === 'gestor') {
+    const sheetAreas = ss.getSheetByName(ABA_AREAS);
+    if (sheetAreas) {
+      const areas = sheetAreas.getDataRange().getValues().slice(1);
+      const areaRow = areas.find(r => String(r[2]).trim().toLowerCase() === email.trim().toLowerCase());
+      if (areaRow) area = String(areaRow[0]).trim();
+    }
+  }
+  return { perfil, area };
+}
+
+function _criarAbaConfigPerfis(ss) {
+  const sheet = ss.insertSheet(ABA_CONFIG_PERFIS);
+  sheet.appendRow(['Email', 'Perfil']);
+  sheet.getRange(1,1,1,2).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+  sheet.setColumnWidths(1, 2, 250);
+  sheet.setFrozenRows(1);
+  // Adicionar nota de ajuda
+  sheet.getRange(2,1).setValue('exemplo@fortestecnologia.com.br');
+  sheet.getRange(2,2).setValue('admin');
+  return sheet;
 }
 
 // ============================================================

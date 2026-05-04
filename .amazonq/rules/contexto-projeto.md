@@ -35,7 +35,7 @@ clasp push --force
 
 ## Configuração
 - URL da API do GAS fica em: `firebase-app/public/config.js` → constante `API_URL`
-- URL atual da API: `https://script.google.com/macros/s/AKfycbzQoJePkexFI0_TDwzid6BdNnNwdrqfsF_BzoHwpEhnBGniq5bUKJRfi0FSnIMxcc7Q/exec`
+- URL atual da API: `https://script.google.com/macros/s/AKfycbwa-HI0jnBUC8IYu1ZyogCvaq-GX5kmh0gynKyhyqevZMv5quSEysmZZwbmUKQUTC1a/exec`
 - Script ID do clasp: `1W74gvNEPO6ENL7OsiDEdgiI-sv775iho7JfSMmmOtt77ibQK_MShgLb8`
 
 ## Fluxo completo de atualização do backend

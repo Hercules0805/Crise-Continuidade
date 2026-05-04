@@ -15,12 +15,52 @@
       <a href="#perguntas" class="nav-link" data-page="perguntas">Perguntas</a>
       <a href="#admin" class="nav-link" data-page="admin">Painel</a>
     </div>
+    <div id="nav-user" style="display:flex;align-items:center;gap:12px;margin-left:auto;padding:0 8px;"></div>
   </nav>
 
   <div id="app"></div>
   <div class="toast" id="toast"></div>
 
   <script src="config.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+  <script>
+    firebase.initializeApp(FIREBASE_CONFIG);
+    const auth = firebase.auth();
+    const DOMINIO = 'fortestecnologia.com.br';
+    auth.onAuthStateChanged(async user => {
+      if (!user || !user.email.endsWith('@' + DOMINIO)) {
+        auth.signOut();
+        window.location.href = '/login.html';
+        return;
+      }
+      // Buscar perfil do usuario
+      try {
+        const url = new URL(API_URL);
+        url.searchParams.append('action', 'getPerfil');
+        url.searchParams.append('email', user.email);
+        const res = await fetch(url);
+        const perfil = await res.json();
+        window.USER_PERFIL = perfil.perfil || 'gestor';
+        window.USER_AREA = perfil.area || null;
+        window.USER_EMAIL = user.email;
+      } catch(e) {
+        window.USER_PERFIL = 'gestor';
+        window.USER_AREA = null;
+        window.USER_EMAIL = user.email;
+      }
+      // Aplicar restricoes de perfil
+      if (window.USER_PERFIL !== 'admin') {
+        document.querySelectorAll('.nav-link[data-page="areas"], .nav-link[data-page="perguntas"]').forEach(el => el.style.display = 'none');
+      }
+      // Mostrar usuario no nav
+      document.getElementById('nav-user').innerHTML = `
+        <img src="${user.photoURL || ''}" style="width:28px;height:28px;border-radius:50%;border:2px solid rgba(255,255,255,0.4);" onerror="this.style.display='none'">
+        <span style="color:rgba(255,255,255,0.85);font-size:0.82em;">${user.displayName || user.email}</span>
+        <button onclick="firebase.auth().signOut().then(()=>window.location.href='/login.html')" style="background:rgba(255,255,255,0.15);border:none;color:white;padding:5px 12px;border-radius:6px;font-size:0.78em;cursor:pointer;font-weight:600;">Sair</button>
+      `;
+    });
+  </script>
   <script src="api.js"></script>
   <script src="app.js"></script>
 </body>

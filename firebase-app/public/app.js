@@ -136,6 +136,15 @@ window.abrirModalPergunta = (p) => {
 };
 
 window.editarPergunta = (id) => abrirModalPergunta(window.perguntasData.find(p => p.id === id));
+window.trocarAbaProcesso = (aba) => {
+  ['identificacao','bia'].forEach(a => {
+    document.getElementById('painel-' + a).style.display = a === aba ? 'block' : 'none';
+    const btn = document.getElementById('tab-' + a);
+    btn.style.color = a === aba ? '#1a237e' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
+  });
+};
+
 window.fecharModal = () => {
   document.getElementById('drawerProcesso').classList.remove('open');
   document.getElementById('drawerOverlayProcesso').classList.remove('open');
@@ -558,59 +567,82 @@ async function processos() {
         <h3 id="modalTitulo">Novo Processo</h3>
         <button onclick="fecharModal()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
-      <div class="drawer-body">
-        <input type="hidden" id="fId">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
-          <div>
-            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área</label>
-            <select id="fArea" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;"></select>
+      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
+        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
+          <button id="tab-identificacao" onclick="trocarAbaProcesso('identificacao')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Identificação</button>
+          <button id="tab-bia" onclick="trocarAbaProcesso('bia')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BIA</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
+          <input type="hidden" id="fId">
+
+          <!-- ABA: IDENTIFICACAO -->
+          <div id="painel-identificacao">
+            <div style="margin-bottom:20px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Processo de Negócio</label>
+              <input type="text" id="fProcesso" placeholder="Ex: Gestão de Identidades e Acessos" style="width:100%;padding:10px 12px;border:2px solid #1a237e;border-radius:7px;font-size:1em;font-weight:600;box-sizing:border-box;">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área</label>
+                <select id="fArea" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;"></select>
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Dono do Processo</label>
+                <input type="text" id="fDono" placeholder="Responsável pela área" readonly style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;background:#f9f9f9;color:#555;">
+              </div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição Funcional</label>
+              <textarea id="fDescricaoFuncional" rows="4" placeholder="Descreva a função deste processo" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
+            </div>
           </div>
-          <div>
-            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Status</label>
-            <select id="fBiaHomologada" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
-              <option value="">Selecione...</option>
-              <option>Avaliado</option>
-              <option>Não avaliado</option>
-            </select>
-          </div>
-        </div>
-        <div style="margin-bottom:16px;">
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BCP Status</label>
-          <select id="fBcpStatus" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
-            <option value="">Selecione...</option>
-            <option>Não avaliado</option>
-            <option>Não necessário</option>
-            <option>Em elaboração</option>
-            <option>Documentado</option>
-          </select>
-        </div>
-        <div style="margin-bottom:16px;">
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Processo de Negócio</label>
-          <input type="text" id="fProcesso" placeholder="Ex: Gestão de Identidades e Acessos" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-        </div>
-        <div style="margin-bottom:16px;">
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição do Impacto para Indisponibilidade</label>
-          <textarea id="fDescricao" rows="3" placeholder="Descreva o impacto caso o processo fique indisponível" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
-        </div>
-        <div style="margin-bottom:16px;">
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Dependência Crítica</label>
-          <input type="text" id="fDependencia" placeholder="Ex: Servidores de Diretório, Active Directory" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;">
-          <div>
-            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
-            <input type="text" id="fRTO" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-            <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Tempo de Recuperação</span>
-          </div>
-          <div>
-            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
-            <input type="text" id="fRPO" placeholder="Ex: 24 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-            <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Ponto de Recuperação</span>
-          </div>
-          <div>
-            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">MTPD</label>
-            <input type="text" id="fMTPD" placeholder="Ex: 30 minutos" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-            <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Máx. Indisponibilidade</span>
+
+          <!-- ABA: BIA -->
+          <div id="painel-bia" style="display:none;">
+            <div id="fBiaScoreInfo" style="margin-bottom:20px;"></div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Status</label>
+              <select id="fBiaHomologada" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
+                <option value="">Selecione...</option>
+                <option>Avaliado</option>
+                <option>Não avaliado</option>
+              </select>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição do Impacto para Indisponibilidade</label>
+              <textarea id="fDescricao" rows="3" placeholder="Descreva o impacto caso o processo fique indisponível" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Dependência Crítica</label>
+              <input type="text" id="fDependencia" placeholder="Ex: Servidores de Diretório, Active Directory" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
+                <input type="text" id="fRTO" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Tempo de Recuperação</span>
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
+                <input type="text" id="fRPO" placeholder="Ex: 24 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Ponto de Recuperação</span>
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">MTPD</label>
+                <input type="text" id="fMTPD" placeholder="Ex: 30 minutos" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Máx. Indisponibilidade</span>
+              </div>
+            </div>
+            <div style="margin-bottom:20px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BCP Status</label>
+              <select id="fBcpStatus" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
+                <option value="">Selecione...</option>
+                <option>Não avaliado</option>
+                <option>Não necessário</option>
+                <option>Em elaboração</option>
+                <option>Documentado</option>
+              </select>
+            </div>
           </div>
         </div>
       </div>
@@ -627,8 +659,18 @@ async function processos() {
   // Preencher filtro de áreas
   const filtroArea = document.getElementById('filtroArea');
   const areasUnicas = [...new Set(areas.map(a => a.nome))].sort();
-  filtroArea.innerHTML = '<option value="">Todas as áreas</option>' + 
-    areasUnicas.map(a => `<option value="${a}">${a}</option>`).join('');
+
+  // Gestor: filtrar apenas sua area e ocultar controles de outras areas
+  if (window.USER_PERFIL !== 'admin' && window.USER_AREA) {
+    processosFiltroArea = window.USER_AREA;
+    filtroArea.innerHTML = `<option value="${window.USER_AREA}">${window.USER_AREA}</option>`;
+    filtroArea.disabled = true;
+    document.getElementById('btnEnviarArea').style.display = 'none';
+    document.getElementById('btnRelatorioArea').style.display = 'none';
+  } else {
+    filtroArea.innerHTML = '<option value="">Todas as áreas</option>' +
+      areasUnicas.map(a => `<option value="${a}">${a}</option>`).join('');
+  }
   
   // Enriquecer processos com dados da área
   const processosEnriquecidos = processos.map(p => {
@@ -684,7 +726,7 @@ function renderizarProcessos() {
     ? data.map(p => {
         const status = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.avaliado ? 'Tier 3 (Suporte)' : 'Pendente';
         const statusColor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : p.avaliado ? '#1565c0' : '#999';
-        return `<tr style="cursor:pointer;" onclick="verDetalhesProcesso(${p.id})">
+        return `<tr style="cursor:pointer;" onclick="editarProcesso(${p.id})">
         <td>${p.area}</td>
         <td><strong>${p.processo}</strong></td>
         <td>${p.responsavelArea || p.responsavel || ''}</td>
@@ -791,12 +833,22 @@ window.abrirModalProcesso = (p) => {
   document.getElementById('fArea').value = p ? p.area : '';
   document.getElementById('fProcesso').value = p ? p.processo : '';
   document.getElementById('fDescricao').value = p ? p.descricao : '';
+  document.getElementById('fDescricaoFuncional').value = p ? (p.descricaoFuncional || '') : '';
   document.getElementById('fDependencia').value = p ? p.dependencia : '';
   document.getElementById('fRTO').value = p ? p.rto : '';
   document.getElementById('fRPO').value = p ? p.rpo : '';
   document.getElementById('fMTPD').value = p ? p.mtpd : '';
   document.getElementById('fBiaHomologada').value = p ? p.biaHomologada : '';
   document.getElementById('fBcpStatus').value = p ? (p.bcpStatus || '') : '';
+
+  // Preencher Dono do Processo com base na area selecionada
+  const atualizarDono = () => {
+    const areaSel = document.getElementById('fArea').value;
+    const areaObj = window.areasDisponiveis.find(a => a.nome === areaSel);
+    document.getElementById('fDono').value = areaObj ? (areaObj.responsavel || '') : '';
+  };
+  document.getElementById('fArea').onchange = atualizarDono;
+  atualizarDono();
   
   const titulo = p ? 'Editar Processo' : 'Novo Processo';
   const scoreHtml = p && p.score > 0 ? (() => {
@@ -807,7 +859,25 @@ window.abrirModalProcesso = (p) => {
   document.getElementById('modalTitulo').innerHTML = titulo + scoreHtml;
   document.getElementById('drawerProcesso').classList.add('open');
   document.getElementById('drawerOverlayProcesso').classList.add('open');
-  // Inicializar resize
+  trocarAbaProcesso('identificacao');
+  // Mostrar score/tier na aba BIA
+  const scoreInfo = document.getElementById('fBiaScoreInfo');
+  if (scoreInfo && p && p.score > 0) {
+    const cor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : '#1565c0';
+    const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : 'Tier 3 (Suporte)';
+    scoreInfo.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;">
+      <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
+        <div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div>
+        <div style="font-size:1.8em;font-weight:700;color:${cor};">${p.score}</div>
+      </div>
+      <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
+        <div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div>
+        <div style="font-size:0.95em;font-weight:700;"><span style="background:${cor};color:white;padding:4px 12px;border-radius:12px;">${tier}</span></div>
+      </div>
+    </div>`;
+  } else if (scoreInfo) {
+    scoreInfo.innerHTML = '<div style="background:#f5f6fa;border-radius:8px;padding:12px 16px;font-size:0.85em;color:#999;margin-bottom:4px;">Processo ainda não avaliado.</div>';
+  }
   iniciarDrawerResize();
 };
 
@@ -825,10 +895,9 @@ window.salvarProcesso = async () => {
     mtpd: document.getElementById('fMTPD').value.trim(),
     biaHomologada: document.getElementById('fBiaHomologada').value.trim(),
     bcpStatus: document.getElementById('fBcpStatus').value.trim(),
+    descricaoFuncional: document.getElementById('fDescricaoFuncional').value.trim(),
   };
-  
-  console.log('Dados do processo a salvar:', p);
-  
+
   if (!p.area) return showToast('Selecione a área.', '#e65100');
   if (!p.processo) return showToast('Informe o processo.', '#e65100');
   
@@ -968,9 +1037,9 @@ window.avaliarProcesso = (id) => {
   }).join('');
   calcularScore();
   // Pré-selecionar respostas anteriores
-  if (p.respostas && p.respostas.length > 0) {
+  if (p.respostas && Object.keys(p.respostas).length > 0) {
     window.processosPerguntas.forEach((perg, i) => {
-      const val = p.respostas[i];
+      const val = p.respostas[perg.pergunta];
       if (val !== undefined) {
         const radio = document.querySelector(`input[name="pergunta${i}"][value="${val}"]`);
         if (radio) {
@@ -1111,20 +1180,28 @@ async function admin() {
 
   const [processos, areas] = await Promise.all([API.getProcessos(), API.getAreas()]);
 
+  // Gestor: filtrar apenas sua area
+  const processosVisiveis = (window.USER_PERFIL !== 'admin' && window.USER_AREA)
+    ? processos.filter(p => p.area === window.USER_AREA)
+    : processos;
+  const areasVisiveis = (window.USER_PERFIL !== 'admin' && window.USER_AREA)
+    ? areas.filter(a => a.nome === window.USER_AREA)
+    : areas;
+
   document.getElementById('loading').style.display = 'none';
   document.getElementById('painel').style.display = 'block';
 
-  const total = processos.length;
-  const avaliados = processos.filter(p => p.avaliado || p.score > 0).length;
+  const total = processosVisiveis.length;
+  const avaliados = processosVisiveis.filter(p => p.avaliado || p.score > 0).length;
   const pendentes = total - avaliados;
-  const tier1 = processos.filter(p => p.score >= 12).length;
-  const tier2 = processos.filter(p => p.score >= 6 && p.score < 12).length;
-  const tier3 = processos.filter(p => (p.avaliado || p.score > 0) && p.score < 6).length;
+  const tier1 = processosVisiveis.filter(p => p.score >= 12).length;
+  const tier2 = processosVisiveis.filter(p => p.score >= 6 && p.score < 12).length;
+  const tier3 = processosVisiveis.filter(p => (p.avaliado || p.score > 0) && p.score < 6).length;
   const pct = total > 0 ? Math.round((avaliados / total) * 100) : 0;
 
   // Resumo por área
-  const porArea = areas.map(a => {
-    const procs = processos.filter(p => p.area === a.nome);
+  const porArea = areasVisiveis.map(a => {
+    const procs = processosVisiveis.filter(p => p.area === a.nome);
     const aval = procs.filter(p => p.avaliado || p.score > 0).length;
     const t1 = procs.filter(p => p.score >= 12).length;
     const t2 = procs.filter(p => p.score >= 6 && p.score < 12).length;
@@ -1214,7 +1291,7 @@ async function admin() {
             </tr>
           </thead>
           <tbody>
-            ${[...processos].sort((a,b) => (b.score||0) - (a.score||0)).map(p => {
+            ${[...processosVisiveis].sort((a,b) => (b.score||0) - (a.score||0)).map(p => {
               const s = p.score || 0;
               const pct = Math.min(Math.round(s / 24 * 100), 100);
               const bg = s >= 12 ? '#c62828' : s >= 6 ? '#f57c00' : s > 0 ? '#1565c0' : '#e0e0e0';
