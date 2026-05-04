@@ -142,7 +142,7 @@
                 <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${perg.pergunta}</div>
                 <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
-                  ${[['3','Alto (3)','#c62828','#ffebee'],['2','Médio (2)','#f57c00','#fff3e0'],['1','Baixo (1)','#2e7d32','#e8f5e9'],['0','N/A (0)','#757575','#f5f5f5']].map(([val,label,cor2,bg2]) => `
+                  ${[['4','Alto (4)','#c62828','#ffebee'],['2','Médio (2)','#f57c00','#fff3e0'],['1','Baixo (1)','#2e7d32','#e8f5e9'],['0','N/A (0)','#757575','#f5f5f5']].map(([val,label,cor2,bg2]) => `
                   <label style="display:flex;align-items:center;padding:9px 10px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;" onmouseover="this.style.borderColor='${cor2}'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
                     <input type="radio" name="pergunta${i}" value="${val}" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='${cor2}';this.parentElement.style.background='${bg2}';" style="margin-right:7px;width:15px;height:15px;">
                     <span style="color:${cor2};font-weight:600;font-size:0.87em;">${label}</span>

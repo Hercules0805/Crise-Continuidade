@@ -7,7 +7,6 @@ const ABA_PERGUNTAS      = 'Perguntas';
 const ABA_AREAS          = 'Áreas';
 const ABA_PROCESSOS      = 'Processos';
 const ABA_RESPOSTAS      = 'Respostas BIA';
-const ABA_CONFIG         = 'Config Gestores';
 const ABA_TOKENS         = 'Tokens';
 const ABA_CONFIG_RESPOSTAS = 'Config Respostas';
 
@@ -35,9 +34,6 @@ function doGet(e) {
 
     let result = {};
     switch(action) {
-      case 'getUsuarioLogado':
-        result = getUsuarioLogado();
-        break;
       case 'getPerguntas':
         result = getPerguntas();
         break;
@@ -257,6 +253,7 @@ function getProcessos() {
 
     // Carregar scores e respostas mais recentes da aba de respostas
     const scores = {};
+    const avaliados = {};
     const respostas = {};
     const sheetResp = ss.getSheetByName(ABA_RESPOSTAS);
     if (sheetResp) {
@@ -271,6 +268,7 @@ function getProcessos() {
         const key = r[areaCol] + '||' + r[procCol];
         if (!scores[key]) {
           scores[key] = Number(r[scoreCol]) || 0;
+          avaliados[key] = true;
           const resp = [];
           for (let c = areaCol + 2; c < scoreCol; c++) {
             resp.push(Number(r[c]) || 0);
@@ -286,6 +284,7 @@ function getProcessos() {
         id: i + 2, area: r[0], processo: r[1], descricao: r[2],
         dependencia: r[3], rto: r[4], rpo: r[5], mtpd: r[6], biaHomologada: r[7], tier: r[8] || '', bcpStatus: r[9] || '',
         score: scores[key] || 0,
+        avaliado: avaliados[key] || false,
         respostas: respostas[key] || []
       };
     });
@@ -308,21 +307,6 @@ function excluirProcesso(rowIndex) {
   return { success: true };
 }
 
-// ============================================================
-// QUESTIONÁRIO
-// ============================================================
-function getUsuarioLogado() {
-  const email = Session.getActiveUser().getEmail();
-  const config = _getConfigGestores();
-  const gestor = config.find(c => c.email.toLowerCase() === email.toLowerCase());
-  return {
-    email,
-    nome:    gestor ? gestor.nome  : email.split('@')[0],
-    area:    gestor ? gestor.area  : null,
-    isAdmin: gestor ? gestor.admin : false
-  };
-}
-
 function getProcessosPorArea(area) {
   const perguntas = getPerguntas().filter(p => p.ativa);
   const processos = getProcessos();
@@ -331,24 +315,25 @@ function getProcessosPorArea(area) {
 
   const ultimasResp = {};
   if (sheetResp) {
-    const rows = sheetResp.getDataRange().getValues().slice(1);
-    // Ordenar por timestamp decrescente para pegar a mais recente
+    const allRows = sheetResp.getDataRange().getValues();
+    const headers = allRows[0];
+    const areaCol = headers.indexOf('Área');
+    const procCol = headers.indexOf('Processo');
+    const rows = allRows.slice(1);
     rows.sort((a, b) => new Date(b[0]) - new Date(a[0]));
     
     rows.forEach(r => {
-      const key = r[2] + '||' + r[3];
-      // Só armazena se ainda não tiver (primeira = mais recente)
+      const key = r[areaCol] + '||' + r[procCol];
       if (!ultimasResp[key]) {
         ultimasResp[key] = {
           timestamp: r[0],
-          email: r[1],
+          respondente: r[1],
           scores: {},
           scoreTotal: r[r.length - 2],
           tier: r[r.length - 1]
         };
-        // Mapear respostas individuais
         perguntas.forEach((perg, i) => {
-          ultimasResp[key].scores[perg.pergunta] = Number(r[4 + i]) || 0;
+          ultimasResp[key].scores[perg.pergunta] = Number(r[areaCol + 2 + i]) || 0;
         });
       }
     });
@@ -367,7 +352,7 @@ function getProcessosPorArea(area) {
         descricao: p.descricao,
         ultimaAvaliacao: resp ? {
           timestamp: resp.timestamp,
-          email: resp.email,
+          respondente: resp.respondente,
           scores: resp.scores,
           scoreTotal: resp.scoreTotal,
           tier: resp.tier
@@ -385,7 +370,7 @@ function salvarRespostas(data) {
   let sheetResp = ss.getSheetByName(ABA_RESPOSTAS);
   if (!sheetResp) {
     sheetResp = ss.insertSheet(ABA_RESPOSTAS);
-    sheetResp.appendRow(['Timestamp', 'Email', 'Área', 'Processo', ...perguntas.map(p => p.pergunta), 'Score', 'Tier']);
+    sheetResp.appendRow(['Timestamp', 'Respondente', 'Cargo', 'Área', 'Processo', ...perguntas.map(p => p.pergunta), 'Score', 'Tier']);
     sheetResp.setFrozenRows(1);
   }
 
@@ -396,7 +381,7 @@ function salvarRespostas(data) {
     const score = valores.reduce((a, b) => a + b, 0);
     const tier = _calcularTier(score);
     const rto = _calcularRTO(tier);
-    sheetResp.appendRow([timestamp, email, resp.area, resp.processo, ...valores, score, tier]);
+    sheetResp.appendRow([timestamp, email, '', resp.area, resp.processo, ...valores, score, tier]);
     
     // Atualizar Tier e RTO na aba Processos
     const sheetProc = ss.getSheetByName(ABA_PROCESSOS);
@@ -517,9 +502,6 @@ function gerarRelatorioArea(data) {
       '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;">' + p.processo + '</td>' +
       '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;text-align:center;font-weight:700;color:' + corTier(p.score) + ';font-size:14px;">' + (p.score > 0 ? p.score : '-') + '</td>' +
       '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;text-align:center;"><span style="background:' + corTier(p.score) + ';color:white;padding:3px 10px;border-radius:12px;font-size:12px;font-weight:600;">' + labelTier(p) + '</span></td>' +
-      '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;">' + (p.rto || '-') + '</td>' +
-      '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;">' + (p.biaHomologada || '-') + '</td>' +
-      '<td style="padding:10px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;">' + (p.bcpStatus || '-') + '</td>' +
       '</tr>'
     ).join('');
 
@@ -550,9 +532,6 @@ function gerarRelatorioArea(data) {
       '<th style="padding:12px;text-align:left;color:white;font-size:12px;">PROCESSO</th>' +
       '<th style="padding:12px;text-align:center;color:white;font-size:12px;">SCORE</th>' +
       '<th style="padding:12px;text-align:center;color:white;font-size:12px;">TIER</th>' +
-      '<th style="padding:12px;text-align:left;color:white;font-size:12px;">RTO</th>' +
-      '<th style="padding:12px;text-align:left;color:white;font-size:12px;">BIA STATUS</th>' +
-      '<th style="padding:12px;text-align:left;color:white;font-size:12px;">BCP STATUS</th>' +
       '</tr></thead>' +
       '<tbody>' + linhasTabela + '</tbody>' +
       '</table></div></div>' +
@@ -736,11 +715,11 @@ function getConfigRespostas() {
     sheet.getRange(1,1,1,5).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
     sheet.setFrozenRows(1);
     const defaults = [
-      ['_default', '3', 'Alto (3)', '#c62828', '#ffebee'],
+      ['_default', '4', 'Alto (4)', '#c62828', '#ffebee'],
       ['_default', '2', 'Médio (2)', '#f57c00', '#fff3e0'],
       ['_default', '1', 'Baixo (1)', '#2e7d32', '#e8f5e9'],
       ['_default', '0', 'N/A (0)', '#757575', '#f5f5f5'],
-      ['Geral', '3', 'Acontece o tempo todo', '#c62828', '#ffebee'],
+      ['Geral', '4', 'Acontece o tempo todo', '#c62828', '#ffebee'],
       ['Geral', '2', 'Acontece com alguma frequência', '#f57c00', '#fff3e0'],
       ['Geral', '1', 'Acontece raramente', '#2e7d32', '#e8f5e9'],
       ['Geral', '0', 'Nunca aconteceu', '#757575', '#f5f5f5'],
@@ -795,15 +774,6 @@ function _calcularRTO(tier) {
   return '> 24 horas';
 }
 
-function _getConfigGestores() {
-  const sheet = _getSS().getSheetByName(ABA_CONFIG);
-  if (!sheet) return [];
-  return sheet.getDataRange().getValues().slice(1).map(r => ({
-    email: String(r[0]).trim(), nome: String(r[1]).trim(),
-    area:  String(r[2]).trim(), admin: String(r[3]).trim().toUpperCase() === 'SIM'
-  }));
-}
-
 // ============================================================
 // SETUP INICIAL
 // ============================================================
@@ -812,7 +782,6 @@ function setupInicial() {
   _criarAbaPerguntas(ss);
   _criarAbaAreas(ss);
   _criarAbaProcessos(ss);
-  _criarAbaConfig(ss);
   _criarAbaRespostas(ss);
   const s = ss.getSheetByName('Página1') || ss.getSheetByName('Sheet1');
   if (s && ss.getSheets().length > 1) {
@@ -872,27 +841,11 @@ function _criarAbaProcessos(ss) {
   sheet.setFrozenRows(1);
 }
 
-function _criarAbaConfig(ss) {
-  if (ss.getSheetByName(ABA_CONFIG)) return;
-  const sheet = ss.insertSheet(ABA_CONFIG);
-  sheet.appendRow(['Email', 'Nome', 'Área', 'Admin']);
-  [
-    ['gestor.si@empresa.com',  'Gestor Seg. Info',  'Segurança da Informação', 'Não'],
-    ['gestor.ti@empresa.com',  'Gestor TI',          'TI / Infraestrutura',    'Não'],
-    ['gestor.fin@empresa.com', 'Gestor Financeiro',  'Financeiro',             'Não'],
-    ['gestor.rh@empresa.com',  'Gestor RH',          'RH',                     'Não'],
-    ['admin@empresa.com',      'Administrador',      '',                       'Sim'],
-  ].forEach(r => sheet.appendRow(r));
-  sheet.getRange(1, 1, 1, 4).setBackground('#b71c1c').setFontColor('white').setFontWeight('bold');
-  sheet.setColumnWidths(1, 4, 200);
-  sheet.setFrozenRows(1);
-}
-
 function _criarAbaRespostas(ss) {
   if (ss.getSheetByName(ABA_RESPOSTAS)) return;
   const sheet = ss.insertSheet(ABA_RESPOSTAS);
   const perguntas = PERGUNTAS_DEFAULT.map(p => p[1]);
-  sheet.appendRow(['Timestamp', 'Email', 'Área', 'Processo', ...perguntas, 'Score', 'Tier']);
-  sheet.getRange(1, 1, 1, 4 + perguntas.length + 2).setBackground('#2e7d32').setFontColor('white').setFontWeight('bold');
+  sheet.appendRow(['Timestamp', 'Respondente', 'Cargo', 'Área', 'Processo', ...perguntas, 'Score', 'Tier']);
+  sheet.getRange(1, 1, 1, 5 + perguntas.length + 2).setBackground('#2e7d32').setFontColor('white').setFontWeight('bold');
   sheet.setFrozenRows(1);
 }

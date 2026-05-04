@@ -98,13 +98,13 @@ async function perguntas() {
   } catch(e) {
     configRespostas = {
       '_default': [
-        {valor:'3',label:'Alto (3)',cor:'#c62828',background:'#ffebee'},
+        {valor:'4',label:'Alto (4)',cor:'#c62828',background:'#ffebee'},
         {valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},
         {valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},
         {valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}
       ],
       'Geral': [
-        {valor:'3',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},
+        {valor:'4',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},
         {valor:'2',label:'Acontece com alguma frequência',cor:'#f57c00',background:'#fff3e0'},
         {valor:'1',label:'Acontece raramente',cor:'#2e7d32',background:'#e8f5e9'},
         {valor:'0',label:'Nunca aconteceu',cor:'#757575',background:'#f5f5f5'}
@@ -136,7 +136,10 @@ window.abrirModalPergunta = (p) => {
 };
 
 window.editarPergunta = (id) => abrirModalPergunta(window.perguntasData.find(p => p.id === id));
-window.fecharModal = () => document.getElementById('modal').classList.remove('open');
+window.fecharModal = () => {
+  document.getElementById('drawerProcesso').classList.remove('open');
+  document.getElementById('drawerOverlayProcesso').classList.remove('open');
+};
 
 function renderizarConfigRespostas(config) {
   const cats = Object.keys(config);
@@ -483,11 +486,8 @@ async function processos() {
             <th onclick="ordenarProcessos('area')" style="cursor:pointer;width:10%;">Área <span id="sort-area"></span></th>
             <th onclick="ordenarProcessos('processo')" style="cursor:pointer;width:14%;">Processo de Negócio <span id="sort-processo"></span></th>
             <th onclick="ordenarProcessos('responsavel')" style="cursor:pointer;width:9%;">Responsável <span id="sort-responsavel"></span></th>
-            <th onclick="ordenarProcessos('biaHomologada')" style="cursor:pointer;width:8%;">BIA Status <span id="sort-biaHomologada"></span></th>
             <th onclick="ordenarProcessos('status')" style="cursor:pointer;width:8%;">Tier <span id="sort-status"></span></th>
             <th onclick="ordenarProcessos('score')" style="cursor:pointer;width:6%;">Score <span id="sort-score"></span></th>
-            <th onclick="ordenarProcessos('bcpStatus')" style="cursor:pointer;width:8%;">BCP Status <span id="sort-bcpStatus"></span></th>
-            <th onclick="ordenarProcessos('solucao')" style="cursor:pointer;width:8%;">Solução <span id="sort-solucao"></span></th>
             <th style="width:10%;text-align:center;">Ações</th>
           </tr>
         </thead>
@@ -513,55 +513,68 @@ async function processos() {
         <button class="btn btn-primary" onclick="enviarConvite()">Enviar</button>
       </div>
     </div></div>
-    <div class="modal-overlay" id="modalAvaliar"><div class="modal" onclick="event.stopPropagation()" style="max-width:1000px;max-height:92vh;overflow-y:auto;position:relative;">
-      <h3 id="modalAvaliarTitulo" style="padding-right:32px;">Avaliar Processo</h3>
-      <button onclick="fecharModalAvaliar()" style="position:absolute;top:20px;right:20px;background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
-      <p id="modalAvaliarNome" style="color:#888;margin-bottom:20px;font-size:0.88em;letter-spacing:0.2px;"></p>
-      <input type="hidden" id="qProcessoId">
-      <input type="hidden" id="qArea">
-      <input type="hidden" id="qProcesso">
-      <div style="background:#f0f4ff;border-left:4px solid #1a237e;border-radius:0 7px 7px 0;padding:14px 18px;margin-bottom:24px;">
-        <div style="font-size:0.78em;font-weight:700;color:#1a237e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Premissas da Avaliação</div>
-        <ul style="margin:0;padding-left:18px;">
-          <li style="font-size:0.88em;color:#333;line-height:1.6;">O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.</li>
-        </ul>
-      </div>
-      <div id="perguntas-container"></div>
-      <div style="background:linear-gradient(135deg,#1a237e,#283593);padding:20px;border-radius:8px;margin:20px 0;color:white;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-          <span style="font-weight:600;font-size:1.1em;">Score Total</span>
-          <span id="scoreTotal" style="font-size:2.5em;font-weight:700;">0</span>
+    <div class="drawer-overlay" id="drawerOverlayAvaliar" onclick="fecharModalAvaliar()"></div>
+    <div class="drawer" id="drawerAvaliar">
+      <div class="drawer-resize" id="drawerResizeAvaliar"></div>
+      <div class="drawer-header">
+        <div>
+          <h3 id="modalAvaliarTitulo" style="margin:0;">Avaliar Processo</h3>
+          <p id="modalAvaliarNome" style="color:#888;font-size:0.85em;margin:4px 0 0;"></p>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid rgba(255,255,255,0.2);">
-          <span style="font-weight:600;">Classificação:</span>
-          <span id="scoreTier" style="font-weight:700;font-size:1.2em;padding:6px 16px;background:rgba(255,255,255,0.2);border-radius:20px;"></span>
+        <button onclick="fecharModalAvaliar()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;flex-shrink:0;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <input type="hidden" id="qProcessoId">
+        <input type="hidden" id="qArea">
+        <input type="hidden" id="qProcesso">
+        <div style="background:#f0f4ff;border-left:4px solid #1a237e;border-radius:0 7px 7px 0;padding:14px 18px;margin-bottom:24px;">
+          <div style="font-size:0.78em;font-weight:700;color:#1a237e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Premissas da Avaliação</div>
+          <ul style="margin:0;padding-left:18px;">
+            <li style="font-size:0.88em;color:#333;line-height:1.6;">O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.</li>
+          </ul>
+        </div>
+        <div id="perguntas-container"></div>
+        <div style="background:linear-gradient(135deg,#1a237e,#283593);padding:20px;border-radius:8px;margin:20px 0;color:white;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <span style="font-weight:600;font-size:1.1em;">Score Total</span>
+            <span id="scoreTotal" style="font-size:2.5em;font-weight:700;">0</span>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid rgba(255,255,255,0.2);">
+            <span style="font-weight:600;">Classificação:</span>
+            <span id="scoreTier" style="font-weight:700;font-size:1.2em;padding:6px 16px;background:rgba(255,255,255,0.2);border-radius:20px;"></span>
+          </div>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharModalAvaliar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="imprimirAvaliacao()" style="color:#1565c0;border-color:#1565c0;">🖨️ Exportar PDF</button>
         <button class="btn btn-primary" onclick="salvarAvaliacaoProcesso()">Salvar Avaliação</button>
       </div>
-    </div></div>
-    <div class="modal-overlay" id="modal"><div class="modal" onclick="event.stopPropagation()" style="max-width:620px;">
-      <h3 id="modalTitulo" style="font-size:1.15em;font-weight:700;color:#1a237e;border-bottom:2px solid #e8eaf6;padding-bottom:12px;margin-bottom:20px;">Novo Processo</h3>
-      <input type="hidden" id="fId">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área</label>
-          <select id="fArea" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;"></select>
-        </div>
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Status</label>
-          <select id="fBiaHomologada" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
-            <option value="">Selecione...</option>
-            <option>Avaliado</option>
-            <option>Não avaliado</option>
-          </select>
-        </div>
+    </div>
+    <div class="drawer-overlay" id="drawerOverlayProcesso" onclick="fecharModal()"></div>
+    <div class="drawer" id="drawerProcesso">
+      <div class="drawer-resize" id="drawerResize"></div>
+      <div class="drawer-header">
+        <h3 id="modalTitulo">Novo Processo</h3>
+        <button onclick="fecharModal()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
-        <div>
+      <div class="drawer-body">
+        <input type="hidden" id="fId">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área</label>
+            <select id="fArea" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;"></select>
+          </div>
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Status</label>
+            <select id="fBiaHomologada" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
+              <option value="">Selecione...</option>
+              <option>Avaliado</option>
+              <option>Não avaliado</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-bottom:16px;">
           <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BCP Status</label>
           <select id="fBcpStatus" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
             <option value="">Selecione...</option>
@@ -571,41 +584,41 @@ async function processos() {
             <option>Documentado</option>
           </select>
         </div>
-      </div>
-      <div style="margin-bottom:16px;">
-        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Processo de Negócio</label>
-        <input type="text" id="fProcesso" placeholder="Ex: Gestão de Identidades e Acessos" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-      </div>
-      <div style="margin-bottom:16px;">
-        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição do Impacto para Indisponibilidade</label>
-        <textarea id="fDescricao" rows="3" placeholder="Descreva o impacto caso o processo fique indisponível" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
-      </div>
-      <div style="margin-bottom:16px;">
-        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Dependência Crítica</label>
-        <input type="text" id="fDependencia" placeholder="Ex: Servidores de Diretório, Active Directory" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;">
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
-          <input type="text" id="fRTO" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-          <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Tempo de Recuperação</span>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Processo de Negócio</label>
+          <input type="text" id="fProcesso" placeholder="Ex: Gestão de Identidades e Acessos" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
         </div>
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
-          <input type="text" id="fRPO" placeholder="Ex: 24 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-          <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Ponto de Recuperação</span>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição do Impacto para Indisponibilidade</label>
+          <textarea id="fDescricao" rows="3" placeholder="Descreva o impacto caso o processo fique indisponível" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
         </div>
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">MTPD</label>
-          <input type="text" id="fMTPD" placeholder="Ex: 30 minutos" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-          <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Máx. Indisponibilidade</span>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Dependência Crítica</label>
+          <input type="text" id="fDependencia" placeholder="Ex: Servidores de Diretório, Active Directory" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:20px;">
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
+            <input type="text" id="fRTO" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+            <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Tempo de Recuperação</span>
+          </div>
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
+            <input type="text" id="fRPO" placeholder="Ex: 24 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+            <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Ponto de Recuperação</span>
+          </div>
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">MTPD</label>
+            <input type="text" id="fMTPD" placeholder="Ex: 30 minutos" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+            <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Máx. Indisponibilidade</span>
+          </div>
         </div>
       </div>
-      <div class="modal-footer">
+      <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
         <button class="btn btn-primary" onclick="salvarProcesso()">Salvar</button>
       </div>
-    </div></div>`;
+    </div>`;
 
   const [processos, areas, perguntas] = await Promise.all([API.getProcessos(), API.getAreas(), API.getPerguntas()]);
   window.processosPerguntas = perguntas.filter(p => p.ativa);
@@ -669,18 +682,21 @@ function renderizarProcessos() {
   
   document.getElementById('rows').innerHTML = data.length
     ? data.map(p => {
-        const status = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.score > 0 ? 'Tier 3 (Suporte)' : 'Pendente';
-        const statusColor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : p.score > 0 ? '#1565c0' : '#999';
+        const status = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.avaliado ? 'Tier 3 (Suporte)' : 'Pendente';
+        const statusColor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : p.avaliado ? '#1565c0' : '#999';
         return `<tr style="cursor:pointer;" onclick="verDetalhesProcesso(${p.id})">
         <td>${p.area}</td>
         <td><strong>${p.processo}</strong></td>
         <td>${p.responsavelArea || p.responsavel || ''}</td>
-        <td>${p.biaHomologada ? `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:white;background:${p.biaHomologada === 'Avaliado' ? '#2e7d32' : '#999'}">${p.biaHomologada}</span>` : ''}</td>
         <td><span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.8em;font-weight:600;color:white;background:${statusColor};">${status}</span></td>
-        <td style="text-align:center;font-weight:700;color:${p.score > 0 ? statusColor : '#bbb'};font-size:0.95em;">${p.score > 0 ? p.score : '-'}</td>
-        <td>${p.bcpStatus ? (() => { const c = p.bcpStatus === 'Documentado' ? '#2e7d32' : p.bcpStatus === 'Em elaboração' ? '#f57c00' : p.bcpStatus === 'Não necessário' ? '#1565c0' : '#999'; return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:white;background:${c}">${p.bcpStatus}</span>`; })() : ''}</td>
-        <td>${p.solucao || ''}</td>
+        <td style="text-align:center;font-weight:700;color:${p.avaliado || p.score > 0 ? statusColor : '#bbb'};font-size:0.95em;">${p.avaliado || p.score > 0 ? p.score : '-'}</td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
+          <button class="btn-icon" onclick="editarProcesso(${p.id})" title="Editar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+          </button>
           <button class="btn-icon" onclick="avaliarProcesso(${p.id})" title="Avaliar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a237e" stroke-width="2">
               <path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
@@ -690,12 +706,6 @@ function renderizarProcessos() {
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2">
               <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
               <polyline points="22,6 12,13 2,6"></polyline>
-            </svg>
-          </button>
-          <button class="btn-icon" onclick="editarProcesso(${p.id})" title="Editar">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
             </svg>
           </button>
           <button class="btn-icon" onclick="excluirProcesso(${p.id})" title="Excluir">
@@ -795,7 +805,10 @@ window.abrirModalProcesso = (p) => {
     return `<span style="margin-left:12px;font-size:0.82em;font-weight:600;padding:3px 10px;border-radius:10px;background:${cor};color:white;vertical-align:middle;">${status} &bull; Score ${p.score}</span>`;
   })() : '';
   document.getElementById('modalTitulo').innerHTML = titulo + scoreHtml;
-  document.getElementById('modal').classList.add('open');
+  document.getElementById('drawerProcesso').classList.add('open');
+  document.getElementById('drawerOverlayProcesso').classList.add('open');
+  // Inicializar resize
+  iniciarDrawerResize();
 };
 
 window.editarProcesso = (id) => abrirModalProcesso(window.processosData.find(p => p.id === id));
@@ -903,13 +916,13 @@ window.avaliarProcesso = (id) => {
   const container = document.getElementById('perguntas-container');
   const OPCOES_RESPOSTA = window.configRespostas || {
     'Geral': [
-      {valor:'3',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},
+      {valor:'4',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},
       {valor:'2',label:'Acontece com alguma frequência',cor:'#f57c00',background:'#fff3e0'},
       {valor:'1',label:'Acontece raramente',cor:'#2e7d32',background:'#e8f5e9'},
       {valor:'0',label:'Nunca aconteceu',cor:'#757575',background:'#f5f5f5'}
     ],
     '_default': [
-      {valor:'3',label:'Alto (3)',cor:'#c62828',background:'#ffebee'},
+      {valor:'4',label:'Alto (4)',cor:'#c62828',background:'#ffebee'},
       {valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},
       {valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},
       {valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}
@@ -940,8 +953,8 @@ window.avaliarProcesso = (id) => {
             <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
               ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default'] || [{valor:'3',label:'Crítico',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Alto',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Moderado',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'Baixo',cor:'#757575',background:'#f5f5f5'}]).slice().sort((a,b) => Number(b.valor) - Number(a.valor)).map(op => {
-                const opCor = (op.cor && op.cor !== 'undefined') ? op.cor : ({'3':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'}[String(op.valor)] || '#555');
-                const opBg = (op.background && op.background !== 'undefined') ? op.background : ({'3':'#ffebee','2':'#fff3e0','1':'#e8f5e9','0':'#f5f5f5'}[String(op.valor)] || '#f5f5f5');
+                const opCor = (op.cor && op.cor !== 'undefined') ? op.cor : ({'4':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'}[String(op.valor)] || '#555');
+                const opBg = (op.background && op.background !== 'undefined') ? op.background : ({'4':'#ffebee','2':'#fff3e0','1':'#e8f5e9','0':'#f5f5f5'}[String(op.valor)] || '#f5f5f5');
                 return `
                 <label style="display:flex;align-items:flex-start;padding:12px 14px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer;min-height:56px;">
                   <input type="radio" name="pergunta${i}" value="${op.valor}" data-cor="${opCor}" data-bg="${opBg}" data-label="${op.label}" onchange="calcularScore();atualizarEstiloOpcoes(this);" style="margin-right:8px;margin-top:2px;width:15px;height:15px;flex-shrink:0;">
@@ -969,10 +982,15 @@ window.avaliarProcesso = (id) => {
     });
     calcularScore();
   }
-  document.getElementById('modalAvaliar').classList.add('open');
+  document.getElementById('drawerAvaliar').classList.add('open');
+  document.getElementById('drawerOverlayAvaliar').classList.add('open');
+  iniciarDrawerResizeAvaliar();
 };
 
-window.fecharModalAvaliar = () => document.getElementById('modalAvaliar').classList.remove('open');
+window.fecharModalAvaliar = () => {
+  document.getElementById('drawerAvaliar').classList.remove('open');
+  document.getElementById('drawerOverlayAvaliar').classList.remove('open');
+};
 
 window.imprimirAvaliacao = () => {
   const titulo = document.getElementById('modalAvaliarTitulo').textContent;
@@ -994,7 +1012,7 @@ window.imprimirAvaliacao = () => {
     const cor = CAT_CORES[cat] || '#555';
     const itens = pergsOrdenadas.filter(p => p.categoria === cat);
     const ops = ((OPCOES[cat] || OPCOES['_default']) || [
-      {valor:'3',label:'Alto (3)',cor:'#c62828',background:'#ffebee'},
+      {valor:'4',label:'Alto (4)',cor:'#c62828',background:'#ffebee'},
       {valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},
       {valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},
       {valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}
@@ -1097,20 +1115,20 @@ async function admin() {
   document.getElementById('painel').style.display = 'block';
 
   const total = processos.length;
-  const avaliados = processos.filter(p => p.score > 0).length;
+  const avaliados = processos.filter(p => p.avaliado || p.score > 0).length;
   const pendentes = total - avaliados;
   const tier1 = processos.filter(p => p.score >= 12).length;
   const tier2 = processos.filter(p => p.score >= 6 && p.score < 12).length;
-  const tier3 = processos.filter(p => p.score > 0 && p.score < 6).length;
+  const tier3 = processos.filter(p => (p.avaliado || p.score > 0) && p.score < 6).length;
   const pct = total > 0 ? Math.round((avaliados / total) * 100) : 0;
 
   // Resumo por área
   const porArea = areas.map(a => {
     const procs = processos.filter(p => p.area === a.nome);
-    const aval = procs.filter(p => p.score > 0).length;
+    const aval = procs.filter(p => p.avaliado || p.score > 0).length;
     const t1 = procs.filter(p => p.score >= 12).length;
     const t2 = procs.filter(p => p.score >= 6 && p.score < 12).length;
-    const t3 = procs.filter(p => p.score > 0 && p.score < 6).length;
+    const t3 = procs.filter(p => (p.avaliado || p.score > 0) && p.score < 6).length;
     return { nome: a.nome, total: procs.length, avaliados: aval, t1, t2, t3 };
   }).filter(a => a.total > 0);
 
@@ -1381,8 +1399,8 @@ window.abrirModalAvaliacaoProcesso = (processoId, area, processo) => {
       <div style="font-size:0.85em;color:#666;margin-bottom:16px;line-height:1.5;">${p.descricao || ''}</div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
         <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='#c62828'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
-          <input type="radio" name="pergunta${i}" value="3" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#c62828';this.parentElement.style.background='#ffebee';" style="margin-right:8px;width:18px;height:18px;">
-          <span style="color:#c62828;font-weight:600;font-size:0.9em;">Alto (3)</span>
+          <input type="radio" name="pergunta${i}" value="4" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#c62828';this.parentElement.style.background='#ffebee';" style="margin-right:8px;width:18px;height:18px;">
+          <span style="color:#c62828;font-weight:600;font-size:0.9em;">Alto (4)</span>
         </label>
         <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='#f57c00'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
           <input type="radio" name="pergunta${i}" value="2" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#f57c00';this.parentElement.style.background='#fff3e0';" style="margin-right:8px;width:18px;height:18px;">
@@ -1406,8 +1424,8 @@ window.abrirModalAvaliacaoProcesso = (processoId, area, processo) => {
 
 window.atualizarEstiloOpcoes = (radio) => {
   const grupo = radio.parentElement.parentElement;
-  const CORES_FALLBACK = {'3':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'};
-  const BGS_FALLBACK = {'3':'#ffebee','2':'#fff3e0','1':'#e8f5e9','0':'#f5f5f5'};
+  const CORES_FALLBACK = {'4':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'};
+  const BGS_FALLBACK = {'4':'#ffebee','2':'#fff3e0','1':'#e8f5e9','0':'#f5f5f5'};
   grupo.querySelectorAll('input[type="radio"]').forEach(r => {
     const label = r.parentElement;
     const span = label.querySelector('span');
@@ -1425,6 +1443,54 @@ window.atualizarEstiloOpcoes = (radio) => {
     }
   });
 };
+
+function iniciarDrawerResizeAvaliar() {
+  const drawer = document.getElementById('drawerAvaliar');
+  const handle = document.getElementById('drawerResizeAvaliar');
+  if (!handle || handle._resizeInit) return;
+  handle._resizeInit = true;
+  let startX, startW;
+  handle.addEventListener('mousedown', e => {
+    startX = e.clientX;
+    startW = drawer.offsetWidth;
+    handle.classList.add('resizing');
+    const onMove = ev => {
+      const newW = Math.min(Math.max(startW + (startX - ev.clientX), 400), window.innerWidth * 0.95);
+      drawer.style.width = newW + 'px';
+    };
+    const onUp = () => {
+      handle.classList.remove('resizing');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
+function iniciarDrawerResize() {
+  const drawer = document.getElementById('drawerProcesso');
+  const handle = document.getElementById('drawerResize');
+  if (!handle || handle._resizeInit) return;
+  handle._resizeInit = true;
+  let startX, startW;
+  handle.addEventListener('mousedown', e => {
+    startX = e.clientX;
+    startW = drawer.offsetWidth;
+    handle.classList.add('resizing');
+    const onMove = ev => {
+      const newW = Math.min(Math.max(startW + (startX - ev.clientX), 320), window.innerWidth * 0.9);
+      drawer.style.width = newW + 'px';
+    };
+    const onUp = () => {
+      handle.classList.remove('resizing');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
 
 window.calcularScore = () => {
   let total = 0;
@@ -1448,12 +1514,9 @@ window.calcularScore = () => {
   } else if (total >= 6) {
     tier = 'Tier 2 (Essencial)';
     tierColor = '#ffe0b2';
-  } else if (total > 0) {
+  } else {
     tier = 'Tier 3 (Suporte)';
     tierColor = '#bbdefb';
-  } else {
-    tier = '-';
-    tierColor = 'rgba(255,255,255,0.2)';
   }
   
   const tierEl = document.getElementById('scoreTier');

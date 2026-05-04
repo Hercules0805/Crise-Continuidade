@@ -10,6 +10,8 @@
 
 > 🤖 **REGRA DO AGENTE**: Sempre que o agente modificar arquivos do frontend (`firebase-app/public/`), deve executar automaticamente o deploy do Firebase ao final. Sempre que o agente modificar `bia-app/Code.gs`, deve executar automaticamente o `clasp push --force` ao final. Não aguardar instrução do usuário para isso.
 > 
+> 🤖 **REGRA DO AGENTE**: Após o `clasp push --force`, informar ao usuário que é necessário publicar uma nova versão no script.google.com e solicitar a nova URL da API. Ao receber a nova URL, atualizar `firebase-app/public/config.js` e executar o deploy do Firebase automaticamente.
+> 
 > 🤖 **REGRA DO AGENTE**: Commit e push para o Git devem ser feitos **somente quando explicitamente solicitado** pelo usuário. Nunca fazer commit/push automaticamente.
 
 ### Firebase (frontend)
@@ -33,7 +35,7 @@ clasp push --force
 
 ## Configuração
 - URL da API do GAS fica em: `firebase-app/public/config.js` → constante `API_URL`
-- URL atual da API: `https://script.google.com/macros/s/AKfycbyk_aWDAzXa6AvDhPREMFiPl3jGuxoz5tLo0h-j4DeLIcL7gfffR0qHO0DN8RXBO1J-/exec`
+- URL atual da API: `https://script.google.com/macros/s/AKfycbzQoJePkexFI0_TDwzid6BdNnNwdrqfsF_BzoHwpEhnBGniq5bUKJRfi0FSnIMxcc7Q/exec`
 - Script ID do clasp: `1W74gvNEPO6ENL7OsiDEdgiI-sv775iho7JfSMmmOtt77ibQK_MShgLb8`
 
 ## Fluxo completo de atualização do backend

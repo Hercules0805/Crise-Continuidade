@@ -49,8 +49,8 @@
         <div style="font-weight:600;color:#333;margin-bottom:16px;">Dados do Respondente</div>
         <div class="field-group">
           <div class="field">
-            <label>Nome completo *</label>
-            <input type="text" id="respondente-nome" placeholder="Seu nome completo">
+            <label>Nome corporativo *</label>
+            <input type="text" id="respondente-nome" placeholder="Seu nome corporativo">
           </div>
           <div class="field">
             <label>Cargo / Função</label>
@@ -70,9 +70,9 @@
         <div class="processo-nav" id="processo-nav"></div>
 
         <div style="background:#f0f4ff;border-left:4px solid #1a237e;border-radius:0 7px 7px 0;padding:14px 18px;margin-bottom:24px;">
-          <div style="font-size:0.78em;font-weight:700;color:#1a237e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Premissas da Avaliação</div>
+          <div style="font-size:0.78em;font-weight:700;color:#1a237e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Objetivo</div>
           <ul style="margin:0;padding-left:18px;">
-            <li style="font-size:0.88em;color:#333;line-height:1.6;">O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.</li>
+            <li style="font-size:0.88em;color:#333;line-height:1.6;">Estamos convidando você para uma avaliação de impacto em situações de crise.</li>
           </ul>
         </div>
 
@@ -158,7 +158,7 @@
     function renderizarNav() {
       document.getElementById('processo-nav').innerHTML = processos.map((p, i) => {
         const respondido = respostas[p.processo] && Object.keys(respostas[p.processo]).length === perguntas.length;
-        return `<button class="processo-nav-btn ${i === processoAtual ? 'ativo' : respondido ? 'respondido' : ''}" onclick="irParaProcesso(${i})">${i+1}. ${p.processo.length > 25 ? p.processo.substring(0,25)+'...' : p.processo}</button>`;
+        return `<button class="processo-nav-btn ${i === processoAtual ? 'ativo' : respondido ? 'respondido' : ''}" onclick="irParaProcesso(${i})">${i+1}. ${p.processo}</button>`;
       }).join('');
     }
 
@@ -173,8 +173,8 @@
       const pergsOrdenadosTemp = [...perguntas.filter(p => p.categoria === 'Geral'), ...perguntas.filter(p => p.categoria !== 'Geral')];
       [...new Set(pergsOrdenadosTemp.map(p => p.categoria))].forEach((c, idx) => { CAT_CORES[c] = CAT_CORES_PALETTE[idx % CAT_CORES_PALETTE.length]; });
       const OPCOES_DEFAULT = {
-        '_default': [{valor:'3',label:'Alto (3)',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}],
-        'Geral': [{valor:'3',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Acontece com alguma frequência',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Acontece raramente',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'Nunca aconteceu',cor:'#757575',background:'#f5f5f5'}]
+        '_default': [{valor:'4',label:'Alto (4)',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}],
+        'Geral': [{valor:'4',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Acontece com alguma frequência',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Acontece raramente',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'Nunca aconteceu',cor:'#757575',background:'#f5f5f5'}]
       };
       const opcoes = configRespostas || OPCOES_DEFAULT;
 
@@ -197,8 +197,8 @@
                 <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
                 <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
                   ${ops.map(op => {
-                    const opCor = (op.cor && op.cor !== 'undefined') ? op.cor : ({'3':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'}[String(op.valor)] || '#555');
-                    const opBg = (op.background && op.background !== 'undefined') ? op.background : ({'3':'#ffebee','2':'#fff3e0','1':'#e8f5e9','0':'#f5f5f5'}[String(op.valor)] || '#f5f5f5');
+                    const opCor = (op.cor && op.cor !== 'undefined') ? op.cor : ({'4':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'}[String(op.valor)] || '#555');
+                    const opBg = (op.background && op.background !== 'undefined') ? op.background : ({'4':'#ffebee','2':'#fff3e0','1':'#e8f5e9','0':'#f5f5f5'}[String(op.valor)] || '#f5f5f5');
                     const checked = valorSalvo !== null && String(valorSalvo) === String(op.valor);
                     const style = checked ? `border-color:${opCor};background:${opBg};` : '';
                     return `<label style="display:flex;align-items:flex-start;padding:12px 14px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer;min-height:56px;${style}" onmouseover="this.style.borderColor='${opCor}'" onmouseout="if(!this.querySelector('input').checked){this.style.borderColor='#e0e0e0';this.style.background='white';}">
@@ -267,7 +267,7 @@
 
     async function enviarAvaliacao() {
       const nome = document.getElementById('respondente-nome').value.trim();
-      if (!nome) return showToast('Informe seu nome completo.', '#e65100');
+      if (!nome) return showToast('Informe seu nome corporativo.', '#e65100');
 
       // Verificar se todos os processos foram respondidos
       const naoRespondidos = processos.filter(p => {
