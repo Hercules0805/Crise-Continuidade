@@ -12,6 +12,7 @@
     <div class="nav-links">
       <a href="#processos" class="nav-link" data-page="processos">Processos</a>
       <a href="#areas" class="nav-link" data-page="areas">Áreas</a>
+      <a href="#dependencias" class="nav-link" data-page="dependencias">Dependências</a>
       <a href="#perguntas" class="nav-link" data-page="perguntas">Perguntas</a>
       <a href="#admin" class="nav-link" data-page="admin">Painel</a>
     </div>
@@ -51,7 +52,7 @@
       }
       // Aplicar restricoes de perfil
       if (window.USER_PERFIL !== 'admin') {
-        document.querySelectorAll('.nav-link[data-page="areas"], .nav-link[data-page="perguntas"]').forEach(el => el.style.display = 'none');
+        document.querySelectorAll('.nav-link[data-page="areas"], .nav-link[data-page="perguntas"], .nav-link[data-page="dependencias"]').forEach(el => el.style.display = 'none');
       }
       // Mostrar usuario no nav
       document.getElementById('nav-user').innerHTML = `

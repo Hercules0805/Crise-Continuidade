@@ -10,6 +10,7 @@ const ABA_RESPOSTAS      = 'Respostas BIA';
 const ABA_TOKENS         = 'Tokens';
 const ABA_CONFIG_RESPOSTAS = 'Config Respostas';
 const ABA_CONFIG_PERFIS  = 'Config Perfis';
+const ABA_DEPENDENCIAS   = 'Dependências';
 const NOTIFICACAO_EMAIL  = 'herculesoliveira@fortestecnologia.com.br';
 
 const PERGUNTAS_DEFAULT = [
@@ -62,6 +63,9 @@ function doGet(e) {
         break;
       case 'getPerfil':
         result = getPerfil(e.parameter.email);
+        break;
+      case 'getDependencias':
+        result = getDependencias();
         break;
       default:
         result = { error: 'Action não especificada' };
@@ -170,6 +174,12 @@ function doPost(e) {
         break;
       case 'excluirConfigResposta':
         result = excluirConfigResposta(data);
+        break;
+      case 'salvarDependencia':
+        result = salvarDependencia(data);
+        break;
+      case 'excluirDependencia':
+        result = excluirDependencia(data.id);
         break;
       default:
         result = { error: 'Action não reconhecida: ' + action };
@@ -289,6 +299,12 @@ function getProcessos() {
       return {
         id: i + 2, area: r[0], processo: r[1], descricao: r[2],
         dependencia: r[3], rto: r[4], rpo: r[5], mtpd: r[6], biaHomologada: r[7], tier: r[8] || '', bcpStatus: r[9] || '', descricaoFuncional: r[10] || '',
+        impactoIndisponibilidade: r[11] ? JSON.parse(r[11]) : null,
+        bcpObjetivo: r[12] || '', bcpEscopo: r[13] || '',
+        bcpContatos: r[14] ? JSON.parse(r[14]) : [],
+        bcpRiscos: r[15] ? JSON.parse(r[15]) : [],
+        bcpPreventivas: r[16] ? JSON.parse(r[16]) : [],
+        drpStatus: r[17] || '', drpObjetivo: r[18] || '', drpEscopo: r[19] || '', drpProcedimentos: r[20] || '', drpCriterios: r[21] || '',
         score: scores[key] || 0,
         avaliado: avaliados[key] || false,
         respostas: respostas[key] || []
@@ -299,11 +315,28 @@ function getProcessos() {
 
 function salvarProcesso(p) {
   const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
+  let impacto = '';
+  if (p.impactoIndisponibilidade) {
+    // Se já é string (veio do FormData), usa direto; se é objeto, serializa
+    impacto = typeof p.impactoIndisponibilidade === 'string' ? p.impactoIndisponibilidade : JSON.stringify(p.impactoIndisponibilidade);
+  }
+  let bcpContatos = '';
+  if (p.bcpContatos) {
+    bcpContatos = typeof p.bcpContatos === 'string' ? p.bcpContatos : JSON.stringify(p.bcpContatos);
+  }
+  let bcpRiscos = '';
+  if (p.bcpRiscos) {
+    bcpRiscos = typeof p.bcpRiscos === 'string' ? p.bcpRiscos : JSON.stringify(p.bcpRiscos);
+  }
+  let bcpPreventivas = '';
+  if (p.bcpPreventivas) {
+    bcpPreventivas = typeof p.bcpPreventivas === 'string' ? p.bcpPreventivas : JSON.stringify(p.bcpPreventivas);
+  }
   if (p.id) {
-    sheet.getRange(p.id, 1, 1, 11).setValues([[p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '', p.descricaoFuncional || '']]);
+    sheet.getRange(p.id, 1, 1, 22).setValues([[p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '', p.descricaoFuncional || '', impacto, p.bcpObjetivo || '', p.bcpEscopo || '', bcpContatos, bcpRiscos, bcpPreventivas, p.drpStatus || '', p.drpObjetivo || '', p.drpEscopo || '', p.drpProcedimentos || '', p.drpCriterios || '']]);
     return { success: true, id: Number(p.id) };
   } else {
-    sheet.appendRow([p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '', p.descricaoFuncional || '']);
+    sheet.appendRow([p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '', p.descricaoFuncional || '', impacto, p.bcpObjetivo || '', p.bcpEscopo || '', bcpContatos, bcpRiscos, bcpPreventivas, p.drpStatus || '', p.drpObjetivo || '', p.drpEscopo || '', p.drpProcedimentos || '', p.drpCriterios || '']);
     return { success: true, id: sheet.getLastRow() };
   }
 }
@@ -971,4 +1004,79 @@ function _criarAbaRespostas(ss) {
   sheet.appendRow(['Timestamp', 'Respondente', 'Cargo', 'Área', 'Processo', ...perguntas, 'Score', 'Tier']);
   sheet.getRange(1, 1, 1, 5 + perguntas.length + 2).setBackground('#2e7d32').setFontColor('white').setFontWeight('bold');
   sheet.setFrozenRows(1);
+}
+
+// ============================================================
+// DEPENDÊNCIAS (Catálogo)
+// ============================================================
+function getDependencias() {
+  try {
+    const sheet = _getSS().getSheetByName(ABA_DEPENDENCIAS);
+    if (!sheet) return _criarAbaDependencias();
+    const data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return [];
+    return data.slice(1).map((r, i) => ({
+      id: i + 2,
+      categoria: r[0],
+      nome: r[1],
+      detalhes: r[2] || '',
+      setor: r[3] || '',
+      empresa: r[4] || '',
+      telefone: r[5] || '',
+      email: r[6] || '',
+      endereco: r[7] || ''
+    }));
+  } catch(err) { Logger.log('getDependencias ERROR: %s', err.message); return []; }
+}
+
+function salvarDependencia(d) {
+  const ss = _getSS();
+  let sheet = ss.getSheetByName(ABA_DEPENDENCIAS);
+  if (!sheet) { _criarAbaDependencias(); sheet = ss.getSheetByName(ABA_DEPENDENCIAS); }
+  const row = [d.categoria, d.nome, d.detalhes || '', d.setor || '', d.empresa || '', d.telefone || '', d.email || '', d.endereco || ''];
+  if (d.id) {
+    sheet.getRange(Number(d.id), 1, 1, 8).setValues([row]);
+    return { success: true, id: Number(d.id) };
+  } else {
+    sheet.appendRow(row);
+    return { success: true, id: sheet.getLastRow() };
+  }
+}
+
+function excluirDependencia(rowIndex) {
+  _getSS().getSheetByName(ABA_DEPENDENCIAS).deleteRow(Number(rowIndex));
+  return { success: true };
+}
+
+function _criarAbaDependencias() {
+  const ss = _getSS();
+  if (ss.getSheetByName(ABA_DEPENDENCIAS)) return getDependencias();
+  const sheet = ss.insertSheet(ABA_DEPENDENCIAS);
+  sheet.appendRow(['Categoria', 'Nome', 'Papel', 'Setor', 'Empresa', 'Telefone', 'Email', 'Endereço']);
+  const dados = [
+    ['Pessoas', 'Equipe de infraestrutura', '', '', '', '', '', ''],
+    ['Sistemas', 'Sistemas de monitoramento', '', '', '', '', '', ''],
+    ['Sistemas', 'Sistemas de gerenciamento de rede', '', '', '', '', '', ''],
+    ['Infraestrutura', 'Energia elétrica (rede pública + UPS + gerador)', '', '', '', '', '', ''],
+    ['Infraestrutura', 'Switches e roteadores', '', '', '', '', '', ''],
+    ['Infraestrutura', 'Links de internet', '', '', '', '', '', ''],
+    ['Infraestrutura', 'Sistemas de climatização', '', '', '', '', '', ''],
+    ['Infraestrutura', 'Sistema de combate a incêndio', '', '', '', '', '', ''],
+    ['Fornecedores', 'Provedor de energia', '', '', '', '', '', ''],
+    ['Fornecedores', 'Operadoras de telecom', '', '', '', '', '', ''],
+    ['Fornecedores', 'Manutenção de climatização', '', '', '', '', '', ''],
+    ['Fornecedores', 'Manutenção de equipamentos críticos', '', '', '', '', '', ''],
+  ];
+  dados.forEach(r => sheet.appendRow(r));
+  sheet.getRange(1, 1, 1, 8).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+  sheet.setColumnWidth(1, 150);
+  sheet.setColumnWidth(2, 300);
+  sheet.setColumnWidth(3, 200);
+  sheet.setColumnWidth(4, 150);
+  sheet.setColumnWidth(5, 180);
+  sheet.setColumnWidth(6, 130);
+  sheet.setColumnWidth(7, 200);
+  sheet.setColumnWidth(8, 200);
+  sheet.setFrozenRows(1);
+  return dados.map((r, i) => ({ id: i + 2, categoria: r[0], nome: r[1], detalhes: '', setor: '', empresa: '', telefone: '', email: '', endereco: '' }));
 }

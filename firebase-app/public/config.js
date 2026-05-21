@@ -1,7 +1,7 @@
 // ============================================================
 // CONFIGURAÇÃO - URL da API do Google Apps Script
 // ============================================================
-const API_URL = 'https://script.google.com/macros/s/AKfycbwa-HI0jnBUC8IYu1ZyogCvaq-GX5kmh0gynKyhyqevZMv5quSEysmZZwbmUKQUTC1a/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbyMuEeoOy8d4MmsdDCpgoTUWaqoiOHrjbqMFRKUlmyO9dF0O3A7MLMwaepFNEwa_XNP/exec';
 
 // ============================================================
 // CONFIGURAÇÃO - Firebase

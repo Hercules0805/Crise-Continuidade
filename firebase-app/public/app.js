@@ -3,7 +3,7 @@
 // ============================================================
 
 const app = document.getElementById('app');
-const pages = { processos, perguntas, areas, admin };
+const pages = { processos, perguntas, areas, admin, dependencias };
 
 // Roteamento
 window.addEventListener('hashchange', route);
@@ -137,13 +137,86 @@ window.abrirModalPergunta = (p) => {
 
 window.editarPergunta = (id) => abrirModalPergunta(window.perguntasData.find(p => p.id === id));
 window.trocarAbaProcesso = (aba) => {
-  ['identificacao','bia'].forEach(a => {
+  ['identificacao','bia','bcp','drp'].forEach(a => {
     document.getElementById('painel-' + a).style.display = a === aba ? 'block' : 'none';
     const btn = document.getElementById('tab-' + a);
     btn.style.color = a === aba ? '#1a237e' : '#999';
     btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
   });
+  // Popular select de contatos ao abrir aba BCP
+  if (aba === 'bcp') popularSelectContatosBcp();
 };
+
+// ============================================================
+// BCP - Contatos e Responsabilidades
+// ============================================================
+window._bcpContatos = []; // IDs das dependências selecionadas
+
+function popularSelectContatosBcp() {
+  const select = document.getElementById('bcpContatoSelect');
+  const catalogo = window.dependenciasCatalogo || [];
+  const selecionados = window._bcpContatos || [];
+  const disponiveis = catalogo.filter(d => !selecionados.includes(d.id));
+  select.innerHTML = '<option value="">Selecione uma dependência para adicionar...</option>' +
+    disponiveis.map(d => `<option value="${d.id}">${d.nome} (${d.categoria})</option>`).join('');
+}
+
+window.adicionarContatoBcp = () => {
+  const select = document.getElementById('bcpContatoSelect');
+  const id = Number(select.value);
+  if (!id) return;
+  if (!window._bcpContatos.includes(id)) {
+    window._bcpContatos.push(id);
+    renderContatosBcp();
+    popularSelectContatosBcp();
+  }
+};
+
+window.removerContatoBcp = (id) => {
+  window._bcpContatos = window._bcpContatos.filter(x => x !== id);
+  renderContatosBcp();
+  popularSelectContatosBcp();
+};
+
+function renderContatosBcp() {
+  const container = document.getElementById('bcpContatosTabela');
+  const catalogo = window.dependenciasCatalogo || [];
+  const contatos = window._bcpContatos.map(id => catalogo.find(d => d.id === id)).filter(Boolean);
+
+  if (!contatos.length) {
+    container.innerHTML = '<p style="font-size:0.85em;color:#999;padding:12px 0;">Nenhum contato adicionado.</p>';
+    return;
+  }
+
+  container.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:0.85em;border:1px solid #e0e0e0;border-radius:7px;overflow:hidden;">
+      <thead>
+        <tr style="background:#f5f6fa;">
+          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">Nome</th>
+          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">Papel</th>
+          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">Setor</th>
+          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">Telefone</th>
+          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">E-mail</th>
+          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">Endereço</th>
+          <th style="padding:8px 6px;text-align:center;border-bottom:1px solid #e0e0e0;width:40px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${contatos.map(d => `<tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:8px 10px;font-weight:600;color:#222;">${d.nome}</td>
+          <td style="padding:8px 10px;color:#555;">${d.detalhes || '-'}</td>
+          <td style="padding:8px 10px;color:#555;">${d.setor || '-'}</td>
+          <td style="padding:8px 10px;color:#555;">${d.telefone || '-'}</td>
+          <td style="padding:8px 10px;color:#555;">${d.email || '-'}</td>
+          <td style="padding:8px 10px;color:#555;">${d.endereco || '-'}</td>
+          <td style="padding:8px 6px;text-align:center;">
+            <button onclick="editarContatoBcp(${d.id})" style="background:none;border:none;cursor:pointer;color:#ff6b35;font-size:0.9em;margin-right:4px;" title="Editar">✎</button>
+            <button onclick="removerContatoBcp(${d.id})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
 
 window.fecharModal = () => {
   document.getElementById('drawerProcesso').classList.remove('open');
@@ -466,6 +539,7 @@ window.excluirArea = async (id) => {
 // ============================================================
 let processosOrdenacao = { coluna: 'area', direcao: 'asc' };
 let processosFiltroArea = '';
+let processosFiltroTier = '';
 
 async function processos() {
   app.innerHTML = `
@@ -473,19 +547,31 @@ async function processos() {
       <div><h2>Processos de Negócio</h2><p class="page-sub">Cadastre os processos críticos de cada área</p></div>
       <button class="btn btn-primary" onclick="abrirModalProcesso()">+ Novo Processo</button>
     </div>
-    <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;">
-      <div style="flex:1;">
+    <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
+      <div>
         <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Área:</label>
         <select id="filtroArea" onchange="filtrarPorArea(this.value)" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
           <option value="">Todas as áreas</option>
         </select>
       </div>
-      <button id="btnEnviarArea" onclick="enviarParaArea()" style="display:none;padding:9px 18px;background:#1565c0;color:white;border:none;border-radius:7px;font-weight:600;font-size:0.88em;cursor:pointer;">
-        ✉️ Enviar Questionário para Área
-      </button>
-      <button id="btnRelatorioArea" onclick="enviarRelatorioArea()" style="display:none;padding:9px 18px;background:#2e7d32;color:white;border:none;border-radius:7px;font-weight:600;font-size:0.88em;cursor:pointer;">
-        📄 Enviar Relatório da Área
-      </button>
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Tier:</label>
+        <select id="filtroTier" onchange="filtrarPorTier(this.value)" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:180px;">
+          <option value="">Todos os tiers</option>
+          <option value="Tier 1">Tier 1 (Crítico)</option>
+          <option value="Tier 2">Tier 2 (Essencial)</option>
+          <option value="Tier 3">Tier 3 (Suporte)</option>
+          <option value="Pendente">Pendente</option>
+        </select>
+      </div>
+      <div style="margin-left:auto;display:flex;gap:8px;">
+        <button id="btnEnviarArea" onclick="enviarParaArea()" style="display:none;padding:9px 18px;background:#1565c0;color:white;border:none;border-radius:7px;font-weight:600;font-size:0.88em;cursor:pointer;">
+          ✉️ Enviar Questionário para Área
+        </button>
+        <button id="btnRelatorioArea" onclick="enviarRelatorioArea()" style="display:none;padding:9px 18px;background:#2e7d32;color:white;border:none;border-radius:7px;font-weight:600;font-size:0.88em;cursor:pointer;">
+          📄 Enviar Relatório da Área
+        </button>
+      </div>
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table" id="lista" style="display:none;">
@@ -497,6 +583,9 @@ async function processos() {
             <th onclick="ordenarProcessos('responsavel')" style="cursor:pointer;width:9%;">Responsável <span id="sort-responsavel"></span></th>
             <th onclick="ordenarProcessos('status')" style="cursor:pointer;width:8%;">Tier <span id="sort-status"></span></th>
             <th onclick="ordenarProcessos('score')" style="cursor:pointer;width:6%;">Score <span id="sort-score"></span></th>
+            <th onclick="ordenarProcessos('biaHomologada')" style="cursor:pointer;width:9%;">BIA Status <span id="sort-biaHomologada"></span></th>
+            <th onclick="ordenarProcessos('bcpStatus')" style="cursor:pointer;width:9%;">BCP Status <span id="sort-bcpStatus"></span></th>
+            <th onclick="ordenarProcessos('drpStatus')" style="cursor:pointer;width:9%;">DRP Status <span id="sort-drpStatus"></span></th>
             <th style="width:10%;text-align:center;">Ações</th>
           </tr>
         </thead>
@@ -571,6 +660,8 @@ async function processos() {
         <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
           <button id="tab-identificacao" onclick="trocarAbaProcesso('identificacao')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Identificação</button>
           <button id="tab-bia" onclick="trocarAbaProcesso('bia')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BIA</button>
+          <button id="tab-bcp" onclick="trocarAbaProcesso('bcp')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BCP</button>
+          <button id="tab-drp" onclick="trocarAbaProcesso('drp')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">DRP</button>
         </div>
         <div style="flex:1;overflow-y:auto;padding:20px 24px;">
           <input type="hidden" id="fId">
@@ -600,12 +691,18 @@ async function processos() {
           <!-- ABA: BIA -->
           <div id="painel-bia" style="display:none;">
             <div id="fBiaScoreInfo" style="margin-bottom:20px;"></div>
+            <div id="fBiaAvaliarBtn" style="margin-bottom:20px;display:none;">
+              <button class="btn btn-primary" onclick="avaliarProcessoFromBia()" style="width:100%;padding:12px;font-size:0.92em;">
+                📋 Avaliar / Editar Avaliação
+              </button>
+            </div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Status</label>
               <select id="fBiaHomologada" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
                 <option value="">Selecione...</option>
-                <option>Avaliado</option>
-                <option>Não avaliado</option>
+                <option>Processo Não Avaliado</option>
+                <option>Processo Avaliado</option>
+                <option>BIA Realizado</option>
               </select>
             </div>
             <div style="margin-bottom:16px;">
@@ -613,8 +710,14 @@ async function processos() {
               <textarea id="fDescricao" rows="3" placeholder="Descreva o impacto caso o processo fique indisponível" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
             </div>
             <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Dependência Crítica</label>
-              <input type="text" id="fDependencia" placeholder="Ex: Servidores de Diretório, Active Directory" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Dependências Críticas</label>
+              <div id="fDependenciaContainer" style="position:relative;">
+                <div id="fDependenciaTags" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;min-height:40px;cursor:text;transition:border-color 0.2s;background:white;" onclick="document.getElementById('fDependenciaInput').focus()">
+                  <input type="text" id="fDependenciaInput" placeholder="Digite para buscar ou adicionar..." autocomplete="off" style="border:none;outline:none;font-size:0.9em;flex:1;min-width:180px;padding:2px 4px;">
+                </div>
+                <div id="fDependenciaDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 7px 7px;max-height:220px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
+              </div>
+              <input type="hidden" id="fDependencia">
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
@@ -634,14 +737,145 @@ async function processos() {
               </div>
             </div>
             <div style="margin-bottom:20px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Impacto da Indisponibilidade</label>
+              <p style="font-size:0.78em;color:#888;margin-bottom:8px;">Descreva o impacto em cada dimensão para diferentes períodos de indisponibilidade. Use Tab para navegar entre células.</p>
+              <table id="tabelaImpacto" style="width:100%;border-collapse:separate;border-spacing:0;font-size:0.88em;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;">
+                <thead>
+                  <tr style="background:linear-gradient(135deg,#e8eaf6,#f5f6fa);">
+                    <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #c5cae9;color:#1a237e;font-weight:700;width:28%;">Dimensão</th>
+                    <th style="padding:10px 6px;text-align:center;border-bottom:2px solid #c5cae9;border-left:1px solid #e0e0e0;width:24%;"><input id="impactoCol0" type="text" value="1h" style="width:100%;border:none;background:transparent;text-align:center;font-weight:700;color:#1a237e;font-size:0.95em;cursor:text;" title="Clique para editar o período"></th>
+                    <th style="padding:10px 6px;text-align:center;border-bottom:2px solid #c5cae9;border-left:1px solid #e0e0e0;width:24%;"><input id="impactoCol1" type="text" value="4h" style="width:100%;border:none;background:transparent;text-align:center;font-weight:700;color:#1a237e;font-size:0.95em;cursor:text;" title="Clique para editar o período"></th>
+                    <th style="padding:10px 6px;text-align:center;border-bottom:2px solid #c5cae9;border-left:1px solid #e0e0e0;width:24%;"><input id="impactoCol2" type="text" value="24h" style="width:100%;border:none;background:transparent;text-align:center;font-weight:700;color:#1a237e;font-size:0.95em;cursor:text;" title="Clique para editar o período"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${['Operacional','Reputacional','Financeiro','Legal/regulatório'].map((linha, idx) => `
+                  <tr class="impacto-row" style="${idx < 3 ? 'border-bottom:1px solid #f0f0f0;' : ''}">
+                    <td style="padding:10px 12px;color:#333;font-weight:600;font-size:0.9em;background:#fafbfc;border-right:1px solid #e8eaf6;">${linha}</td>
+                    <td class="impacto-cell" style="padding:3px;border-left:1px solid #f0f0f0;"><textarea data-linha="${linha}" data-col="0" placeholder="Descreva o impacto..." rows="2" style="width:100%;min-height:44px;border:1.5px solid transparent;border-radius:5px;padding:8px 10px;text-align:left;font-size:0.88em;box-sizing:border-box;resize:none;overflow:hidden;font-family:inherit;line-height:1.4;transition:border-color 0.2s,background 0.2s;background:#fff;" onfocus="this.style.borderColor='#1a237e';this.style.background='#f8f9ff';" onblur="this.style.borderColor='transparent';this.style.background='#fff';" oninput="this.style.height='auto';this.style.height=Math.max(44,this.scrollHeight)+'px'"></textarea></td>
+                    <td class="impacto-cell" style="padding:3px;border-left:1px solid #f0f0f0;"><textarea data-linha="${linha}" data-col="1" placeholder="Descreva o impacto..." rows="2" style="width:100%;min-height:44px;border:1.5px solid transparent;border-radius:5px;padding:8px 10px;text-align:left;font-size:0.88em;box-sizing:border-box;resize:none;overflow:hidden;font-family:inherit;line-height:1.4;transition:border-color 0.2s,background 0.2s;background:#fff;" onfocus="this.style.borderColor='#1a237e';this.style.background='#f8f9ff';" onblur="this.style.borderColor='transparent';this.style.background='#fff';" oninput="this.style.height='auto';this.style.height=Math.max(44,this.scrollHeight)+'px'"></textarea></td>
+                    <td class="impacto-cell" style="padding:3px;border-left:1px solid #f0f0f0;"><textarea data-linha="${linha}" data-col="2" placeholder="Descreva o impacto..." rows="2" style="width:100%;min-height:44px;border:1.5px solid transparent;border-radius:5px;padding:8px 10px;text-align:left;font-size:0.88em;box-sizing:border-box;resize:none;overflow:hidden;font-family:inherit;line-height:1.4;transition:border-color 0.2s,background 0.2s;background:#fff;" onfocus="this.style.borderColor='#1a237e';this.style.background='#f8f9ff';" onblur="this.style.borderColor='transparent';this.style.background='#fff';" oninput="this.style.height='auto';this.style.height=Math.max(44,this.scrollHeight)+'px'"></textarea></td>
+                  </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- ABA: BCP -->
+          <div id="painel-bcp" style="display:none;">
+            <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BCP Status</label>
               <select id="fBcpStatus" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
                 <option value="">Selecione...</option>
-                <option>Não avaliado</option>
-                <option>Não necessário</option>
-                <option>Em elaboração</option>
-                <option>Documentado</option>
+                <option>BCP Pendente</option>
+                <option>BCP em Andamento</option>
+                <option>BCP Realizado</option>
               </select>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Objetivo</label>
+              <textarea id="fBcpObjetivo" rows="4" placeholder="Descreva o objetivo do plano de continuidade para este processo" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Escopo</label>
+              <textarea id="fBcpEscopo" rows="4" placeholder="Defina o escopo de atuação do plano de continuidade" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Informações de Contato e Responsabilidades</label>
+              <div style="display:flex;gap:8px;margin-bottom:10px;">
+                <select id="bcpContatoSelect" style="flex:1;padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;">
+                  <option value="">Selecione uma dependência para adicionar...</option>
+                </select>
+                <button class="btn btn-primary" onclick="adicionarContatoBcp()" style="padding:8px 16px;font-size:0.85em;white-space:nowrap;">+ Adicionar</button>
+                <button class="btn btn-ghost" onclick="abrirModalDepBcp()" style="padding:8px 14px;font-size:0.85em;white-space:nowrap;" title="Criar nova dependência">+ Novo</button>
+              </div>
+              <div id="bcpContatosTabela"></div>
+              <div class="modal-overlay" id="modalDepBcp"><div class="modal" onclick="event.stopPropagation()" style="max-width:540px;">
+                <h3 id="modalDepBcpTitulo">Nova Dependência</h3>
+                <input type="hidden" id="depBcpId">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
+                  <div>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Categoria</label>
+                    <input type="text" id="depBcpCategoria" list="depBcpCatList" placeholder="Ex: Pessoas" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                    <datalist id="depBcpCatList"></datalist>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Nome</label>
+                    <input type="text" id="depBcpNome" placeholder="Ex: João Silva" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
+                  <div>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Papel</label>
+                    <input type="text" id="depBcpDetalhes" placeholder="Ex: Coordenador do Plano" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Setor</label>
+                    <input type="text" id="depBcpSetor" placeholder="Ex: TI" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                  </div>
+                </div>
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Empresa</label>
+                  <input type="text" id="depBcpEmpresa" placeholder="Ex: Fortes Tecnologia" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
+                  <div>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Telefone</label>
+                    <input type="text" id="depBcpTelefone" placeholder="(00) 0000-0000" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Email</label>
+                    <input type="email" id="depBcpEmail" placeholder="email@empresa.com" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                  </div>
+                </div>
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Endereço</label>
+                  <input type="text" id="depBcpEndereco" placeholder="Endereço ou localização" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                </div>
+                <div class="modal-footer">
+                  <button class="btn btn-ghost" onclick="fecharModalDepBcp()">Cancelar</button>
+                  <button class="btn btn-primary" onclick="salvarDepBcp()">Salvar</button>
+                </div>
+              </div></div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Avaliação de Riscos</label>
+              <div id="bcpRiscosTabela"></div>
+              <button class="btn btn-ghost" onclick="adicionarRiscoBcp()" style="margin-top:8px;font-size:0.85em;">+ Adicionar Evento</button>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Medidas Preventivas</label>
+              <div id="bcpPreventivasTabela"></div>
+              <button class="btn btn-ghost" onclick="adicionarPreventivaBcp()" style="margin-top:8px;font-size:0.85em;">+ Adicionar Controle</button>
+            </div>
+          </div>
+
+          <!-- ABA: DRP -->
+          <div id="painel-drp" style="display:none;">
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">DRP Status</label>
+              <select id="fDrpStatus" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
+                <option value="">Selecione...</option>
+                <option>DRP Pendente</option>
+                <option>DRP em Andamento</option>
+                <option>DRP Realizado</option>
+              </select>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Objetivo</label>
+              <textarea id="fDrpObjetivo" rows="4" placeholder="Descreva o objetivo do plano de recuperação de desastres" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Escopo</label>
+              <textarea id="fDrpEscopo" rows="4" placeholder="Defina o escopo do plano de recuperação de desastres" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Procedimentos de Recuperação</label>
+              <textarea id="fDrpProcedimentos" rows="5" placeholder="Descreva os procedimentos de recuperação em caso de desastre" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Critérios de Ativação</label>
+              <textarea id="fDrpCriterios" rows="3" placeholder="Defina os critérios para ativação do plano de recuperação" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
             </div>
           </div>
         </div>
@@ -655,6 +889,7 @@ async function processos() {
   const [processos, areas, perguntas] = await Promise.all([API.getProcessos(), API.getAreas(), API.getPerguntas()]);
   window.processosPerguntas = perguntas.filter(p => p.ativa);
   try { window.configRespostas = await API.getConfigRespostas(); } catch(e) { window.configRespostas = null; }
+  try { window.dependenciasCatalogo = await API.getDependencias(); } catch(e) { window.dependenciasCatalogo = []; }
   
   // Preencher filtro de áreas
   const filtroArea = document.getElementById('filtroArea');
@@ -697,6 +932,14 @@ function renderizarProcessos() {
   if (processosFiltroArea) {
     data = data.filter(p => p.area === processosFiltroArea);
   }
+
+  // Filtrar por tier
+  if (processosFiltroTier) {
+    data = data.filter(p => {
+      const tier = p.score >= 12 ? 'Tier 1' : p.score >= 6 ? 'Tier 2' : p.avaliado || p.score > 0 ? 'Tier 3' : 'Pendente';
+      return tier === processosFiltroTier;
+    });
+  }
   
   // Ordenar
   data.sort((a, b) => {
@@ -711,7 +954,7 @@ function renderizarProcessos() {
   });
   
   // Atualizar indicadores de ordenação
-  ['area', 'processo', 'status', 'score', 'responsavel', 'solucao', 'biaHomologada'].forEach(col => {
+  ['area', 'processo', 'status', 'score', 'responsavel', 'solucao', 'biaHomologada', 'bcpStatus', 'drpStatus'].forEach(col => {
     const el = document.getElementById(`sort-${col}`);
     if (el) {
       if (col === processosOrdenacao.coluna) {
@@ -732,6 +975,9 @@ function renderizarProcessos() {
         <td>${p.responsavelArea || p.responsavel || ''}</td>
         <td><span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.8em;font-weight:600;color:white;background:${statusColor};">${status}</span></td>
         <td style="text-align:center;font-weight:700;color:${p.avaliado || p.score > 0 ? statusColor : '#bbb'};font-size:0.95em;">${p.avaliado || p.score > 0 ? p.score : '-'}</td>
+        <td style="font-size:0.8em;color:#555;">${p.biaHomologada || '-'}</td>
+        <td style="font-size:0.8em;color:#555;">${p.bcpStatus || '-'}</td>
+        <td style="font-size:0.8em;color:#555;">${p.drpStatus || '-'}</td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarProcesso(${p.id})" title="Editar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
@@ -759,7 +1005,7 @@ function renderizarProcessos() {
         </td>
       </tr>`;
       }).join('')
-    : `<tr><td colspan="8" style="text-align:center;color:#999;padding:40px;">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
+    : `<tr><td colspan="7" style="text-align:center;color:#999;padding:40px;">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
 }
 
 window.filtrarPorArea = (area) => {
@@ -768,6 +1014,11 @@ window.filtrarPorArea = (area) => {
   if (btn) btn.style.display = area ? 'block' : 'none';
   const btnRel = document.getElementById('btnRelatorioArea');
   if (btnRel) btnRel.style.display = area ? 'block' : 'none';
+  renderizarProcessos();
+};
+
+window.filtrarPorTier = (tier) => {
+  processosFiltroTier = tier;
   renderizarProcessos();
 };
 
@@ -823,6 +1074,344 @@ window.ordenarProcessos = (coluna) => {
   renderizarProcessos();
 };
 
+// ============================================================
+// COMPONENTE: Tags de Dependência com Autocomplete
+// ============================================================
+window._dependenciaSelecionadas = [];
+
+function initDependenciaTags(valorAtual) {
+  const container = document.getElementById('fDependenciaTags');
+  const input = document.getElementById('fDependenciaInput');
+  const dropdown = document.getElementById('fDependenciaDropdown');
+  
+  // Parsear valor atual (string separada por vírgula)
+  window._dependenciaSelecionadas = valorAtual 
+    ? valorAtual.split(',').map(s => s.trim()).filter(Boolean) 
+    : [];
+  
+  renderDependenciaTags();
+  
+  // Focus style
+  input.addEventListener('focus', () => {
+    container.style.borderColor = '#1a237e';
+    container.style.boxShadow = '0 0 0 3px rgba(26,35,126,0.08)';
+    mostrarDropdownDependencia('');
+  });
+  input.addEventListener('blur', () => {
+    setTimeout(() => {
+      container.style.borderColor = '#e0e0e0';
+      container.style.boxShadow = 'none';
+      dropdown.style.display = 'none';
+    }, 200);
+  });
+  
+  // Filtrar ao digitar
+  input.addEventListener('input', () => {
+    mostrarDropdownDependencia(input.value);
+  });
+  
+  // Teclas especiais
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const val = input.value.trim();
+      if (val && !window._dependenciaSelecionadas.includes(val)) {
+        window._dependenciaSelecionadas.push(val);
+        // Adicionar ao catálogo se não existir
+        const existe = (window.dependenciasCatalogo || []).some(d => d.nome.toLowerCase() === val.toLowerCase());
+        if (!existe) {
+          API.salvarDependencia({ categoria: 'Outros', nome: val }).then(r => {
+            window.dependenciasCatalogo.push({ id: r.id, categoria: 'Outros', nome: val });
+            API.invalidate('getDependencias');
+          });
+        }
+        renderDependenciaTags();
+      }
+      input.value = '';
+      dropdown.style.display = 'none';
+    } else if (e.key === 'Backspace' && !input.value && window._dependenciaSelecionadas.length) {
+      window._dependenciaSelecionadas.pop();
+      renderDependenciaTags();
+    } else if (e.key === 'Escape') {
+      dropdown.style.display = 'none';
+      input.blur();
+    }
+  });
+}
+
+function renderDependenciaTags() {
+  const container = document.getElementById('fDependenciaTags');
+  const input = document.getElementById('fDependenciaInput');
+  // Remover tags existentes (manter apenas o input)
+  container.querySelectorAll('.dep-tag').forEach(el => el.remove());
+  // Renderizar tags antes do input
+  window._dependenciaSelecionadas.forEach((nome, idx) => {
+    const tag = document.createElement('span');
+    tag.className = 'dep-tag';
+    tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#e8eaf6;color:#1a237e;padding:3px 8px 3px 10px;border-radius:14px;font-size:0.82em;font-weight:500;white-space:nowrap;';
+    tag.innerHTML = `${nome}<button onclick="removerDependenciaTag(${idx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:#666;line-height:1;padding:0 2px;">&times;</button>`;
+    container.insertBefore(tag, input);
+  });
+  // Atualizar hidden input
+  document.getElementById('fDependencia').value = window._dependenciaSelecionadas.join(', ');
+}
+
+window.removerDependenciaTag = (idx) => {
+  window._dependenciaSelecionadas.splice(idx, 1);
+  renderDependenciaTags();
+};
+
+function mostrarDropdownDependencia(filtro) {
+  const dropdown = document.getElementById('fDependenciaDropdown');
+  const catalogo = window.dependenciasCatalogo || [];
+  const filtroLower = filtro.toLowerCase();
+  
+  // Filtrar itens não selecionados e que correspondem ao filtro
+  const disponiveis = catalogo.filter(d => 
+    !window._dependenciaSelecionadas.includes(d.nome) &&
+    (filtroLower === '' || d.nome.toLowerCase().includes(filtroLower) || d.categoria.toLowerCase().includes(filtroLower))
+  );
+  
+  if (!disponiveis.length && !filtro.trim()) {
+    dropdown.style.display = 'none';
+    return;
+  }
+  
+  // Agrupar por categoria
+  const grupos = {};
+  disponiveis.forEach(d => {
+    if (!grupos[d.categoria]) grupos[d.categoria] = [];
+    grupos[d.categoria].push(d);
+  });
+  
+  let html = '';
+  Object.entries(grupos).sort((a,b) => a[0].localeCompare(b[0])).forEach(([cat, itens]) => {
+    html += `<div style="padding:6px 12px 3px;font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;background:#fafafa;">${cat}</div>`;
+    itens.forEach(d => {
+      html += `<div class="dep-option" onmousedown="selecionarDependencia('${d.nome.replace(/'/g, "\\'")}')" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">${d.nome}</div>`;
+    });
+  });
+  
+  // Opção de criar nova se digitou algo que não existe
+  if (filtro.trim() && !catalogo.some(d => d.nome.toLowerCase() === filtroLower)) {
+    html += `<div class="dep-option" onmousedown="selecionarDependencia('${filtro.trim().replace(/'/g, "\\'")}')" style="padding:8px 12px;font-size:0.88em;cursor:pointer;color:#1a237e;font-weight:600;border-top:1px solid #f0f0f0;">+ Adicionar "${filtro.trim()}"</div>`;
+  }
+  
+  if (!html) {
+    dropdown.style.display = 'none';
+    return;
+  }
+  
+  dropdown.innerHTML = html;
+  dropdown.style.display = 'block';
+  
+  // Hover style
+  dropdown.querySelectorAll('.dep-option').forEach(el => {
+    el.addEventListener('mouseenter', () => el.style.background = '#f0f4ff');
+    el.addEventListener('mouseleave', () => el.style.background = 'transparent');
+  });
+}
+
+window.selecionarDependencia = (nome) => {
+  if (!window._dependenciaSelecionadas.includes(nome)) {
+    window._dependenciaSelecionadas.push(nome);
+    // Adicionar ao catálogo se não existir
+    const existe = (window.dependenciasCatalogo || []).some(d => d.nome.toLowerCase() === nome.toLowerCase());
+    if (!existe) {
+      API.salvarDependencia({ categoria: 'Outros', nome }).then(r => {
+        window.dependenciasCatalogo.push({ id: r.id, categoria: 'Outros', nome });
+        API.invalidate('getDependencias');
+      });
+    }
+    renderDependenciaTags();
+  }
+  document.getElementById('fDependenciaInput').value = '';
+  document.getElementById('fDependenciaDropdown').style.display = 'none';
+};
+
+// ============================================================
+// BCP - Modal de Criar/Editar Dependência inline
+// ============================================================
+window.abrirModalDepBcp = (d) => {
+  document.getElementById('depBcpId').value = d ? d.id : '';
+  document.getElementById('depBcpCategoria').value = d ? d.categoria : '';
+  document.getElementById('depBcpNome').value = d ? d.nome : '';
+  document.getElementById('depBcpDetalhes').value = d ? (d.detalhes || '') : '';
+  document.getElementById('depBcpSetor').value = d ? (d.setor || '') : '';
+  document.getElementById('depBcpEmpresa').value = d ? (d.empresa || '') : '';
+  document.getElementById('depBcpTelefone').value = d ? (d.telefone || '') : '';
+  document.getElementById('depBcpEmail').value = d ? (d.email || '') : '';
+  document.getElementById('depBcpEndereco').value = d ? (d.endereco || '') : '';
+  document.getElementById('modalDepBcpTitulo').textContent = d ? 'Editar Dependência' : 'Nova Dependência';
+  // Preencher datalist de categorias
+  const cats = [...new Set((window.dependenciasCatalogo || []).map(x => x.categoria))].sort();
+  document.getElementById('depBcpCatList').innerHTML = cats.map(c => `<option value="${c}">`).join('');
+  document.getElementById('modalDepBcp').classList.add('open');
+};
+
+window.fecharModalDepBcp = () => {
+  document.getElementById('modalDepBcp').classList.remove('open');
+};
+
+window.editarContatoBcp = (id) => {
+  const d = (window.dependenciasCatalogo || []).find(x => x.id === id);
+  if (d) abrirModalDepBcp(d);
+};
+
+window.salvarDepBcp = async () => {
+  const d = {
+    id: document.getElementById('depBcpId').value ? Number(document.getElementById('depBcpId').value) : null,
+    categoria: document.getElementById('depBcpCategoria').value.trim(),
+    nome: document.getElementById('depBcpNome').value.trim(),
+    detalhes: document.getElementById('depBcpDetalhes').value.trim(),
+    setor: document.getElementById('depBcpSetor').value.trim(),
+    empresa: document.getElementById('depBcpEmpresa').value.trim(),
+    telefone: document.getElementById('depBcpTelefone').value.trim(),
+    email: document.getElementById('depBcpEmail').value.trim(),
+    endereco: document.getElementById('depBcpEndereco').value.trim(),
+  };
+  if (!d.categoria) return showToast('Informe a categoria.', '#e65100');
+  if (!d.nome) return showToast('Informe o nome.', '#e65100');
+  try {
+    const result = await API.salvarDependencia(d);
+    fecharModalDepBcp();
+    showToast('✅ Dependência salva!', '#2e7d32');
+    // Atualizar catálogo local
+    if (d.id) {
+      const idx = (window.dependenciasCatalogo || []).findIndex(x => x.id === d.id);
+      if (idx !== -1) window.dependenciasCatalogo[idx] = { ...d };
+    } else {
+      d.id = result.id;
+      window.dependenciasCatalogo = window.dependenciasCatalogo || [];
+      window.dependenciasCatalogo.push(d);
+      // Adicionar automaticamente à tabela de contatos
+      if (!window._bcpContatos.includes(d.id)) {
+        window._bcpContatos.push(d.id);
+      }
+    }
+    API.invalidate('getDependencias');
+    renderContatosBcp();
+    popularSelectContatosBcp();
+  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
+};
+
+// ============================================================
+// BCP - Avaliação de Riscos
+// ============================================================
+window._bcpRiscos = [];
+
+function renderRiscosBcp() {
+  const container = document.getElementById('bcpRiscosTabela');
+  if (!window._bcpRiscos.length) {
+    container.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhum evento de risco cadastrado.</p>';
+    return;
+  }
+
+  const corProb = { 'Baixo': '#e8f5e9', 'Médio': '#fff8e1', 'Alto': '#ffebee' };
+  const corProbText = { 'Baixo': '#2e7d32', 'Médio': '#f57c00', 'Alto': '#c62828' };
+
+  container.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:0.85em;border:1px solid #e0e0e0;border-radius:7px;overflow:hidden;">
+      <thead>
+        <tr style="background:#f5f6fa;">
+          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:28%;">Evento</th>
+          <th style="padding:8px 10px;text-align:center;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:18%;">Probabilidade</th>
+          <th style="padding:8px 10px;text-align:center;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:18%;">Impacto</th>
+          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:28%;">Mitigação</th>
+          <th style="padding:8px 6px;text-align:center;border-bottom:1px solid #e0e0e0;width:8%;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${window._bcpRiscos.map((r, idx) => `<tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:6px 10px;"><input type="text" value="${(r.evento || '').replace(/"/g, '&quot;')}" onchange="atualizarRiscoBcp(${idx},'evento',this.value)" placeholder="Descreva o evento" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
+          <td style="padding:6px 6px;text-align:center;"><select onchange="atualizarRiscoBcp(${idx},'probabilidade',this.value)" style="padding:5px 8px;border-radius:12px;border:none;font-size:0.88em;font-weight:600;cursor:pointer;background:${corProb[r.probabilidade] || '#f5f5f5'};color:${corProbText[r.probabilidade] || '#555'};">
+            <option value="" ${!r.probabilidade ? 'selected' : ''}>-</option>
+            <option value="Baixo" ${r.probabilidade === 'Baixo' ? 'selected' : ''}>Baixo</option>
+            <option value="Médio" ${r.probabilidade === 'Médio' ? 'selected' : ''}>Médio</option>
+            <option value="Alto" ${r.probabilidade === 'Alto' ? 'selected' : ''}>Alto</option>
+          </select></td>
+          <td style="padding:6px 6px;text-align:center;"><select onchange="atualizarRiscoBcp(${idx},'impacto',this.value)" style="padding:5px 8px;border-radius:12px;border:none;font-size:0.88em;font-weight:600;cursor:pointer;background:${corProb[r.impacto] || '#f5f5f5'};color:${corProbText[r.impacto] || '#555'};">
+            <option value="" ${!r.impacto ? 'selected' : ''}>-</option>
+            <option value="Baixo" ${r.impacto === 'Baixo' ? 'selected' : ''}>Baixo</option>
+            <option value="Médio" ${r.impacto === 'Médio' ? 'selected' : ''}>Médio</option>
+            <option value="Alto" ${r.impacto === 'Alto' ? 'selected' : ''}>Alto</option>
+          </select></td>
+          <td style="padding:6px 10px;"><input type="text" value="${(r.mitigacao || '').replace(/"/g, '&quot;')}" onchange="atualizarRiscoBcp(${idx},'mitigacao',this.value)" placeholder="Ação de mitigação" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
+          <td style="padding:6px 6px;text-align:center;">
+            <button onclick="removerRiscoBcp(${idx})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+window.adicionarRiscoBcp = () => {
+  window._bcpRiscos.push({ evento: '', probabilidade: '', impacto: '', mitigacao: '' });
+  renderRiscosBcp();
+};
+
+window.atualizarRiscoBcp = (idx, campo, valor) => {
+  if (window._bcpRiscos[idx]) {
+    window._bcpRiscos[idx][campo] = valor;
+    // Re-render para atualizar cores dos selects
+    if (campo === 'probabilidade' || campo === 'impacto') renderRiscosBcp();
+  }
+};
+
+window.removerRiscoBcp = (idx) => {
+  window._bcpRiscos.splice(idx, 1);
+  renderRiscosBcp();
+};
+
+// ============================================================
+// BCP - Medidas Preventivas
+// ============================================================
+window._bcpPreventivas = [];
+
+function renderPreventivasBcp() {
+  const container = document.getElementById('bcpPreventivasTabela');
+  if (!window._bcpPreventivas.length) {
+    container.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhuma medida preventiva cadastrada.</p>';
+    return;
+  }
+
+  container.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:0.85em;border:1px solid #e0e0e0;border-radius:7px;overflow:hidden;">
+      <thead>
+        <tr style="background:#f5f6fa;">
+          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:30%;">Controle</th>
+          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:62%;">Descrição</th>
+          <th style="padding:8px 6px;text-align:center;border-bottom:1px solid #e0e0e0;width:8%;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        ${window._bcpPreventivas.map((r, idx) => `<tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:6px 10px;"><input type="text" value="${(r.controle || '').replace(/"/g, '&quot;')}" onchange="atualizarPreventivaBcp(${idx},'controle',this.value)" placeholder="Ex: Energia" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
+          <td style="padding:6px 10px;"><input type="text" value="${(r.descricao || '').replace(/"/g, '&quot;')}" onchange="atualizarPreventivaBcp(${idx},'descricao',this.value)" placeholder="Descreva a medida preventiva" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
+          <td style="padding:6px 6px;text-align:center;">
+            <button onclick="removerPreventivaBcp(${idx})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+window.adicionarPreventivaBcp = () => {
+  window._bcpPreventivas.push({ controle: '', descricao: '' });
+  renderPreventivasBcp();
+};
+
+window.atualizarPreventivaBcp = (idx, campo, valor) => {
+  if (window._bcpPreventivas[idx]) {
+    window._bcpPreventivas[idx][campo] = valor;
+  }
+};
+
+window.removerPreventivaBcp = (idx) => {
+  window._bcpPreventivas.splice(idx, 1);
+  renderPreventivasBcp();
+};
+
 window.abrirModalProcesso = (p) => {
   // Preencher dropdown de áreas
   const selectArea = document.getElementById('fArea');
@@ -834,12 +1423,49 @@ window.abrirModalProcesso = (p) => {
   document.getElementById('fProcesso').value = p ? p.processo : '';
   document.getElementById('fDescricao').value = p ? p.descricao : '';
   document.getElementById('fDescricaoFuncional').value = p ? (p.descricaoFuncional || '') : '';
-  document.getElementById('fDependencia').value = p ? p.dependencia : '';
+  // Preencher tags de dependência
+  initDependenciaTags(p ? p.dependencia : '');
   document.getElementById('fRTO').value = p ? p.rto : '';
   document.getElementById('fRPO').value = p ? p.rpo : '';
   document.getElementById('fMTPD').value = p ? p.mtpd : '';
   document.getElementById('fBiaHomologada').value = p ? p.biaHomologada : '';
-  document.getElementById('fBcpStatus').value = p ? (p.bcpStatus || '') : '';
+  const fBcpEl = document.getElementById('fBcpStatus'); if (fBcpEl) fBcpEl.value = p ? (p.bcpStatus || '') : '';
+  document.getElementById('fBcpObjetivo').value = p ? (p.bcpObjetivo || '') : '';
+  document.getElementById('fBcpEscopo').value = p ? (p.bcpEscopo || '') : '';
+  // Preencher contatos BCP
+  window._bcpContatos = p && p.bcpContatos ? (typeof p.bcpContatos === 'string' ? JSON.parse(p.bcpContatos) : p.bcpContatos) : [];
+  renderContatosBcp();
+  // Preencher riscos BCP
+  window._bcpRiscos = p && p.bcpRiscos ? (typeof p.bcpRiscos === 'string' ? JSON.parse(p.bcpRiscos) : p.bcpRiscos) : [];
+  renderRiscosBcp();
+  // Preencher medidas preventivas BCP
+  window._bcpPreventivas = p && p.bcpPreventivas ? (typeof p.bcpPreventivas === 'string' ? JSON.parse(p.bcpPreventivas) : p.bcpPreventivas) : [];
+  renderPreventivasBcp();
+
+  // Preencher campos DRP
+  document.getElementById('fDrpStatus').value = p ? (p.drpStatus || '') : '';
+  document.getElementById('fDrpObjetivo').value = p ? (p.drpObjetivo || '') : '';
+  document.getElementById('fDrpEscopo').value = p ? (p.drpEscopo || '') : '';
+  document.getElementById('fDrpProcedimentos').value = p ? (p.drpProcedimentos || '') : '';
+  document.getElementById('fDrpCriterios').value = p ? (p.drpCriterios || '') : '';
+
+  // Preencher tabela de impacto
+  const imp = p && p.impactoIndisponibilidade ? p.impactoIndisponibilidade : {};
+  setTimeout(() => {
+    if (imp.colunas) {
+      ['impactoCol0','impactoCol1','impactoCol2'].forEach((id,i) => {
+        const el = document.getElementById(id);
+        if (el && imp.colunas[i] !== undefined) el.value = imp.colunas[i];
+      });
+    }
+    document.querySelectorAll('#tabelaImpacto tbody textarea').forEach(ta => {
+      const linha = ta.dataset.linha;
+      const col = ta.dataset.col;
+      ta.value = (imp.dados && imp.dados[linha] && imp.dados[linha][col] !== undefined) ? imp.dados[linha][col] : '';
+      ta.style.height = 'auto';
+      ta.style.height = Math.max(44, ta.scrollHeight) + 'px';
+    });
+  }, 50);
 
   // Preencher Dono do Processo com base na area selecionada
   const atualizarDono = () => {
@@ -878,10 +1504,20 @@ window.abrirModalProcesso = (p) => {
   } else if (scoreInfo) {
     scoreInfo.innerHTML = '<div style="background:#f5f6fa;border-radius:8px;padding:12px 16px;font-size:0.85em;color:#999;margin-bottom:4px;">Processo ainda não avaliado.</div>';
   }
+  // Mostrar botão de avaliar se processo já existe
+  const btnAvaliar = document.getElementById('fBiaAvaliarBtn');
+  if (btnAvaliar) btnAvaliar.style.display = p && p.id ? 'block' : 'none';
   iniciarDrawerResize();
 };
 
 window.editarProcesso = (id) => abrirModalProcesso(window.processosData.find(p => p.id === id));
+
+window.avaliarProcessoFromBia = () => {
+  const id = Number(document.getElementById('fId').value);
+  if (!id) return;
+  fecharModal();
+  setTimeout(() => avaliarProcesso(id), 300);
+};
 
 window.salvarProcesso = async () => {
   const p = {
@@ -889,18 +1525,44 @@ window.salvarProcesso = async () => {
     area: document.getElementById('fArea').value.trim(),
     processo: document.getElementById('fProcesso').value.trim(),
     descricao: document.getElementById('fDescricao').value.trim(),
-    dependencia: document.getElementById('fDependencia').value.trim(),
+    dependencia: (window._dependenciaSelecionadas || []).join(', '),
     rto: document.getElementById('fRTO').value.trim(),
     rpo: document.getElementById('fRPO').value.trim(),
     mtpd: document.getElementById('fMTPD').value.trim(),
     biaHomologada: document.getElementById('fBiaHomologada').value.trim(),
-    bcpStatus: document.getElementById('fBcpStatus').value.trim(),
+    bcpStatus: (document.getElementById('fBcpStatus') || {value:''}).value.trim(),
     descricaoFuncional: document.getElementById('fDescricaoFuncional').value.trim(),
+    impactoIndisponibilidade: (() => {
+      const colunas = ['impactoCol0','impactoCol1','impactoCol2'].map(id => document.getElementById(id) ? document.getElementById(id).value : '');
+      const dados = {};
+      document.querySelectorAll('#tabelaImpacto tbody textarea').forEach(ta => {
+        const linha = ta.dataset.linha;
+        const col = ta.dataset.col;
+        if (!dados[linha]) dados[linha] = {};
+        dados[linha][col] = ta.value;
+      });
+      return { colunas, dados };
+    })(),
+    bcpObjetivo: document.getElementById('fBcpObjetivo').value.trim(),
+    bcpEscopo: document.getElementById('fBcpEscopo').value.trim(),
+    bcpContatos: window._bcpContatos || [],
+    bcpRiscos: window._bcpRiscos || [],
+    bcpPreventivas: window._bcpPreventivas || [],
+    drpStatus: document.getElementById('fDrpStatus').value.trim(),
+    drpObjetivo: document.getElementById('fDrpObjetivo').value.trim(),
+    drpEscopo: document.getElementById('fDrpEscopo').value.trim(),
+    drpProcedimentos: document.getElementById('fDrpProcedimentos').value.trim(),
+    drpCriterios: document.getElementById('fDrpCriterios').value.trim(),
   };
 
   if (!p.area) return showToast('Selecione a área.', '#e65100');
   if (!p.processo) return showToast('Informe o processo.', '#e65100');
   
+  // Desabilitar botão e mostrar loading
+  const btnSalvar = document.querySelector('#drawerProcesso .drawer-footer .btn-primary');
+  const textoOriginal = btnSalvar ? btnSalvar.innerHTML : '';
+  if (btnSalvar) { btnSalvar.disabled = true; btnSalvar.innerHTML = '⏳ Salvando...'; btnSalvar.style.opacity = '0.7'; }
+
   try {
     const result = await API.salvarProcesso(p);
     fecharModal();
@@ -923,6 +1585,7 @@ window.salvarProcesso = async () => {
   } catch (err) {
     console.error('Erro ao salvar processo:', err);
     showToast('❌ Erro ao salvar: ' + err.message, '#c62828');
+    if (btnSalvar) { btnSalvar.disabled = false; btnSalvar.innerHTML = textoOriginal; btnSalvar.style.opacity = '1'; }
   }
 };
 
@@ -1164,6 +1827,227 @@ window.enviarConvite = async () => {
   } catch(err) {
     showToast('❌ Erro: ' + err.message, '#c62828');
   }
+};
+
+// ============================================================
+// PÁGINA: DEPENDÊNCIAS (Catálogo)
+// ============================================================
+let dependenciasData = [];
+let dependenciasOrdenacao = { coluna: 'categoria', direcao: 'asc' };
+
+async function dependencias() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Catálogo de Dependências</h2><p class="page-sub">Gerencie as dependências críticas reutilizáveis nos processos</p></div>
+      <button class="btn btn-primary" onclick="abrirModalDependencia()">+ Nova Dependência</button>
+    </div>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Categoria:</label>
+      <select id="filtroDepCategoria" onchange="filtrarDependencias()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
+        <option value="">Todas as categorias</option>
+      </select>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div class="data-table" id="listaDeps" style="display:none;">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="ordenarDependencias('categoria')" style="cursor:pointer;width:12%;">Categoria <span id="sort-dep-categoria"></span></th>
+            <th onclick="ordenarDependencias('nome')" style="cursor:pointer;width:15%;">Nome <span id="sort-dep-nome"></span></th>
+            <th onclick="ordenarDependencias('empresa')" style="cursor:pointer;width:13%;">Empresa <span id="sort-dep-empresa"></span></th>
+            <th style="width:12%;">Papel</th>
+            <th style="width:10%;">Setor</th>
+            <th style="width:10%;">Telefone</th>
+            <th style="width:13%;">Email</th>
+            <th style="width:10%;">Endereço</th>
+            <th style="width:6%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody id="depRows"></tbody>
+      </table>
+    </div>
+    <div class="modal-overlay" id="modalDep"><div class="modal" onclick="event.stopPropagation()" style="max-width:580px;">
+      <h3 id="modalDepTitulo">Nova Dependência</h3>
+      <input type="hidden" id="depId">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria</label>
+          <input type="text" id="depCategoria" list="depCategoriaList" placeholder="Ex: Infraestrutura" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+          <datalist id="depCategoriaList"></datalist>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Nome</label>
+          <input type="text" id="depNome" placeholder="Ex: Switches e roteadores" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Papel</label>
+          <input type="text" id="depDetalhes" placeholder="Papel ou função desta dependência" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Setor</label>
+          <input type="text" id="depSetor" placeholder="Ex: TI, Facilities" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Empresa</label>
+        <input type="text" id="depEmpresa" placeholder="Ex: Fortes Tecnologia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Telefone</label>
+          <input type="text" id="depTelefone" placeholder="(00) 0000-0000" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Email</label>
+          <input type="email" id="depEmail" placeholder="contato@fornecedor.com" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Endereço</label>
+        <input type="text" id="depEndereco" placeholder="Endereço ou localização" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalDependencia()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarDep()">Salvar</button>
+      </div>
+    </div></div>`;
+
+  try {
+    dependenciasData = await API.getDependencias();
+  } catch(e) { dependenciasData = []; }
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('listaDeps').style.display = 'block';
+  // Popular filtro de categorias
+  const cats = [...new Set(dependenciasData.map(d => d.categoria))].sort();
+  document.getElementById('filtroDepCategoria').innerHTML = '<option value="">Todas as categorias</option>' +
+    cats.map(c => `<option value="${c}">${c}</option>`).join('');
+  renderizarDependencias();
+}
+
+function renderizarDependencias() {
+  let data = [...dependenciasData];
+
+  // Filtrar por categoria
+  const filtro = document.getElementById('filtroDepCategoria');
+  if (filtro && filtro.value) {
+    data = data.filter(d => d.categoria === filtro.value);
+  }
+
+  data.sort((a, b) => {
+    const valA = (a[dependenciasOrdenacao.coluna] || '').toString().toLowerCase();
+    const valB = (b[dependenciasOrdenacao.coluna] || '').toString().toLowerCase();
+    const cmp = valA.localeCompare(valB);
+    return dependenciasOrdenacao.direcao === 'asc' ? cmp : -cmp;
+  });
+
+  ['categoria', 'nome', 'empresa'].forEach(col => {
+    const el = document.getElementById(`sort-dep-${col}`);
+    if (el) el.textContent = col === dependenciasOrdenacao.coluna ? (dependenciasOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
+  });
+
+  document.getElementById('depRows').innerHTML = data.length
+    ? data.map(d => `<tr>
+        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${d.categoria}</span></td>
+        <td style="font-weight:600;color:#222;">${d.nome}</td>
+        <td style="font-size:0.85em;color:#555;">${d.empresa || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${d.detalhes || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${d.setor || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${d.telefone || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${d.email || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${d.endereco || '-'}</td>
+        <td style="text-align:center;white-space:nowrap;">
+          <button class="btn-icon" onclick="editarDep(${d.id})" title="Editar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="excluirDep(${d.id})" title="Excluir">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="9" style="text-align:center;color:#999;padding:40px;">Nenhuma dependência cadastrada.</td></tr>';
+}
+
+window.filtrarDependencias = () => renderizarDependencias();
+
+window.ordenarDependencias = (coluna) => {
+  if (dependenciasOrdenacao.coluna === coluna) {
+    dependenciasOrdenacao.direcao = dependenciasOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
+  } else {
+    dependenciasOrdenacao.coluna = coluna;
+    dependenciasOrdenacao.direcao = 'asc';
+  }
+  renderizarDependencias();
+};
+
+window.abrirModalDependencia = (d) => {
+  document.getElementById('depId').value = d ? d.id : '';
+  document.getElementById('depCategoria').value = d ? d.categoria : '';
+  document.getElementById('depNome').value = d ? d.nome : '';
+  document.getElementById('depDetalhes').value = d ? (d.detalhes || '') : '';
+  document.getElementById('depSetor').value = d ? (d.setor || '') : '';
+  document.getElementById('depEmpresa').value = d ? (d.empresa || '') : '';
+  document.getElementById('depTelefone').value = d ? (d.telefone || '') : '';
+  document.getElementById('depEmail').value = d ? (d.email || '') : '';
+  document.getElementById('depEndereco').value = d ? (d.endereco || '') : '';
+  document.getElementById('modalDepTitulo').textContent = d ? 'Editar Dependência' : 'Nova Dependência';
+  // Preencher datalist de categorias
+  const cats = [...new Set(dependenciasData.map(x => x.categoria))].sort();
+  document.getElementById('depCategoriaList').innerHTML = cats.map(c => `<option value="${c}">`).join('');
+  document.getElementById('modalDep').classList.add('open');
+};
+
+window.fecharModalDependencia = () => {
+  document.getElementById('modalDep').classList.remove('open');
+};
+
+window.editarDep = (id) => {
+  const d = dependenciasData.find(x => x.id === id);
+  if (d) abrirModalDependencia(d);
+};
+
+window.excluirDep = async (id) => {
+  if (!confirm('Excluir esta dependência?')) return;
+  try {
+    await API.excluirDependencia(id);
+    dependenciasData = dependenciasData.filter(x => x.id !== id);
+    renderizarDependencias();
+    showToast('✅ Excluída!', '#2e7d32');
+    API.invalidate('getDependencias');
+  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
+};
+
+window.salvarDep = async () => {
+  const d = {
+    id: document.getElementById('depId').value ? Number(document.getElementById('depId').value) : null,
+    categoria: document.getElementById('depCategoria').value.trim(),
+    nome: document.getElementById('depNome').value.trim(),
+    detalhes: document.getElementById('depDetalhes').value.trim(),
+    setor: document.getElementById('depSetor').value.trim(),
+    empresa: document.getElementById('depEmpresa').value.trim(),
+    telefone: document.getElementById('depTelefone').value.trim(),
+    email: document.getElementById('depEmail').value.trim(),
+    endereco: document.getElementById('depEndereco').value.trim(),
+  };
+  if (!d.categoria) return showToast('Informe a categoria.', '#e65100');
+  if (!d.nome) return showToast('Informe o nome.', '#e65100');
+  try {
+    const result = await API.salvarDependencia(d);
+    fecharModalDependencia();
+    showToast('✅ Salvo!', '#2e7d32');
+    if (d.id) {
+      const idx = dependenciasData.findIndex(x => x.id === d.id);
+      if (idx !== -1) dependenciasData[idx] = { ...d };
+    } else {
+      d.id = result.id;
+      dependenciasData.push(d);
+    }
+    renderizarDependencias();
+    API.invalidate('getDependencias');
+    // Atualizar catálogo global se estiver carregado
+    window.dependenciasCatalogo = dependenciasData;
+  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
 };
 
 // ============================================================
@@ -1618,14 +2502,20 @@ window.salvarAvaliacaoProcesso = async () => {
     else todasRespondidas = false;
   });
   if (!todasRespondidas) return showToast('Por favor, responda todas as perguntas.', '#e65100');
+
+  // Desabilitar botões de salvar e mostrar loading
+  const btns = document.querySelectorAll('button[onclick="salvarAvaliacaoProcesso()"]');
+  const textoOriginal = [];
+  btns.forEach((btn, i) => {
+    textoOriginal[i] = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Salvando...';
+    btn.style.opacity = '0.7';
+    btn.style.cursor = 'not-allowed';
+  });
+
   try {
-    const formData = new FormData();
-    formData.append('action', 'salvarRespostas');
-    formData.append('area', area);
-    formData.append('processo', processo);
-    formData.append('scores', JSON.stringify(scores));
-    const res = await fetch(API_URL, { method: 'POST', body: formData });
-    const result = await res.json();
+    const result = await API.post('salvarRespostas', { area, processo, scores });
     if (result.error) throw new Error(result.error);
     if (window.processosPerguntas) {
       fecharModalAvaliar();
@@ -1638,5 +2528,12 @@ window.salvarAvaliacaoProcesso = async () => {
     }
   } catch (err) {
     showToast('❌ Erro ao salvar: ' + err.message, '#c62828');
+    // Reabilitar botões em caso de erro
+    btns.forEach((btn, i) => {
+      btn.disabled = false;
+      btn.innerHTML = textoOriginal[i];
+      btn.style.opacity = '1';
+      btn.style.cursor = 'pointer';
+    });
   }
 };

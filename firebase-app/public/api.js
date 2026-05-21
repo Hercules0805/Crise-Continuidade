@@ -31,12 +31,22 @@ const API = {
 
   async post(action, body) {
     try {
-      const formData = new FormData();
-      formData.append('action', action);
+      const payload = { action };
+      // Adicionar campos do body, serializando objetos e arrays como JSON string
       Object.entries(body).forEach(([key, value]) => {
-        if (value !== null && value !== undefined) formData.append(key, String(value));
+        if (value === null || value === undefined) return;
+        if (typeof value === 'object') {
+          payload[key] = JSON.stringify(value);
+        } else {
+          payload[key] = value;
+        }
       });
-      const res = await fetch(API_URL, { method: 'POST', body: formData });
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(payload),
+        redirect: 'follow'
+      });
       const text = await res.text();
       const data = JSON.parse(text);
       if (data.error) throw new Error(data.error);
@@ -66,4 +76,7 @@ const API = {
   salvarRespostas: (respostas) => API.post('salvarRespostas', { respostas }),
   salvarConfigResposta: (d) => API.post('salvarConfigResposta', d),
   excluirConfigResposta: (d) => API.post('excluirConfigResposta', d),
+  getDependencias: () => API.get('getDependencias'),
+  salvarDependencia: (d) => API.post('salvarDependencia', d),
+  excluirDependencia: (id) => API.post('excluirDependencia', { id }),
 };
