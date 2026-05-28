@@ -11,6 +11,7 @@ const ABA_TOKENS         = 'Tokens';
 const ABA_CONFIG_RESPOSTAS = 'Config Respostas';
 const ABA_CONFIG_PERFIS  = 'Config Perfis';
 const ABA_DEPENDENCIAS   = 'Dependências';
+const ABA_COMPONENTES    = 'Componentes';
 const NOTIFICACAO_EMAIL  = 'herculesoliveira@fortestecnologia.com.br';
 
 const PERGUNTAS_DEFAULT = [
@@ -66,6 +67,9 @@ function doGet(e) {
         break;
       case 'getDependencias':
         result = getDependencias();
+        break;
+      case 'getComponentes':
+        result = getComponentes();
         break;
       default:
         result = { error: 'Action não especificada' };
@@ -180,6 +184,12 @@ function doPost(e) {
         break;
       case 'excluirDependencia':
         result = excluirDependencia(data.id);
+        break;
+      case 'salvarComponente':
+        result = salvarComponente(data);
+        break;
+      case 'excluirComponente':
+        result = excluirComponente(data.id);
         break;
       default:
         result = { error: 'Action não reconhecida: ' + action };
@@ -1079,4 +1089,62 @@ function _criarAbaDependencias() {
   sheet.setColumnWidth(8, 200);
   sheet.setFrozenRows(1);
   return dados.map((r, i) => ({ id: i + 2, categoria: r[0], nome: r[1], detalhes: '', setor: '', empresa: '', telefone: '', email: '', endereco: '' }));
+}
+
+// ============================================================
+// COMPONENTES DE SERVIÇO (Catálogo)
+// ============================================================
+function getComponentes() {
+  try {
+    const sheet = _getSS().getSheetByName(ABA_COMPONENTES);
+    if (!sheet) return _criarAbaComponentes();
+    const data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return [];
+    return data.slice(1).map((r, i) => ({
+      id: i + 2,
+      tipo: r[0],
+      nome: r[1],
+      descricao: r[2] || '',
+      rto: r[3] || '',
+      rpo: r[4] || '',
+      estrategia: r[5] || '',
+      responsavel: r[6] || ''
+    }));
+  } catch(err) { Logger.log('getComponentes ERROR: %s', err.message); return []; }
+}
+
+function salvarComponente(d) {
+  const ss = _getSS();
+  let sheet = ss.getSheetByName(ABA_COMPONENTES);
+  if (!sheet) { _criarAbaComponentes(); sheet = ss.getSheetByName(ABA_COMPONENTES); }
+  const row = [d.tipo, d.nome, d.descricao || '', d.rto || '', d.rpo || '', d.estrategia || '', d.responsavel || ''];
+  if (d.id) {
+    sheet.getRange(Number(d.id), 1, 1, 7).setValues([row]);
+    return { success: true, id: Number(d.id) };
+  } else {
+    sheet.appendRow(row);
+    return { success: true, id: sheet.getLastRow() };
+  }
+}
+
+function excluirComponente(rowIndex) {
+  _getSS().getSheetByName(ABA_COMPONENTES).deleteRow(Number(rowIndex));
+  return { success: true };
+}
+
+function _criarAbaComponentes() {
+  const ss = _getSS();
+  if (ss.getSheetByName(ABA_COMPONENTES)) return getComponentes();
+  const sheet = ss.insertSheet(ABA_COMPONENTES);
+  sheet.appendRow(['Tipo', 'Nome', 'Descrição', 'RTO', 'RPO', 'Estratégia de Backup', 'Responsável']);
+  sheet.getRange(1, 1, 1, 7).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+  sheet.setColumnWidth(1, 150);
+  sheet.setColumnWidth(2, 250);
+  sheet.setColumnWidth(3, 300);
+  sheet.setColumnWidth(4, 100);
+  sheet.setColumnWidth(5, 100);
+  sheet.setColumnWidth(6, 200);
+  sheet.setColumnWidth(7, 200);
+  sheet.setFrozenRows(1);
+  return [];
 }

@@ -1,0 +1,10 @@
+export type { IAreaRepository } from './IAreaRepository';
+export type { IProcessoRepository } from './IProcessoRepository';
+export type { IPerguntaRepository } from './IPerguntaRepository';
+export type { IRespostaBiaRepository } from './IRespostaBiaRepository';
+export type { ITokenRepository } from './ITokenRepository';
+export type { IDependenciaRepository } from './IDependenciaRepository';
+export type { IConfigRespostaRepository } from './IConfigRespostaRepository';
+export type { IConfigPerfilRepository } from './IConfigPerfilRepository';
+export type { IEmailService } from './IEmailService';
+export type { IEventBus } from './IEventBus';

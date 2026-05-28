@@ -1,0 +1,43 @@
+version: '3.8'
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: bia_db
+      POSTGRES_USER: bia_user
+      POSTGRES_PASSWORD: bia_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bia_user -d bia_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://bia_user:bia_password@postgres:5432/bia_db
+      NODE_ENV: development
+      PORT: "3000"
+      CORS_ORIGIN: https://bia-forte-2025.web.app
+      FIREBASE_PROJECT_ID: ""
+      FIREBASE_SERVICE_ACCOUNT: ""
+      SMTP_HOST: ""
+      SMTP_PORT: "587"
+      SMTP_USER: ""
+      SMTP_PASS: ""
+      NOTIFICATION_EMAIL: ""
+      TOKEN_BASE_URL: http://localhost:3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./src:/app/src
+
+volumes:
+  postgres_data:

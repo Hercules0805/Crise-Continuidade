@@ -3,7 +3,7 @@
 // ============================================================
 
 const app = document.getElementById('app');
-const pages = { processos, perguntas, areas, admin, dependencias };
+const pages = { processos, perguntas, areas, admin, dependencias, componentes };
 
 // Roteamento
 window.addEventListener('hashchange', route);
@@ -137,7 +137,7 @@ window.abrirModalPergunta = (p) => {
 
 window.editarPergunta = (id) => abrirModalPergunta(window.perguntasData.find(p => p.id === id));
 window.trocarAbaProcesso = (aba) => {
-  ['identificacao','bia','bcp','drp'].forEach(a => {
+  ['identificacao','avaliacao','bia','bcp','drp'].forEach(a => {
     document.getElementById('painel-' + a).style.display = a === aba ? 'block' : 'none';
     const btn = document.getElementById('tab-' + a);
     btn.style.color = a === aba ? '#1a237e' : '#999';
@@ -145,6 +145,146 @@ window.trocarAbaProcesso = (aba) => {
   });
   // Popular select de contatos ao abrir aba BCP
   if (aba === 'bcp') popularSelectContatosBcp();
+  // Renderizar avaliação ao abrir aba
+  if (aba === 'avaliacao') renderAvaliacaoInline();
+};
+
+// ============================================================
+// Avaliação Inline (dentro do drawer de processo)
+// ============================================================
+window.renderAvaliacaoInline = () => {
+  const container = document.getElementById('avaliacaoPerguntas');
+  const resumoContainer = document.getElementById('avaliacaoScoreResumo');
+  if (!container) return;
+  
+  const id = Number(document.getElementById('fId').value);
+  const p = id ? window.processosData.find(proc => proc.id === id) : null;
+  
+  // Mostrar score/tier se já avaliado
+  if (resumoContainer && p && p.score > 0) {
+    const cor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : '#1565c0';
+    const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : 'Tier 3 (Suporte)';
+    resumoContainer.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;">
+      <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
+        <div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div>
+        <div style="font-size:1.8em;font-weight:700;color:${cor};" id="avaliacaoScoreValor">${p.score}</div>
+      </div>
+      <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
+        <div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div>
+        <div style="font-size:0.95em;font-weight:700;" id="avaliacaoTierValor"><span style="background:${cor};color:white;padding:4px 12px;border-radius:12px;">${tier}</span></div>
+      </div>
+    </div>`;
+  } else if (resumoContainer) {
+    resumoContainer.innerHTML = `<div style="background:#f5f6fa;border-radius:8px;padding:12px 16px;font-size:0.85em;color:#999;margin-bottom:4px;" id="avaliacaoScoreValor">Processo ainda não avaliado. Responda as perguntas abaixo.</div>`;
+  }
+  
+  if (!id) {
+    container.innerHTML = '<p style="font-size:0.9em;color:#999;padding:16px 0;">Salve o processo primeiro para poder avaliar.</p>';
+    return;
+  }
+  
+  const OPCOES_RESPOSTA = window.configRespostas || {
+    'Geral': [
+      {valor:'4',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},
+      {valor:'2',label:'Acontece com alguma frequência',cor:'#f57c00',background:'#fff3e0'},
+      {valor:'1',label:'Acontece raramente',cor:'#2e7d32',background:'#e8f5e9'},
+      {valor:'0',label:'Nunca aconteceu',cor:'#757575',background:'#f5f5f5'}
+    ],
+    '_default': [
+      {valor:'4',label:'Alto (4)',cor:'#c62828',background:'#ffebee'},
+      {valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},
+      {valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},
+      {valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}
+    ]
+  };
+  
+  const CAT_CORES_PALETTE = ['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1b9a','#00695c','#1565c0','#4e342e','#558b2f'];
+  const CAT_CORES = {};
+  [...new Set(window.processosPerguntas.map(pg => pg.categoria))].forEach((c, i) => {
+    CAT_CORES[c] = CAT_CORES_PALETTE[i % CAT_CORES_PALETTE.length];
+  });
+  
+  const pergsOrdenadas = [
+    ...window.processosPerguntas.filter(pg => pg.categoria === 'Geral'),
+    ...window.processosPerguntas.filter(pg => pg.categoria !== 'Geral'),
+  ];
+  const gruposCats = [];
+  const vistosCats = {};
+  pergsOrdenadas.forEach(pg => { if (!vistosCats[pg.categoria]) { vistosCats[pg.categoria] = true; gruposCats.push(pg.categoria); } });
+  
+  container.innerHTML = gruposCats.map(cat => {
+    const cor = CAT_CORES[cat] || '#555';
+    const itensCat = pergsOrdenadas.filter(pg => pg.categoria === cat);
+    return `<div style="margin-bottom:20px;">
+      <div style="background:${cor};color:white;padding:8px 16px;border-radius:7px 7px 0 0;font-size:0.8em;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">${cat}</div>
+      <div style="border:1.5px solid ${cor};border-top:none;border-radius:0 0 7px 7px;overflow:hidden;">
+        ${itensCat.map(perg => {
+          const i = window.processosPerguntas.indexOf(perg);
+          return `<div style="padding:20px 24px;background:#fafafa;border-bottom:1px solid #f0f0f0;">
+            <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${perg.pergunta}</div>
+            <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+              ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default']).slice().sort((a,b) => Number(b.valor) - Number(a.valor)).map(op => {
+                const opCor = (op.cor && op.cor !== 'undefined') ? op.cor : ({'4':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'}[String(op.valor)] || '#555');
+                const opBg = (op.background && op.background !== 'undefined') ? op.background : ({'4':'#ffebee','2':'#fff3e0','1':'#e8f5e9','0':'#f5f5f5'}[String(op.valor)] || '#f5f5f5');
+                return `
+                <label style="display:flex;align-items:flex-start;padding:12px 14px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer;min-height:56px;">
+                  <input type="radio" name="avalInline${i}" value="${op.valor}" data-cor="${opCor}" data-bg="${opBg}" data-label="${op.label}" onchange="calcularScoreInline();atualizarEstiloOpcoes(this);" style="margin-right:8px;margin-top:2px;width:15px;height:15px;flex-shrink:0;">
+                  <span style="color:${opCor};font-weight:600;font-size:0.85em;line-height:1.4;">${op.label}</span>
+                </label>`;}).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }).join('');
+  
+  // Pré-selecionar respostas anteriores
+  if (p && p.respostas && Object.keys(p.respostas).length > 0) {
+    window.processosPerguntas.forEach((perg, i) => {
+      const val = p.respostas[perg.pergunta];
+      if (val !== undefined) {
+        const radio = document.querySelector(`input[name="avalInline${i}"][value="${val}"]`);
+        if (radio) {
+          radio.checked = true;
+          atualizarEstiloOpcoes(radio);
+        }
+      }
+    });
+  }
+  calcularScoreInline();
+};
+
+window.calcularScoreInline = () => {
+  let total = 0;
+  const pergs = window.processosPerguntas || [];
+  pergs.forEach((pg, i) => {
+    const sel = document.querySelector(`input[name="avalInline${i}"]:checked`);
+    if (sel) total += Number(sel.value);
+  });
+  // Atualizar resumo de score
+  const resumoContainer = document.getElementById('avaliacaoScoreResumo');
+  if (resumoContainer && total > 0) {
+    const cor = total >= 12 ? '#c62828' : total >= 6 ? '#f57c00' : '#1565c0';
+    const tier = total >= 12 ? 'Tier 1 (Crítico)' : total >= 6 ? 'Tier 2 (Essencial)' : 'Tier 3 (Suporte)';
+    resumoContainer.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;">
+      <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
+        <div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div>
+        <div style="font-size:1.8em;font-weight:700;color:${cor};" id="avaliacaoScoreValor">${total}</div>
+      </div>
+      <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
+        <div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div>
+        <div style="font-size:0.95em;font-weight:700;" id="avaliacaoTierValor"><span style="background:${cor};color:white;padding:4px 12px;border-radius:12px;">${tier}</span></div>
+      </div>
+    </div>`;
+  }
+  // Salvar respostas para incluir no salvarProcesso
+  window._avaliacaoRespostas = {};
+  pergs.forEach((pg, i) => {
+    const sel = document.querySelector(`input[name="avalInline${i}"]:checked`);
+    if (sel) window._avaliacaoRespostas[pg.pergunta] = Number(sel.value);
+  });
+  window._avaliacaoScore = total;
 };
 
 // ============================================================
@@ -153,13 +293,89 @@ window.trocarAbaProcesso = (aba) => {
 window._bcpContatos = []; // IDs das dependências selecionadas
 
 function popularSelectContatosBcp() {
+  // Mantido para compatibilidade, mas agora usamos busca
   const select = document.getElementById('bcpContatoSelect');
+  if (!select) return;
   const catalogo = window.dependenciasCatalogo || [];
   const selecionados = window._bcpContatos || [];
   const disponiveis = catalogo.filter(d => !selecionados.includes(d.id));
-  select.innerHTML = '<option value="">Selecione uma dependência para adicionar...</option>' +
+  select.innerHTML = '<option value=""></option>' +
     disponiveis.map(d => `<option value="${d.id}">${d.nome} (${d.categoria})</option>`).join('');
 }
+
+window.mostrarDropdownContatoBcp = () => {
+  const input = document.getElementById('bcpContatoBusca');
+  const dropdown = document.getElementById('bcpContatoDropdown');
+  if (!input || !dropdown) return;
+  
+  const catalogo = window.dependenciasCatalogo || [];
+  const selecionados = window._bcpContatos || [];
+  const filtro = input.value.toLowerCase();
+  
+  const disponiveis = catalogo.filter(d => 
+    !selecionados.includes(d.id) &&
+    (filtro === '' || 
+     d.nome.toLowerCase().includes(filtro) || 
+     (d.categoria || '').toLowerCase().includes(filtro) ||
+     (d.setor || '').toLowerCase().includes(filtro) ||
+     (d.empresa || '').toLowerCase().includes(filtro) ||
+     (d.detalhes || '').toLowerCase().includes(filtro))
+  );
+  
+  if (!disponiveis.length) {
+    dropdown.innerHTML = '<div style="padding:10px 14px;font-size:0.88em;color:#999;">Nenhum resultado encontrado.</div>';
+    dropdown.style.display = 'block';
+    return;
+  }
+  
+  // Agrupar por categoria
+  const grupos = {};
+  disponiveis.forEach(d => {
+    if (!grupos[d.categoria]) grupos[d.categoria] = [];
+    grupos[d.categoria].push(d);
+  });
+  
+  let html = '';
+  Object.entries(grupos).sort((a,b) => a[0].localeCompare(b[0])).forEach(([cat, itens]) => {
+    html += `<div style="padding:6px 12px 3px;font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;background:#fafafa;">${cat}</div>`;
+    itens.forEach(d => {
+      const info = [d.setor, d.empresa].filter(Boolean).join(' • ');
+      html += `<div class="bcp-contato-option" onmousedown="adicionarContatoBcpById(${d.id})" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
+        <div style="font-weight:600;color:#222;">${d.nome}</div>
+        ${info ? `<div style="font-size:0.82em;color:#888;margin-top:2px;">${info}</div>` : ''}
+      </div>`;
+    });
+  });
+  
+  dropdown.innerHTML = html;
+  dropdown.style.display = 'block';
+  
+  dropdown.querySelectorAll('.bcp-contato-option').forEach(el => {
+    el.addEventListener('mouseenter', () => el.style.background = '#f0f4ff');
+    el.addEventListener('mouseleave', () => el.style.background = 'transparent');
+  });
+};
+
+window.adicionarContatoBcpById = (id) => {
+  if (!window._bcpContatos.includes(id)) {
+    window._bcpContatos.push(id);
+    renderContatosBcp();
+    popularSelectContatosBcp();
+  }
+  const input = document.getElementById('bcpContatoBusca');
+  const dropdown = document.getElementById('bcpContatoDropdown');
+  if (input) input.value = '';
+  if (dropdown) dropdown.style.display = 'none';
+};
+
+// Fechar dropdown ao clicar fora
+document.addEventListener('click', (e) => {
+  const dropdown = document.getElementById('bcpContatoDropdown');
+  const input = document.getElementById('bcpContatoBusca');
+  if (dropdown && input && !input.contains(e.target) && !dropdown.contains(e.target)) {
+    dropdown.style.display = 'none';
+  }
+});
 
 window.adicionarContatoBcp = () => {
   const select = document.getElementById('bcpContatoSelect');
@@ -183,37 +399,39 @@ function renderContatosBcp() {
   const catalogo = window.dependenciasCatalogo || [];
   const contatos = window._bcpContatos.map(id => catalogo.find(d => d.id === id)).filter(Boolean);
 
-  if (!contatos.length) {
-    container.innerHTML = '<p style="font-size:0.85em;color:#999;padding:12px 0;">Nenhum contato adicionado.</p>';
-    return;
+  let rows = '';
+  if (contatos.length) {
+    rows = contatos.map(d => `<tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:12px 14px;font-weight:600;color:#222;">${d.nome || '-'}</td>
+          <td style="padding:12px 14px;color:#555;">${d.empresa || '-'}</td>
+          <td style="padding:12px 14px;color:#555;">${d.setor || '-'}</td>
+          <td style="padding:12px 14px;color:#555;">${d.detalhes || '-'}</td>
+          <td style="padding:12px 14px;color:#555;">${d.telefone || '-'}</td>
+          <td style="padding:12px 14px;color:#555;">${d.email || '-'}</td>
+          <td style="padding:12px 6px;text-align:center;">
+            <button onclick="editarContatoBcp(${d.id})" style="background:none;border:none;cursor:pointer;color:#1a237e;font-size:0.9em;margin-right:4px;" title="Editar">✎</button>
+            <button onclick="removerContatoBcp(${d.id})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
+          </td>
+        </tr>`).join('');
+  } else {
+    rows = `<tr><td colspan="7" style="padding:16px 14px;color:#999;font-size:0.9em;text-align:center;">Nenhum contato adicionado. Use o campo abaixo para buscar e adicionar.</td></tr>`;
   }
 
   container.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;font-size:0.85em;border:1px solid #e0e0e0;border-radius:7px;overflow:hidden;">
+    <table style="width:100%;border-collapse:collapse;font-size:0.88em;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;">
       <thead>
         <tr style="background:#f5f6fa;">
-          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">Nome</th>
-          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">Papel</th>
-          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">Setor</th>
-          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">Telefone</th>
-          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">E-mail</th>
-          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;">Endereço</th>
-          <th style="padding:8px 6px;text-align:center;border-bottom:1px solid #e0e0e0;width:40px;"></th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Nome</th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Empresa</th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Setor</th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Papel na Crise</th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Telefone</th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">E-mail</th>
+          <th style="padding:11px 6px;text-align:center;border-bottom:1.5px solid #e0e0e0;width:50px;"></th>
         </tr>
       </thead>
       <tbody>
-        ${contatos.map(d => `<tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:8px 10px;font-weight:600;color:#222;">${d.nome}</td>
-          <td style="padding:8px 10px;color:#555;">${d.detalhes || '-'}</td>
-          <td style="padding:8px 10px;color:#555;">${d.setor || '-'}</td>
-          <td style="padding:8px 10px;color:#555;">${d.telefone || '-'}</td>
-          <td style="padding:8px 10px;color:#555;">${d.email || '-'}</td>
-          <td style="padding:8px 10px;color:#555;">${d.endereco || '-'}</td>
-          <td style="padding:8px 6px;text-align:center;">
-            <button onclick="editarContatoBcp(${d.id})" style="background:none;border:none;cursor:pointer;color:#ff6b35;font-size:0.9em;margin-right:4px;" title="Editar">✎</button>
-            <button onclick="removerContatoBcp(${d.id})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
-          </td>
-        </tr>`).join('')}
+        ${rows}
       </tbody>
     </table>`;
 }
@@ -659,6 +877,7 @@ async function processos() {
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
         <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
           <button id="tab-identificacao" onclick="trocarAbaProcesso('identificacao')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Identificação</button>
+          <button id="tab-avaliacao" onclick="trocarAbaProcesso('avaliacao')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Avaliação</button>
           <button id="tab-bia" onclick="trocarAbaProcesso('bia')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BIA</button>
           <button id="tab-bcp" onclick="trocarAbaProcesso('bcp')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BCP</button>
           <button id="tab-drp" onclick="trocarAbaProcesso('drp')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">DRP</button>
@@ -688,14 +907,14 @@ async function processos() {
             </div>
           </div>
 
+          <!-- ABA: AVALIAÇÃO -->
+          <div id="painel-avaliacao" style="display:none;">
+            <div id="avaliacaoScoreResumo" style="margin-bottom:20px;"></div>
+            <div id="avaliacaoPerguntas"></div>
+          </div>
+
           <!-- ABA: BIA -->
           <div id="painel-bia" style="display:none;">
-            <div id="fBiaScoreInfo" style="margin-bottom:20px;"></div>
-            <div id="fBiaAvaliarBtn" style="margin-bottom:20px;display:none;">
-              <button class="btn btn-primary" onclick="avaliarProcessoFromBia()" style="width:100%;padding:12px;font-size:0.92em;">
-                📋 Avaliar / Editar Avaliação
-              </button>
-            </div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Status</label>
               <select id="fBiaHomologada" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
@@ -710,55 +929,11 @@ async function processos() {
               <textarea id="fDescricao" rows="3" placeholder="Descreva o impacto caso o processo fique indisponível" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
             </div>
             <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Dependências Críticas</label>
-              <div id="fDependenciaContainer" style="position:relative;">
-                <div id="fDependenciaTags" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;min-height:40px;cursor:text;transition:border-color 0.2s;background:white;" onclick="document.getElementById('fDependenciaInput').focus()">
-                  <input type="text" id="fDependenciaInput" placeholder="Digite para buscar ou adicionar..." autocomplete="off" style="border:none;outline:none;font-size:0.9em;flex:1;min-width:180px;padding:2px 4px;">
-                </div>
-                <div id="fDependenciaDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 7px 7px;max-height:220px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
-              </div>
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Dependências Críticas</label>
+              <div id="fDependenciaTabela"></div>
               <input type="hidden" id="fDependencia">
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
-                <input type="text" id="fRTO" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-                <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Tempo de Recuperação</span>
-              </div>
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
-                <input type="text" id="fRPO" placeholder="Ex: 24 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-                <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Ponto de Recuperação</span>
-              </div>
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">MTPD</label>
-                <input type="text" id="fMTPD" placeholder="Ex: 30 minutos" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-                <span style="font-size:0.75em;color:#888;margin-top:3px;display:block;">Máx. Indisponibilidade</span>
-              </div>
-            </div>
-            <div style="margin-bottom:20px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Impacto da Indisponibilidade</label>
-              <p style="font-size:0.78em;color:#888;margin-bottom:8px;">Descreva o impacto em cada dimensão para diferentes períodos de indisponibilidade. Use Tab para navegar entre células.</p>
-              <table id="tabelaImpacto" style="width:100%;border-collapse:separate;border-spacing:0;font-size:0.88em;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;">
-                <thead>
-                  <tr style="background:linear-gradient(135deg,#e8eaf6,#f5f6fa);">
-                    <th style="padding:10px 12px;text-align:left;border-bottom:2px solid #c5cae9;color:#1a237e;font-weight:700;width:28%;">Dimensão</th>
-                    <th style="padding:10px 6px;text-align:center;border-bottom:2px solid #c5cae9;border-left:1px solid #e0e0e0;width:24%;"><input id="impactoCol0" type="text" value="1h" style="width:100%;border:none;background:transparent;text-align:center;font-weight:700;color:#1a237e;font-size:0.95em;cursor:text;" title="Clique para editar o período"></th>
-                    <th style="padding:10px 6px;text-align:center;border-bottom:2px solid #c5cae9;border-left:1px solid #e0e0e0;width:24%;"><input id="impactoCol1" type="text" value="4h" style="width:100%;border:none;background:transparent;text-align:center;font-weight:700;color:#1a237e;font-size:0.95em;cursor:text;" title="Clique para editar o período"></th>
-                    <th style="padding:10px 6px;text-align:center;border-bottom:2px solid #c5cae9;border-left:1px solid #e0e0e0;width:24%;"><input id="impactoCol2" type="text" value="24h" style="width:100%;border:none;background:transparent;text-align:center;font-weight:700;color:#1a237e;font-size:0.95em;cursor:text;" title="Clique para editar o período"></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${['Operacional','Reputacional','Financeiro','Legal/regulatório'].map((linha, idx) => `
-                  <tr class="impacto-row" style="${idx < 3 ? 'border-bottom:1px solid #f0f0f0;' : ''}">
-                    <td style="padding:10px 12px;color:#333;font-weight:600;font-size:0.9em;background:#fafbfc;border-right:1px solid #e8eaf6;">${linha}</td>
-                    <td class="impacto-cell" style="padding:3px;border-left:1px solid #f0f0f0;"><textarea data-linha="${linha}" data-col="0" placeholder="Descreva o impacto..." rows="2" style="width:100%;min-height:44px;border:1.5px solid transparent;border-radius:5px;padding:8px 10px;text-align:left;font-size:0.88em;box-sizing:border-box;resize:none;overflow:hidden;font-family:inherit;line-height:1.4;transition:border-color 0.2s,background 0.2s;background:#fff;" onfocus="this.style.borderColor='#1a237e';this.style.background='#f8f9ff';" onblur="this.style.borderColor='transparent';this.style.background='#fff';" oninput="this.style.height='auto';this.style.height=Math.max(44,this.scrollHeight)+'px'"></textarea></td>
-                    <td class="impacto-cell" style="padding:3px;border-left:1px solid #f0f0f0;"><textarea data-linha="${linha}" data-col="1" placeholder="Descreva o impacto..." rows="2" style="width:100%;min-height:44px;border:1.5px solid transparent;border-radius:5px;padding:8px 10px;text-align:left;font-size:0.88em;box-sizing:border-box;resize:none;overflow:hidden;font-family:inherit;line-height:1.4;transition:border-color 0.2s,background 0.2s;background:#fff;" onfocus="this.style.borderColor='#1a237e';this.style.background='#f8f9ff';" onblur="this.style.borderColor='transparent';this.style.background='#fff';" oninput="this.style.height='auto';this.style.height=Math.max(44,this.scrollHeight)+'px'"></textarea></td>
-                    <td class="impacto-cell" style="padding:3px;border-left:1px solid #f0f0f0;"><textarea data-linha="${linha}" data-col="2" placeholder="Descreva o impacto..." rows="2" style="width:100%;min-height:44px;border:1.5px solid transparent;border-radius:5px;padding:8px 10px;text-align:left;font-size:0.88em;box-sizing:border-box;resize:none;overflow:hidden;font-family:inherit;line-height:1.4;transition:border-color 0.2s,background 0.2s;background:#fff;" onfocus="this.style.borderColor='#1a237e';this.style.background='#f8f9ff';" onblur="this.style.borderColor='transparent';this.style.background='#fff';" oninput="this.style.height='auto';this.style.height=Math.max(44,this.scrollHeight)+'px'"></textarea></td>
-                  </tr>`).join('')}
-                </tbody>
-              </table>
-            </div>
+
           </div>
 
           <!-- ABA: BCP -->
@@ -773,23 +948,16 @@ async function processos() {
               </select>
             </div>
             <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Objetivo</label>
-              <textarea id="fBcpObjetivo" rows="4" placeholder="Descreva o objetivo do plano de continuidade para este processo" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Escopo</label>
-              <textarea id="fBcpEscopo" rows="4" placeholder="Defina o escopo de atuação do plano de continuidade" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Informações de Contato e Responsabilidades</label>
-              <div style="display:flex;gap:8px;margin-bottom:10px;">
-                <select id="bcpContatoSelect" style="flex:1;padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;">
-                  <option value="">Selecione uma dependência para adicionar...</option>
-                </select>
-                <button class="btn btn-primary" onclick="adicionarContatoBcp()" style="padding:8px 16px;font-size:0.85em;white-space:nowrap;">+ Adicionar</button>
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Informações de Contato e Matriz de Responsabilidade</label>
+              <div id="bcpContatosTabela"></div>
+              <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
+                <div style="flex:1;position:relative;">
+                  <input type="text" id="bcpContatoBusca" placeholder="Buscar contato por nome, setor ou categoria..." autocomplete="off" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;" onfocus="mostrarDropdownContatoBcp()" oninput="mostrarDropdownContatoBcp()">
+                  <div id="bcpContatoDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 7px 7px;max-height:220px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
+                </div>
                 <button class="btn btn-ghost" onclick="abrirModalDepBcp()" style="padding:8px 14px;font-size:0.85em;white-space:nowrap;" title="Criar nova dependência">+ Novo</button>
               </div>
-              <div id="bcpContatosTabela"></div>
+              <select id="bcpContatoSelect" style="display:none;"><option value=""></option></select>
               <div class="modal-overlay" id="modalDepBcp"><div class="modal" onclick="event.stopPropagation()" style="max-width:540px;">
                 <h3 id="modalDepBcpTitulo">Nova Dependência</h3>
                 <input type="hidden" id="depBcpId">
@@ -806,7 +974,7 @@ async function processos() {
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
                   <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Papel</label>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Papel na Crise</label>
                     <input type="text" id="depBcpDetalhes" placeholder="Ex: Coordenador do Plano" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
                   </div>
                   <div>
@@ -814,39 +982,26 @@ async function processos() {
                     <input type="text" id="depBcpSetor" placeholder="Ex: TI" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
                   </div>
                 </div>
-                <div style="margin-bottom:12px;">
-                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Empresa</label>
-                  <input type="text" id="depBcpEmpresa" placeholder="Ex: Fortes Tecnologia" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
                   <div>
                     <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Telefone</label>
                     <input type="text" id="depBcpTelefone" placeholder="(00) 0000-0000" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
                   </div>
                   <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Email</label>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">E-mail</label>
                     <input type="email" id="depBcpEmail" placeholder="email@empresa.com" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
                   </div>
                 </div>
                 <div style="margin-bottom:12px;">
-                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Endereço</label>
-                  <input type="text" id="depBcpEndereco" placeholder="Endereço ou localização" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Empresa</label>
+                  <input type="text" id="depBcpEmpresa" placeholder="Ex: Fortes Tecnologia" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
                 </div>
+                <input type="hidden" id="depBcpEndereco">
                 <div class="modal-footer">
                   <button class="btn btn-ghost" onclick="fecharModalDepBcp()">Cancelar</button>
                   <button class="btn btn-primary" onclick="salvarDepBcp()">Salvar</button>
                 </div>
               </div></div>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Avaliação de Riscos</label>
-              <div id="bcpRiscosTabela"></div>
-              <button class="btn btn-ghost" onclick="adicionarRiscoBcp()" style="margin-top:8px;font-size:0.85em;">+ Adicionar Evento</button>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Medidas Preventivas</label>
-              <div id="bcpPreventivasTabela"></div>
-              <button class="btn btn-ghost" onclick="adicionarPreventivaBcp()" style="margin-top:8px;font-size:0.85em;">+ Adicionar Controle</button>
             </div>
           </div>
 
@@ -862,20 +1017,63 @@ async function processos() {
               </select>
             </div>
             <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Objetivo</label>
-              <textarea id="fDrpObjetivo" rows="4" placeholder="Descreva o objetivo do plano de recuperação de desastres" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Escopo</label>
-              <textarea id="fDrpEscopo" rows="4" placeholder="Defina o escopo do plano de recuperação de desastres" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Procedimentos de Recuperação</label>
-              <textarea id="fDrpProcedimentos" rows="5" placeholder="Descreva os procedimentos de recuperação em caso de desastre" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Critérios de Ativação</label>
-              <textarea id="fDrpCriterios" rows="3" placeholder="Defina os critérios para ativação do plano de recuperação" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;font-family:inherit;"></textarea>
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Componentes do Serviço</label>
+              <div id="drpComponentesTabela"></div>
+              <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
+                <div style="flex:1;position:relative;">
+                  <input type="text" id="drpComponenteBusca" placeholder="Buscar componente por nome, tipo ou descrição..." autocomplete="off" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;" onfocus="mostrarDropdownComponenteDrp()" oninput="mostrarDropdownComponenteDrp()">
+                  <div id="drpComponenteDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 7px 7px;max-height:220px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
+                </div>
+                <button class="btn btn-ghost" onclick="abrirModalCompDrp()" style="padding:8px 14px;font-size:0.85em;white-space:nowrap;" title="Criar novo componente">+ Novo</button>
+              </div>
+              <div class="modal-overlay" id="modalCompDrp"><div class="modal" onclick="event.stopPropagation()" style="max-width:540px;">
+                <h3 id="modalCompDrpTitulo">Novo Componente</h3>
+                <input type="hidden" id="compDrpId">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
+                  <div>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Tipo</label>
+                    <input type="text" id="compDrpTipo" list="compDrpTipoList" placeholder="Ex: Servidor, Banco de Dados" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                    <datalist id="compDrpTipoList"></datalist>
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Nome</label>
+                    <input type="text" id="compDrpNome" placeholder="Ex: SQL Server Produção" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                  </div>
+                </div>
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Descrição</label>
+                  <input type="text" id="compDrpDescricao" placeholder="Descrição do componente" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
+                  <div>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">RTO</label>
+                    <input type="text" id="compDrpRto" placeholder="Ex: 4 horas" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                  </div>
+                  <div>
+                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">RPO</label>
+                    <input type="text" id="compDrpRpo" placeholder="Ex: 1 hora" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                  </div>
+                </div>
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Estratégia de Backup</label>
+                  <select id="compDrpEstrategia" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;">
+                    <option value="">Selecione...</option>
+                    <option value="Backup & Restore">Backup & Restore (Restaurar ambiente a partir de backups)</option>
+                    <option value="Cold Site">Cold Site (Local alternativo sem infraestrutura ativa)</option>
+                    <option value="Warm Standby">Warm Standby (Infraestrutura parcialmente pronta)</option>
+                    <option value="Active-Passive">Active-Passive (Ambiente secundário pronto para assumir)</option>
+                    <option value="Active-Active">Active-Active (Dois ou mais ambientes ativos simultaneamente)</option>
+                  </select>
+                </div>
+                <div style="margin-bottom:12px;">
+                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Responsável</label>
+                  <input type="text" id="compDrpResponsavel" placeholder="Responsável pelo componente" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+                </div>
+                <div class="modal-footer">
+                  <button class="btn btn-ghost" onclick="fecharModalCompDrp()">Cancelar</button>
+                  <button class="btn btn-primary" onclick="salvarCompDrp()">Salvar</button>
+                </div>
+              </div></div>
             </div>
           </div>
         </div>
@@ -890,6 +1088,7 @@ async function processos() {
   window.processosPerguntas = perguntas.filter(p => p.ativa);
   try { window.configRespostas = await API.getConfigRespostas(); } catch(e) { window.configRespostas = null; }
   try { window.dependenciasCatalogo = await API.getDependencias(); } catch(e) { window.dependenciasCatalogo = []; }
+  try { window.componentesCatalogo = await API.getComponentes(); } catch(e) { window.componentesCatalogo = []; }
   
   // Preencher filtro de áreas
   const filtroArea = document.getElementById('filtroArea');
@@ -1080,121 +1279,139 @@ window.ordenarProcessos = (coluna) => {
 window._dependenciaSelecionadas = [];
 
 function initDependenciaTags(valorAtual) {
-  const container = document.getElementById('fDependenciaTags');
-  const input = document.getElementById('fDependenciaInput');
-  const dropdown = document.getElementById('fDependenciaDropdown');
-  
   // Parsear valor atual (string separada por vírgula)
   window._dependenciaSelecionadas = valorAtual 
     ? valorAtual.split(',').map(s => s.trim()).filter(Boolean) 
     : [];
   
-  renderDependenciaTags();
-  
-  // Focus style
-  input.addEventListener('focus', () => {
-    container.style.borderColor = '#1a237e';
-    container.style.boxShadow = '0 0 0 3px rgba(26,35,126,0.08)';
-    mostrarDropdownDependencia('');
-  });
-  input.addEventListener('blur', () => {
-    setTimeout(() => {
-      container.style.borderColor = '#e0e0e0';
-      container.style.boxShadow = 'none';
-      dropdown.style.display = 'none';
-    }, 200);
-  });
-  
-  // Filtrar ao digitar
-  input.addEventListener('input', () => {
-    mostrarDropdownDependencia(input.value);
-  });
-  
-  // Teclas especiais
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      const val = input.value.trim();
-      if (val && !window._dependenciaSelecionadas.includes(val)) {
-        window._dependenciaSelecionadas.push(val);
-        // Adicionar ao catálogo se não existir
-        const existe = (window.dependenciasCatalogo || []).some(d => d.nome.toLowerCase() === val.toLowerCase());
-        if (!existe) {
-          API.salvarDependencia({ categoria: 'Outros', nome: val }).then(r => {
-            window.dependenciasCatalogo.push({ id: r.id, categoria: 'Outros', nome: val });
-            API.invalidate('getDependencias');
-          });
-        }
-        renderDependenciaTags();
-      }
-      input.value = '';
-      dropdown.style.display = 'none';
-    } else if (e.key === 'Backspace' && !input.value && window._dependenciaSelecionadas.length) {
-      window._dependenciaSelecionadas.pop();
-      renderDependenciaTags();
-    } else if (e.key === 'Escape') {
-      dropdown.style.display = 'none';
-      input.blur();
-    }
-  });
+  renderDependenciaTabela();
 }
 
 function renderDependenciaTags() {
-  const container = document.getElementById('fDependenciaTags');
-  const input = document.getElementById('fDependenciaInput');
-  // Remover tags existentes (manter apenas o input)
-  container.querySelectorAll('.dep-tag').forEach(el => el.remove());
-  // Renderizar tags antes do input
-  window._dependenciaSelecionadas.forEach((nome, idx) => {
-    const tag = document.createElement('span');
-    tag.className = 'dep-tag';
-    tag.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#e8eaf6;color:#1a237e;padding:3px 8px 3px 10px;border-radius:14px;font-size:0.82em;font-weight:500;white-space:nowrap;';
-    tag.innerHTML = `${nome}<button onclick="removerDependenciaTag(${idx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:#666;line-height:1;padding:0 2px;">&times;</button>`;
-    container.insertBefore(tag, input);
-  });
-  // Atualizar hidden input
+  // Atualizar hidden input e re-renderizar tabela
   document.getElementById('fDependencia').value = window._dependenciaSelecionadas.join(', ');
+  renderDependenciaTabela();
 }
 
-window.removerDependenciaTag = (idx) => {
-  window._dependenciaSelecionadas.splice(idx, 1);
-  renderDependenciaTags();
-};
-
-function mostrarDropdownDependencia(filtro) {
-  const dropdown = document.getElementById('fDependenciaDropdown');
+function renderDependenciaTabela() {
+  const tabelaContainer = document.getElementById('fDependenciaTabela');
+  if (!tabelaContainer) return;
   const catalogo = window.dependenciasCatalogo || [];
-  const filtroLower = filtro.toLowerCase();
+  const selecionadas = window._dependenciaSelecionadas || [];
   
-  // Filtrar itens não selecionados e que correspondem ao filtro
+  // Obter categorias do catálogo
+  const categoriasSet = new Set(catalogo.map(d => d.categoria));
+  // Adicionar categorias das dependências selecionadas que podem não estar no catálogo
+  selecionadas.forEach(nome => {
+    const dep = catalogo.find(d => d.nome === nome);
+    if (dep) categoriasSet.add(dep.categoria);
+  });
+  const categorias = [...categoriasSet].sort();
+  
+  if (!categorias.length) {
+    tabelaContainer.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhuma dependência cadastrada no catálogo.</p>';
+    return;
+  }
+  
+  // Agrupar selecionadas por categoria
+  const grupos = {};
+  categorias.forEach(cat => { grupos[cat] = []; });
+  selecionadas.forEach(nome => {
+    const dep = catalogo.find(d => d.nome === nome);
+    const cat = dep ? dep.categoria : 'Outros';
+    if (!grupos[cat]) grupos[cat] = [];
+    grupos[cat].push(nome);
+  });
+  
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
+    <thead>
+      <tr>
+        <th style="padding:12px 0;text-align:left;font-weight:600;color:#555;font-size:0.82em;border-bottom:1.5px solid #e0e0e0;width:28%;">Tipo de Dependência</th>
+        <th style="padding:12px 0 12px 20px;text-align:left;font-weight:600;color:#555;font-size:0.82em;border-bottom:1.5px solid #e0e0e0;">Recursos Necessários para Continuidade</th>
+      </tr>
+    </thead>
+    <tbody>`;
+  
+  categorias.forEach((cat) => {
+    const recursos = grupos[cat] || [];
+    const tags = recursos.map((nome, idx) => {
+      const globalIdx = selecionadas.indexOf(nome);
+      return `<span style="display:inline-flex;align-items:center;gap:3px;background:#e8eaf6;color:#1a237e;padding:2px 8px 2px 10px;border-radius:12px;font-size:0.85em;font-weight:500;white-space:nowrap;">${nome}<button onclick="removerDependenciaTag(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:#666;line-height:1;padding:0 2px;" title="Remover">&times;</button></span>`;
+    }).join(' ');
+    
+    html += `
+      <tr>
+        <td style="padding:14px 0;color:#222;font-weight:600;font-size:0.92em;vertical-align:top;border-bottom:1px solid #f0f0f0;">${cat}</td>
+        <td style="padding:10px 0 10px 20px;color:#444;font-size:0.9em;line-height:1.8;border-bottom:1px solid #f0f0f0;vertical-align:middle;">
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
+            ${tags}
+            <div style="position:relative;flex:1;min-width:160px;">
+              <input type="text" class="dep-cat-input" data-categoria="${cat}" placeholder="Adicionar..." autocomplete="off" style="border:none;border-bottom:1px solid #e0e0e0;outline:none;font-size:0.9em;padding:4px 2px;width:100%;background:transparent;" onfocus="mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" oninput="mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" onblur="setTimeout(()=>{const dd=this.parentElement.querySelector('.dep-cat-dropdown');if(dd)dd.style.display='none';},200)">
+              <div class="dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:180px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
+            </div>
+          </div>
+        </td>
+      </tr>`;
+  });
+  
+  html += `</tbody></table>`;
+  tabelaContainer.innerHTML = html;
+  
+  // Atualizar hidden input
+  document.getElementById('fDependencia').value = selecionadas.join(', ');
+  
+  // Adicionar listener de Enter nos inputs
+  tabelaContainer.querySelectorAll('.dep-cat-input').forEach(input => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const val = input.value.trim();
+        const cat = input.dataset.categoria;
+        if (val && !window._dependenciaSelecionadas.includes(val)) {
+          window._dependenciaSelecionadas.push(val);
+          const existe = (window.dependenciasCatalogo || []).some(d => d.nome.toLowerCase() === val.toLowerCase());
+          if (!existe) {
+            API.salvarDependencia({ categoria: cat, nome: val }).then(r => {
+              window.dependenciasCatalogo.push({ id: r.id, categoria: cat, nome: val });
+              API.invalidate('getDependencias');
+            });
+          }
+          renderDependenciaTabela();
+        }
+        input.value = '';
+      } else if (e.key === 'Escape') {
+        const dd = input.parentElement.querySelector('.dep-cat-dropdown');
+        if (dd) dd.style.display = 'none';
+        input.blur();
+      }
+    });
+  });
+}
+
+window.mostrarDropdownCategoria = (input, categoria) => {
+  const dropdown = input.parentElement.querySelector('.dep-cat-dropdown');
+  if (!dropdown) return;
+  const catalogo = window.dependenciasCatalogo || [];
+  const filtro = input.value.toLowerCase();
+  
   const disponiveis = catalogo.filter(d => 
+    d.categoria === categoria &&
     !window._dependenciaSelecionadas.includes(d.nome) &&
-    (filtroLower === '' || d.nome.toLowerCase().includes(filtroLower) || d.categoria.toLowerCase().includes(filtroLower))
+    (filtro === '' || d.nome.toLowerCase().includes(filtro))
   );
   
-  if (!disponiveis.length && !filtro.trim()) {
+  if (!disponiveis.length && !input.value.trim()) {
     dropdown.style.display = 'none';
     return;
   }
   
-  // Agrupar por categoria
-  const grupos = {};
-  disponiveis.forEach(d => {
-    if (!grupos[d.categoria]) grupos[d.categoria] = [];
-    grupos[d.categoria].push(d);
-  });
-  
   let html = '';
-  Object.entries(grupos).sort((a,b) => a[0].localeCompare(b[0])).forEach(([cat, itens]) => {
-    html += `<div style="padding:6px 12px 3px;font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;background:#fafafa;">${cat}</div>`;
-    itens.forEach(d => {
-      html += `<div class="dep-option" onmousedown="selecionarDependencia('${d.nome.replace(/'/g, "\\'")}')" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">${d.nome}</div>`;
-    });
+  disponiveis.forEach(d => {
+    html += `<div class="dep-option" onmousedown="selecionarDependenciaCategoria('${d.nome.replace(/'/g, "\\'")}')" style="padding:7px 12px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">${d.nome}</div>`;
   });
   
-  // Opção de criar nova se digitou algo que não existe
-  if (filtro.trim() && !catalogo.some(d => d.nome.toLowerCase() === filtroLower)) {
-    html += `<div class="dep-option" onmousedown="selecionarDependencia('${filtro.trim().replace(/'/g, "\\'")}')" style="padding:8px 12px;font-size:0.88em;cursor:pointer;color:#1a237e;font-weight:600;border-top:1px solid #f0f0f0;">+ Adicionar "${filtro.trim()}"</div>`;
+  if (input.value.trim() && !catalogo.some(d => d.nome.toLowerCase() === input.value.trim().toLowerCase())) {
+    html += `<div class="dep-option" onmousedown="adicionarDependenciaCategoria('${input.value.trim().replace(/'/g, "\\'")}','${categoria.replace(/'/g, "\\'")}')" style="padding:7px 12px;font-size:0.88em;cursor:pointer;color:#1a237e;font-weight:600;border-top:1px solid #f0f0f0;">+ Adicionar "${input.value.trim()}"</div>`;
   }
   
   if (!html) {
@@ -1205,28 +1422,36 @@ function mostrarDropdownDependencia(filtro) {
   dropdown.innerHTML = html;
   dropdown.style.display = 'block';
   
-  // Hover style
   dropdown.querySelectorAll('.dep-option').forEach(el => {
     el.addEventListener('mouseenter', () => el.style.background = '#f0f4ff');
     el.addEventListener('mouseleave', () => el.style.background = 'transparent');
   });
-}
+};
 
-window.selecionarDependencia = (nome) => {
+window.selecionarDependenciaCategoria = (nome) => {
   if (!window._dependenciaSelecionadas.includes(nome)) {
     window._dependenciaSelecionadas.push(nome);
-    // Adicionar ao catálogo se não existir
+    renderDependenciaTabela();
+  }
+};
+
+window.adicionarDependenciaCategoria = (nome, categoria) => {
+  if (!window._dependenciaSelecionadas.includes(nome)) {
+    window._dependenciaSelecionadas.push(nome);
     const existe = (window.dependenciasCatalogo || []).some(d => d.nome.toLowerCase() === nome.toLowerCase());
     if (!existe) {
-      API.salvarDependencia({ categoria: 'Outros', nome }).then(r => {
-        window.dependenciasCatalogo.push({ id: r.id, categoria: 'Outros', nome });
+      API.salvarDependencia({ categoria, nome }).then(r => {
+        window.dependenciasCatalogo.push({ id: r.id, categoria, nome });
         API.invalidate('getDependencias');
       });
     }
-    renderDependenciaTags();
+    renderDependenciaTabela();
   }
-  document.getElementById('fDependenciaInput').value = '';
-  document.getElementById('fDependenciaDropdown').style.display = 'none';
+};
+
+window.removerDependenciaTag = (idx) => {
+  window._dependenciaSelecionadas.splice(idx, 1);
+  renderDependenciaTabela();
 };
 
 // ============================================================
@@ -1425,47 +1650,19 @@ window.abrirModalProcesso = (p) => {
   document.getElementById('fDescricaoFuncional').value = p ? (p.descricaoFuncional || '') : '';
   // Preencher tags de dependência
   initDependenciaTags(p ? p.dependencia : '');
-  document.getElementById('fRTO').value = p ? p.rto : '';
-  document.getElementById('fRPO').value = p ? p.rpo : '';
-  document.getElementById('fMTPD').value = p ? p.mtpd : '';
   document.getElementById('fBiaHomologada').value = p ? p.biaHomologada : '';
   const fBcpEl = document.getElementById('fBcpStatus'); if (fBcpEl) fBcpEl.value = p ? (p.bcpStatus || '') : '';
-  document.getElementById('fBcpObjetivo').value = p ? (p.bcpObjetivo || '') : '';
-  document.getElementById('fBcpEscopo').value = p ? (p.bcpEscopo || '') : '';
   // Preencher contatos BCP
   window._bcpContatos = p && p.bcpContatos ? (typeof p.bcpContatos === 'string' ? JSON.parse(p.bcpContatos) : p.bcpContatos) : [];
   renderContatosBcp();
-  // Preencher riscos BCP
-  window._bcpRiscos = p && p.bcpRiscos ? (typeof p.bcpRiscos === 'string' ? JSON.parse(p.bcpRiscos) : p.bcpRiscos) : [];
-  renderRiscosBcp();
-  // Preencher medidas preventivas BCP
-  window._bcpPreventivas = p && p.bcpPreventivas ? (typeof p.bcpPreventivas === 'string' ? JSON.parse(p.bcpPreventivas) : p.bcpPreventivas) : [];
-  renderPreventivasBcp();
 
   // Preencher campos DRP
   document.getElementById('fDrpStatus').value = p ? (p.drpStatus || '') : '';
-  document.getElementById('fDrpObjetivo').value = p ? (p.drpObjetivo || '') : '';
-  document.getElementById('fDrpEscopo').value = p ? (p.drpEscopo || '') : '';
-  document.getElementById('fDrpProcedimentos').value = p ? (p.drpProcedimentos || '') : '';
-  document.getElementById('fDrpCriterios').value = p ? (p.drpCriterios || '') : '';
+  // Preencher componentes DRP
+  window._drpComponentes = p && p.drpComponentes ? (typeof p.drpComponentes === 'string' ? JSON.parse(p.drpComponentes) : p.drpComponentes) : [];
+  renderComponentesDrp();
 
-  // Preencher tabela de impacto
-  const imp = p && p.impactoIndisponibilidade ? p.impactoIndisponibilidade : {};
-  setTimeout(() => {
-    if (imp.colunas) {
-      ['impactoCol0','impactoCol1','impactoCol2'].forEach((id,i) => {
-        const el = document.getElementById(id);
-        if (el && imp.colunas[i] !== undefined) el.value = imp.colunas[i];
-      });
-    }
-    document.querySelectorAll('#tabelaImpacto tbody textarea').forEach(ta => {
-      const linha = ta.dataset.linha;
-      const col = ta.dataset.col;
-      ta.value = (imp.dados && imp.dados[linha] && imp.dados[linha][col] !== undefined) ? imp.dados[linha][col] : '';
-      ta.style.height = 'auto';
-      ta.style.height = Math.max(44, ta.scrollHeight) + 'px';
-    });
-  }, 50);
+
 
   // Preencher Dono do Processo com base na area selecionada
   const atualizarDono = () => {
@@ -1485,28 +1682,13 @@ window.abrirModalProcesso = (p) => {
   document.getElementById('modalTitulo').innerHTML = titulo + scoreHtml;
   document.getElementById('drawerProcesso').classList.add('open');
   document.getElementById('drawerOverlayProcesso').classList.add('open');
+  // Resetar botão salvar
+  const btnSalvar = document.querySelector('#drawerProcesso .drawer-footer .btn-primary');
+  if (btnSalvar) { btnSalvar.disabled = false; btnSalvar.innerHTML = 'Salvar'; btnSalvar.style.opacity = '1'; btnSalvar.style.cursor = 'pointer'; }
   trocarAbaProcesso('identificacao');
-  // Mostrar score/tier na aba BIA
-  const scoreInfo = document.getElementById('fBiaScoreInfo');
-  if (scoreInfo && p && p.score > 0) {
-    const cor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : '#1565c0';
-    const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : 'Tier 3 (Suporte)';
-    scoreInfo.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;">
-      <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
-        <div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div>
-        <div style="font-size:1.8em;font-weight:700;color:${cor};">${p.score}</div>
-      </div>
-      <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
-        <div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div>
-        <div style="font-size:0.95em;font-weight:700;"><span style="background:${cor};color:white;padding:4px 12px;border-radius:12px;">${tier}</span></div>
-      </div>
-    </div>`;
-  } else if (scoreInfo) {
-    scoreInfo.innerHTML = '<div style="background:#f5f6fa;border-radius:8px;padding:12px 16px;font-size:0.85em;color:#999;margin-bottom:4px;">Processo ainda não avaliado.</div>';
-  }
-  // Mostrar botão de avaliar se processo já existe
-  const btnAvaliar = document.getElementById('fBiaAvaliarBtn');
-  if (btnAvaliar) btnAvaliar.style.display = p && p.id ? 'block' : 'none';
+  // Reset avaliação inline
+  window._avaliacaoRespostas = {};
+  window._avaliacaoScore = 0;
   iniciarDrawerResize();
 };
 
@@ -1526,38 +1708,42 @@ window.salvarProcesso = async () => {
     processo: document.getElementById('fProcesso').value.trim(),
     descricao: document.getElementById('fDescricao').value.trim(),
     dependencia: (window._dependenciaSelecionadas || []).join(', '),
-    rto: document.getElementById('fRTO').value.trim(),
-    rpo: document.getElementById('fRPO').value.trim(),
-    mtpd: document.getElementById('fMTPD').value.trim(),
     biaHomologada: document.getElementById('fBiaHomologada').value.trim(),
     bcpStatus: (document.getElementById('fBcpStatus') || {value:''}).value.trim(),
     descricaoFuncional: document.getElementById('fDescricaoFuncional').value.trim(),
-    impactoIndisponibilidade: (() => {
-      const colunas = ['impactoCol0','impactoCol1','impactoCol2'].map(id => document.getElementById(id) ? document.getElementById(id).value : '');
-      const dados = {};
-      document.querySelectorAll('#tabelaImpacto tbody textarea').forEach(ta => {
-        const linha = ta.dataset.linha;
-        const col = ta.dataset.col;
-        if (!dados[linha]) dados[linha] = {};
-        dados[linha][col] = ta.value;
-      });
-      return { colunas, dados };
-    })(),
-    bcpObjetivo: document.getElementById('fBcpObjetivo').value.trim(),
-    bcpEscopo: document.getElementById('fBcpEscopo').value.trim(),
     bcpContatos: window._bcpContatos || [],
-    bcpRiscos: window._bcpRiscos || [],
-    bcpPreventivas: window._bcpPreventivas || [],
     drpStatus: document.getElementById('fDrpStatus').value.trim(),
-    drpObjetivo: document.getElementById('fDrpObjetivo').value.trim(),
-    drpEscopo: document.getElementById('fDrpEscopo').value.trim(),
-    drpProcedimentos: document.getElementById('fDrpProcedimentos').value.trim(),
-    drpCriterios: document.getElementById('fDrpCriterios').value.trim(),
+    drpComponentes: window._drpComponentes || [],
   };
 
   if (!p.area) return showToast('Selecione a área.', '#e65100');
   if (!p.processo) return showToast('Informe o processo.', '#e65100');
   
+  // Prevenir duplicatas: se não tem id, verificar se já existe processo com mesmo nome e área
+  if (!p.id) {
+    const duplicado = (window.processosData || []).find(x => 
+      x.area.toLowerCase() === p.area.toLowerCase() && 
+      x.processo.toLowerCase() === p.processo.toLowerCase()
+    );
+    if (duplicado) {
+      return showToast('Já existe um processo com esse nome nesta área.', '#e65100');
+    }
+  }
+  
+  // Coletar respostas da avaliação inline (se houver)
+  const pergs = window.processosPerguntas || [];
+  const avalScores = {};
+  let avalTotal = 0;
+  let temResposta = false;
+  pergs.forEach((pg, i) => {
+    const sel = document.querySelector(`input[name="avalInline${i}"]:checked`);
+    if (sel) {
+      avalScores[pg.pergunta] = parseInt(sel.value);
+      avalTotal += parseInt(sel.value);
+      temResposta = true;
+    }
+  });
+
   // Desabilitar botão e mostrar loading
   const btnSalvar = document.querySelector('#drawerProcesso .drawer-footer .btn-primary');
   const textoOriginal = btnSalvar ? btnSalvar.innerHTML : '';
@@ -1565,6 +1751,12 @@ window.salvarProcesso = async () => {
 
   try {
     const result = await API.salvarProcesso(p);
+    
+    // Salvar avaliação se respondida
+    if (temResposta) {
+      await API.post('salvarRespostas', { area: p.area, processo: p.processo, scores: avalScores });
+    }
+    
     fecharModal();
     showToast('✅ Salvo!', '#2e7d32');
     // Atualizar localmente sem recarregar do backend
@@ -1573,12 +1765,14 @@ window.salvarProcesso = async () => {
     if (p.id) {
       const idx = window.processosData.findIndex(x => x.id === p.id);
       if (idx !== -1) {
-        pEnriquecido.score = window.processosData[idx].score;
-        pEnriquecido.respostas = window.processosData[idx].respostas;
+        pEnriquecido.score = temResposta ? avalTotal : window.processosData[idx].score;
+        pEnriquecido.respostas = temResposta ? avalScores : window.processosData[idx].respostas;
         window.processosData[idx] = pEnriquecido;
       }
     } else {
       pEnriquecido.id = result.id || Date.now();
+      pEnriquecido.score = temResposta ? avalTotal : 0;
+      pEnriquecido.respostas = temResposta ? avalScores : {};
       window.processosData.push(pEnriquecido);
     }
     renderizarProcessos();
@@ -2114,6 +2308,12 @@ async function admin() {
       </div>
     </div>
 
+    <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);margin-bottom:28px;border-top:4px solid #c62828;">
+      <div style="font-weight:600;color:#333;margin-bottom:6px;">Cobertura dos Processos Críticos (Tier 1)</div>
+      <div style="font-size:0.82em;color:#999;margin-bottom:16px;">Percentual de processos Tier 1 com BIA, BCP e DRP realizados</div>
+      <div id="painelTier1Cobertura"></div>
+    </div>
+
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:28px;">
       <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
         <div style="font-weight:600;color:#333;margin-bottom:16px;">Progresso de Avaliação</div>
@@ -2237,6 +2437,51 @@ async function admin() {
       </table>
     </div>
   `;
+
+  // Popular cobertura Tier 1
+  const coberturaEl = document.getElementById('painelTier1Cobertura');
+  if (coberturaEl) {
+    if (tier1 > 0) {
+      const t1Procs = processosVisiveis.filter(p => p.score >= 12);
+      const t1Bia = t1Procs.filter(p => p.biaHomologada === 'BIA Realizado').length;
+      const t1Bcp = t1Procs.filter(p => p.bcpStatus === 'BCP Realizado').length;
+      const t1Drp = t1Procs.filter(p => p.drpStatus === 'DRP Realizado').length;
+      const pctBia = Math.round(t1Bia / tier1 * 100);
+      const pctBcp = Math.round(t1Bcp / tier1 * 100);
+      const pctDrp = Math.round(t1Drp / tier1 * 100);
+      const corBia = pctBia >= 80 ? '#2e7d32' : pctBia >= 50 ? '#f57c00' : '#c62828';
+      const corBcp = pctBcp >= 80 ? '#2e7d32' : pctBcp >= 50 ? '#f57c00' : '#c62828';
+      const corDrp = pctDrp >= 80 ? '#2e7d32' : pctDrp >= 50 ? '#f57c00' : '#c62828';
+      coberturaEl.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">' +
+        '<div style="text-align:center;padding:16px;background:#f8f9fa;border-radius:8px;">' +
+          '<div style="font-size:0.78em;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">BIA Realizado</div>' +
+          '<div style="font-size:2em;font-weight:700;color:' + corBia + ';">' + pctBia + '%</div>' +
+          '<div style="font-size:0.8em;color:#888;margin-top:4px;">' + t1Bia + ' de ' + tier1 + ' processos</div>' +
+          '<div style="margin-top:8px;background:#e0e0e0;border-radius:20px;height:8px;overflow:hidden;">' +
+            '<div style="width:' + pctBia + '%;background:' + corBia + ';height:100%;border-radius:20px;"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="text-align:center;padding:16px;background:#f8f9fa;border-radius:8px;">' +
+          '<div style="font-size:0.78em;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">BCP Realizado</div>' +
+          '<div style="font-size:2em;font-weight:700;color:' + corBcp + ';">' + pctBcp + '%</div>' +
+          '<div style="font-size:0.8em;color:#888;margin-top:4px;">' + t1Bcp + ' de ' + tier1 + ' processos</div>' +
+          '<div style="margin-top:8px;background:#e0e0e0;border-radius:20px;height:8px;overflow:hidden;">' +
+            '<div style="width:' + pctBcp + '%;background:' + corBcp + ';height:100%;border-radius:20px;"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div style="text-align:center;padding:16px;background:#f8f9fa;border-radius:8px;">' +
+          '<div style="font-size:0.78em;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">DRP Realizado</div>' +
+          '<div style="font-size:2em;font-weight:700;color:' + corDrp + ';">' + pctDrp + '%</div>' +
+          '<div style="font-size:0.8em;color:#888;margin-top:4px;">' + t1Drp + ' de ' + tier1 + ' processos</div>' +
+          '<div style="margin-top:8px;background:#e0e0e0;border-radius:20px;height:8px;overflow:hidden;">' +
+            '<div style="width:' + pctDrp + '%;background:' + corDrp + ';height:100%;border-radius:20px;"></div>' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+    } else {
+      coberturaEl.innerHTML = '<p style="font-size:0.9em;color:#999;">Nenhum processo classificado como Tier 1 ainda.</p>';
+    }
+  }
 }
 
 // ============================================================
@@ -2536,4 +2781,353 @@ window.salvarAvaliacaoProcesso = async () => {
       btn.style.cursor = 'pointer';
     });
   }
+};
+
+
+// ============================================================
+// PÁGINA: COMPONENTES DE SERVIÇO (Catálogo)
+// ============================================================
+let componentesData = [];
+let componentesOrdenacao = { coluna: 'tipo', direcao: 'asc' };
+
+async function componentes() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Componentes de Serviço</h2><p class="page-sub">Gerencie os componentes de infraestrutura e serviços para o DRP</p></div>
+      <button class="btn btn-primary" onclick="abrirModalComponente()">+ Novo Componente</button>
+    </div>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Tipo:</label>
+      <select id="filtroCompTipo" onchange="filtrarComponentes()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
+        <option value="">Todos os tipos</option>
+      </select>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div class="data-table" id="listaComps" style="display:none;">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="ordenarComponentes('tipo')" style="cursor:pointer;width:12%;">Tipo <span id="sort-comp-tipo"></span></th>
+            <th onclick="ordenarComponentes('nome')" style="cursor:pointer;width:15%;">Nome <span id="sort-comp-nome"></span></th>
+            <th style="width:18%;">Descrição</th>
+            <th style="width:8%;">RTO</th>
+            <th style="width:8%;">RPO</th>
+            <th style="width:16%;">Estratégia de Backup</th>
+            <th onclick="ordenarComponentes('responsavel')" style="cursor:pointer;width:12%;">Responsável <span id="sort-comp-responsavel"></span></th>
+            <th style="width:6%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody id="compRows"></tbody>
+      </table>
+    </div>
+    <div class="modal-overlay" id="modalComp"><div class="modal" onclick="event.stopPropagation()" style="max-width:580px;">
+      <h3 id="modalCompTitulo">Novo Componente</h3>
+      <input type="hidden" id="compId">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Tipo</label>
+          <input type="text" id="compTipo" list="compTipoList" placeholder="Ex: Servidor, Banco de Dados" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+          <datalist id="compTipoList"></datalist>
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Nome</label>
+          <input type="text" id="compNome" placeholder="Ex: SQL Server Produção" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição</label>
+        <input type="text" id="compDescricao" placeholder="Descrição do componente" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
+          <input type="text" id="compRto" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        </div>
+        <div>
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
+          <input type="text" id="compRpo" placeholder="Ex: 1 hora" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        </div>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Estratégia de Backup</label>
+        <select id="compEstrategia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
+          <option value="">Selecione...</option>
+          <option value="Backup & Restore">Backup & Restore (Restaurar ambiente a partir de backups)</option>
+          <option value="Cold Site">Cold Site (Local alternativo sem infraestrutura ativa)</option>
+          <option value="Warm Standby">Warm Standby (Infraestrutura parcialmente pronta)</option>
+          <option value="Active-Passive">Active-Passive (Ambiente secundário pronto para assumir)</option>
+          <option value="Active-Active">Active-Active (Dois ou mais ambientes ativos simultaneamente)</option>
+        </select>
+      </div>
+      <div style="margin-bottom:14px;">
+        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Responsável</label>
+        <input type="text" id="compResponsavel" placeholder="Responsável pelo componente" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalComponente()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarComp()">Salvar</button>
+      </div>
+    </div></div>`;
+
+  try {
+    componentesData = await API.getComponentes();
+  } catch(e) { componentesData = []; }
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('listaComps').style.display = 'block';
+  const tipos = [...new Set(componentesData.map(d => d.tipo))].sort();
+  document.getElementById('filtroCompTipo').innerHTML = '<option value="">Todos os tipos</option>' +
+    tipos.map(c => `<option value="${c}">${c}</option>`).join('');
+  renderizarComponentes();
+}
+
+function renderizarComponentes() {
+  let data = [...componentesData];
+  const filtro = document.getElementById('filtroCompTipo');
+  if (filtro && filtro.value) data = data.filter(d => d.tipo === filtro.value);
+
+  data.sort((a, b) => {
+    const valA = (a[componentesOrdenacao.coluna] || '').toString().toLowerCase();
+    const valB = (b[componentesOrdenacao.coluna] || '').toString().toLowerCase();
+    const cmp = valA.localeCompare(valB);
+    return componentesOrdenacao.direcao === 'asc' ? cmp : -cmp;
+  });
+
+  ['tipo', 'nome', 'responsavel'].forEach(col => {
+    const el = document.getElementById(`sort-comp-${col}`);
+    if (el) el.textContent = col === componentesOrdenacao.coluna ? (componentesOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
+  });
+
+  document.getElementById('compRows').innerHTML = data.length
+    ? data.map(d => `<tr>
+        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${d.tipo}</span></td>
+        <td style="font-weight:600;color:#222;">${d.nome}</td>
+        <td style="font-size:0.85em;color:#555;">${d.descricao || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${d.rto || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${d.rpo || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${d.estrategia || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${d.responsavel || '-'}</td>
+        <td style="text-align:center;white-space:nowrap;">
+          <button class="btn-icon" onclick="editarComp(${d.id})" title="Editar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="excluirComp(${d.id})" title="Excluir">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="8" style="text-align:center;color:#999;padding:40px;">Nenhum componente cadastrado.</td></tr>';
+}
+
+window.filtrarComponentes = () => renderizarComponentes();
+window.ordenarComponentes = (coluna) => {
+  if (componentesOrdenacao.coluna === coluna) {
+    componentesOrdenacao.direcao = componentesOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
+  } else {
+    componentesOrdenacao.coluna = coluna;
+    componentesOrdenacao.direcao = 'asc';
+  }
+  renderizarComponentes();
+};
+
+window.abrirModalComponente = (d) => {
+  document.getElementById('compId').value = d ? d.id : '';
+  document.getElementById('compTipo').value = d ? d.tipo : '';
+  document.getElementById('compNome').value = d ? d.nome : '';
+  document.getElementById('compDescricao').value = d ? (d.descricao || '') : '';
+  document.getElementById('compRto').value = d ? (d.rto || '') : '';
+  document.getElementById('compRpo').value = d ? (d.rpo || '') : '';
+  document.getElementById('compEstrategia').value = d ? (d.estrategia || '') : '';
+  document.getElementById('compResponsavel').value = d ? (d.responsavel || '') : '';
+  document.getElementById('modalCompTitulo').textContent = d ? 'Editar Componente' : 'Novo Componente';
+  const tipos = [...new Set(componentesData.map(x => x.tipo))].sort();
+  document.getElementById('compTipoList').innerHTML = tipos.map(c => `<option value="${c}">`).join('');
+  document.getElementById('modalComp').classList.add('open');
+};
+window.fecharModalComponente = () => document.getElementById('modalComp').classList.remove('open');
+window.editarComp = (id) => { const d = componentesData.find(x => x.id === id); if (d) abrirModalComponente(d); };
+window.excluirComp = async (id) => {
+  if (!confirm('Excluir este componente?')) return;
+  try {
+    await API.excluirComponente(id);
+    componentesData = componentesData.filter(x => x.id !== id);
+    renderizarComponentes();
+    showToast('✅ Excluído!', '#2e7d32');
+    API.invalidate('getComponentes');
+  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
+};
+window.salvarComp = async () => {
+  const d = {
+    id: document.getElementById('compId').value ? Number(document.getElementById('compId').value) : null,
+    tipo: document.getElementById('compTipo').value.trim(),
+    nome: document.getElementById('compNome').value.trim(),
+    descricao: document.getElementById('compDescricao').value.trim(),
+    rto: document.getElementById('compRto').value.trim(),
+    rpo: document.getElementById('compRpo').value.trim(),
+    estrategia: document.getElementById('compEstrategia').value.trim(),
+    responsavel: document.getElementById('compResponsavel').value.trim(),
+  };
+  if (!d.tipo) return showToast('Informe o tipo.', '#e65100');
+  if (!d.nome) return showToast('Informe o nome.', '#e65100');
+  try {
+    const result = await API.salvarComponente(d);
+    fecharModalComponente();
+    showToast('✅ Salvo!', '#2e7d32');
+    if (d.id) {
+      const idx = componentesData.findIndex(x => x.id === d.id);
+      if (idx !== -1) componentesData[idx] = { ...d };
+    } else {
+      d.id = result.id;
+      componentesData.push(d);
+    }
+    renderizarComponentes();
+    API.invalidate('getComponentes');
+    window.componentesCatalogo = componentesData;
+  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
+};
+
+// ============================================================
+// DRP - Componentes do Serviço (inline no drawer)
+// ============================================================
+window._drpComponentes = [];
+
+function renderComponentesDrp() {
+  const container = document.getElementById('drpComponentesTabela');
+  if (!container) return;
+  const catalogo = window.componentesCatalogo || [];
+  const comps = window._drpComponentes.map(id => catalogo.find(d => d.id === id)).filter(Boolean);
+
+  let rows = '';
+  if (comps.length) {
+    rows = comps.map(d => `<tr style="border-bottom:1px solid #f0f0f0;">
+          <td style="padding:12px 14px;color:#555;">${d.tipo || '-'}</td>
+          <td style="padding:12px 14px;font-weight:600;color:#222;">${d.nome || '-'}</td>
+          <td style="padding:12px 14px;color:#555;">${d.descricao || '-'}</td>
+          <td style="padding:12px 14px;color:#555;">${d.rto || '-'}</td>
+          <td style="padding:12px 14px;color:#555;">${d.rpo || '-'}</td>
+          <td style="padding:12px 14px;color:#555;">${d.estrategia || '-'}</td>
+          <td style="padding:12px 14px;color:#555;">${d.responsavel || '-'}</td>
+          <td style="padding:12px 6px;text-align:center;">
+            <button onclick="removerComponenteDrp(${d.id})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
+          </td>
+        </tr>`).join('');
+  } else {
+    rows = `<tr><td colspan="8" style="padding:16px 14px;color:#999;font-size:0.9em;text-align:center;">Nenhum componente adicionado. Use o campo abaixo para buscar e adicionar.</td></tr>`;
+  }
+
+  container.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:0.88em;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;">
+      <thead>
+        <tr style="background:#f5f6fa;">
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Tipo</th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Nome</th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Descrição</th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">RTO</th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">RPO</th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Estratégia</th>
+          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Responsável</th>
+          <th style="padding:11px 6px;text-align:center;border-bottom:1.5px solid #e0e0e0;width:40px;"></th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+window.mostrarDropdownComponenteDrp = () => {
+  const input = document.getElementById('drpComponenteBusca');
+  const dropdown = document.getElementById('drpComponenteDropdown');
+  if (!input || !dropdown) return;
+  const catalogo = window.componentesCatalogo || [];
+  const selecionados = window._drpComponentes || [];
+  const filtro = input.value.toLowerCase();
+  const disponiveis = catalogo.filter(d =>
+    !selecionados.includes(d.id) &&
+    (filtro === '' || d.nome.toLowerCase().includes(filtro) || (d.tipo || '').toLowerCase().includes(filtro) || (d.descricao || '').toLowerCase().includes(filtro))
+  );
+  if (!disponiveis.length) {
+    dropdown.innerHTML = '<div style="padding:10px 14px;font-size:0.88em;color:#999;">Nenhum resultado encontrado.</div>';
+    dropdown.style.display = 'block';
+    return;
+  }
+  const grupos = {};
+  disponiveis.forEach(d => { if (!grupos[d.tipo]) grupos[d.tipo] = []; grupos[d.tipo].push(d); });
+  let html = '';
+  Object.entries(grupos).sort((a,b) => a[0].localeCompare(b[0])).forEach(([tipo, itens]) => {
+    html += `<div style="padding:6px 12px 3px;font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;background:#fafafa;">${tipo}</div>`;
+    itens.forEach(d => {
+      html += `<div class="drp-comp-option" onmousedown="adicionarComponenteDrpById(${d.id})" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
+        <div style="font-weight:600;color:#222;">${d.nome}</div>
+        ${d.descricao ? `<div style="font-size:0.82em;color:#888;margin-top:2px;">${d.descricao}</div>` : ''}
+      </div>`;
+    });
+  });
+  dropdown.innerHTML = html;
+  dropdown.style.display = 'block';
+  dropdown.querySelectorAll('.drp-comp-option').forEach(el => {
+    el.addEventListener('mouseenter', () => el.style.background = '#f0f4ff');
+    el.addEventListener('mouseleave', () => el.style.background = 'transparent');
+  });
+};
+
+window.adicionarComponenteDrpById = (id) => {
+  if (!window._drpComponentes.includes(id)) {
+    window._drpComponentes.push(id);
+    renderComponentesDrp();
+  }
+  const input = document.getElementById('drpComponenteBusca');
+  const dropdown = document.getElementById('drpComponenteDropdown');
+  if (input) input.value = '';
+  if (dropdown) dropdown.style.display = 'none';
+};
+
+window.removerComponenteDrp = (id) => {
+  window._drpComponentes = window._drpComponentes.filter(x => x !== id);
+  renderComponentesDrp();
+};
+
+window.abrirModalCompDrp = (d) => {
+  document.getElementById('compDrpId').value = d ? d.id : '';
+  document.getElementById('compDrpTipo').value = d ? d.tipo : '';
+  document.getElementById('compDrpNome').value = d ? d.nome : '';
+  document.getElementById('compDrpDescricao').value = d ? (d.descricao || '') : '';
+  document.getElementById('compDrpRto').value = d ? (d.rto || '') : '';
+  document.getElementById('compDrpRpo').value = d ? (d.rpo || '') : '';
+  document.getElementById('compDrpEstrategia').value = d ? (d.estrategia || '') : '';
+  document.getElementById('compDrpResponsavel').value = d ? (d.responsavel || '') : '';
+  document.getElementById('modalCompDrpTitulo').textContent = d ? 'Editar Componente' : 'Novo Componente';
+  const tipos = [...new Set((window.componentesCatalogo || []).map(x => x.tipo))].sort();
+  document.getElementById('compDrpTipoList').innerHTML = tipos.map(c => `<option value="${c}">`).join('');
+  document.getElementById('modalCompDrp').classList.add('open');
+};
+window.fecharModalCompDrp = () => document.getElementById('modalCompDrp').classList.remove('open');
+window.salvarCompDrp = async () => {
+  const d = {
+    id: document.getElementById('compDrpId').value ? Number(document.getElementById('compDrpId').value) : null,
+    tipo: document.getElementById('compDrpTipo').value.trim(),
+    nome: document.getElementById('compDrpNome').value.trim(),
+    descricao: document.getElementById('compDrpDescricao').value.trim(),
+    rto: document.getElementById('compDrpRto').value.trim(),
+    rpo: document.getElementById('compDrpRpo').value.trim(),
+    estrategia: document.getElementById('compDrpEstrategia').value.trim(),
+    responsavel: document.getElementById('compDrpResponsavel').value.trim(),
+  };
+  if (!d.tipo) return showToast('Informe o tipo.', '#e65100');
+  if (!d.nome) return showToast('Informe o nome.', '#e65100');
+  try {
+    const result = await API.salvarComponente(d);
+    fecharModalCompDrp();
+    showToast('✅ Salvo!', '#2e7d32');
+    if (d.id) {
+      const idx = (window.componentesCatalogo || []).findIndex(x => x.id === d.id);
+      if (idx !== -1) window.componentesCatalogo[idx] = { ...d };
+    } else {
+      d.id = result.id;
+      window.componentesCatalogo = window.componentesCatalogo || [];
+      window.componentesCatalogo.push(d);
+    }
+    if (!window._drpComponentes.includes(d.id)) {
+      window._drpComponentes.push(d.id);
+    }
+    renderComponentesDrp();
+    API.invalidate('getComponentes');
+  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
 };

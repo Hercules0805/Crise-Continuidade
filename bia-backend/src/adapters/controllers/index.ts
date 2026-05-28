@@ -1,0 +1,9 @@
+export { ActionRouter } from './ActionRouter';
+export { PerguntaController } from './PerguntaController';
+export { AreaController } from './AreaController';
+export { ProcessoController } from './ProcessoController';
+export { EvaluationController } from './EvaluationController';
+export { TokenController } from './TokenController';
+export { ReportController } from './ReportController';
+export { ConfigController } from './ConfigController';
+export { DependenciaController } from './DependenciaController';

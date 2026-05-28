@@ -79,4 +79,7 @@ const API = {
   getDependencias: () => API.get('getDependencias'),
   salvarDependencia: (d) => API.post('salvarDependencia', d),
   excluirDependencia: (id) => API.post('excluirDependencia', { id }),
+  getComponentes: () => API.get('getComponentes'),
+  salvarComponente: (d) => API.post('salvarComponente', d),
+  excluirComponente: (id) => API.post('excluirComponente', { id }),
 };

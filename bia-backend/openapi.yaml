@@ -1,0 +1,927 @@
+openapi: 3.0.3
+info:
+  title: BIA Backend API
+  description: |
+    Business Impact Analysis (BIA) backend API.
+    Migrated from Google Apps Script to Node.js/TypeScript with PostgreSQL.
+
+    The API uses a single `/exec` endpoint with action-based routing:
+    - **GET** requests use the `action` query parameter
+    - **POST** requests include the `action` field in the JSON body
+
+    All business logic errors return HTTP 200 with `{ "error": "<message>" }`.
+    Authentication errors return HTTP 401 or 403.
+  version: 1.0.0
+  contact:
+    name: Forte Tecnologia
+    email: suporte@fortestecnologia.com.br
+
+servers:
+  - url: http://localhost:3000
+    description: Local development
+  - url: https://api.bia.fortestecnologia.com.br
+    description: Production
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      description: Returns HTTP 200 if the server is running. No authentication required.
+      operationId: healthCheck
+      tags:
+        - System
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+
+  /exec:
+    get:
+      summary: Execute a GET action
+      description: |
+        Dispatches to the appropriate handler based on the `action` query parameter.
+        All GET actions require Firebase Auth token except public actions (validarToken, validarTokenArea).
+      operationId: execGet
+      tags:
+        - Actions
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: action
+          in: query
+          required: true
+          description: The action to execute
+          schema:
+            type: string
+            enum:
+              - getPerguntas
+              - getAreas
+              - getProcessos
+              - getProcessosPorArea
+              - getResumoRespostas
+              - getConfigRespostas
+              - getPerfil
+              - getDependencias
+              - validarToken
+              - validarTokenArea
+        - name: area
+          in: query
+          required: false
+          description: Area name filter (used by getProcessosPorArea)
+          schema:
+            type: string
+        - name: email
+          in: query
+          required: false
+          description: User email (used by getPerfil)
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: false
+          description: Token value (used by validarToken, validarTokenArea)
+          schema:
+            type: string
+        - name: categoria
+          in: query
+          required: false
+          description: Category filter (used by getConfigRespostas)
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response (varies by action)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/PerguntaArray'
+                  - $ref: '#/components/schemas/AreaArray'
+                  - $ref: '#/components/schemas/ProcessoFormattedArray'
+                  - $ref: '#/components/schemas/RespostaBiaArray'
+                  - $ref: '#/components/schemas/ConfigRespostasGrouped'
+                  - $ref: '#/components/schemas/ConfigPerfil'
+                  - $ref: '#/components/schemas/DependenciaArray'
+                  - $ref: '#/components/schemas/TokenValidationResponse'
+                  - $ref: '#/components/schemas/TokenAreaValidationResponse'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Domain not authorized or profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+    post:
+      summary: Execute a POST action
+      description: |
+        Dispatches to the appropriate handler based on the `action` field in the request body.
+        All POST actions require Firebase Auth token except public actions (salvarRespostasToken, salvarRespostasArea).
+      operationId: execPost
+      tags:
+        - Actions
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: '#/components/schemas/SalvarPerguntaRequest'
+                - $ref: '#/components/schemas/ExcluirRequest'
+                - $ref: '#/components/schemas/SalvarAreaRequest'
+                - $ref: '#/components/schemas/SalvarProcessoRequest'
+                - $ref: '#/components/schemas/SalvarRespostasRequest'
+                - $ref: '#/components/schemas/SalvarRespostasTokenRequest'
+                - $ref: '#/components/schemas/SalvarRespostasAreaRequest'
+                - $ref: '#/components/schemas/GerarTokenRequest'
+                - $ref: '#/components/schemas/GerarTokenAreaRequest'
+                - $ref: '#/components/schemas/GerarRelatorioAreaRequest'
+                - $ref: '#/components/schemas/SalvarConfigRespostaRequest'
+                - $ref: '#/components/schemas/SalvarDependenciaRequest'
+          text/plain:
+            schema:
+              type: string
+              description: JSON-encoded body sent as text/plain (legacy frontend compatibility)
+      responses:
+        '200':
+          description: Successful response (varies by action)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SuccessWithId'
+                  - $ref: '#/components/schemas/SuccessResponse'
+                  - $ref: '#/components/schemas/SuccessWithToken'
+                  - $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Missing or invalid authentication token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Domain not authorized or profile not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Firebase ID Token
+      description: Firebase Auth ID token. Not required for public actions (validarToken, validarTokenArea, salvarRespostasToken, salvarRespostasArea).
+
+  schemas:
+    # ─── Response Schemas ───────────────────────────────────────────────
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+          description: Descriptive error message
+      example:
+        error: "Action não reconhecida: invalidAction"
+
+    SuccessResponse:
+      type: object
+      required:
+        - success
+      properties:
+        success:
+          type: boolean
+          example: true
+
+    SuccessWithId:
+      type: object
+      required:
+        - success
+        - id
+      properties:
+        success:
+          type: boolean
+          example: true
+        id:
+          type: string
+          format: uuid
+          description: ID of the created or updated record
+
+    SuccessWithToken:
+      type: object
+      required:
+        - success
+        - token
+        - link
+      properties:
+        success:
+          type: boolean
+          example: true
+        token:
+          type: string
+          format: uuid
+          description: Generated token value
+        link:
+          type: string
+          format: uri
+          description: Full evaluation link URL
+
+    # ─── Entity Schemas ─────────────────────────────────────────────────
+
+    Pergunta:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        categoria:
+          type: string
+          description: Category grouping
+        pergunta:
+          type: string
+          description: Question text
+        descricao:
+          type: string
+          description: Description/help text
+        ativa:
+          type: boolean
+          description: Whether the question is active
+        ordem:
+          type: integer
+          description: Display order
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PerguntaArray:
+      type: array
+      items:
+        $ref: '#/components/schemas/Pergunta'
+
+    Area:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        nome:
+          type: string
+          description: Department name
+        responsavel:
+          type: string
+          description: Responsible person
+        email:
+          type: string
+          format: email
+          description: Contact email
+        solucao:
+          type: string
+          description: Solution/product
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AreaArray:
+      type: array
+      items:
+        $ref: '#/components/schemas/Area'
+
+    ProcessoFormatted:
+      type: object
+      description: Processo formatted by LegacyResponsePresenter for frontend compatibility
+      properties:
+        id:
+          type: string
+          format: uuid
+        area:
+          type: string
+          description: Area name (resolved from area_id)
+        processo:
+          type: string
+          description: Process name
+        descricao:
+          type: string
+          description: Impact description
+        dependencia:
+          type: string
+          description: Critical dependency
+        rto:
+          type: string
+          description: Recovery Time Objective
+        rpo:
+          type: string
+          description: Recovery Point Objective
+        mtpd:
+          type: string
+          description: Maximum Tolerable Period of Disruption
+        biaHomologada:
+          type: string
+          description: BIA approval status
+        tier:
+          type: string
+          description: Tier classification
+        bcpStatus:
+          type: string
+          description: BCP status
+        descricaoFuncional:
+          type: string
+          description: Functional description
+        impactoIndisponibilidade:
+          type: object
+          description: Unavailability impact (JSON)
+        bcpObjetivo:
+          type: string
+          description: BCP objective
+        bcpEscopo:
+          type: string
+          description: BCP scope
+        bcpContatos:
+          type: array
+          items:
+            type: object
+          description: BCP contacts (JSON array)
+        bcpRiscos:
+          type: array
+          items:
+            type: object
+          description: BCP risks (JSON array)
+        bcpPreventivas:
+          type: array
+          items:
+            type: object
+          description: BCP preventive actions (JSON array)
+        drpStatus:
+          type: string
+          description: DRP status
+        drpObjetivo:
+          type: string
+          description: DRP objective
+        drpEscopo:
+          type: string
+          description: DRP scope
+        drpProcedimentos:
+          type: string
+          description: DRP procedures
+        drpCriterios:
+          type: string
+          description: DRP criteria
+        score:
+          type: number
+          description: Latest evaluation score (0 if not evaluated)
+        avaliado:
+          type: boolean
+          description: Whether the process has been evaluated
+        respostas:
+          type: object
+          additionalProperties:
+            type: number
+          description: Question ID to score mapping from latest evaluation
+
+    ProcessoFormattedArray:
+      type: array
+      items:
+        $ref: '#/components/schemas/ProcessoFormatted'
+
+    RespostaBia:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        processo_id:
+          type: string
+          format: uuid
+        respondente:
+          type: string
+          description: Respondent email or name
+        cargo:
+          type: string
+          description: Respondent role
+        scores:
+          type: object
+          additionalProperties:
+            type: number
+          description: Question ID to score mapping
+        score_total:
+          type: number
+          description: Calculated total score
+        tier:
+          type: string
+          description: Calculated tier classification
+        created_at:
+          type: string
+          format: date-time
+
+    RespostaBiaArray:
+      type: array
+      items:
+        $ref: '#/components/schemas/RespostaBia'
+
+    ConfigResposta:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        categoria:
+          type: string
+          description: Category grouping
+        valor:
+          type: string
+          description: Numeric value as string
+        label:
+          type: string
+          description: Display label
+        cor:
+          type: string
+          description: Text color (CSS)
+        background:
+          type: string
+          description: Background color (CSS)
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    ConfigRespostasGrouped:
+      type: object
+      additionalProperties:
+        type: array
+        items:
+          $ref: '#/components/schemas/ConfigResposta'
+      description: Config entries grouped by category name
+      example:
+        impacto:
+          - id: "uuid-1"
+            categoria: "impacto"
+            valor: "4"
+            label: "Crítico"
+            cor: "#fff"
+            background: "#dc3545"
+        _default:
+          - id: "uuid-2"
+            categoria: "_default"
+            valor: "0"
+            label: "N/A"
+            cor: "#000"
+            background: "#f8f9fa"
+
+    ConfigPerfil:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        nome:
+          type: string
+          description: User name
+        area:
+          type: string
+          description: User's area/department
+        admin:
+          type: boolean
+          description: Admin flag
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    Dependencia:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        categoria:
+          type: string
+          description: Category (people, systems, suppliers)
+        nome:
+          type: string
+          description: Name
+        detalhes:
+          type: string
+          description: Details/role
+        setor:
+          type: string
+          description: Sector/department
+        empresa:
+          type: string
+          description: Company
+        telefone:
+          type: string
+          description: Phone number
+        email:
+          type: string
+          format: email
+          description: Email address
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DependenciaArray:
+      type: array
+      items:
+        $ref: '#/components/schemas/Dependencia'
+
+    TokenValidationResponse:
+      type: object
+      description: Response from validarToken action
+      properties:
+        token:
+          type: string
+          format: uuid
+        area:
+          type: string
+          description: Area name
+        processo:
+          type: string
+          description: Process name
+        email:
+          type: string
+          format: email
+        perguntas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pergunta'
+
+    TokenAreaValidationResponse:
+      type: object
+      description: Response from validarTokenArea action
+      properties:
+        area:
+          type: string
+          description: Area name
+        processos:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProcessoFormatted'
+        perguntas:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pergunta'
+
+    # ─── Request Schemas ────────────────────────────────────────────────
+
+    SalvarPerguntaRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum: [salvarPergunta]
+        id:
+          type: string
+          format: uuid
+          description: If provided, updates existing record
+        categoria:
+          type: string
+        pergunta:
+          type: string
+        descricao:
+          type: string
+        ativa:
+          type: boolean
+        ordem:
+          type: integer
+
+    ExcluirRequest:
+      type: object
+      required:
+        - action
+        - id
+      properties:
+        action:
+          type: string
+          enum:
+            - excluirPergunta
+            - excluirArea
+            - excluirProcesso
+            - excluirConfigResposta
+            - excluirDependencia
+        id:
+          type: string
+          format: uuid
+          description: ID of the record to delete
+
+    SalvarAreaRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum: [salvarArea]
+        id:
+          type: string
+          format: uuid
+          description: If provided, updates existing record
+        nome:
+          type: string
+        responsavel:
+          type: string
+        email:
+          type: string
+          format: email
+        solucao:
+          type: string
+
+    SalvarProcessoRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum: [salvarProcesso]
+        id:
+          type: string
+          format: uuid
+          description: If provided, updates existing record
+        area_id:
+          type: string
+          format: uuid
+        processo:
+          type: string
+        descricao:
+          type: string
+        dependencia:
+          type: string
+        rto:
+          type: string
+        rpo:
+          type: string
+        mtpd:
+          type: string
+        biaHomologada:
+          type: string
+        tier:
+          type: string
+        bcpStatus:
+          type: string
+        descricaoFuncional:
+          type: string
+        impactoIndisponibilidade:
+          type: object
+        bcpObjetivo:
+          type: string
+        bcpEscopo:
+          type: string
+        bcpContatos:
+          type: array
+          items:
+            type: object
+        bcpRiscos:
+          type: array
+          items:
+            type: object
+        bcpPreventivas:
+          type: array
+          items:
+            type: object
+        drpStatus:
+          type: string
+        drpObjetivo:
+          type: string
+        drpEscopo:
+          type: string
+        drpProcedimentos:
+          type: string
+        drpCriterios:
+          type: string
+
+    SalvarRespostasRequest:
+      type: object
+      required:
+        - action
+        - processo_id
+        - respondente
+        - scores
+      properties:
+        action:
+          type: string
+          enum: [salvarRespostas]
+        processo_id:
+          type: string
+          format: uuid
+        respondente:
+          type: string
+          description: Respondent email or name
+        cargo:
+          type: string
+          description: Respondent role
+        scores:
+          type: object
+          additionalProperties:
+            type: number
+          description: Question ID to score mapping
+
+    SalvarRespostasTokenRequest:
+      type: object
+      required:
+        - action
+        - token
+        - respondente
+        - scores
+      properties:
+        action:
+          type: string
+          enum: [salvarRespostasToken]
+        token:
+          type: string
+          format: uuid
+          description: Evaluation token
+        respondente:
+          type: string
+        cargo:
+          type: string
+        scores:
+          type: object
+          additionalProperties:
+            type: number
+
+    SalvarRespostasAreaRequest:
+      type: object
+      required:
+        - action
+        - token
+        - avaliacoes
+      properties:
+        action:
+          type: string
+          enum: [salvarRespostasArea]
+        token:
+          type: string
+          format: uuid
+          description: Area evaluation token
+        avaliacoes:
+          type: array
+          description: Array of evaluations, one per process
+          items:
+            type: object
+            required:
+              - processo_id
+              - respondente
+              - scores
+            properties:
+              processo_id:
+                type: string
+                format: uuid
+              respondente:
+                type: string
+              cargo:
+                type: string
+              scores:
+                type: object
+                additionalProperties:
+                  type: number
+
+    GerarTokenRequest:
+      type: object
+      required:
+        - action
+        - area_id
+        - processo_id
+        - email
+      properties:
+        action:
+          type: string
+          enum: [gerarToken]
+        area_id:
+          type: string
+          format: uuid
+        processo_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+          description: Recipient email for the evaluation link
+
+    GerarTokenAreaRequest:
+      type: object
+      required:
+        - action
+        - area_id
+        - email
+      properties:
+        action:
+          type: string
+          enum: [gerarTokenArea]
+        area_id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+          description: Recipient email for the area evaluation link
+
+    GerarRelatorioAreaRequest:
+      type: object
+      required:
+        - action
+        - areaName
+        - email
+      properties:
+        action:
+          type: string
+          enum: [gerarRelatorioArea]
+        areaName:
+          type: string
+          description: Name of the area to generate report for
+        email:
+          type: string
+          format: email
+          description: Email to send the report to
+
+    SalvarConfigRespostaRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum: [salvarConfigResposta]
+        id:
+          type: string
+          format: uuid
+          description: If provided, updates existing record
+        categoria:
+          type: string
+        valor:
+          type: string
+        label:
+          type: string
+        cor:
+          type: string
+        background:
+          type: string
+
+    SalvarDependenciaRequest:
+      type: object
+      required:
+        - action
+      properties:
+        action:
+          type: string
+          enum: [salvarDependencia]
+        id:
+          type: string
+          format: uuid
+          description: If provided, updates existing record
+        categoria:
+          type: string
+        nome:
+          type: string
+        detalhes:
+          type: string
+        setor:
+          type: string
+        empresa:
+          type: string
+        telefone:
+          type: string
+        email:
+          type: string
+          format: email
+
+tags:
+  - name: System
+    description: System health and status endpoints
+  - name: Actions
+    description: Action-based API endpoint (GET and POST via /exec)
