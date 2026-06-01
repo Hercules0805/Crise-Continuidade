@@ -12,8 +12,8 @@ window.addEventListener('load', route);
 function route() {
   const hash = window.location.hash.slice(1) || 'processos';
   document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page === hash));
-  const page = pages[hash] || pages.questionario;
-  page();
+  const page = pages[hash] || pages.processos;
+  if (page) page();
 }
 
 // Utilitários
@@ -3404,7 +3404,7 @@ setTimeout(function(){
   var html='';
   for(var i=0;i<hs.length;i++){var h=hs[i];var sid='s'+i;h.id=sid;var cls=h.tagName==='H1'?'h1-link':h.tagName==='H2'?'h2-link':'h3-link';html+='<li style="'+(h.tagName==='H3'?'padding-left:12px;':'')+'"><a href="#'+sid+'" class="'+cls+'">'+h.textContent.trim()+'</a></li>';}
   nav.innerHTML=html;
-},200);
+},500);
 function togglePCNSidebar(){
   var sb=document.getElementById('pcn-sidebar');
   var mn=document.getElementById('pcn-main');
