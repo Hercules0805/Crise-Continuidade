@@ -143,10 +143,39 @@ window.trocarAbaProcesso = (aba) => {
     btn.style.color = a === aba ? '#1a237e' : '#999';
     btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
   });
-  // Popular select de contatos ao abrir aba BCP
-  if (aba === 'bcp') popularSelectContatosBcp();
+  // Popular contatos ao abrir aba BCP - auto-adicionar pessoas da BIA
+  if (aba === 'bcp') {
+    const catalogo = window.dependenciasCatalogo || [];
+    const selecionadas = window._dependenciaSelecionadas || [];
+    selecionadas.forEach(nome => {
+      const dep = catalogo.find(d => d.nome === nome);
+      if (dep && ['Pessoa', 'Pessoas'].includes(dep.categoria) && !window._bcpContatos.includes(dep.id)) {
+        window._bcpContatos.push(dep.id);
+      }
+    });
+    popularSelectContatosBcp();
+    renderContatosBcp();
+    renderFornecedoresBcp();
+  }
   // Renderizar avaliação ao abrir aba
   if (aba === 'avaliacao') renderAvaliacaoInline();
+  // Auto-adicionar sistemas/infraestrutura da BIA como componentes DRP
+  if (aba === 'drp') {
+    const catalogo = window.dependenciasCatalogo || [];
+    const componentesCat = window.componentesCatalogo || [];
+    const selecionadas = window._dependenciaSelecionadas || [];
+    selecionadas.forEach(nome => {
+      const dep = catalogo.find(d => d.nome === nome);
+      if (dep && ['Sistemas', 'Sistema', 'Infraestrutura'].includes(dep.categoria)) {
+        // Buscar componente correspondente no catálogo de componentes (por nome)
+        const comp = componentesCat.find(c => c.nome === nome);
+        if (comp && !window._drpComponentes.includes(comp.id)) {
+          window._drpComponentes.push(comp.id);
+        }
+      }
+    });
+    renderComponentesDrp();
+  }
 };
 
 // ============================================================
@@ -405,11 +434,10 @@ function renderContatosBcp() {
           <td style="padding:12px 14px;font-weight:600;color:#222;">${d.nome || '-'}</td>
           <td style="padding:12px 14px;color:#555;">${d.empresa || '-'}</td>
           <td style="padding:12px 14px;color:#555;">${d.setor || '-'}</td>
-          <td style="padding:12px 14px;color:#555;">${d.detalhes || '-'}</td>
+          <td style="padding:6px 8px;"><input type="text" class="papel-crise-input" data-id="${d.id}" value="${(d.detalhes || '').replace(/"/g, '&quot;')}" placeholder="Papel neste processo..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.88em;box-sizing:border-box;"></td>
           <td style="padding:12px 14px;color:#555;">${d.telefone || '-'}</td>
           <td style="padding:12px 14px;color:#555;">${d.email || '-'}</td>
           <td style="padding:12px 6px;text-align:center;">
-            <button onclick="editarContatoBcp(${d.id})" style="background:none;border:none;cursor:pointer;color:#1a237e;font-size:0.9em;margin-right:4px;" title="Editar">✎</button>
             <button onclick="removerContatoBcp(${d.id})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
           </td>
         </tr>`).join('');
@@ -755,7 +783,7 @@ window.excluirArea = async (id) => {
 // ============================================================
 // PÁGINA: PROCESSOS (Tabela com ordenação e filtro)
 // ============================================================
-let processosOrdenacao = { coluna: 'area', direcao: 'asc' };
+let processosOrdenacao = { coluna: 'score', direcao: 'desc' };
 let processosFiltroArea = '';
 let processosFiltroTier = '';
 
@@ -915,6 +943,7 @@ async function processos() {
 
           <!-- ABA: BIA -->
           <div id="painel-bia" style="display:none;">
+            <div id="fBiaScoreInfo" style="margin-bottom:20px;"></div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Status</label>
               <select id="fBiaHomologada" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
@@ -927,6 +956,23 @@ async function processos() {
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição do Impacto para Indisponibilidade</label>
               <textarea id="fDescricao" rows="3" placeholder="Descreva o impacto caso o processo fique indisponível" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO Esperado</label>
+                <input type="text" id="fRTO" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Tempo de Recuperação</span>
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO Esperado</label>
+                <input type="text" id="fRPO" placeholder="Ex: 24 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Ponto de Recuperação</span>
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">MTD</label>
+                <input type="text" id="fMTD" placeholder="Ex: 48 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Máx. Downtime Tolerável</span>
+              </div>
             </div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Dependências Críticas</label>
@@ -1002,6 +1048,10 @@ async function processos() {
                   <button class="btn btn-primary" onclick="salvarDepBcp()">Salvar</button>
                 </div>
               </div></div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Fornecedores</label>
+              <div id="bcpFornecedoresTabela"></div>
             </div>
           </div>
 
@@ -1080,6 +1130,9 @@ async function processos() {
       </div>
       <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+        <button class="btn btn-ghost" onclick="gerarDossieProcesso()" style="color:#1565c0;border-color:#1565c0;">📄 Dossiê</button>
+        <button class="btn btn-ghost" onclick="abrirPCNSalvo()" id="btnPcnSalvo" style="color:#2e7d32;border-color:#2e7d32;display:none;">📂 Abrir PCN</button>
+        <button class="btn btn-ghost" onclick="gerarPCNProcesso()" style="color:#2e7d32;border-color:#2e7d32;">🤖 Gerar PCN</button>
         <button class="btn btn-primary" onclick="salvarProcesso()">Salvar</button>
       </div>
     </div>`;
@@ -1195,6 +1248,14 @@ function renderizarProcessos() {
               <polyline points="22,6 12,13 2,6"></polyline>
             </svg>
           </button>
+          ${p.pcnSalvo ? `<button class="btn-icon" onclick="abrirPCNDireto(${p.id})" title="Abrir PCN">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1565c0" stroke-width="2">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
+          </button>` : ''}
           <button class="btn-icon" onclick="excluirProcesso(${p.id})" title="Excluir">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
               <polyline points="3 6 5 6 21 6"></polyline>
@@ -1679,7 +1740,7 @@ window.abrirModalProcesso = (p) => {
     const cor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : '#1565c0';
     return `<span style="margin-left:12px;font-size:0.82em;font-weight:600;padding:3px 10px;border-radius:10px;background:${cor};color:white;vertical-align:middle;">${status} &bull; Score ${p.score}</span>`;
   })() : '';
-  document.getElementById('modalTitulo').innerHTML = titulo + scoreHtml;
+  document.getElementById('modalTitulo').innerHTML = titulo + scoreHtml + (p ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${p.processo}</div>` : '');
   document.getElementById('drawerProcesso').classList.add('open');
   document.getElementById('drawerOverlayProcesso').classList.add('open');
   // Resetar botão salvar
@@ -1689,6 +1750,20 @@ window.abrirModalProcesso = (p) => {
   // Reset avaliação inline
   window._avaliacaoRespostas = {};
   window._avaliacaoScore = 0;
+  // Mostrar/ocultar botão Abrir PCN
+  const btnPcnSalvo = document.getElementById('btnPcnSalvo');
+  if (btnPcnSalvo) btnPcnSalvo.style.display = (p && p.pcnSalvo) ? 'inline-block' : 'none';
+  // Score/Tier cards na BIA
+  const scoreInfo = document.getElementById('fBiaScoreInfo');
+  if (scoreInfo && p && p.score > 0) {
+    const cor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : '#1565c0';
+    const tierLabel = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : 'Tier 3 (Suporte)';
+    scoreInfo.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;"><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div><div style="font-size:1.8em;font-weight:700;color:${cor};">${p.score}</div></div><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div><div style="font-size:0.95em;font-weight:700;"><span style="background:${cor};color:white;padding:4px 12px;border-radius:12px;">${tierLabel}</span></div></div></div>`;
+  } else if (scoreInfo) { scoreInfo.innerHTML = ''; }
+  // Preencher RTO/RPO/MTD
+  const fRTO = document.getElementById('fRTO'); if (fRTO) fRTO.value = p ? (p.rto || '') : '';
+  const fRPO = document.getElementById('fRPO'); if (fRPO) fRPO.value = p ? (p.rpo || '') : '';
+  const fMTD = document.getElementById('fMTD'); if (fMTD) fMTD.value = p ? (p.mtd || '') : '';
   iniciarDrawerResize();
 };
 
@@ -1708,6 +1783,9 @@ window.salvarProcesso = async () => {
     processo: document.getElementById('fProcesso').value.trim(),
     descricao: document.getElementById('fDescricao').value.trim(),
     dependencia: (window._dependenciaSelecionadas || []).join(', '),
+    rto: (document.getElementById('fRTO') || {value:''}).value.trim(),
+    rpo: (document.getElementById('fRPO') || {value:''}).value.trim(),
+    mtd: (document.getElementById('fMTD') || {value:''}).value.trim(),
     biaHomologada: document.getElementById('fBiaHomologada').value.trim(),
     bcpStatus: (document.getElementById('fBcpStatus') || {value:''}).value.trim(),
     descricaoFuncional: document.getElementById('fDescricaoFuncional').value.trim(),
@@ -1718,6 +1796,11 @@ window.salvarProcesso = async () => {
 
   if (!p.area) return showToast('Selecione a área.', '#e65100');
   if (!p.processo) return showToast('Informe o processo.', '#e65100');
+  // Prevenir duplicatas
+  if (!p.id) {
+    const duplicado = (window.processosData || []).find(x => x.area.toLowerCase() === p.area.toLowerCase() && x.processo.toLowerCase() === p.processo.toLowerCase());
+    if (duplicado) return showToast('Já existe um processo com esse nome nesta área.', '#e65100');
+  }
   
   // Prevenir duplicatas: se não tem id, verificar se já existe processo com mesmo nome e área
   if (!p.id) {
@@ -3131,3 +3214,291 @@ window.salvarCompDrp = async () => {
     API.invalidate('getComponentes');
   } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
 };
+
+
+// ============================================================
+// DOSSIÊ DO PROCESSO
+// ============================================================
+window.gerarDossieProcesso = () => {
+  const id = Number(document.getElementById('fId').value);
+  const p = id ? window.processosData.find(proc => proc.id === id) : null;
+  if (!p) return showToast('Salve o processo antes de gerar o dossiê.', '#e65100');
+  const catalogo = window.dependenciasCatalogo || [];
+  const componentesCat = window.componentesCatalogo || [];
+  const area = window.areasDisponiveis ? window.areasDisponiveis.find(a => a.nome === p.area) : null;
+  const responsavel = area ? area.responsavel : '';
+  const score = p.score || 0;
+  const tier = score >= 12 ? 'Tier 1 (Crítico)' : score >= 6 ? 'Tier 2 (Essencial)' : score > 0 ? 'Tier 3 (Suporte)' : 'Não avaliado';
+  const deps = (p.dependencia || '').split(',').map(s => s.trim()).filter(Boolean);
+  const depGrupos = {};
+  deps.forEach(nome => { const dep = catalogo.find(d => d.nome === nome); const cat = dep ? dep.categoria : 'Outros'; if (!depGrupos[cat]) depGrupos[cat] = []; depGrupos[cat].push(nome); });
+  const contatos = (p.bcpContatos || []).map(cid => catalogo.find(d => d.id === cid)).filter(Boolean);
+  const comps = (p.drpComponentes || []).map(cid => componentesCat.find(d => d.id === cid)).filter(Boolean);
+  const pergs = window.processosPerguntas || [];
+  const respostas = p.respostas || {};
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado.', '#e65100');
+  win.document.write('<html><head><title>Dossiê - ' + p.processo + '</title><style>body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6}h1{color:#1a237e}h2{color:#1a237e;border-bottom:2px solid #e8eaf6;padding-bottom:6px;margin-top:24px}table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt}th{background:#1a237e;color:white;padding:8px 10px;text-align:left}td{padding:7px 10px;border:1px solid #e0e0e0}.badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:9pt;font-weight:700;color:white;background:' + (score >= 12 ? '#c62828' : score >= 6 ? '#f57c00' : '#1565c0') + '}</style></head><body>');
+  win.document.write('<h1>' + p.processo + '</h1><p>' + p.area + ' — ' + responsavel + '</p><span class="badge">' + tier + ' • Score ' + score + '</span>');
+  win.document.write('<h2>Identificação</h2><p><b>Descrição:</b> ' + (p.descricaoFuncional || '-') + '</p>');
+  win.document.write('<h2>BIA</h2><p><b>Status:</b> ' + (p.biaHomologada || '-') + '</p><p><b>Impacto:</b> ' + (p.descricao || '-') + '</p><p><b>RTO:</b> ' + (p.rto || '-') + ' | <b>RPO:</b> ' + (p.rpo || '-') + ' | <b>MTD:</b> ' + (p.mtd || '-') + '</p>');
+  if (Object.keys(depGrupos).length) { win.document.write('<h3>Dependências</h3><table><tr><th>Tipo</th><th>Recursos</th></tr>'); Object.entries(depGrupos).sort().forEach(function(e) { win.document.write('<tr><td><b>' + e[0] + '</b></td><td>' + e[1].join(', ') + '</td></tr>'); }); win.document.write('</table>'); }
+  win.document.write('<h2>BCP</h2><p><b>Status:</b> ' + (p.bcpStatus || '-') + '</p>');
+  if (contatos.length) { win.document.write('<table><tr><th>Nome</th><th>Empresa</th><th>Setor</th><th>Telefone</th><th>Email</th></tr>'); contatos.forEach(function(d) { win.document.write('<tr><td><b>' + d.nome + '</b></td><td>' + (d.empresa||'-') + '</td><td>' + (d.setor||'-') + '</td><td>' + (d.telefone||'-') + '</td><td>' + (d.email||'-') + '</td></tr>'); }); win.document.write('</table>'); }
+  win.document.write('<h2>DRP</h2><p><b>Status:</b> ' + (p.drpStatus || '-') + '</p>');
+  if (comps.length) { win.document.write('<table><tr><th>Tipo</th><th>Nome</th><th>Estratégia</th></tr>'); comps.forEach(function(c) { win.document.write('<tr><td>' + c.tipo + '</td><td><b>' + c.nome + '</b></td><td>' + (c.estrategia||'-') + '</td></tr>'); }); win.document.write('</table>'); }
+  win.document.write('<div style="margin-top:30px;border-top:1px solid #ddd;padding-top:10px;font-size:8pt;color:#999;text-align:center;">Dossiê gerado em ' + new Date().toLocaleDateString('pt-BR') + '</div></body></html>');
+  win.document.close();
+};
+
+// ============================================================
+// GERAÇÃO DE PCN VIA IA (Gemini) - com sidebar recolhível
+// ============================================================
+window.gerarPCNProcesso = async () => {
+  const id = Number(document.getElementById('fId').value);
+  if (!id) return showToast('Salve o processo antes de gerar o PCN.', '#e65100');
+  const win = window.open('', '_blank');
+  if (win) win.document.write('<html><body style="font-family:Arial;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><div style="text-align:center;"><h2 style="color:#1a237e;">⏳ Gerando Plano de Continuidade...</h2><p style="color:#666;">Isso pode levar alguns segundos.</p></div></body></html>');
+  const btn = document.querySelector('button[onclick="gerarPCNProcesso()"]');
+  const textoOriginal = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Gerando...'; btn.style.opacity = '0.7'; }
+  try {
+    const result = await API.post('gerarPCN', { id });
+    if (result.error) throw new Error(result.error);
+    let pcnContent = (result.pcn || '');
+    const htmlStart = pcnContent.indexOf('<');
+    if (htmlStart > 0) pcnContent = pcnContent.substring(htmlStart);
+    pcnContent = pcnContent.replace(/^```html\s*/i, '').replace(/```\s*$/i, '').trim();
+    const pcnHtml = _buildPCNPage(pcnContent, result, id);
+    if (win) { win.document.open(); win.document.write(pcnHtml); win.document.close(); }
+    showToast('✅ PCN gerado!', '#2e7d32');
+  } catch(err) {
+    console.error('Erro PCN:', err);
+    showToast('❌ ' + err.message, '#c62828');
+    if (win) win.close();
+  } finally { if (btn) { btn.disabled = false; btn.innerHTML = textoOriginal; btn.style.opacity = '1'; } }
+};
+
+// ============================================================
+// ABRIR PCN SALVO
+// ============================================================
+window.abrirPCNSalvo = () => {
+  const id = Number(document.getElementById('fId').value);
+  const p = id ? window.processosData.find(proc => proc.id === id) : null;
+  if (!p || !p.pcnSalvo) return showToast('Nenhum PCN salvo.', '#e65100');
+  const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.score > 0 ? 'Tier 3 (Suporte)' : 'Não avaliado';
+  const versoes = _parsePCNVersoes(p.pcnSalvo);
+  const ultimaVersao = versoes[versoes.length - 1];
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado.', '#e65100');
+  const pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes);
+  win.document.open(); win.document.write(pcnHtml); win.document.close();
+};
+
+// ============================================================
+// PARSER DE VERSÕES DO PCN
+// ============================================================
+function _parsePCNVersoes(pcnSalvo) {
+  if (!pcnSalvo) return [];
+  try {
+    const parsed = JSON.parse(pcnSalvo);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && parsed.html) return [parsed];
+    return [{ versao: 1, data: new Date().toISOString(), autor: 'sistema', html: pcnSalvo }];
+  } catch(e) {
+    // HTML legado
+    return [{ versao: 1, data: new Date().toISOString(), autor: 'sistema', html: pcnSalvo }];
+  }
+}
+
+// ============================================================
+// TEMPLATE HTML DO PCN (compartilhado)
+// ============================================================
+function _buildPCNPage(pcnContent, info, processId, versoes) {
+  const versoesJson = versoes ? JSON.stringify(versoes).replace(/'/g, "\\'").replace(/</g, '\\x3c') : '[]';
+  const versaoAtual = versoes ? versoes.length : 1;
+  const seletorVersoes = versoes && versoes.length > 1 ? `
+    <div style="position:fixed;bottom:16px;right:20px;z-index:60;background:white;border:1.5px solid #e0e0e0;border-radius:8px;padding:8px 14px;box-shadow:0 2px 12px rgba(0,0,0,0.15);font-size:9pt;display:flex;align-items:center;gap:8px;">
+      <span style="color:#666;">Versão:</span>
+      <select id="pcn-versao-select" onchange="trocarVersaoPCN(this.value)" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:9pt;">
+        ${versoes.map(function(v) { return '<option value="' + (v.versao-1) + '"' + (v.versao === versaoAtual ? ' selected' : '') + '>v' + v.versao + ' — ' + new Date(v.data).toLocaleDateString('pt-BR') + ' ' + new Date(v.data).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) + '</option>'; }).join('')}
+      </select>
+      <span style="color:#999;font-size:8pt;">${versoes.length} versões</span>
+    </div>` : '';
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>PCN - ${info.processo || ''}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#333;font-size:10.5pt;line-height:1.6;margin:0}
+.sidebar{position:fixed;left:0;top:0;width:260px;height:100vh;overflow-y:auto;background:linear-gradient(180deg,#1a237e,#283593);padding:20px 16px;z-index:50;box-shadow:4px 0 16px rgba(0,0,0,0.15);transition:transform 0.3s ease}
+.sidebar.collapsed{transform:translateX(-260px)}
+.sidebar h3{color:rgba(255,255,255,0.9);font-size:10pt;margin-bottom:12px}
+.sidebar ol{list-style:none;padding:0;margin:0}
+.sidebar li{margin-bottom:6px}
+.sidebar a{color:rgba(255,255,255,0.75);text-decoration:none;font-size:8.5pt;display:block;padding:4px 8px;border-radius:4px;transition:background 0.2s}
+.sidebar a:hover{background:rgba(255,255,255,0.1);color:white}
+.sidebar a.h1-link{font-weight:700;font-size:9pt}
+.sidebar a.h2-link{font-size:8.5pt}
+.sidebar a.h3-link{font-size:8pt;opacity:0.7;padding-left:16px}
+.toggle-btn{position:fixed;left:268px;top:12px;z-index:60;background:#1a237e;color:white;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,0.2);transition:left 0.3s ease}
+.toggle-btn.collapsed{left:12px}
+.main{margin-left:280px;padding:40px 50px;max-width:950px;transition:margin-left 0.3s ease}
+.main.expanded{margin-left:20px}
+h1{font-size:22pt;color:#1a237e;margin-bottom:4px}
+h2{font-size:13pt;color:#1a237e;margin:30px 0 14px;padding:8px 14px;background:linear-gradient(135deg,#e8eaf6,#f5f6fa);border-left:4px solid #1a237e;border-radius:0 6px 6px 0}
+h3{font-size:11pt;color:#333;margin:20px 0 8px}
+p{margin-bottom:8px}
+ul,ol{margin:6px 0 12px 24px}
+li{margin-bottom:5px}
+table{width:100%;border-collapse:collapse;margin:10px 0 18px;font-size:9.5pt}
+th{background:#1a237e;color:white;padding:9px 12px;text-align:left;font-weight:600;font-size:9pt}
+td{padding:8px 12px;border:1px solid #ddd;vertical-align:top}
+tr:nth-child(even){background:#fafbfc}
+.cover{background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:40px 50px;margin:-40px -50px 30px;border-radius:0 0 12px 12px}
+.cover h1{color:white;font-size:24pt}
+.cover p{color:rgba(255,255,255,0.85)}
+.cover .badge{background:rgba(255,255,255,0.2);color:white;display:inline-block;padding:5px 16px;border-radius:14px;font-size:9.5pt;font-weight:700;margin-top:10px}
+.btn-action{position:fixed;top:12px;padding:10px 20px;background:#1a237e;color:white;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600;z-index:60;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
+.btn-action:hover{opacity:0.9}
+.footer{margin-top:40px;padding-top:16px;border-top:2px solid #e8eaf6;font-size:8pt;color:#999;text-align:center}
+@media print{.sidebar,.toggle-btn,.btn-action,#pcn-versao-select,.version-panel{display:none!important}.main{margin-left:0!important;padding:20px 30px}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.cover{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;margin:-20px -30px 20px;padding:30px}th{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}h2{page-break-after:avoid}table{page-break-inside:avoid}}
+</style>
+</head>
+<body>
+<nav class="sidebar" id="pcn-sidebar"><h3>📋 Navegação</h3><ol id="pcn-nav-list"></ol></nav>
+<button class="toggle-btn" id="pcn-toggle" onclick="togglePCNSidebar()">☰</button>
+<button class="btn-action" style="right:180px;" onclick="window.print()">🖨️ Imprimir / PDF</button>
+<button class="btn-action" style="right:20px;background:#2e7d32;" onclick="salvarVersaoPCN()">💾 Salvar versão</button>
+${seletorVersoes}
+<div class="main" id="pcn-main">
+  <div class="cover">
+    <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:16px;" alt="Fortes" onerror="this.style.display='none'">
+    <h1>Plano de Continuidade de Negócios</h1>
+    <p style="font-size:13pt;">${info.processo || ''}</p>
+    <p>Área: ${info.area || ''}</p>
+    <span class="badge">${info.tier || ''} • Score ${info.score || 0}</span>
+    <p style="margin-top:16px;font-size:9pt;opacity:0.7;">Versão ${versaoAtual} • ${new Date().toLocaleDateString('pt-BR')} • Classificação: Uso Interno</p>
+  </div>
+  <div id="pcn-editavel" contenteditable="true" style="outline:none;min-height:200px;">
+  ${pcnContent}
+  </div>
+  <div class="footer">
+    <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:24px;margin-bottom:6px;" alt="Fortes" onerror="this.style.display='none'"><br>
+    PCN v${versaoAtual} • Fortes Tecnologia
+  </div>
+</div>
+<script>
+var PROCESS_ID = ${processId};
+var PCN_API_URL = '` + API_URL + `';
+var PCN_VERSOES = JSON.parse('${versoesJson}');
+setTimeout(function(){
+  var el = document.getElementById('pcn-editavel');
+  var nav = document.getElementById('pcn-nav-list');
+  if(!el||!nav)return;
+  var hs = el.querySelectorAll('h1,h2,h3');
+  if(!hs.length){document.getElementById('pcn-sidebar').style.display='none';document.getElementById('pcn-toggle').style.display='none';return;}
+  var html='';
+  for(var i=0;i<hs.length;i++){var h=hs[i];var sid='s'+i;h.id=sid;var cls=h.tagName==='H1'?'h1-link':h.tagName==='H2'?'h2-link':'h3-link';html+='<li style="'+(h.tagName==='H3'?'padding-left:12px;':'')+'"><a href="#'+sid+'" class="'+cls+'">'+h.textContent.trim()+'</a></li>';}
+  nav.innerHTML=html;
+},200);
+function togglePCNSidebar(){
+  var sb=document.getElementById('pcn-sidebar');
+  var mn=document.getElementById('pcn-main');
+  var tb=document.getElementById('pcn-toggle');
+  sb.classList.toggle('collapsed');
+  mn.classList.toggle('expanded');
+  tb.classList.toggle('collapsed');
+}
+function trocarVersaoPCN(idx) {
+  var versao = PCN_VERSOES[Number(idx)];
+  if (versao && versao.html) {
+    document.getElementById('pcn-editavel').innerHTML = versao.html;
+    setTimeout(function(){
+      var el = document.getElementById('pcn-editavel');
+      var nav = document.getElementById('pcn-nav-list');
+      var hs = el.querySelectorAll('h1,h2,h3');
+      var html='';
+      for(var i=0;i<hs.length;i++){var h=hs[i];var sid='s'+i;h.id=sid;var cls=h.tagName==='H1'?'h1-link':h.tagName==='H2'?'h2-link':'h3-link';html+='<li style="'+(h.tagName==='H3'?'padding-left:12px;':'')+'"><a href="#'+sid+'" class="'+cls+'">'+h.textContent.trim()+'</a></li>';}
+      nav.innerHTML=html;
+    },100);
+  }
+}
+async function salvarVersaoPCN(){
+  var conteudo=document.getElementById('pcn-editavel').innerHTML;
+  var btn=document.querySelector('button[onclick="salvarVersaoPCN()"]');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Salvando...';}
+  try{
+    var res=await fetch(PCN_API_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'salvarPCN',id:String(PROCESS_ID),pcnHtml:conteudo}),redirect:'follow'});
+    var text=await res.text();var data=JSON.parse(text);
+    if(data.error)throw new Error(data.error);
+    alert('✅ Versão ' + (data.versao || '') + ' salva com sucesso! (' + (data.totalVersoes || '') + ' versões no total)');
+  }catch(e){alert('❌ Erro: '+e.message);}
+  finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
+}
+</script>
+</body>
+</html>`;
+}
+
+
+// ============================================================
+// ABRIR PCN DIRETO DA TABELA DE PROCESSOS
+// ============================================================
+window.abrirPCNDireto = (id) => {
+  const p = window.processosData.find(proc => proc.id === id);
+  if (!p || !p.pcnSalvo) return showToast('Nenhum PCN salvo para este processo.', '#e65100');
+  const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.score > 0 ? 'Tier 3 (Suporte)' : 'Não avaliado';
+  const versoes = _parsePCNVersoes(p.pcnSalvo);
+  const ultimaVersao = versoes[versoes.length - 1];
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado.', '#e65100');
+  const pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes);
+  win.document.open(); win.document.write(pcnHtml); win.document.close();
+};
+
+
+// ============================================================
+// BCP - TABELA DE FORNECEDORES (com Plano B e SLA)
+// ============================================================
+function renderFornecedoresBcp() {
+  const container = document.getElementById('bcpFornecedoresTabela');
+  if (!container) return;
+  const catalogo = window.dependenciasCatalogo || [];
+  const selecionadas = window._dependenciaSelecionadas || [];
+  
+  // Filtrar fornecedores do processo
+  const fornecedores = selecionadas.filter(nome => {
+    const dep = catalogo.find(d => d.nome === nome);
+    return dep && ['Fornecedores', 'Fornecedor'].includes(dep.categoria);
+  });
+  
+  if (!fornecedores.length) {
+    container.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhum fornecedor mapeado na BIA.</p>';
+    return;
+  }
+  
+  let html = `<table style="width:100%;border-collapse:collapse;font-size:0.88em;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;">
+    <thead>
+      <tr style="background:#f5f6fa;">
+        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;width:25%;">Fornecedor</th>
+        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Contingência / Plano B</th>
+        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">SLA Contratado</th>
+      </tr>
+    </thead>
+    <tbody>`;
+  
+  fornecedores.forEach(nome => {
+    html += `<tr style="border-bottom:1px solid #f0f0f0;">
+      <td style="padding:10px 14px;font-weight:600;color:#222;">${nome}</td>
+      <td style="padding:6px 8px;"><input type="text" class="planoB-contingencia" data-dep="${nome}" placeholder="Ex: Provedor alternativo..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
+      <td style="padding:6px 8px;"><input type="text" class="sla-valor" data-dep="${nome}" placeholder="Ex: Suporte 24x7, 15min..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
+    </tr>`;
+  });
+  
+  html += `</tbody></table>`;
+  container.innerHTML = html;
+}

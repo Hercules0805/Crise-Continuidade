@@ -61,7 +61,7 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 /* DRAWER (painel lateral) */
 .drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; }
 .drawer-overlay.open { display: block; }
-.drawer { position: fixed; top: 0; right: 0; height: 100vh; width: 480px; min-width: 320px; max-width: 90vw; background: white; box-shadow: -4px 0 24px rgba(0,0,0,0.15); z-index: 101; display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.25s ease; }
+.drawer { position: fixed; top: 0; right: 0; height: 100vh; width: 70vw; min-width: 320px; max-width: 90vw; background: white; box-shadow: -4px 0 24px rgba(0,0,0,0.15); z-index: 101; display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.25s ease; }
 .drawer#drawerAvaliar { width: 680px; }
 .drawer.open { transform: translateX(0); }
 .drawer-resize { position: absolute; left: 0; top: 0; width: 5px; height: 100%; cursor: ew-resize; background: transparent; z-index: 10; }

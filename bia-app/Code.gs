@@ -191,6 +191,15 @@ function doPost(e) {
       case 'excluirComponente':
         result = excluirComponente(data.id);
         break;
+      case 'gerarPCN':
+        result = gerarPCN(data);
+        break;
+      case 'salvarPCN':
+        result = salvarPCNProcesso(data);
+        break;
+      case 'listarModelos':
+        result = listarModelosGemini();
+        break;
       default:
         result = { error: 'Action não reconhecida: ' + action };
     }
@@ -315,6 +324,20 @@ function getProcessos() {
         bcpRiscos: r[15] ? JSON.parse(r[15]) : [],
         bcpPreventivas: r[16] ? JSON.parse(r[16]) : [],
         drpStatus: r[17] || '', drpObjetivo: r[18] || '', drpEscopo: r[19] || '', drpProcedimentos: r[20] || '', drpCriterios: r[21] || '',
+        drpComponentes: r[22] ? JSON.parse(r[22]) : [],
+        mtd: r[23] || '', workaround: r[24] || '',
+        impactoJanela: r[25] ? (typeof r[25] === 'string' ? r[25] : JSON.stringify(r[25])) : '',
+        bcpPlanoBProvedores: r[26] || '', bcpSlas: r[27] || '', bcpGatilhos: r[28] || '', bcpReconstituicao: r[29] || '',
+        bcpPapeisCrise: r[30] || '',
+        pcnSalvo: (() => {
+          const raw = r[31] || '';
+          if (!raw) return '';
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) return raw; // Already versioned JSON
+            return raw;
+          } catch(e) { return raw; } // Legacy HTML
+        })(),
         score: scores[key] || 0,
         avaliado: avaliados[key] || false,
         respostas: respostas[key] || []
@@ -327,7 +350,6 @@ function salvarProcesso(p) {
   const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
   let impacto = '';
   if (p.impactoIndisponibilidade) {
-    // Se já é string (veio do FormData), usa direto; se é objeto, serializa
     impacto = typeof p.impactoIndisponibilidade === 'string' ? p.impactoIndisponibilidade : JSON.stringify(p.impactoIndisponibilidade);
   }
   let bcpContatos = '';
@@ -342,11 +364,25 @@ function salvarProcesso(p) {
   if (p.bcpPreventivas) {
     bcpPreventivas = typeof p.bcpPreventivas === 'string' ? p.bcpPreventivas : JSON.stringify(p.bcpPreventivas);
   }
+  let drpComponentes = '';
+  if (p.drpComponentes) {
+    drpComponentes = typeof p.drpComponentes === 'string' ? p.drpComponentes : JSON.stringify(p.drpComponentes);
+  }
+  let impactoJanela = '';
+  if (p.impactoJanela) {
+    impactoJanela = typeof p.impactoJanela === 'string' ? p.impactoJanela : JSON.stringify(p.impactoJanela);
+  }
+  const row = [
+    p.area, p.processo, p.descricao, p.dependencia, p.rto || '', p.rpo || '', p.mtpd || '', p.biaHomologada || '', '',
+    p.bcpStatus || '', p.descricaoFuncional || '', impacto, p.bcpObjetivo || '', p.bcpEscopo || '', bcpContatos, bcpRiscos, bcpPreventivas,
+    p.drpStatus || '', p.drpObjetivo || '', p.drpEscopo || '', p.drpProcedimentos || '', p.drpCriterios || '', drpComponentes,
+    p.mtd || '', p.workaround || '', impactoJanela, p.bcpPlanoBProvedores || '', p.bcpSlas || '', p.bcpGatilhos || '', p.bcpReconstituicao || '', p.bcpPapeisCrise || '', p.pcnSalvo || ''
+  ];
   if (p.id) {
-    sheet.getRange(p.id, 1, 1, 22).setValues([[p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '', p.descricaoFuncional || '', impacto, p.bcpObjetivo || '', p.bcpEscopo || '', bcpContatos, bcpRiscos, bcpPreventivas, p.drpStatus || '', p.drpObjetivo || '', p.drpEscopo || '', p.drpProcedimentos || '', p.drpCriterios || '']]);
+    sheet.getRange(p.id, 1, 1, 32).setValues([row]);
     return { success: true, id: Number(p.id) };
   } else {
-    sheet.appendRow([p.area, p.processo, p.descricao, p.dependencia, p.rto, p.rpo, p.mtpd, p.biaHomologada, '', p.bcpStatus || '', p.descricaoFuncional || '', impacto, p.bcpObjetivo || '', p.bcpEscopo || '', bcpContatos, bcpRiscos, bcpPreventivas, p.drpStatus || '', p.drpObjetivo || '', p.drpEscopo || '', p.drpProcedimentos || '', p.drpCriterios || '']);
+    sheet.appendRow(row);
     return { success: true, id: sheet.getLastRow() };
   }
 }
@@ -1147,4 +1183,249 @@ function _criarAbaComponentes() {
   sheet.setColumnWidth(7, 200);
   sheet.setFrozenRows(1);
   return [];
+}
+
+
+// ============================================================
+// GERAÇÃO DE PCN VIA GEMINI AI
+// ============================================================
+function gerarPCN(data) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) return { error: 'API Key do Gemini não configurada. Configure em Propriedades do Script.' };
+  
+  const processoId = Number(data.id);
+  if (!processoId) return { error: 'ID do processo não informado.' };
+  
+  // Buscar dados completos do processo
+  const processos = getProcessos();
+  const p = processos.find(proc => proc.id === processoId);
+  if (!p) return { error: 'Processo não encontrado.' };
+  
+  // Buscar dependências e componentes
+  const dependencias = getDependencias();
+  const componentes = getComponentes();
+  
+  // Montar contexto das dependências do processo
+  const depsNomes = (p.dependencia || '').split(',').map(s => s.trim()).filter(Boolean);
+  const depsDetalhadas = depsNomes.map(nome => {
+    const dep = dependencias.find(d => d.nome === nome);
+    return dep ? { nome: dep.nome, categoria: dep.categoria, setor: dep.setor, empresa: dep.empresa, telefone: dep.telefone, email: dep.email, papel: dep.detalhes } : { nome };
+  });
+  
+  // Montar contexto dos componentes do processo
+  const compsIds = p.drpComponentes || [];
+  const compsDetalhados = compsIds.map(id => {
+    const comp = componentes.find(c => c.id === id);
+    return comp || null;
+  }).filter(Boolean);
+  
+  // Montar contexto dos contatos BCP
+  const contatosIds = p.bcpContatos || [];
+  const contatosDetalhados = contatosIds.map(id => {
+    const dep = dependencias.find(d => d.id === id);
+    return dep ? { nome: dep.nome, setor: dep.setor, empresa: dep.empresa, telefone: dep.telefone, email: dep.email, papel: dep.detalhes } : null;
+  }).filter(Boolean);
+  
+  // Parsear dados adicionais
+  let planoBData = {};
+  try { planoBData = p.bcpPlanoBProvedores ? JSON.parse(p.bcpPlanoBProvedores) : {}; } catch(e) {}
+  let slasData = {};
+  try { slasData = p.bcpSlas ? JSON.parse(p.bcpSlas) : {}; } catch(e) {}
+  let papeisCrise = {};
+  try { papeisCrise = p.bcpPapeisCrise ? JSON.parse(p.bcpPapeisCrise) : {}; } catch(e) {}
+  
+  const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.score > 0 ? 'Tier 3 (Suporte)' : 'Não avaliado';
+  
+  // Montar prompt
+  const prompt = `Você é o "Fortes Resiliente", um arquiteto sênior de Continuidade de Negócios e Resiliência Organizacional, com profundo conhecimento das normas ISO 22301, ISO 27031 e NIST SP 800-34.
+
+Com base nos dados coletados abaixo, gere um Plano de Continuidade de Negócios (PCN) COMPLETO, técnico e executável, seguindo EXATAMENTE a estrutura do template abaixo.
+
+Onde houver dados disponíveis, preencha com informações reais. Onde não houver dados suficientes, faça inferências técnicas inteligentes baseadas no contexto do processo e preencha com recomendações profissionais (nunca deixe campos com "[Inserir...]" — sempre preencha com conteúdo real ou recomendado).
+
+---
+## DADOS COLETADOS DO PROCESSO
+
+**Processo:** ${p.processo}
+**Área:** ${p.area}
+**Descrição Funcional:** ${p.descricaoFuncional || 'Não informada'}
+**Score de Criticidade:** ${p.score} (${tier})
+**RTO Esperado:** ${p.rto || 'Não definido'}
+**RPO Esperado:** ${p.rpo || 'Não definido'}
+**MTD (Máximo Downtime Tolerável):** ${p.mtd || 'Não definido'}
+**Descrição do Impacto:** ${p.descricao || 'Não informada'}
+
+### Dependências Críticas
+${depsDetalhadas.length ? depsDetalhadas.map(d => `- **${d.categoria || 'Outros'}:** ${d.nome}${d.empresa ? ' (' + d.empresa + ')' : ''}${d.papel ? ' — ' + d.papel : ''}`).join('\n') : 'Nenhuma dependência mapeada.'}
+
+### Equipe de Crise (Contatos)
+${contatosDetalhados.length ? contatosDetalhados.map(d => {
+    const papel = papeisCrise[d.nome] || papeisCrise[String(contatosIds[contatosDetalhados.indexOf(d)])] || d.papel || '';
+    return `- **${d.nome}** | Papel: ${papel || 'Não definido'} | Setor: ${d.setor || '-'} | Empresa: ${d.empresa || '-'} | Tel: ${d.telefone || '-'} | Email: ${d.email || '-'}`;
+  }).join('\n') : 'Nenhum contato definido.'}
+
+### Plano B de Provedores (Contingência)
+${Object.keys(planoBData).length ? Object.entries(planoBData).map(([dep, cont]) => `- **${dep}:** ${cont}`).join('\n') : 'Não definido.'}
+
+### SLAs de Fornecedores
+${Object.keys(slasData).length ? Object.entries(slasData).map(([dep, sla]) => `- **${dep}:** ${sla}`).join('\n') : 'Não definido.'}
+
+### Componentes de Serviço (DRP)
+${compsDetalhados.length ? compsDetalhados.map(c => `- **${c.tipo}:** ${c.nome} | Estratégia: ${c.estrategia || 'Não definida'} | RTO: ${c.rto || '-'} | RPO: ${c.rpo || '-'} | Responsável: ${c.responsavel || '-'}`).join('\n') : 'Nenhum componente mapeado.'}
+
+---
+## TEMPLATE OBRIGATÓRIO DO PCN (siga esta estrutura exata)
+
+# PROCESSO: [Nome do Processo]
+
+## PARTE 1: ANÁLISE DE IMPACTO DE NEGÓCIOS (BIA)
+1. Identificação do Processo (Nome, Área, Dono, Descrição Funcional)
+2. Classificação de Criticidade (marcar o Tier correto com [x])
+3. Matriz de Impacto da Indisponibilidade (tabela: Dimensão × Janelas 1h/4h/24h para Operacional, Reputacional, Financeiro, Legal)
+4. Mapeamento de Dependências Críticas (tabela: Tipo × Recursos — Pessoas, Sistemas, Fornecedores, Infraestrutura)
+5. Objetivos de Recuperação RTO e RPO (tabela: Recurso × RTO × RPO)
+
+## PARTE 2: PLANO DE CONTINUIDADE DE NEGÓCIOS (BCP)
+1. Escopo e Objetivo
+2. Informações de Contato e Matriz de Responsabilidade (tabela: Nome, Papel na Crise, Setor, Telefone, E-mail)
+3. Avaliação de Riscos (tabela: Evento, Probabilidade, Impacto, Estratégia de Mitigação)
+4. Medidas Preventivas / Controles Existentes (tabela: Controle × Descrição)
+5. Estratégia Operacional em Contingência (tabela: Atividade Afetada × Alternativa Operacional)
+6. Estrutura de Governança da Crise (tabela: Papel × Responsabilidade)
+7. Critérios de Ativação do BCP (lista de condições)
+8. Fluxo Prioritário de Recuperação (tabela: Ordem × Recurso × RTO × RPO)
+9. Plano de Comunicação da Crise (Interna, Externa, Canais, Frequência)
+10. Cronograma de Testes, Exercícios e Manutenção (tabela: Atividade × Escopo × Frequência)
+
+## PARTE 3: PLANO DE RECUPERAÇÃO DE DESASTRES (DRP)
+1. Objetivo e Escopo Técnico
+2. Estratégia Técnica de Recuperação (tabela: Atributo × Definição — Ambiente, Failover, Provisionamento)
+3. Checklists de Verificação e Diagnóstico (Health Check — lista com checkboxes)
+4. Fase Executiva de Recuperação / Runbook de Restore (8 passos sequenciais detalhados)
+5. Critérios de Retorno à Normalidade e Reconstituição (lista com checkboxes)
+6. Limitações Conhecidas da Estratégia
+
+## PARTE 4: ANEXOS
+- Modelo de Teste de Integração/API (tabela: Tipo de Teste × O que valida × Frequência)
+
+---
+## INSTRUÇÕES DE FORMATAÇÃO
+
+- Gere o PCN em formato HTML bem estruturado e formatado para impressão.
+- Use tabelas HTML com bordas para todas as matrizes.
+- Use headings (h1, h2, h3) para as seções.
+- Use listas (ul/ol) para itens sequenciais.
+- Use checkboxes (☐ ou ☑) para checklists.
+- NÃO inclua tags <html>, <head> ou <body> — retorne apenas o conteúdo interno.
+- NÃO inclua texto introdutório, explicações ou comentários fora do HTML. Comece DIRETAMENTE com a primeira tag HTML (<h1> ou <div>).
+- NÃO use code fences. Retorne HTML puro sem marcação markdown.
+- Linguagem: Português do Brasil, técnica e direta.
+- Preencha TODAS as seções com conteúdo real ou recomendações técnicas baseadas no contexto.`;
+
+  // Chamar API do Gemini
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 16384
+    }
+  };
+  
+  try {
+    const response = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      payload: JSON.stringify(payload),
+      muteHttpExceptions: true
+    });
+    
+    const status = response.getResponseCode();
+    const body = JSON.parse(response.getContentText());
+    
+    if (status !== 200) {
+      Logger.log('Gemini API Error: ' + JSON.stringify(body));
+      return { error: 'Erro na API do Gemini: ' + (body.error ? body.error.message : 'Status ' + status) };
+    }
+    
+    const content = body.candidates && body.candidates[0] && body.candidates[0].content;
+    if (!content || !content.parts || !content.parts[0]) {
+      return { error: 'Resposta vazia do Gemini.' };
+    }
+    
+    const pcnHtml = content.parts[0].text;
+    return { success: true, pcn: pcnHtml, processo: p.processo, area: p.area, tier: tier, score: p.score };
+  } catch(err) {
+    Logger.log('gerarPCN ERROR: ' + err.message);
+    return { error: 'Erro ao gerar PCN: ' + err.message };
+  }
+}
+
+
+// ============================================================
+// DIAGNÓSTICO - Listar modelos disponíveis
+// ============================================================
+function listarModelosGemini() {
+  const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
+  if (!apiKey) return { error: 'API Key não configurada.' };
+  
+  try {
+    const response = UrlFetchApp.fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + apiKey, { muteHttpExceptions: true });
+    const body = JSON.parse(response.getContentText());
+    if (body.error) return { error: body.error.message };
+    const modelos = (body.models || []).filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent')).map(m => m.name);
+    return { modelos };
+  } catch(err) {
+    return { error: err.message };
+  }
+}
+
+
+// ============================================================
+// SALVAR PCN EDITADO (com versionamento)
+// ============================================================
+function salvarPCNProcesso(data) {
+  const id = Number(data.id);
+  const pcnHtml = data.pcnHtml || '';
+  if (!id) return { error: 'ID do processo não informado.' };
+  
+  const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
+  if (!sheet) return { error: 'Aba de processos não encontrada.' };
+  
+  // Ler versões existentes da coluna 32
+  const celula = sheet.getRange(id, 32).getValue();
+  let versoes = [];
+  try {
+    const parsed = celula ? JSON.parse(celula) : null;
+    if (Array.isArray(parsed)) {
+      versoes = parsed;
+    } else if (parsed && parsed.html) {
+      // Formato antigo com objeto único - migrar
+      versoes = [parsed];
+    } else if (typeof celula === 'string' && celula.trim().startsWith('<')) {
+      // HTML puro legado - migrar como v1
+      versoes = [{ versao: 1, data: new Date().toISOString(), autor: Session.getActiveUser().getEmail() || 'sistema', html: celula }];
+    }
+  } catch(e) {
+    // Se não é JSON, é HTML legado
+    if (celula && typeof celula === 'string' && celula.trim().length > 0) {
+      versoes = [{ versao: 1, data: new Date().toISOString(), autor: 'sistema', html: celula }];
+    }
+  }
+  
+  // Adicionar nova versão
+  const novaVersao = {
+    versao: versoes.length + 1,
+    data: new Date().toISOString(),
+    autor: Session.getActiveUser().getEmail() || 'sistema',
+    html: pcnHtml
+  };
+  versoes.push(novaVersao);
+  
+  // Manter no máximo 10 versões (remover as mais antigas)
+  if (versoes.length > 10) versoes = versoes.slice(versoes.length - 10);
+  
+  // Salvar JSON com todas as versões
+  sheet.getRange(id, 32).setValue(JSON.stringify(versoes));
+  return { success: true, versao: novaVersao.versao, totalVersoes: versoes.length };
 }
