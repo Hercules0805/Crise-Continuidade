@@ -3,11 +3,13 @@
 // ============================================================
 
 const app = document.getElementById('app');
-const pages = { processos, perguntas, areas, admin, dependencias, componentes };
+const pages = { processos, perguntas, areas, admin, dependencias, componentes, pcns };
 
 // Roteamento
 window.addEventListener('hashchange', route);
 window.addEventListener('load', route);
+
+// Listener para salvar PCN via postMessage (não mais necessário - PCN agora abre em pcn-viewer.html com mesma origin)
 
 function route() {
   const hash = window.location.hash.slice(1) || 'processos';
@@ -3257,8 +3259,11 @@ window.gerarDossieProcesso = () => {
 window.gerarPCNProcesso = async () => {
   const id = Number(document.getElementById('fId').value);
   if (!id) return showToast('Salve o processo antes de gerar o PCN.', '#e65100');
-  const win = window.open('', '_blank');
-  if (win) win.document.write('<html><body style="font-family:Arial;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><div style="text-align:center;"><h2 style="color:#1a237e;">⏳ Gerando Plano de Continuidade...</h2><p style="color:#666;">Isso pode levar alguns segundos.</p></div></body></html>');
+  
+  // Abrir janela de loading (mesma origin para evitar CORS)
+  const win = window.open('pcn-viewer.html?loading=1', '_blank');
+  if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
+  
   const btn = document.querySelector('button[onclick="gerarPCNProcesso()"]');
   const textoOriginal = btn ? btn.innerHTML : '';
   if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Gerando...'; btn.style.opacity = '0.7'; }
@@ -3270,7 +3275,10 @@ window.gerarPCNProcesso = async () => {
     if (htmlStart > 0) pcnContent = pcnContent.substring(htmlStart);
     pcnContent = pcnContent.replace(/^```html\s*/i, '').replace(/```\s*$/i, '').trim();
     const pcnHtml = _buildPCNPage(pcnContent, result, id);
-    if (win) { win.document.open(); win.document.write(pcnHtml); win.document.close(); }
+    // Escrever diretamente na janela aberta
+    win.document.open();
+    win.document.write(pcnHtml);
+    win.document.close();
     showToast('✅ PCN gerado!', '#2e7d32');
   } catch(err) {
     console.error('Erro PCN:', err);
@@ -3289,10 +3297,12 @@ window.abrirPCNSalvo = () => {
   const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.score > 0 ? 'Tier 3 (Suporte)' : 'Não avaliado';
   const versoes = _parsePCNVersoes(p.pcnSalvo);
   const ultimaVersao = versoes[versoes.length - 1];
+  const pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes);
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado.', '#e65100');
-  const pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes);
-  win.document.open(); win.document.write(pcnHtml); win.document.close();
+  win.document.open();
+  win.document.write(pcnHtml);
+  win.document.close();
 };
 
 // ============================================================
@@ -3315,7 +3325,7 @@ function _parsePCNVersoes(pcnSalvo) {
 // TEMPLATE HTML DO PCN (compartilhado)
 // ============================================================
 function _buildPCNPage(pcnContent, info, processId, versoes) {
-  const versoesJson = versoes ? JSON.stringify(versoes).replace(/'/g, "\\'").replace(/</g, '\\x3c') : '[]';
+  const versoesJson = versoes ? JSON.stringify(versoes).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t').replace(/</g, '\\x3c') : '[]';
   const versaoAtual = versoes ? versoes.length : 1;
   const seletorVersoes = versoes && versoes.length > 1 ? `
     <div style="position:fixed;bottom:16px;right:20px;z-index:60;background:white;border:1.5px solid #e0e0e0;border-radius:8px;padding:8px 14px;box-shadow:0 2px 12px rgba(0,0,0,0.15);font-size:9pt;display:flex;align-items:center;gap:8px;">
@@ -3395,7 +3405,7 @@ ${seletorVersoes}
 var PROCESS_ID = ${processId};
 var PCN_API_URL = '` + API_URL + `';
 var PCN_VERSOES = JSON.parse('${versoesJson}');
-setTimeout(function(){
+function buildNav(){
   var el = document.getElementById('pcn-editavel');
   var nav = document.getElementById('pcn-nav-list');
   if(!el||!nav)return;
@@ -3404,7 +3414,19 @@ setTimeout(function(){
   var html='';
   for(var i=0;i<hs.length;i++){var h=hs[i];var sid='s'+i;h.id=sid;var cls=h.tagName==='H1'?'h1-link':h.tagName==='H2'?'h2-link':'h3-link';html+='<li style="'+(h.tagName==='H3'?'padding-left:12px;':'')+'"><a href="#'+sid+'" class="'+cls+'">'+h.textContent.trim()+'</a></li>';}
   nav.innerHTML=html;
-},500);
+}
+// Tentar construir nav em múltiplos momentos para garantir que funciona
+setTimeout(buildNav, 300);
+setTimeout(buildNav, 1000);
+setTimeout(buildNav, 2000);
+setTimeout(buildNav, 4000);
+// Também observer mutations no conteúdo
+if(window.MutationObserver){
+  var _navBuilt = false;
+  var _obs = new MutationObserver(function(){if(!_navBuilt){_navBuilt=true;setTimeout(buildNav,200);}});
+  var _target = document.getElementById('pcn-editavel');
+  if(_target) _obs.observe(_target,{childList:true,subtree:true});
+}
 function togglePCNSidebar(){
   var sb=document.getElementById('pcn-sidebar');
   var mn=document.getElementById('pcn-main');
@@ -3432,9 +3454,16 @@ async function salvarVersaoPCN(){
   var btn=document.querySelector('button[onclick="salvarVersaoPCN()"]');
   if(btn){btn.disabled=true;btn.textContent='⏳ Salvando...';}
   try{
-    var res=await fetch(PCN_API_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify({action:'salvarPCN',id:String(PROCESS_ID),pcnHtml:conteudo}),redirect:'follow'});
-    var text=await res.text();var data=JSON.parse(text);
-    if(data.error)throw new Error(data.error);
+    var payload = JSON.stringify({action:'salvarPCN',id:String(PROCESS_ID),pcnHtml:conteudo});
+    var res = await fetch(PCN_API_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=UTF-8'},
+      body: payload,
+      redirect:'follow'
+    });
+    var text = await res.text();
+    var data = JSON.parse(text);
+    if(data.error) throw new Error(data.error);
     alert('✅ Versão ' + (data.versao || '') + ' salva com sucesso! (' + (data.totalVersoes || '') + ' versões no total)');
   }catch(e){alert('❌ Erro: '+e.message);}
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
@@ -3454,10 +3483,12 @@ window.abrirPCNDireto = (id) => {
   const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.score > 0 ? 'Tier 3 (Suporte)' : 'Não avaliado';
   const versoes = _parsePCNVersoes(p.pcnSalvo);
   const ultimaVersao = versoes[versoes.length - 1];
+  const pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes);
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado.', '#e65100');
-  const pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes);
-  win.document.open(); win.document.write(pcnHtml); win.document.close();
+  win.document.open();
+  win.document.write(pcnHtml);
+  win.document.close();
 };
 
 
@@ -3501,4 +3532,94 @@ function renderFornecedoresBcp() {
   
   html += `</tbody></table>`;
   container.innerHTML = html;
+}
+
+// ============================================================
+// PÁGINA: PCNs - Biblioteca de Planos de Continuidade
+// ============================================================
+async function pcns() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>📋 Planos de Continuidade (PCNs)</h2><p class="page-sub">Navegue pelos PCNs gerados, organizados por área</p></div>
+    </div>
+    <div class="loading" id="loading">⏳ Carregando...</div>
+    <div id="pcns-lista"></div>`;
+
+  try {
+    // Carregar processos (que contêm os PCNs salvos)
+    const processos = await API.getProcessos();
+    window.processosData = processos; // Garantir que está disponível para abrirPCNDireto
+    document.getElementById('loading').style.display = 'none';
+
+    // Filtrar apenas processos com PCN salvo
+    const comPCN = processos.filter(p => p.pcnSalvo);
+
+    if (!comPCN.length) {
+      document.getElementById('pcns-lista').innerHTML = `
+        <div style="text-align:center;padding:60px 20px;color:#999;">
+          <div style="font-size:3em;margin-bottom:16px;">📄</div>
+          <h3 style="color:#666;margin-bottom:8px;">Nenhum PCN gerado ainda</h3>
+          <p>Gere PCNs na tela de Processos clicando em "🤖 Gerar PCN".</p>
+        </div>`;
+      return;
+    }
+
+    // Agrupar por área
+    const porArea = {};
+    comPCN.forEach(p => {
+      const area = p.area || 'Sem Área';
+      if (!porArea[area]) porArea[area] = [];
+      porArea[area].push(p);
+    });
+
+    // Cores por tier
+    const tierColor = (score) => score >= 12 ? '#c62828' : score >= 6 ? '#f57c00' : score > 0 ? '#1565c0' : '#999';
+    const tierLabel = (score) => score >= 12 ? 'Tier 1' : score >= 6 ? 'Tier 2' : score > 0 ? 'Tier 3' : '-';
+
+    // Renderizar
+    let html = `<div style="margin-bottom:16px;display:flex;align-items:center;gap:16px;">
+      <span style="font-size:0.9em;color:#666;">${comPCN.length} PCN${comPCN.length > 1 ? 's' : ''} em ${Object.keys(porArea).length} área${Object.keys(porArea).length > 1 ? 's' : ''}</span>
+    </div>`;
+
+    Object.entries(porArea).sort((a, b) => a[0].localeCompare(b[0])).forEach(([area, procs]) => {
+      html += `<div style="margin-bottom:24px;">
+        <div style="background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:12px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;">
+          <span style="font-weight:700;font-size:1em;">📁 ${area}</span>
+          <span style="font-size:0.8em;opacity:0.8;">${procs.length} processo${procs.length > 1 ? 's' : ''}</span>
+        </div>
+        <div style="border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">`;
+
+      procs.sort((a, b) => (b.score || 0) - (a.score || 0)).forEach(p => {
+        const versoes = _parsePCNVersoes(p.pcnSalvo);
+        const ultimaVersao = versoes[versoes.length - 1];
+        const dataVersao = ultimaVersao && ultimaVersao.data ? new Date(ultimaVersao.data).toLocaleDateString('pt-BR') : '-';
+        const numVersoes = versoes.length;
+
+        html += `<div style="display:flex;align-items:center;padding:14px 20px;border-bottom:1px solid #f0f0f0;cursor:pointer;transition:background 0.15s;" 
+                      onmouseenter="this.style.background='#f8f9ff'" onmouseleave="this.style.background='white'"
+                      onclick="abrirPCNDireto(${p.id})">
+          <div style="flex:1;">
+            <div style="font-weight:600;color:#222;font-size:0.95em;">${p.processo}</div>
+            <div style="font-size:0.8em;color:#888;margin-top:3px;">
+              Última versão: ${dataVersao} • ${numVersoes} versão${numVersoes > 1 ? 'ões' : ''}
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span style="background:${tierColor(p.score)};color:white;padding:3px 10px;border-radius:10px;font-size:0.75em;font-weight:700;">${tierLabel(p.score)} • ${p.score || 0}</span>
+            <span style="color:#1a237e;font-size:1.2em;" title="Abrir PCN">📄</span>
+          </div>
+        </div>`;
+      });
+
+      html += `</div></div>`;
+    });
+
+    document.getElementById('pcns-lista').innerHTML = html;
+  } catch (err) {
+    document.getElementById('loading').innerHTML = `
+      <div style="color:#c62828;padding:20px;text-align:center;">
+        <h3>❌ Erro ao carregar PCNs</h3>
+        <p>${err.message}</p>
+      </div>`;
+  }
 }

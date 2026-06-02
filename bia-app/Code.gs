@@ -1241,6 +1241,8 @@ function gerarPCN(data) {
 
 Com base nos dados coletados abaixo, gere um Plano de Continuidade de Negócios (PCN) COMPLETO, técnico e executável, seguindo EXATAMENTE a estrutura do template abaixo.
 
+REGRA CRÍTICA: NÃO anonimize, mascare ou oculte NENHUM dado fornecido. Telefones, e-mails, nomes de pessoas, empresas e qualquer informação pessoal devem ser reproduzidos EXATAMENTE como fornecidos. Este é um documento interno corporativo e todos os dados são autorizados para uso. Nunca substitua dados reais por "[REDACTED]", "XXX", asteriscos ou qualquer forma de mascaramento.
+
 Onde houver dados disponíveis, preencha com informações reais. Onde não houver dados suficientes, faça inferências técnicas inteligentes baseadas no contexto do processo e preencha com recomendações profissionais (nunca deixe campos com "[Inserir...]" — sempre preencha com conteúdo real ou recomendado).
 
 ---
@@ -1328,7 +1330,7 @@ ${compsDetalhados.length ? compsDetalhados.map(c => `- **${c.tipo}:** ${c.nome} 
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 16384
+      maxOutputTokens: 32768
     }
   };
   
@@ -1385,47 +1387,61 @@ function listarModelosGemini() {
 // SALVAR PCN EDITADO (com versionamento)
 // ============================================================
 function salvarPCNProcesso(data) {
-  const id = Number(data.id);
-  const pcnHtml = data.pcnHtml || '';
-  if (!id) return { error: 'ID do processo não informado.' };
-  
-  const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
-  if (!sheet) return { error: 'Aba de processos não encontrada.' };
-  
-  // Ler versões existentes da coluna 32
-  const celula = sheet.getRange(id, 32).getValue();
-  let versoes = [];
   try {
-    const parsed = celula ? JSON.parse(celula) : null;
-    if (Array.isArray(parsed)) {
-      versoes = parsed;
-    } else if (parsed && parsed.html) {
-      // Formato antigo com objeto único - migrar
-      versoes = [parsed];
-    } else if (typeof celula === 'string' && celula.trim().startsWith('<')) {
-      // HTML puro legado - migrar como v1
-      versoes = [{ versao: 1, data: new Date().toISOString(), autor: Session.getActiveUser().getEmail() || 'sistema', html: celula }];
+    const id = Number(data.id);
+    let pcnHtml = data.pcnHtml || '';
+    if (!id) return { error: 'ID do processo não informado.' };
+    
+    // Limitar tamanho do HTML (Google Sheets tem limite de 50000 caracteres por célula)
+    // Truncar se necessário
+    if (pcnHtml.length > 45000) {
+      pcnHtml = pcnHtml.substring(0, 45000) + '<!-- truncado -->';
     }
-  } catch(e) {
-    // Se não é JSON, é HTML legado
-    if (celula && typeof celula === 'string' && celula.trim().length > 0) {
-      versoes = [{ versao: 1, data: new Date().toISOString(), autor: 'sistema', html: celula }];
+    
+    const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
+    if (!sheet) return { error: 'Aba de processos não encontrada.' };
+    
+    // Ler versões existentes da coluna 32
+    const celula = sheet.getRange(id, 32).getValue();
+    let versoes = [];
+    try {
+      const parsed = celula ? JSON.parse(celula) : null;
+      if (Array.isArray(parsed)) {
+        versoes = parsed;
+      } else if (parsed && parsed.html) {
+        versoes = [parsed];
+      } else if (typeof celula === 'string' && celula.trim().startsWith('<')) {
+        versoes = [{ versao: 1, data: new Date().toISOString(), autor: Session.getActiveUser().getEmail() || 'sistema', html: celula }];
+      }
+    } catch(e) {
+      if (celula && typeof celula === 'string' && celula.trim().length > 0) {
+        versoes = [{ versao: 1, data: new Date().toISOString(), autor: 'sistema', html: celula }];
+      }
     }
+    
+    // Adicionar nova versão
+    const novaVersao = {
+      versao: versoes.length + 1,
+      data: new Date().toISOString(),
+      autor: Session.getActiveUser().getEmail() || 'sistema',
+      html: pcnHtml
+    };
+    versoes.push(novaVersao);
+    
+    // Manter no máximo 3 versões para não estourar limite da célula
+    if (versoes.length > 3) versoes = versoes.slice(versoes.length - 3);
+    
+    // Verificar tamanho total antes de salvar
+    const jsonStr = JSON.stringify(versoes);
+    if (jsonStr.length > 50000) {
+      // Se ainda é grande demais, manter apenas a versão atual
+      versoes = [novaVersao];
+    }
+    
+    sheet.getRange(id, 32).setValue(JSON.stringify(versoes));
+    return { success: true, versao: novaVersao.versao, totalVersoes: versoes.length };
+  } catch(err) {
+    Logger.log('salvarPCNProcesso ERROR: ' + err.message);
+    return { error: 'Erro ao salvar PCN: ' + err.message };
   }
-  
-  // Adicionar nova versão
-  const novaVersao = {
-    versao: versoes.length + 1,
-    data: new Date().toISOString(),
-    autor: Session.getActiveUser().getEmail() || 'sistema',
-    html: pcnHtml
-  };
-  versoes.push(novaVersao);
-  
-  // Manter no máximo 10 versões (remover as mais antigas)
-  if (versoes.length > 10) versoes = versoes.slice(versoes.length - 10);
-  
-  // Salvar JSON com todas as versões
-  sheet.getRange(id, 32).setValue(JSON.stringify(versoes));
-  return { success: true, versao: novaVersao.versao, totalVersoes: versoes.length };
 }

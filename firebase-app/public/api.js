@@ -29,7 +29,7 @@ const API = {
     actions.forEach(a => { Object.keys(_cache).filter(k => k.startsWith(a)).forEach(k => delete _cache[k]); });
   },
 
-  async post(action, body) {
+  async post(action, body, options = {}) {
     try {
       const payload = { action };
       // Adicionar campos do body, serializando objetos e arrays como JSON string
@@ -41,17 +41,29 @@ const API = {
           payload[key] = value;
         }
       });
+
+      // Timeout configurável (padrão 120s, ações pesadas como gerarPCN usam 300s)
+      const timeoutMs = options.timeout || (action === 'gerarPCN' ? 300000 : 120000);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
       const res = await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify(payload),
-        redirect: 'follow'
+        redirect: 'follow',
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
+
       const text = await res.text();
       const data = JSON.parse(text);
       if (data.error) throw new Error(data.error);
       return data;
     } catch (err) {
+      if (err.name === 'AbortError') {
+        throw new Error('Timeout: a requisição demorou demais. Tente novamente.');
+      }
       console.error('API POST Error:', err);
       throw err;
     }

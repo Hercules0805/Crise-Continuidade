@@ -6,7 +6,37 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "headers": [
+      {
+        "source": "**/*.html",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      },
+      {
+        "source": "**/*.js",
+        "headers": [{ "key": "Cache-Control", "value": "no-cache" }]
+      }
+    ],
     "rewrites": [
+      {
+        "source": "/pcn-viewer.html",
+        "destination": "/pcn-viewer.html"
+      },
+      {
+        "source": "/avaliar.html",
+        "destination": "/avaliar.html"
+      },
+      {
+        "source": "/avaliar-area.html",
+        "destination": "/avaliar-area.html"
+      },
+      {
+        "source": "/login.html",
+        "destination": "/login.html"
+      },
+      {
+        "source": "/cadastrar-areas.html",
+        "destination": "/cadastrar-areas.html"
+      },
       {
         "source": "**",
         "destination": "/index.html"

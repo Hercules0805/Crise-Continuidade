@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PCN - Plano de Continuidade</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 0; padding: 0; }
+    .loading { display: flex; align-items: center; justify-content: center; height: 100vh; background: #f5f5f5; }
+    .loading h2 { color: #1a237e; }
+    .loading p { color: #666; }
+    #timer { color: #999; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="loading" id="loading">
+    <div style="text-align:center;">
+      <h2>⏳ Carregando Plano de Continuidade...</h2>
+      <p id="loading-msg">Aguarde...</p>
+      <p id="timer"></p>
+    </div>
+  </div>
+  <script>
+    (function() {
+      var seconds = 0;
+      var timerInterval = null;
+      var pollInterval = null;
+
+      function renderPCN(html) {
+        if (timerInterval) clearInterval(timerInterval);
+        if (pollInterval) clearInterval(pollInterval);
+        document.open();
+        document.write(html);
+        document.close();
+      }
+
+      function showError(msg) {
+        if (timerInterval) clearInterval(timerInterval);
+        if (pollInterval) clearInterval(pollInterval);
+        var el = document.getElementById('loading');
+        if (el) el.innerHTML = '<div style="text-align:center;"><h2 style="color:#c62828;">&#x274C; Erro</h2><p>' + msg + '</p></div>';
+      }
+
+      function decodeData(raw) {
+        // Tentar decodificar como base64 (novo formato)
+        try {
+          return decodeURIComponent(escape(atob(raw)));
+        } catch(e) {}
+        // Fallback: tentar como JSON (formato antigo)
+        try {
+          var parsed = JSON.parse(raw);
+          return parsed.html || '';
+        } catch(e2) {}
+        // Último fallback: retornar como está
+        return raw;
+      }
+
+      function checkForData() {
+        var pcnData = localStorage.getItem('pcn_viewer_data');
+        if (pcnData) {
+          localStorage.removeItem('pcn_viewer_data');
+          try {
+            var html = decodeData(pcnData);
+            if (html) {
+              renderPCN(html);
+            } else {
+              showError('Dados do PCN vazios.');
+            }
+          } catch(e) {
+            showError(e.message);
+          }
+        }
+      }
+
+      // Checar imediatamente
+      checkForData();
+
+      // Se não carregou, mostrar timer após 200ms
+      setTimeout(function() {
+        if (document.getElementById('loading')) {
+          var msgEl = document.getElementById('loading-msg');
+          var timerEl = document.getElementById('timer');
+          if (msgEl) msgEl.textContent = 'Isso pode levar até 2 minutos. Aguarde...';
+          timerInterval = setInterval(function() {
+            seconds++;
+            if (timerEl) timerEl.textContent = seconds + 's';
+          }, 1000);
+        }
+      }, 200);
+
+      // Polling
+      pollInterval = setInterval(checkForData, 500);
+
+      // Timeout 5 min
+      setTimeout(function() {
+        showError('O PCN demorou demais. Feche esta aba e tente novamente.');
+      }, 300000);
+    })();
+  </script>
+</body>
+</html>
