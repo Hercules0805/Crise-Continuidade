@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BIA — Mapeamento de Dependências</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f6fa; min-height: 100vh; color: #333; }
+    .header { background: linear-gradient(135deg, #1a237e, #283593); color: white; padding: 30px 20px; text-align: center; }
+    .header h1 { font-size: 1.4em; margin-bottom: 6px; }
+    .header p { font-size: 0.9em; opacity: 0.85; }
+    .container { max-width: 800px; margin: -20px auto 40px; padding: 0 16px; }
+    .card { background: white; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 28px 32px; margin-bottom: 20px; }
+    .card h2 { font-size: 1.1em; color: #1a237e; margin-bottom: 6px; }
+    .card p.desc { font-size: 0.88em; color: #666; margin-bottom: 16px; line-height: 1.5; }
+    .info-box { background: #e8eaf6; border-left: 4px solid #1a237e; padding: 14px 18px; border-radius: 0 8px 8px 0; margin-bottom: 20px; }
+    .info-box strong { color: #1a237e; }
+    .info-box p { font-size: 0.88em; color: #333; margin-top: 4px; }
+    .section-examples { font-size: 0.78em; color: #666; background: #f9f9f9; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; border: 1px dashed #ddd; }
+    .section-examples strong { color: #555; }
+    .tags-area { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 44px; padding: 10px; background: #fafbfc; border: 1.5px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
+    .tag { display: inline-flex; align-items: center; gap: 4px; background: #1a237e; color: white; padding: 5px 10px 5px 12px; border-radius: 14px; font-size: 0.85em; font-weight: 500; animation: tagIn 0.2s ease; }
+    @keyframes tagIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .tag button { background: none; border: none; cursor: pointer; color: rgba(255,255,255,0.7); font-size: 1.2em; line-height: 1; padding: 0 2px; }
+    .tag button:hover { color: white; }
+    .tag-empty { font-size: 0.82em; color: #bbb; font-style: italic; }
+    .catalog-area { margin-top: 8px; }
+    .catalog-label { font-size: 0.75em; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 6px; }
+    .catalog-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .chip { display: inline-block; padding: 5px 12px; border-radius: 14px; font-size: 0.82em; font-weight: 500; background: #e8eaf6; color: #1a237e; cursor: pointer; border: 1.5px solid transparent; transition: all 0.15s; user-select: none; }
+    .chip:hover { background: #c5cae9; border-color: #1a237e; }
+    .chip.selected { background: #1a237e; color: white; cursor: default; opacity: 0.6; }
+    .chip-add { background: white; border: 1.5px dashed #1a237e; color: #1a237e; cursor: pointer; }
+    .chip-add:hover { background: #e8eaf6; }
+    .add-input-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+    .add-input-row input { flex: 1; padding: 8px 12px; border: 1.5px solid #e0e0e0; border-radius: 8px; font-size: 0.9em; }
+    .add-input-row input:focus { border-color: #1a237e; outline: none; }
+    .add-input-row button { padding: 8px 16px; background: #1a237e; color: white; border: none; border-radius: 8px; font-size: 0.85em; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .add-input-row button:hover { opacity: 0.9; }
+    .campo { margin-bottom: 16px; }
+    .campo label { display: block; font-size: 0.82em; font-weight: 600; color: #444; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.3px; }
+    .campo input, .campo textarea, .campo select { width: 100%; padding: 10px 12px; border: 1.5px solid #e0e0e0; border-radius: 8px; font-size: 0.93em; transition: border-color 0.2s; }
+    .campo input:focus, .campo textarea:focus, .campo select:focus { border-color: #1a237e; outline: none; }
+    .campo .hint { font-size: 0.78em; color: #999; margin-top: 4px; }
+    .btn-primary { background: #1a237e; color: white; border: none; padding: 14px 32px; border-radius: 8px; font-size: 1em; font-weight: 600; cursor: pointer; width: 100%; transition: opacity 0.2s; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .success-msg { text-align: center; padding: 40px 20px; }
+    .success-msg h2 { color: #2e7d32; margin-bottom: 8px; }
+    .loading { text-align: center; padding: 60px 20px; color: #666; }
+    .error { text-align: center; padding: 60px 20px; color: #c62828; }
+    @media (max-width: 600px) { .card { padding: 20px 16px; } .container { padding: 0 10px; } .add-input-row { flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📋 Mapeamento de Dependências Críticas</h1>
+    <p>Identifique os recursos essenciais para o funcionamento do seu processo</p>
+  </div>
+  <div class="container">
+    <div id="content">
+      <div class="loading">⏳ Validando acesso...</div>
+    </div>
+  </div>
+
+  <script src="config.js?v=2"></script>
+  <script>
+    let TOKEN = '';
+    let PROCESSO_INFO = {};
+    let CATALOGO = {};
+    const DEPS = { fornecedores: [], infraestrutura: [], pessoas: [], sistemas: [] };
+
+    async function init() {
+      const params = new URLSearchParams(window.location.search);
+      TOKEN = params.get('token');
+      if (!TOKEN) return showError('Link inválido. Solicite um novo link ao administrador.');
+      try {
+        const url = new URL(API_URL);
+        url.searchParams.append('action', 'validarTokenBIA');
+        url.searchParams.append('token', TOKEN);
+        const res = await fetch(url, { redirect: 'follow' });
+        const text = await res.text();
+        const data = JSON.parse(text);
+        if (data.error) return showError(data.error);
+        PROCESSO_INFO = data;
+        CATALOGO = data.catalogo || {};
+        // Pré-carregar dependências existentes
+        if (data.dependencias) {
+          data.dependencias.split(',').map(s => s.trim()).filter(Boolean).forEach(nome => {
+            const cat = (data.depCategorias && data.depCategorias[nome]) || '';
+            const key = cat.toLowerCase().replace(/[^a-záéíóúãõç]/g, '');
+            const mapped = key === 'fornecedor' ? 'fornecedores' : key === 'pessoa' ? 'pessoas' : key === 'sistema' ? 'sistemas' : key;
+            if (DEPS[mapped]) DEPS[mapped].push(nome);
+          });
+        }
+        renderForm();
+      } catch(e) {
+        showError('Erro ao validar o link: ' + e.message);
+      }
+    }
+
+    function showError(msg) {
+      document.getElementById('content').innerHTML = '<div class="card"><div class="error"><h2>❌ ' + msg + '</h2><p style="margin-top:12px;color:#666;">Se o problema persistir, entre em contato com a equipe de Segurança da Informação.</p></div></div>';
+    }
+
+    function renderForm() {
+      document.getElementById('content').innerHTML = `
+        <div class="card">
+          <div class="info-box">
+            <strong>Processo:</strong> ${PROCESSO_INFO.processo}
+            <p><strong>Área:</strong> ${PROCESSO_INFO.area}</p>
+          </div>
+          <p class="desc">
+            Olá! Precisamos da sua ajuda para mapear os <strong>recursos essenciais</strong> que o seu processo precisa para funcionar.
+            Pense: <em>"Se esse recurso falhar ou ficar indisponível, meu processo para?"</em> — se a resposta for sim, ele é uma dependência crítica.
+          </p>
+        </div>
+
+        <div class="card">
+          <h2>1. Impacto da Indisponibilidade</h2>
+          <p class="desc">Descreva brevemente o que acontece se o seu processo ficar indisponível (parado).</p>
+          <div class="campo">
+            <label>O que acontece se o processo parar?</label>
+            <textarea id="fImpacto" rows="3" placeholder="Ex: Clientes não recebem boletos, causando atraso no fluxo de caixa e reclamações...">${PROCESSO_INFO.descricao || ''}</textarea>
+            <div class="hint">Pense nos impactos para clientes, financeiro, operação e reputação.</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">
+            <div class="campo">
+              <label>Tempo máximo sem o processo</label>
+              <select id="fRTO">
+                <option value="">Selecione...</option>
+                <option value="< 1 hora">Menos de 1 hora</option>
+                <option value="< 4 horas">Até 4 horas</option>
+                <option value="4h a 8h">4 a 8 horas</option>
+                <option value="8h a 24h">8 a 24 horas</option>
+                <option value="> 24 horas">Mais de 24 horas</option>
+              </select>
+              <div class="hint">Quanto tempo pode ficar parado?</div>
+            </div>
+            <div class="campo">
+              <label>Perda de dados tolerável</label>
+              <select id="fRPO">
+                <option value="">Selecione...</option>
+                <option value="0 (nenhuma perda)">Nenhuma perda</option>
+                <option value="< 1 hora">Até 1 hora</option>
+                <option value="< 4 horas">Até 4 horas</option>
+                <option value="24 horas">24 horas</option>
+                <option value="> 24 horas">Mais de 24 horas</option>
+              </select>
+              <div class="hint">Quantas horas de dados pode perder?</div>
+            </div>
+            <div class="campo">
+              <label>Downtime máximo tolerável</label>
+              <select id="fMTD">
+                <option value="">Selecione...</option>
+                <option value="4 horas">4 horas</option>
+                <option value="8 horas">8 horas</option>
+                <option value="24 horas">24 horas</option>
+                <option value="48 horas">48 horas</option>
+                <option value="72 horas">72 horas</option>
+                <option value="> 72 horas">Mais de 72 horas</option>
+              </select>
+              <div class="hint">Tempo máximo que a empresa suporta?</div>
+            </div>
+          </div>
+        </div>
+
+        ${renderCategoryCard('fornecedores', '2. Fornecedores e Parceiros', 'Quais empresas ou prestadores de serviço são essenciais para o seu processo funcionar?', 'Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado, empresa de telecom')}
+        ${renderCategoryCard('infraestrutura', '3. Infraestrutura e Utilidades', 'Quais recursos físicos ou de infraestrutura são indispensáveis?', 'Internet, energia elétrica (rede pública + UPS + gerador), climatização, switches e roteadores, servidor de banco de dados, cluster, telefonia, impressora fiscal')}
+        ${renderCategoryCard('pessoas', '4. Pessoas-chave', 'Quem são as pessoas sem as quais o processo não funciona?', 'DBA (administrador de banco de dados), analista financeiro responsável, gerente aprovador, operador do sistema, técnico de infraestrutura')}
+        ${renderCategoryCard('sistemas', '5. Sistemas e Aplicações', 'Quais softwares ou sistemas são necessários para executar o processo?', 'ERP Fortes, banco de dados PostgreSQL / SQL Server / Oracle, e-mail corporativo, Active Directory, sistema bancário, portal do cliente, Zabbix')}
+
+        <div class="card">
+          <h2>6. Observações (opcional)</h2>
+          <p class="desc">Algo mais que considere importante sobre as dependências do processo?</p>
+          <div class="campo">
+            <textarea id="fObs" rows="3" placeholder="Ex: O processo depende de aprovação manual do diretor financeiro em valores acima de R$50k..."></textarea>
+          </div>
+        </div>
+
+        <div class="card" style="text-align:center;">
+          <button class="btn-primary" id="btnEnviar" onclick="enviar()">✅ Enviar Mapeamento</button>
+          <p style="font-size:0.78em;color:#999;margin-top:10px;">Suas respostas serão salvas e revisadas pela equipe de Segurança da Informação.</p>
+        </div>
+      `;
+
+      // Pre-selecionar RTO/RPO/MTD
+      if (PROCESSO_INFO.rto) document.getElementById('fRTO').value = PROCESSO_INFO.rto;
+      if (PROCESSO_INFO.rpo) document.getElementById('fRPO').value = PROCESSO_INFO.rpo;
+      if (PROCESSO_INFO.mtd) document.getElementById('fMTD').value = PROCESSO_INFO.mtd;
+    }
+
+    function renderCategoryCard(key, title, desc, examples) {
+      const catalogItems = (CATALOGO[key] || []).sort();
+      const selected = DEPS[key] || [];
+
+      return `<div class="card" id="card-${key}">
+        <h2>${title}</h2>
+        <p class="desc">${desc}</p>
+        <div class="section-examples"><strong>Exemplos:</strong> ${examples}</div>
+
+        <div class="tags-area" id="tags-${key}">
+          ${selected.length ? selected.map(n => `<span class="tag">${n}<button onclick="removeTag('${key}','${n.replace(/'/g,"\\'")}')">×</button></span>`).join('') : '<span class="tag-empty">Clique nas opções abaixo ou adicione manualmente</span>'}
+        </div>
+
+        ${catalogItems.length ? `
+          <div class="catalog-area">
+            <div class="catalog-label">📂 Opções disponíveis (clique para adicionar):</div>
+            <div class="catalog-chips" id="chips-${key}">
+              ${catalogItems.map(nome => {
+                const isSelected = selected.includes(nome);
+                return `<span class="chip${isSelected ? ' selected' : ''}" onclick="toggleChip('${key}','${nome.replace(/'/g,"\\'")}')" id="chip-${key}-${nome.replace(/[^a-zA-Z0-9]/g,'_')}">${nome}</span>`;
+              }).join('')}
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="add-input-row">
+          <input type="text" id="input-${key}" placeholder="Não encontrou? Digite o nome aqui..." onkeydown="if(event.key==='Enter'){event.preventDefault();addManual('${key}');}">
+          <button onclick="addManual('${key}')">+ Adicionar</button>
+        </div>
+      </div>`;
+    }
+
+    function toggleChip(category, nome) {
+      if (DEPS[category].includes(nome)) {
+        // Remover
+        DEPS[category] = DEPS[category].filter(n => n !== nome);
+      } else {
+        // Adicionar
+        DEPS[category].push(nome);
+      }
+      refreshSection(category);
+    }
+
+    function removeTag(category, nome) {
+      DEPS[category] = DEPS[category].filter(n => n !== nome);
+      refreshSection(category);
+    }
+
+    function addManual(category) {
+      const input = document.getElementById('input-' + category);
+      const val = input.value.trim();
+      if (!val || DEPS[category].includes(val)) { input.value = ''; return; }
+      DEPS[category].push(val);
+      // Add to catalog chips if not already there
+      if (!(CATALOGO[category] || []).includes(val)) {
+        if (!CATALOGO[category]) CATALOGO[category] = [];
+        CATALOGO[category].push(val);
+      }
+      input.value = '';
+      refreshSection(category);
+    }
+
+    function refreshSection(category) {
+      const selected = DEPS[category] || [];
+      const catalogItems = (CATALOGO[category] || []).sort();
+
+      // Update tags
+      const tagsArea = document.getElementById('tags-' + category);
+      tagsArea.innerHTML = selected.length
+        ? selected.map(n => `<span class="tag">${n}<button onclick="removeTag('${category}','${n.replace(/'/g,"\\'")}')">×</button></span>`).join('')
+        : '<span class="tag-empty">Clique nas opções abaixo ou adicione manualmente</span>';
+
+      // Update chips
+      const chipsArea = document.getElementById('chips-' + category);
+      if (chipsArea) {
+        chipsArea.innerHTML = catalogItems.map(nome => {
+          const isSelected = selected.includes(nome);
+          return `<span class="chip${isSelected ? ' selected' : ''}" onclick="toggleChip('${category}','${nome.replace(/'/g,"\\'")}')">${nome}</span>`;
+        }).join('');
+      }
+    }
+
+    async function enviar() {
+      const btn = document.getElementById('btnEnviar');
+      btn.disabled = true;
+      btn.textContent = '⏳ Enviando...';
+
+      const payload = {
+        action: 'salvarDependenciasBIA',
+        token: TOKEN,
+        impacto: document.getElementById('fImpacto').value.trim(),
+        rto: document.getElementById('fRTO').value,
+        rpo: document.getElementById('fRPO').value,
+        mtd: document.getElementById('fMTD').value,
+        observacoes: document.getElementById('fObs').value.trim(),
+        fornecedores: JSON.stringify(DEPS.fornecedores),
+        infraestrutura: JSON.stringify(DEPS.infraestrutura),
+        pessoas: JSON.stringify(DEPS.pessoas),
+        sistemas: JSON.stringify(DEPS.sistemas)
+      };
+
+      try {
+        const res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+          body: JSON.stringify(payload),
+          redirect: 'follow'
+        });
+        const text = await res.text();
+        const data = JSON.parse(text);
+        if (data.error) throw new Error(data.error);
+        document.getElementById('content').innerHTML = `
+          <div class="card">
+            <div class="success-msg">
+              <div style="font-size:3em;margin-bottom:12px;">✅</div>
+              <h2>Mapeamento enviado com sucesso!</h2>
+              <p style="color:#666;margin-top:8px;">Obrigado por contribuir com a continuidade do negócio.<br>A equipe de Segurança da Informação revisará suas respostas.</p>
+            </div>
+          </div>`;
+      } catch(e) {
+        alert('❌ Erro: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = '✅ Enviar Mapeamento';
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

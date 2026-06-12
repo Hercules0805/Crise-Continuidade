@@ -15,6 +15,9 @@ const API = {
       Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
       const res = await fetch(url, { redirect: 'follow' });
       const text = await res.text();
+      if (text.startsWith('<!') || text.startsWith('<html')) {
+        throw new Error('Resposta inválida do servidor. Tente recarregar a página (Ctrl+Shift+R).');
+      }
       const data = JSON.parse(text);
       if (data.error) throw new Error(data.error);
       _cache[cacheKey] = data;

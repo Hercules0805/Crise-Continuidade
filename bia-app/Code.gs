@@ -71,6 +71,12 @@ function doGet(e) {
       case 'getComponentes':
         result = getComponentes();
         break;
+      case 'validarTokenBIA':
+        result = validarTokenBIA(e.parameter.token);
+        break;
+      case 'validarTokenDRP':
+        result = validarTokenDRP(e.parameter.token);
+        break;
       default:
         result = { error: 'Action não especificada' };
     }
@@ -196,6 +202,21 @@ function doPost(e) {
         break;
       case 'salvarPCN':
         result = salvarPCNProcesso(data);
+        break;
+      case 'gerarTokenBIA':
+        result = gerarTokenBIA(data);
+        break;
+      case 'salvarDependenciasBIA':
+        result = salvarDependenciasBIA(data);
+        break;
+      case 'enviarLinkBIA':
+        result = enviarLinkBIA(data);
+        break;
+      case 'gerarTokenDRP':
+        result = gerarTokenDRP(data);
+        break;
+      case 'salvarComponentesDRP':
+        result = salvarComponentesDRP(data);
         break;
       case 'listarModelos':
         result = listarModelosGemini();
@@ -1443,5 +1464,400 @@ function salvarPCNProcesso(data) {
   } catch(err) {
     Logger.log('salvarPCNProcesso ERROR: ' + err.message);
     return { error: 'Erro ao salvar PCN: ' + err.message };
+  }
+}
+
+// ============================================================
+// TOKEN BIA - Mapeamento de Dependências via e-mail
+// ============================================================
+function gerarTokenBIA(data) {
+  const ss = _getSS();
+  let sheet = ss.getSheetByName(ABA_TOKENS);
+  if (!sheet) {
+    sheet = ss.insertSheet(ABA_TOKENS);
+    sheet.appendRow(['Token', 'Área', 'Processo', 'Email', 'Criado em', 'Expira em', 'Usado']);
+    sheet.getRange(1,1,1,7).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+  const token = Utilities.getUuid();
+  const agora = new Date();
+  const expira = new Date(agora.getTime() + 14 * 24 * 60 * 60 * 1000); // 14 dias
+  sheet.appendRow([token, data.area, '_BIA_' + data.processo, data.email, agora, expira, false]);
+
+  const link = 'https://bia-forte-2025.web.app/bia-dependencias.html?token=' + token;
+
+  // Se email é _link_only_, apenas gerar o link sem enviar email
+  if (data.email === '_link_only_') {
+    return { success: true, token, link };
+  }
+
+  const assunto = 'BIA — Mapeamento de Dependências: ' + data.processo;
+  const corpo = `Olá,
+
+Precisamos da sua ajuda para mapear as dependências críticas do processo de negócio abaixo:
+
+Área: ${data.area}
+Processo: ${data.processo}
+
+Clique no link abaixo para preencher o formulário (leva cerca de 5 minutos):
+${link}
+
+O formulário pergunta sobre:
+• Fornecedores e parceiros essenciais
+• Infraestrutura necessária (internet, energia, etc.)
+• Pessoas-chave para o processo
+• Sistemas e aplicações utilizados
+
+Este link é válido por 14 dias e pode ser usado apenas uma vez.
+
+Atenciosamente,
+Equipe SI - Fortes Tecnologia`;
+
+  try {
+    GmailApp.sendEmail(data.email, assunto, corpo);
+  } catch(emailErr) {
+    Logger.log('gerarTokenBIA EMAIL ERROR: ' + emailErr.message);
+    return { error: 'Token gerado, mas falha ao enviar e-mail: ' + emailErr.message };
+  }
+  return { success: true, token, link };
+}
+
+function validarTokenBIA(token) {
+  if (!token) return { error: 'Token não informado.' };
+  const sheet = _getSS().getSheetByName(ABA_TOKENS);
+  if (!sheet) return { error: 'Token inválido.' };
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === token && String(rows[i][2]).startsWith('_BIA_')) {
+      if (rows[i][6] === true) return { error: 'Este link já foi utilizado.' };
+      if (new Date() > new Date(rows[i][5])) return { error: 'Este link expirou.' };
+      const area = rows[i][1];
+      const processo = String(rows[i][2]).replace('_BIA_', '');
+      // Buscar dados atuais do processo
+      const processos = getProcessos();
+      const p = processos.find(proc => proc.area === area && proc.processo === processo);
+      if (!p) return { error: 'Processo não encontrado.' };
+      // Buscar catálogo completo de dependências
+      const catalogo = getDependencias();
+      const depCategorias = {};
+      if (p.dependencia) {
+        p.dependencia.split(',').map(s => s.trim()).filter(Boolean).forEach(nome => {
+          const dep = catalogo.find(d => d.nome === nome);
+          if (dep) depCategorias[nome] = dep.categoria;
+        });
+      }
+      // Agrupar catálogo por categoria para o frontend
+      const catalogoPorCategoria = {};
+      catalogo.forEach(d => {
+        const cat = (d.categoria || 'Outros').toLowerCase().replace(/[^a-záéíóúãõç]/g, '');
+        const key = cat === 'fornecedor' ? 'fornecedores' : cat === 'pessoa' ? 'pessoas' : cat === 'sistema' ? 'sistemas' : cat;
+        if (!catalogoPorCategoria[key]) catalogoPorCategoria[key] = [];
+        catalogoPorCategoria[key].push(d.nome);
+      });
+      return { area, processo, dependencias: p.dependencia || '', depCategorias, catalogo: catalogoPorCategoria, descricao: p.descricao || '', rto: p.rto || '', rpo: p.rpo || '', mtd: p.mtd || '' };
+    }
+  }
+  return { error: 'Link inválido ou expirado.' };
+}
+
+function salvarDependenciasBIA(data) {
+  try {
+    // Validar token
+    const sheet = _getSS().getSheetByName(ABA_TOKENS);
+    if (!sheet) return { error: 'Token inválido.' };
+    const rows = sheet.getDataRange().getValues();
+    let tokenRow = -1;
+    let area = '', processo = '';
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === data.token && String(rows[i][2]).startsWith('_BIA_')) {
+        if (rows[i][6] === true) return { error: 'Este link já foi utilizado.' };
+        if (new Date() > new Date(rows[i][5])) return { error: 'Este link expirou.' };
+        tokenRow = i + 1;
+        area = rows[i][1];
+        processo = String(rows[i][2]).replace('_BIA_', '');
+        break;
+      }
+    }
+    if (tokenRow === -1) return { error: 'Token inválido.' };
+
+    // Buscar processo na planilha
+    const sheetProc = _getSS().getSheetByName(ABA_PROCESSOS);
+    const procRows = sheetProc.getDataRange().getValues();
+    let procRow = -1;
+    for (let i = 1; i < procRows.length; i++) {
+      if (String(procRows[i][0]).trim() === area && String(procRows[i][1]).trim() === processo) {
+        procRow = i + 1;
+        break;
+      }
+    }
+    if (procRow === -1) return { error: 'Processo não encontrado na planilha.' };
+
+    // Montar lista de dependências (unir todas as categorias)
+    const fornecedores = data.fornecedores ? JSON.parse(data.fornecedores) : [];
+    const infraestrutura = data.infraestrutura ? JSON.parse(data.infraestrutura) : [];
+    const pessoas = data.pessoas ? JSON.parse(data.pessoas) : [];
+    const sistemas = data.sistemas ? JSON.parse(data.sistemas) : [];
+    const todasDeps = [...new Set([...fornecedores, ...infraestrutura, ...pessoas, ...sistemas])];
+
+    // Salvar dependências no catálogo (se não existirem)
+    const catalogoSheet = _getSS().getSheetByName(ABA_DEPENDENCIAS);
+    const catalogoData = catalogoSheet ? catalogoSheet.getDataRange().getValues().slice(1) : [];
+    const existentes = catalogoData.map(r => String(r[1]).toLowerCase());
+
+    const novos = [];
+    fornecedores.forEach(nome => { if (!existentes.includes(nome.toLowerCase())) novos.push(['Fornecedores', nome, '', '', '', '', '']); });
+    infraestrutura.forEach(nome => { if (!existentes.includes(nome.toLowerCase())) novos.push(['Infraestrutura', nome, '', '', '', '', '']); });
+    pessoas.forEach(nome => { if (!existentes.includes(nome.toLowerCase())) novos.push(['Pessoas', nome, '', '', '', '', '']); });
+    sistemas.forEach(nome => { if (!existentes.includes(nome.toLowerCase())) novos.push(['Sistemas', nome, '', '', '', '', '']); });
+
+    if (novos.length && catalogoSheet) {
+      novos.forEach(row => catalogoSheet.appendRow(row));
+    }
+
+    // Atualizar processo: dependências (col 4), descrição do impacto (col 3), RTO (col 5), RPO (col 6), MTD (col 24)
+    if (todasDeps.length) sheetProc.getRange(procRow, 4).setValue(todasDeps.join(', '));
+    if (data.impacto) sheetProc.getRange(procRow, 3).setValue(data.impacto);
+    if (data.rto) sheetProc.getRange(procRow, 5).setValue(data.rto);
+    if (data.rpo) sheetProc.getRange(procRow, 6).setValue(data.rpo);
+    if (data.mtd) sheetProc.getRange(procRow, 24).setValue(data.mtd);
+
+    // Marcar token como usado
+    sheet.getRange(tokenRow, 7).setValue(true);
+
+    // Notificar admin
+    try {
+      GmailApp.sendEmail(NOTIFICACAO_EMAIL, 'BIA — Dependências mapeadas: ' + processo,
+        'O dono do processo "' + processo + '" (Área: ' + area + ') preencheu o mapeamento de dependências.\n\n' +
+        'Fornecedores: ' + fornecedores.join(', ') + '\n' +
+        'Infraestrutura: ' + infraestrutura.join(', ') + '\n' +
+        'Pessoas: ' + pessoas.join(', ') + '\n' +
+        'Sistemas: ' + sistemas.join(', ') + '\n\n' +
+        (data.observacoes ? 'Observações: ' + data.observacoes : '')
+      );
+    } catch(e) {}
+
+    return { success: true };
+  } catch(err) {
+    Logger.log('salvarDependenciasBIA ERROR: ' + err.message);
+    return { error: 'Erro ao salvar: ' + err.message };
+  }
+}
+
+
+// ============================================================
+// ENVIAR DEEP LINK BIA POR E-MAIL
+// ============================================================
+function enviarLinkBIA(data) {
+  try {
+    const email = data.email;
+    const processo = data.processo;
+    const area = data.area;
+    const link = data.link;
+    if (!email || !processo || !link) return { error: 'Dados incompletos.' };
+
+    const assunto = 'BIA — Preencha as dependências do processo: ' + processo;
+    const corpo = `Olá,
+
+Precisamos da sua ajuda para mapear as dependências críticas do processo abaixo:
+
+Área: ${area}
+Processo: ${processo}
+
+Clique no link abaixo para acessar o sistema e preencher as informações:
+${link}
+
+O que você precisa informar:
+• Qual o impacto se o processo ficar parado
+• Fornecedores e parceiros essenciais
+• Infraestrutura necessária (internet, energia, etc.)
+• Pessoas-chave para o processo
+• Sistemas e aplicações utilizados
+
+Dica: Pense "Se esse recurso falhar, meu processo para?" — se sim, ele é uma dependência crítica.
+
+Leva cerca de 5 minutos. Obrigado!
+
+Atenciosamente,
+Equipe SI - Fortes Tecnologia`;
+
+    GmailApp.sendEmail(email, assunto, corpo);
+    return { success: true };
+  } catch(err) {
+    Logger.log('enviarLinkBIA ERROR: ' + err.message);
+    return { error: 'Erro ao enviar e-mail: ' + err.message };
+  }
+}
+
+
+// ============================================================
+// TOKEN DRP - Mapeamento de Componentes via e-mail
+// ============================================================
+function gerarTokenDRP(data) {
+  const ss = _getSS();
+  let sheet = ss.getSheetByName(ABA_TOKENS);
+  if (!sheet) {
+    sheet = ss.insertSheet(ABA_TOKENS);
+    sheet.appendRow(['Token', 'Área', 'Processo', 'Email', 'Criado em', 'Expira em', 'Usado']);
+    sheet.getRange(1,1,1,7).setBackground('#1a237e').setFontColor('white').setFontWeight('bold');
+    sheet.setFrozenRows(1);
+  }
+  const token = Utilities.getUuid();
+  const agora = new Date();
+  const expira = new Date(agora.getTime() + 14 * 24 * 60 * 60 * 1000);
+  sheet.appendRow([token, data.area, '_DRP_' + data.processo, data.email, agora, expira, false]);
+
+  const link = 'https://bia-forte-2025.web.app/drp-componentes.html?token=' + token;
+
+  // Se email é _link_only_, apenas gerar o link sem enviar email
+  if (data.email === '_link_only_') {
+    return { success: true, token, link };
+  }
+
+  const assunto = 'DRP — Mapeamento de Componentes: ' + data.processo;
+  const corpo = `Olá,
+
+Precisamos da sua ajuda para identificar os componentes técnicos que sustentam o processo abaixo:
+
+Área: ${data.area}
+Processo: ${data.processo}
+
+Clique no link abaixo para preencher o formulário (leva cerca de 5 minutos):
+${link}
+
+O formulário pergunta sobre:
+• Servidores e máquinas virtuais
+• Bancos de dados
+• Aplicações e APIs
+• Infraestrutura de rede e storage
+• Componentes de segurança
+
+Dica: Pense "Se esse componente falhar, o processo é impactado?" — se sim, selecione-o.
+
+Este link é válido por 14 dias e pode ser usado apenas uma vez.
+
+Atenciosamente,
+Equipe SI - Fortes Tecnologia`;
+
+  try {
+    GmailApp.sendEmail(data.email, assunto, corpo);
+  } catch(emailErr) {
+    Logger.log('gerarTokenDRP EMAIL ERROR: ' + emailErr.message);
+    return { error: 'Token gerado, mas falha ao enviar e-mail: ' + emailErr.message };
+  }
+  return { success: true, token, link };
+}
+
+function validarTokenDRP(token) {
+  if (!token) return { error: 'Token não informado.' };
+  const sheet = _getSS().getSheetByName(ABA_TOKENS);
+  if (!sheet) return { error: 'Token inválido.' };
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === token && String(rows[i][2]).startsWith('_DRP_')) {
+      if (rows[i][6] === true) return { error: 'Este link já foi utilizado.' };
+      if (new Date() > new Date(rows[i][5])) return { error: 'Este link expirou.' };
+      const area = rows[i][1];
+      const processo = String(rows[i][2]).replace('_DRP_', '');
+      // Buscar dados do processo
+      const processos = getProcessos();
+      const p = processos.find(proc => proc.area === area && proc.processo === processo);
+      if (!p) return { error: 'Processo não encontrado.' };
+      // Buscar catálogo de componentes agrupado por tipo
+      const componentes = getComponentes();
+      const catalogoPorTipo = {};
+      componentes.forEach(c => {
+        const tipo = c.tipo || 'Outros';
+        if (!catalogoPorTipo[tipo]) catalogoPorTipo[tipo] = [];
+        catalogoPorTipo[tipo].push(c.nome);
+      });
+      // Componentes já selecionados
+      const compIds = p.drpComponentes || [];
+      const componentesSelecionados = compIds.map(id => {
+        const comp = componentes.find(c => c.id === id);
+        return comp ? comp.nome : null;
+      }).filter(Boolean);
+      const compTipos = {};
+      compIds.forEach(id => {
+        const comp = componentes.find(c => c.id === id);
+        if (comp) compTipos[comp.nome] = comp.tipo;
+      });
+      return { area, processo, catalogo: catalogoPorTipo, componentesSelecionados, compTipos };
+    }
+  }
+  return { error: 'Link inválido ou expirado.' };
+}
+
+function salvarComponentesDRP(data) {
+  try {
+    const sheet = _getSS().getSheetByName(ABA_TOKENS);
+    if (!sheet) return { error: 'Token inválido.' };
+    const rows = sheet.getDataRange().getValues();
+    let tokenRow = -1;
+    let area = '', processo = '';
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === data.token && String(rows[i][2]).startsWith('_DRP_')) {
+        if (rows[i][6] === true) return { error: 'Este link já foi utilizado.' };
+        if (new Date() > new Date(rows[i][5])) return { error: 'Este link expirou.' };
+        tokenRow = i + 1;
+        area = rows[i][1];
+        processo = String(rows[i][2]).replace('_DRP_', '');
+        break;
+      }
+    }
+    if (tokenRow === -1) return { error: 'Token inválido.' };
+
+    // Parsear componentes enviados (formato: { "tipo": ["nome1", "nome2"], ... })
+    const compsPorTipo = data.componentes ? JSON.parse(data.componentes) : {};
+    
+    // Buscar catálogo de componentes existente
+    const catalogoSheet = _getSS().getSheetByName(ABA_COMPONENTES);
+    const componentes = getComponentes();
+    
+    // Para cada componente enviado, verificar se existe no catálogo ou criar
+    const idsFinais = [];
+    Object.entries(compsPorTipo).forEach(([tipo, nomes]) => {
+      nomes.forEach(nome => {
+        let comp = componentes.find(c => c.nome.toLowerCase() === nome.toLowerCase() && c.tipo === tipo);
+        if (!comp) {
+          // Criar no catálogo
+          if (catalogoSheet) {
+            catalogoSheet.appendRow([tipo, nome, '', '', '', '', '']);
+            const novoId = catalogoSheet.getLastRow();
+            comp = { id: novoId, tipo, nome };
+            componentes.push(comp);
+          }
+        }
+        if (comp && !idsFinais.includes(comp.id)) {
+          idsFinais.push(comp.id);
+        }
+      });
+    });
+
+    // Atualizar processo com os IDs dos componentes (coluna 23)
+    const sheetProc = _getSS().getSheetByName(ABA_PROCESSOS);
+    const procRows = sheetProc.getDataRange().getValues();
+    for (let i = 1; i < procRows.length; i++) {
+      if (String(procRows[i][0]).trim() === area && String(procRows[i][1]).trim() === processo) {
+        sheetProc.getRange(i + 1, 23).setValue(JSON.stringify(idsFinais));
+        break;
+      }
+    }
+
+    // Marcar token como usado
+    sheet.getRange(tokenRow, 7).setValue(true);
+
+    // Notificar admin
+    try {
+      const allNomes = Object.entries(compsPorTipo).map(([t, ns]) => t + ': ' + ns.join(', ')).join('\n');
+      GmailApp.sendEmail(NOTIFICACAO_EMAIL, 'DRP — Componentes mapeados: ' + processo,
+        'O dono do processo "' + processo + '" (Área: ' + area + ') preencheu o mapeamento de componentes.\n\n' + allNomes +
+        (data.observacoes ? '\n\nObservações: ' + data.observacoes : '')
+      );
+    } catch(e) {}
+
+    return { success: true, totalComponentes: idsFinais.length };
+  } catch(err) {
+    Logger.log('salvarComponentesDRP ERROR: ' + err.message);
+    return { error: 'Erro ao salvar: ' + err.message };
   }
 }

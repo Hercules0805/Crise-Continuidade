@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DRP — Componentes do Serviço</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f6fa; min-height: 100vh; color: #333; }
+    .header { background: linear-gradient(135deg, #1a237e, #283593); color: white; padding: 30px 20px; text-align: center; }
+    .header h1 { font-size: 1.4em; margin-bottom: 6px; }
+    .header p { font-size: 0.9em; opacity: 0.85; }
+    .container { max-width: 800px; margin: -20px auto 40px; padding: 0 16px; }
+    .card { background: white; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 28px 32px; margin-bottom: 20px; }
+    .card h2 { font-size: 1.1em; color: #1a237e; margin-bottom: 6px; }
+    .card p.desc { font-size: 0.88em; color: #666; margin-bottom: 16px; line-height: 1.5; }
+    .info-box { background: #e8eaf6; border-left: 4px solid #1a237e; padding: 14px 18px; border-radius: 0 8px 8px 0; margin-bottom: 20px; }
+    .info-box strong { color: #1a237e; }
+    .info-box p { font-size: 0.88em; color: #333; margin-top: 4px; }
+    .section-examples { font-size: 0.78em; color: #666; background: #f9f9f9; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; border: 1px dashed #ddd; }
+    .section-examples strong { color: #555; }
+    .tags-area { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 44px; padding: 10px; background: #fafbfc; border: 1.5px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
+    .tag { display: inline-flex; align-items: center; gap: 4px; background: #1a237e; color: white; padding: 5px 10px 5px 12px; border-radius: 14px; font-size: 0.85em; font-weight: 500; animation: tagIn 0.2s ease; }
+    @keyframes tagIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    .tag button { background: none; border: none; cursor: pointer; color: rgba(255,255,255,0.7); font-size: 1.2em; line-height: 1; padding: 0 2px; }
+    .tag button:hover { color: white; }
+    .tag-empty { font-size: 0.82em; color: #bbb; font-style: italic; }
+    .catalog-area { margin-top: 8px; }
+    .catalog-label { font-size: 0.75em; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 6px; }
+    .catalog-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+    .chip { display: inline-block; padding: 5px 12px; border-radius: 14px; font-size: 0.82em; font-weight: 500; background: #f5f6fa; color: #1a237e; cursor: pointer; border: 1.5px solid #e0e0e0; transition: all 0.15s; user-select: none; }
+    .chip:hover { background: #c5cae9; border-color: #1a237e; }
+    .chip.selected { background: #1a237e; color: white; cursor: default; opacity: 0.6; }
+    .add-input-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+    .add-input-row input { flex: 1; padding: 8px 12px; border: 1.5px solid #e0e0e0; border-radius: 8px; font-size: 0.9em; }
+    .add-input-row input:focus { border-color: #1a237e; outline: none; }
+    .add-input-row button { padding: 8px 16px; background: #1a237e; color: white; border: none; border-radius: 8px; font-size: 0.85em; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .add-input-row button:hover { opacity: 0.9; }
+    .campo { margin-bottom: 16px; }
+    .campo label { display: block; font-size: 0.82em; font-weight: 600; color: #444; margin-bottom: 5px; }
+    .campo textarea { width: 100%; padding: 10px 12px; border: 1.5px solid #e0e0e0; border-radius: 8px; font-size: 0.93em; }
+    .campo textarea:focus { border-color: #1a237e; outline: none; }
+    .campo .hint { font-size: 0.78em; color: #999; margin-top: 4px; }
+    .btn-primary { background: #1a237e; color: white; border: none; padding: 14px 32px; border-radius: 8px; font-size: 1em; font-weight: 600; cursor: pointer; width: 100%; transition: opacity 0.2s; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .loading { text-align: center; padding: 60px 20px; color: #666; }
+    .error { text-align: center; padding: 60px 20px; color: #c62828; }
+    @media (max-width: 600px) { .card { padding: 20px 16px; } .container { padding: 0 10px; } .add-input-row { flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🖥️ Mapeamento de Componentes do Serviço</h1>
+    <p>Identifique os componentes técnicos essenciais para a recuperação do seu processo</p>
+  </div>
+  <div class="container">
+    <div id="content">
+      <div class="loading">⏳ Validando acesso...</div>
+    </div>
+  </div>
+
+  <script src="config.js?v=2"></script>
+  <script>
+    var TOKEN = '';
+    var PROCESSO_INFO = {};
+    var CATALOGO = {};
+    var COMPS = {};
+
+    async function init() {
+      var params = new URLSearchParams(window.location.search);
+      TOKEN = params.get('token');
+      if (!TOKEN) return showError('Link inválido. Solicite um novo link ao administrador.');
+      try {
+        var url = new URL(API_URL);
+        url.searchParams.append('action', 'validarTokenDRP');
+        url.searchParams.append('token', TOKEN);
+        var res = await fetch(url, { redirect: 'follow' });
+        var text = await res.text();
+        var data = JSON.parse(text);
+        if (data.error) return showError(data.error);
+        PROCESSO_INFO = data;
+        CATALOGO = data.catalogo || {};
+        // Pre-carregar componentes já selecionados
+        (data.componentesSelecionados || []).forEach(function(nome) {
+          var tipo = (data.compTipos && data.compTipos[nome]) || 'Outros';
+          if (!COMPS[tipo]) COMPS[tipo] = [];
+          if (!COMPS[tipo].includes(nome)) COMPS[tipo].push(nome);
+        });
+        renderForm();
+      } catch(e) {
+        showError('Erro ao validar o link: ' + e.message);
+      }
+    }
+
+    function showError(msg) {
+      document.getElementById('content').innerHTML = '<div class="card"><div class="error"><h2>❌ ' + msg + '</h2><p style="margin-top:12px;color:#666;">Se o problema persistir, entre em contato com a equipe de Segurança da Informação.</p></div></div>';
+    }
+
+    function getAllSelected() {
+      var all = [];
+      Object.values(COMPS).forEach(function(arr) { arr.forEach(function(n) { if (!all.includes(n)) all.push(n); }); });
+      return all;
+    }
+
+    function renderForm() {
+      var tipos = Object.keys(CATALOGO).sort();
+      // Adicionar tipos dos componentes já selecionados
+      Object.keys(COMPS).forEach(function(t) { if (!tipos.includes(t)) tipos.push(t); });
+      tipos.sort();
+
+      var sections = tipos.map(function(tipo) {
+        return renderTypeSection(tipo);
+      }).join('');
+
+      document.getElementById('content').innerHTML =
+        '<div class="card">' +
+          '<div class="info-box">' +
+            '<strong>Processo:</strong> ' + PROCESSO_INFO.processo +
+            '<p><strong>Área:</strong> ' + PROCESSO_INFO.area + '</p>' +
+          '</div>' +
+          '<p class="desc">' +
+            'Precisamos identificar os <strong>componentes técnicos</strong> que sustentam o seu processo. ' +
+            'Pense: <em>"Se esse componente falhar, o processo é impactado?"</em> — se sim, selecione-o abaixo.' +
+          '</p>' +
+        '</div>' +
+        sections +
+        '<div class="card">' +
+          '<div class="campo">' +
+            '<label>Observações (opcional)</label>' +
+            '<textarea id="fObs" rows="3" placeholder="Ex: O servidor de aplicação é compartilhado com outro processo e precisa de priorização..."></textarea>' +
+            '<div class="hint">Informações adicionais sobre os componentes ou a infraestrutura.</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="card" style="text-align:center;">' +
+          '<button class="btn-primary" id="btnEnviar" onclick="enviar()">✅ Enviar Mapeamento</button>' +
+          '<p style="font-size:0.78em;color:#999;margin-top:10px;">Suas respostas serão salvas e revisadas pela equipe de Segurança da Informação.</p>' +
+        '</div>';
+    }
+
+    function renderTypeSection(tipo) {
+      var catalogItems = (CATALOGO[tipo] || []).sort();
+      var selected = COMPS[tipo] || [];
+      var allSelected = getAllSelected();
+
+      var examples = {
+        'Servidor': 'Servidor de aplicação, servidor web, VM de produção, container Docker',
+        'Servidores': 'Servidor de aplicação, servidor web, VM de produção, container Docker',
+        'Banco de Dados': 'PostgreSQL primário, SQL Server cluster, Redis cache, MongoDB',
+        'Aplicação': 'ERP Fortes, portal do cliente, API de integração, microserviço',
+        'Aplicações': 'ERP Fortes, portal do cliente, API de integração, microserviço',
+        'Rede': 'Firewall, switch core, link dedicado, VPN site-to-site, load balancer',
+        'Infraestrutura': 'Storage NAS/SAN, energia (UPS/gerador), climatização, rack',
+        'Cloud': 'AWS EC2, Azure VM, Google Cloud Run, S3 bucket, RDS',
+        'Segurança': 'WAF, antivírus endpoint, SIEM, cofre de senhas, certificados TLS',
+        'API': 'API bancária, API de pagamentos, webhook de notificações',
+        'Certificados': 'Certificados digitais TLS/mTLS, certificado A1/A3'
+      };
+      var example = examples[tipo] || '';
+
+      var tagsHtml = selected.length
+        ? selected.map(function(n) { return '<span class="tag">' + n + '<button onclick="removeComp(\'' + tipo.replace(/'/g,"\\'") + '\',\'' + n.replace(/'/g,"\\'") + '\')">×</button></span>'; }).join('')
+        : '<span class="tag-empty">Clique nas opções abaixo ou adicione manualmente</span>';
+
+      var chipsHtml = catalogItems.filter(function(n) { return !allSelected.includes(n); }).map(function(nome) {
+        return '<span class="chip" onclick="toggleComp(\'' + tipo.replace(/'/g,"\\'") + '\',\'' + nome.replace(/'/g,"\\'") + '\')">' + nome + '</span>';
+      }).join('');
+
+      return '<div class="card" id="card-' + tipo.replace(/[^a-zA-Z0-9]/g,'_') + '">' +
+        '<h2>' + tipo + '</h2>' +
+        (example ? '<div class="section-examples"><strong>Exemplos:</strong> ' + example + '</div>' : '') +
+        '<div class="tags-area" id="tags-' + tipo.replace(/[^a-zA-Z0-9]/g,'_') + '">' + tagsHtml + '</div>' +
+        (chipsHtml ? '<div class="catalog-area"><div class="catalog-label">📂 Opções disponíveis (clique para adicionar):</div><div class="catalog-chips">' + chipsHtml + '</div></div>' : '') +
+        '<div class="add-input-row">' +
+          '<input type="text" id="input-' + tipo.replace(/[^a-zA-Z0-9]/g,'_') + '" placeholder="Não encontrou? Digite o nome aqui..." onkeydown="if(event.key===\'Enter\'){event.preventDefault();addManual(\'' + tipo.replace(/'/g,"\\'") + '\');}">' +
+          '<button onclick="addManual(\'' + tipo.replace(/'/g,"\\'") + '\')">+ Adicionar</button>' +
+        '</div>' +
+      '</div>';
+    }
+
+    function toggleComp(tipo, nome) {
+      if (!COMPS[tipo]) COMPS[tipo] = [];
+      if (COMPS[tipo].includes(nome)) {
+        COMPS[tipo] = COMPS[tipo].filter(function(n) { return n !== nome; });
+      } else {
+        COMPS[tipo].push(nome);
+      }
+      renderForm();
+    }
+
+    function removeComp(tipo, nome) {
+      if (COMPS[tipo]) COMPS[tipo] = COMPS[tipo].filter(function(n) { return n !== nome; });
+      renderForm();
+    }
+
+    function addManual(tipo) {
+      var inputId = 'input-' + tipo.replace(/[^a-zA-Z0-9]/g,'_');
+      var input = document.getElementById(inputId);
+      var val = input ? input.value.trim() : '';
+      if (!val) return;
+      if (!COMPS[tipo]) COMPS[tipo] = [];
+      if (!COMPS[tipo].includes(val)) COMPS[tipo].push(val);
+      if (!CATALOGO[tipo]) CATALOGO[tipo] = [];
+      if (!CATALOGO[tipo].includes(val)) CATALOGO[tipo].push(val);
+      renderForm();
+    }
+
+    async function enviar() {
+      var btn = document.getElementById('btnEnviar');
+      btn.disabled = true;
+      btn.textContent = '⏳ Enviando...';
+
+      var payload = {
+        action: 'salvarComponentesDRP',
+        token: TOKEN,
+        componentes: JSON.stringify(COMPS),
+        observacoes: (document.getElementById('fObs') || {}).value || ''
+      };
+
+      try {
+        var res = await fetch(API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+          body: JSON.stringify(payload),
+          redirect: 'follow'
+        });
+        var text = await res.text();
+        var data = JSON.parse(text);
+        if (data.error) throw new Error(data.error);
+        document.getElementById('content').innerHTML =
+          '<div class="card"><div style="text-align:center;padding:40px 20px;">' +
+            '<div style="font-size:3em;margin-bottom:12px;">✅</div>' +
+            '<h2 style="color:#2e7d32;">Mapeamento enviado com sucesso!</h2>' +
+            '<p style="color:#666;margin-top:8px;">Obrigado por contribuir com a recuperação do serviço.<br>A equipe de Segurança da Informação revisará suas respostas.</p>' +
+          '</div></div>';
+      } catch(e) {
+        alert('❌ Erro: ' + e.message);
+        btn.disabled = false;
+        btn.textContent = '✅ Enviar Mapeamento';
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

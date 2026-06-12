@@ -22,6 +22,14 @@
         "destination": "/pcn-viewer.html"
       },
       {
+        "source": "/bia-dependencias.html",
+        "destination": "/bia-dependencias.html"
+      },
+      {
+        "source": "/drp-componentes.html",
+        "destination": "/drp-componentes.html"
+      },
+      {
         "source": "/avaliar.html",
         "destination": "/avaliar.html"
       },

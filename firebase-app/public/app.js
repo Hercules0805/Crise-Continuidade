@@ -12,10 +12,33 @@ window.addEventListener('load', route);
 // Listener para salvar PCN via postMessage (não mais necessário - PCN agora abre em pcn-viewer.html com mesma origin)
 
 function route() {
+  // Esperar perfil ser carregado antes de renderizar páginas
+  if (!window._perfilCarregado) {
+    window._routePendente = true;
+    return;
+  }
   const hash = window.location.hash.slice(1) || 'processos';
-  document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page === hash));
-  const page = pages[hash] || pages.processos;
-  if (page) page();
+  const [page, queryStr] = hash.split('?');
+  const params = new URLSearchParams(queryStr || '');
+  document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page === page));
+  const pageFunc = pages[page] || pages.processos;
+  if (pageFunc) pageFunc();
+  // Deep link: abrir processo na aba específica (aguarda dados carregarem)
+  if (params.get('editar')) {
+    const id = Number(params.get('editar'));
+    const aba = params.get('aba') || 'identificacao';
+    function tryOpenProcess() {
+      if (window.processosData && window.processosData.length) {
+        if (window.editarProcesso) {
+          window.editarProcesso(id);
+          setTimeout(() => { if (window.trocarAbaProcesso) window.trocarAbaProcesso(aba); }, 300);
+        }
+      } else {
+        setTimeout(tryOpenProcess, 500);
+      }
+    }
+    setTimeout(tryOpenProcess, 800);
+  }
 }
 
 // Utilitários
@@ -957,29 +980,57 @@ async function processos() {
             </div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição do Impacto para Indisponibilidade</label>
-              <textarea id="fDescricao" rows="3" placeholder="Descreva o impacto caso o processo fique indisponível" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
+              <p style="font-size:0.78em;color:#888;margin-bottom:6px;">O que acontece se o processo parar? Pense nos impactos para clientes, financeiro, operação e reputação.</p>
+              <textarea id="fDescricao" rows="3" placeholder="Ex: Clientes não recebem boletos, causando atraso no fluxo de caixa e reclamações..." style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
                 <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO Esperado</label>
-                <input type="text" id="fRTO" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Tempo de Recuperação</span>
+                <select id="fRTO" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                  <option value="">Selecione...</option>
+                  <option value="< 1 hora">Menos de 1 hora</option>
+                  <option value="< 4 horas">Até 4 horas</option>
+                  <option value="4h a 8h">4 a 8 horas</option>
+                  <option value="8h a 24h">8 a 24 horas</option>
+                  <option value="> 24 horas">Mais de 24 horas</option>
+                </select>
+                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Quanto tempo pode ficar parado sem causar dano grave?</span>
               </div>
               <div>
                 <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO Esperado</label>
-                <input type="text" id="fRPO" placeholder="Ex: 24 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Ponto de Recuperação</span>
+                <select id="fRPO" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                  <option value="">Selecione...</option>
+                  <option value="0 (nenhuma perda)">Nenhuma perda</option>
+                  <option value="< 1 hora">Até 1 hora</option>
+                  <option value="< 4 horas">Até 4 horas</option>
+                  <option value="24 horas">24 horas</option>
+                  <option value="> 24 horas">Mais de 24 horas</option>
+                </select>
+                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Quantas horas de dados pode perder?</span>
               </div>
               <div>
                 <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">MTD</label>
-                <input type="text" id="fMTD" placeholder="Ex: 48 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Máx. Downtime Tolerável</span>
+                <select id="fMTD" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                  <option value="">Selecione...</option>
+                  <option value="4 horas">4 horas</option>
+                  <option value="8 horas">8 horas</option>
+                  <option value="24 horas">24 horas</option>
+                  <option value="48 horas">48 horas</option>
+                  <option value="72 horas">72 horas</option>
+                  <option value="> 72 horas">Mais de 72 horas</option>
+                </select>
+                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Tempo máximo que a empresa suporta sem o processo?</span>
               </div>
             </div>
             <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Dependências Críticas</label>
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Dependências Críticas</label>
+              <p style="font-size:0.78em;color:#888;margin-bottom:8px;">Pense: <em>"Se esse recurso falhar, meu processo para?"</em> — se sim, ele é uma dependência crítica. Clique nas opções disponíveis ou digite para adicionar.</p>
               <div id="fDependenciaTabela"></div>
               <input type="hidden" id="fDependencia">
+              <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;">
+                <button class="btn btn-ghost" onclick="copiarLinkBIA()" style="font-size:0.82em;color:#555;border-color:#ccc;padding:6px 14px;" title="Gera o link e copia para a área de transferência">🔗 Copiar link</button>
+                <button class="btn btn-ghost" onclick="enviarBIADependencias()" style="font-size:0.82em;color:#1a237e;border-color:#1a237e;padding:6px 14px;" title="Envia formulário por e-mail">📧 Enviar por e-mail</button>
+              </div>
             </div>
 
           </div>
@@ -1071,13 +1122,6 @@ async function processos() {
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Componentes do Serviço</label>
               <div id="drpComponentesTabela"></div>
-              <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
-                <div style="flex:1;position:relative;">
-                  <input type="text" id="drpComponenteBusca" placeholder="Buscar componente por nome, tipo ou descrição..." autocomplete="off" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;" onfocus="mostrarDropdownComponenteDrp()" oninput="mostrarDropdownComponenteDrp()">
-                  <div id="drpComponenteDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 7px 7px;max-height:220px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
-                </div>
-                <button class="btn btn-ghost" onclick="abrirModalCompDrp()" style="padding:8px 14px;font-size:0.85em;white-space:nowrap;" title="Criar novo componente">+ Novo</button>
-              </div>
               <div class="modal-overlay" id="modalCompDrp"><div class="modal" onclick="event.stopPropagation()" style="max-width:540px;">
                 <h3 id="modalCompDrpTitulo">Novo Componente</h3>
                 <input type="hidden" id="compDrpId">
@@ -1126,6 +1170,11 @@ async function processos() {
                   <button class="btn btn-primary" onclick="salvarCompDrp()">Salvar</button>
                 </div>
               </div></div>
+              <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
+                <button class="btn btn-ghost" onclick="abrirModalCompDrp()" style="font-size:0.82em;color:#555;border-color:#ccc;padding:6px 14px;" title="Criar novo componente que não está no catálogo">+ Novo componente</button>
+                <button class="btn btn-ghost" onclick="copiarLinkDRP()" style="font-size:0.82em;color:#555;border-color:#ccc;padding:6px 14px;" title="Gera o link e copia para a área de transferência">🔗 Copiar link</button>
+                <button class="btn btn-ghost" onclick="enviarDRPComponentes()" style="font-size:0.82em;color:#1a237e;border-color:#1a237e;padding:6px 14px;" title="Envia formulário por e-mail para o dono do processo">📧 Enviar por e-mail</button>
+              </div>
             </div>
           </div>
         </div>
@@ -1154,8 +1203,25 @@ async function processos() {
     processosFiltroArea = window.USER_AREA;
     filtroArea.innerHTML = `<option value="${window.USER_AREA}">${window.USER_AREA}</option>`;
     filtroArea.disabled = true;
-    document.getElementById('btnEnviarArea').style.display = 'none';
-    document.getElementById('btnRelatorioArea').style.display = 'none';
+    const btnEnviar = document.getElementById('btnEnviarArea');
+    const btnRelatorio = document.getElementById('btnRelatorioArea');
+    if (btnEnviar) btnEnviar.style.display = 'none';
+    if (btnRelatorio) btnRelatorio.style.display = 'none';
+  } else if (window.USER_PERFIL !== 'admin' && !window.USER_AREA) {
+    // Gestor sem área: bloquear acesso
+    const loadingEl = document.getElementById('loading');
+    if (loadingEl) loadingEl.style.display = 'none';
+    const listaEl = document.getElementById('listaProcessos');
+    if (listaEl) {
+      listaEl.style.display = 'block';
+      listaEl.innerHTML = `
+        <div style="text-align:center;padding:60px 20px;color:#999;">
+          <div style="font-size:3em;margin-bottom:16px;">🔒</div>
+          <h3 style="color:#666;margin-bottom:8px;">Acesso não configurado</h3>
+          <p>Seu e-mail ainda não está vinculado a uma área. Solicite ao administrador que configure seu acesso.</p>
+        </div>`;
+    }
+    return;
   } else {
     filtroArea.innerHTML = '<option value="">Todas as áreas</option>' +
       areasUnicas.map(a => `<option value="${a}">${a}</option>`).join('');
@@ -1342,9 +1408,9 @@ window.ordenarProcessos = (coluna) => {
 window._dependenciaSelecionadas = [];
 
 function initDependenciaTags(valorAtual) {
-  // Parsear valor atual (string separada por vírgula)
+  // Parsear valor atual (string separada por vírgula) e remover duplicatas
   window._dependenciaSelecionadas = valorAtual 
-    ? valorAtual.split(',').map(s => s.trim()).filter(Boolean) 
+    ? [...new Set(valorAtual.split(',').map(s => s.trim()).filter(Boolean))]
     : [];
   
   renderDependenciaTabela();
@@ -1362,9 +1428,17 @@ function renderDependenciaTabela() {
   const catalogo = window.dependenciasCatalogo || [];
   const selecionadas = window._dependenciaSelecionadas || [];
   
+  // Ícones por categoria
+  const catIcons = {
+    'Fornecedores': '🏢', 'Fornecedor': '🏢',
+    'Infraestrutura': '⚡',
+    'Pessoas': '👤', 'Pessoa': '👤',
+    'Sistemas': '💻', 'Sistema': '💻',
+    'Outros': '📦'
+  };
+  
   // Obter categorias do catálogo
   const categoriasSet = new Set(catalogo.map(d => d.categoria));
-  // Adicionar categorias das dependências selecionadas que podem não estar no catálogo
   selecionadas.forEach(nome => {
     const dep = catalogo.find(d => d.nome === nome);
     if (dep) categoriasSet.add(dep.categoria);
@@ -1380,10 +1454,20 @@ function renderDependenciaTabela() {
   const grupos = {};
   categorias.forEach(cat => { grupos[cat] = []; });
   selecionadas.forEach(nome => {
-    const dep = catalogo.find(d => d.nome === nome);
-    const cat = dep ? dep.categoria : 'Outros';
-    if (!grupos[cat]) grupos[cat] = [];
-    grupos[cat].push(nome);
+    // Buscar TODAS as categorias onde esse nome existe no catálogo
+    const deps = catalogo.filter(d => d.nome === nome);
+    if (deps.length > 1) {
+      // Item existe em múltiplas categorias — mostrar em todas
+      deps.forEach(dep => {
+        if (grupos[dep.categoria] && !grupos[dep.categoria].includes(nome)) {
+          grupos[dep.categoria].push(nome);
+        }
+      });
+    } else {
+      const cat = deps.length ? deps[0].categoria : 'Outros';
+      if (!grupos[cat]) grupos[cat] = [];
+      if (!grupos[cat].includes(nome)) grupos[cat].push(nome);
+    }
   });
   
   let html = `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
@@ -1397,22 +1481,52 @@ function renderDependenciaTabela() {
   
   categorias.forEach((cat) => {
     const recursos = grupos[cat] || [];
-    const tags = recursos.map((nome, idx) => {
+    const icon = catIcons[cat] || '📦';
+    const count = recursos.length;
+    
+    // Exemplos por categoria
+    const catExamples = {
+      'Fornecedores': 'Ex: Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado',
+      'Fornecedor': 'Ex: Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado',
+      'Infraestrutura': 'Ex: Internet, energia elétrica, climatização, switches/roteadores, servidor de banco de dados, telefonia',
+      'Pessoas': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
+      'Pessoa': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
+      'Sistemas': 'Ex: ERP Fortes, banco de dados PostgreSQL/Oracle, e-mail corporativo, Active Directory, sistema bancário',
+      'Sistema': 'Ex: ERP Fortes, banco de dados PostgreSQL/Oracle, e-mail corporativo, Active Directory, sistema bancário'
+    };
+    const example = catExamples[cat] || '';
+    
+    const tags = recursos.map((nome) => {
       const globalIdx = selecionadas.indexOf(nome);
-      return `<span style="display:inline-flex;align-items:center;gap:3px;background:#e8eaf6;color:#1a237e;padding:2px 8px 2px 10px;border-radius:12px;font-size:0.85em;font-weight:500;white-space:nowrap;">${nome}<button onclick="removerDependenciaTag(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:#666;line-height:1;padding:0 2px;" title="Remover">&times;</button></span>`;
+      const dep = catalogo.find(d => d.nome === nome);
+      const tooltip = dep ? [dep.empresa, dep.detalhes, dep.telefone].filter(Boolean).join(' • ') : '';
+      return `<span class="dep-tag-item" style="display:inline-flex;align-items:center;gap:3px;background:#1a237e;color:white;padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;cursor:default;" title="${tooltip ? tooltip.replace(/"/g, '&quot;') : nome}">${nome}<button onclick="removerDependenciaTag(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.7);line-height:1;padding:0 3px;" onmouseenter="this.style.color='white'" onmouseleave="this.style.color='rgba(255,255,255,0.7)'" title="Remover">&times;</button></span>`;
     }).join(' ');
     
+    const emptyMsg = !count ? `<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum recurso mapeado</span>` : '';
+    
+    // Chips de itens disponíveis no catálogo (não selecionados)
+    const disponiveisNaCat = catalogo.filter(d => d.categoria === cat && !selecionadas.includes(d.nome));
+    const chips = disponiveisNaCat.map(d => {
+      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="selecionarDependenciaCategoria('${d.nome.replace(/'/g, "\\'")}')" title="${[d.empresa, d.detalhes].filter(Boolean).join(' • ') || d.nome}">${d.nome}</span>`;
+    }).join(' ');
+
     html += `
       <tr>
-        <td style="padding:14px 0;color:#222;font-weight:600;font-size:0.92em;vertical-align:top;border-bottom:1px solid #f0f0f0;">${cat}</td>
-        <td style="padding:10px 0 10px 20px;color:#444;font-size:0.9em;line-height:1.8;border-bottom:1px solid #f0f0f0;vertical-align:middle;">
+        <td style="padding:14px 0;color:#222;font-weight:600;font-size:0.92em;vertical-align:top;border-bottom:1px solid #f0f0f0;">
+          <span style="margin-right:4px;">${icon}</span>${cat}${count ? ` <span style="font-size:0.75em;color:#888;font-weight:400;">(${count})</span>` : ''}
+          ${example ? `<div style="font-size:0.72em;font-weight:400;color:#999;margin-top:4px;line-height:1.4;font-style:italic;">${example}</div>` : ''}
+        </td>
+        <td style="padding:10px 0 10px 20px;color:#444;font-size:0.9em;line-height:2;border-bottom:1px solid #f0f0f0;vertical-align:middle;">
           <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
             ${tags}
-            <div style="position:relative;flex:1;min-width:160px;">
-              <input type="text" class="dep-cat-input" data-categoria="${cat}" placeholder="Adicionar..." autocomplete="off" style="border:none;border-bottom:1px solid #e0e0e0;outline:none;font-size:0.9em;padding:4px 2px;width:100%;background:transparent;" onfocus="mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" oninput="mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" onblur="setTimeout(()=>{const dd=this.parentElement.querySelector('.dep-cat-dropdown');if(dd)dd.style.display='none';},200)">
-              <div class="dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:180px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
+            ${emptyMsg}
+            <div style="position:relative;flex:1;min-width:180px;display:flex;align-items:center;gap:4px;">
+              <input type="text" class="dep-cat-input" data-categoria="${cat}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #e8eaf6;outline:none;font-size:0.88em;padding:5px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#1a237e';mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" oninput="mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" onblur="this.style.borderColor='#e8eaf6';setTimeout(()=>{const dd=this.parentElement.querySelector('.dep-cat-dropdown');if(dd)dd.style.display='none';},200)">
+              <div class="dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:200px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
             </div>
           </div>
+          ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed #f0f0f0;"><span style="font-size:0.7em;color:#999;margin-right:4px;">Disponíveis:</span>${chips}</div>` : ''}
         </td>
       </tr>`;
   });
@@ -1423,7 +1537,7 @@ function renderDependenciaTabela() {
   // Atualizar hidden input
   document.getElementById('fDependencia').value = selecionadas.join(', ');
   
-  // Adicionar listener de Enter nos inputs
+  // Adicionar listeners nos inputs
   tabelaContainer.querySelectorAll('.dep-cat-input').forEach(input => {
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -1431,15 +1545,7 @@ function renderDependenciaTabela() {
         const val = input.value.trim();
         const cat = input.dataset.categoria;
         if (val && !window._dependenciaSelecionadas.includes(val)) {
-          window._dependenciaSelecionadas.push(val);
-          const existe = (window.dependenciasCatalogo || []).some(d => d.nome.toLowerCase() === val.toLowerCase());
-          if (!existe) {
-            API.salvarDependencia({ categoria: cat, nome: val }).then(r => {
-              window.dependenciasCatalogo.push({ id: r.id, categoria: cat, nome: val });
-              API.invalidate('getDependencias');
-            });
-          }
-          renderDependenciaTabela();
+          adicionarDependenciaCategoria(val, cat);
         }
         input.value = '';
       } else if (e.key === 'Escape') {
@@ -1447,6 +1553,17 @@ function renderDependenciaTabela() {
         if (dd) dd.style.display = 'none';
         input.blur();
       }
+    });
+    // Ao sair do campo, adicionar automaticamente se tiver texto
+    input.addEventListener('blur', () => {
+      setTimeout(() => {
+        const val = input.value.trim();
+        const cat = input.dataset.categoria;
+        if (val && !window._dependenciaSelecionadas.includes(val)) {
+          adicionarDependenciaCategoria(val, cat);
+          input.value = '';
+        }
+      }, 250);
     });
   });
 }
@@ -1470,11 +1587,15 @@ window.mostrarDropdownCategoria = (input, categoria) => {
   
   let html = '';
   disponiveis.forEach(d => {
-    html += `<div class="dep-option" onmousedown="selecionarDependenciaCategoria('${d.nome.replace(/'/g, "\\'")}')" style="padding:7px 12px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">${d.nome}</div>`;
+    const info = [d.empresa, d.detalhes].filter(Boolean).join(' • ');
+    html += `<div class="dep-option" onmousedown="selecionarDependenciaCategoria('${d.nome.replace(/'/g, "\\'")}')" style="padding:8px 12px;cursor:pointer;transition:background 0.1s;border-bottom:1px solid #f8f8f8;">
+      <div style="font-size:0.9em;font-weight:500;color:#222;">${d.nome}</div>
+      ${info ? `<div style="font-size:0.75em;color:#888;margin-top:2px;">${info}</div>` : ''}
+    </div>`;
   });
   
   if (input.value.trim() && !catalogo.some(d => d.nome.toLowerCase() === input.value.trim().toLowerCase())) {
-    html += `<div class="dep-option" onmousedown="adicionarDependenciaCategoria('${input.value.trim().replace(/'/g, "\\'")}','${categoria.replace(/'/g, "\\'")}')" style="padding:7px 12px;font-size:0.88em;cursor:pointer;color:#1a237e;font-weight:600;border-top:1px solid #f0f0f0;">+ Adicionar "${input.value.trim()}"</div>`;
+    html += `<div class="dep-option" onmousedown="adicionarDependenciaCategoria('${input.value.trim().replace(/'/g, "\\'")}','${categoria.replace(/'/g, "\\'")}')" style="padding:9px 12px;cursor:pointer;color:#1a237e;font-weight:600;border-top:1.5px solid #e8eaf6;background:#f8f9ff;">+ Criar "${input.value.trim()}"</div>`;
   }
   
   if (!html) {
@@ -1501,15 +1622,19 @@ window.selecionarDependenciaCategoria = (nome) => {
 window.adicionarDependenciaCategoria = (nome, categoria) => {
   if (!window._dependenciaSelecionadas.includes(nome)) {
     window._dependenciaSelecionadas.push(nome);
-    const existe = (window.dependenciasCatalogo || []).some(d => d.nome.toLowerCase() === nome.toLowerCase());
-    if (!existe) {
-      API.salvarDependencia({ categoria, nome }).then(r => {
-        window.dependenciasCatalogo.push({ id: r.id, categoria, nome });
-        API.invalidate('getDependencias');
-      });
-    }
-    renderDependenciaTabela();
   }
+  // Verificar se existe no catálogo COM esta categoria específica
+  const existeNaCategoria = (window.dependenciasCatalogo || []).some(d => d.nome.toLowerCase() === nome.toLowerCase() && d.categoria === categoria);
+  if (!existeNaCategoria) {
+    // Adicionar ao catálogo local e salvar no backend
+    const novaDep = { id: null, categoria, nome };
+    window.dependenciasCatalogo.push(novaDep);
+    API.invalidate('getDependencias');
+    API.salvarDependencia({ categoria, nome }).then(r => {
+      novaDep.id = r.id;
+    });
+  }
+  renderDependenciaTabela();
 };
 
 window.removerDependenciaTag = (idx) => {
@@ -1832,7 +1957,29 @@ window.salvarProcesso = async () => {
   // Desabilitar botão e mostrar loading
   const btnSalvar = document.querySelector('#drawerProcesso .drawer-footer .btn-primary');
   const textoOriginal = btnSalvar ? btnSalvar.innerHTML : '';
-  if (btnSalvar) { btnSalvar.disabled = true; btnSalvar.innerHTML = '⏳ Salvando...'; btnSalvar.style.opacity = '0.7'; }
+  if (btnSalvar) { btnSalvar.disabled = true; btnSalvar.innerHTML = '⏳ Salvando...'; btnSalvar.classList.add('btn-loading'); }
+
+  // Optimistic: fechar drawer e atualizar UI imediatamente
+  const area = window.areasDisponiveis ? window.areasDisponiveis.find(a => a.nome === p.area) : null;
+  const pEnriquecido = { ...p, responsavelArea: area ? area.responsavel : '', solucao: area ? area.solucao : '', score: 0, respostas: [] };
+  if (p.id) {
+    const idx = window.processosData.findIndex(x => x.id === p.id);
+    if (idx !== -1) {
+      pEnriquecido.score = temResposta ? avalTotal : window.processosData[idx].score;
+      pEnriquecido.respostas = temResposta ? avalScores : window.processosData[idx].respostas;
+      pEnriquecido.pcnSalvo = window.processosData[idx].pcnSalvo;
+      pEnriquecido.avaliado = window.processosData[idx].avaliado || temResposta;
+      window.processosData[idx] = pEnriquecido;
+    }
+  } else {
+    pEnriquecido.id = Date.now(); // ID temporário
+    pEnriquecido.score = temResposta ? avalTotal : 0;
+    pEnriquecido.respostas = temResposta ? avalScores : {};
+    window.processosData.push(pEnriquecido);
+  }
+  fecharModal();
+  renderizarProcessos();
+  showToast('✅ Salvando...', '#1a237e');
 
   try {
     const result = await API.salvarProcesso(p);
@@ -1842,29 +1989,24 @@ window.salvarProcesso = async () => {
       await API.post('salvarRespostas', { area: p.area, processo: p.processo, scores: avalScores });
     }
     
-    fecharModal();
-    showToast('✅ Salvo!', '#2e7d32');
-    // Atualizar localmente sem recarregar do backend
-    const area = window.areasDisponiveis.find(a => a.nome === p.area);
-    const pEnriquecido = { ...p, responsavelArea: area ? area.responsavel : '', solucao: area ? area.solucao : '', score: 0, respostas: [] };
-    if (p.id) {
-      const idx = window.processosData.findIndex(x => x.id === p.id);
-      if (idx !== -1) {
-        pEnriquecido.score = temResposta ? avalTotal : window.processosData[idx].score;
-        pEnriquecido.respostas = temResposta ? avalScores : window.processosData[idx].respostas;
-        window.processosData[idx] = pEnriquecido;
-      }
-    } else {
-      pEnriquecido.id = result.id || Date.now();
-      pEnriquecido.score = temResposta ? avalTotal : 0;
-      pEnriquecido.respostas = temResposta ? avalScores : {};
-      window.processosData.push(pEnriquecido);
+    // Atualizar ID real se era novo
+    if (!p.id && result.id) {
+      const tempIdx = window.processosData.findIndex(x => x.id === pEnriquecido.id);
+      if (tempIdx !== -1) window.processosData[tempIdx].id = result.id;
+      renderizarProcessos();
     }
-    renderizarProcessos();
+    showToast('✅ Salvo!', '#2e7d32');
+    API.invalidate('getProcessos');
   } catch (err) {
     console.error('Erro ao salvar processo:', err);
     showToast('❌ Erro ao salvar: ' + err.message, '#c62828');
-    if (btnSalvar) { btnSalvar.disabled = false; btnSalvar.innerHTML = textoOriginal; btnSalvar.style.opacity = '1'; }
+    // Reverter optimistic update
+    if (p.id) {
+      API.invalidate('getProcessos');
+    } else {
+      window.processosData = window.processosData.filter(x => x.id !== pEnriquecido.id);
+      renderizarProcessos();
+    }
   }
 };
 
@@ -2166,12 +2308,14 @@ async function dependencias() {
         </div>
         <div>
           <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Setor</label>
-          <input type="text" id="depSetor" placeholder="Ex: TI, Facilities" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+          <input type="text" id="depSetor" list="depSetorList" placeholder="Ex: TI, Facilities" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+          <datalist id="depSetorList"></datalist>
         </div>
       </div>
       <div style="margin-bottom:14px;">
         <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Empresa</label>
-        <input type="text" id="depEmpresa" placeholder="Ex: Fortes Tecnologia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        <input type="text" id="depEmpresa" list="depEmpresaList" placeholder="Ex: Fortes Tecnologia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        <datalist id="depEmpresaList"></datalist>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
         <div>
@@ -2274,6 +2418,14 @@ window.abrirModalDependencia = (d) => {
   // Preencher datalist de categorias
   const cats = [...new Set(dependenciasData.map(x => x.categoria))].sort();
   document.getElementById('depCategoriaList').innerHTML = cats.map(c => `<option value="${c}">`).join('');
+  // Preencher datalist de setores existentes
+  const setores = [...new Set(dependenciasData.map(x => x.setor).filter(Boolean))].sort();
+  const setorList = document.getElementById('depSetorList');
+  if (setorList) setorList.innerHTML = setores.map(s => `<option value="${s}">`).join('');
+  // Preencher datalist de empresas existentes
+  const empresas = [...new Set(dependenciasData.map(x => x.empresa).filter(Boolean))].sort();
+  const empresaList = document.getElementById('depEmpresaList');
+  if (empresaList) empresaList.innerHTML = empresas.map(e => `<option value="${e}">`).join('');
   document.getElementById('modalDep').classList.add('open');
 };
 
@@ -2342,6 +2494,19 @@ async function admin() {
   `;
 
   const [processos, areas] = await Promise.all([API.getProcessos(), API.getAreas()]);
+
+  // Gestor sem área: bloquear acesso
+  if (window.USER_PERFIL !== 'admin' && !window.USER_AREA) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('painel').style.display = 'block';
+    document.getElementById('painel').innerHTML = `
+      <div style="text-align:center;padding:60px 20px;color:#999;">
+        <div style="font-size:3em;margin-bottom:16px;">🔒</div>
+        <h3 style="color:#666;margin-bottom:8px;">Acesso não configurado</h3>
+        <p>Seu e-mail ainda não está vinculado a uma área. Solicite ao administrador que configure seu acesso.</p>
+      </div>`;
+    return;
+  }
 
   // Gestor: filtrar apenas sua area
   const processosVisiveis = (window.USER_PERFIL !== 'admin' && window.USER_AREA)
@@ -2585,7 +2750,15 @@ async function questionario() {
         <option value="">Selecione uma área...</option>
       </select>
     </div>
-    <div class="loading" id="loading">⏳ Carregando...</div>
+    <div class="loading" id="loading">
+      <div class="skeleton-table">
+        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:15%;height:16px;"></div><div class="skeleton skeleton-cell" style="width:25%;height:16px;"></div><div class="skeleton skeleton-cell" style="width:15%;height:16px;"></div><div class="skeleton skeleton-cell" style="width:8%;height:16px;"></div><div class="skeleton skeleton-cell" style="width:12%;height:16px;"></div></div>
+        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:15%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:30%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:12%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:8%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:10%;height:14px;"></div></div>
+        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:12%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:22%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:18%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:6%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:14%;height:14px;"></div></div>
+        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:18%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:20%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:14%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:7%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:11%;height:14px;"></div></div>
+        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:14%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:28%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:10%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:8%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:12%;height:14px;"></div></div>
+      </div>
+    </div>
     <div id="listaProcessos" style="display:none;"></div>
     
     <div class="modal-overlay" id="modalQuestionario"><div class="modal" onclick="event.stopPropagation()" style="max-width:700px;max-height:90vh;overflow-y:auto;">
@@ -3071,7 +3244,7 @@ window.salvarComp = async () => {
 };
 
 // ============================================================
-// DRP - Componentes do Serviço (inline no drawer)
+// DRP - Componentes do Serviço (inline no drawer - modelo tags por tipo)
 // ============================================================
 window._drpComponentes = [];
 
@@ -3079,42 +3252,107 @@ function renderComponentesDrp() {
   const container = document.getElementById('drpComponentesTabela');
   if (!container) return;
   const catalogo = window.componentesCatalogo || [];
-  const comps = window._drpComponentes.map(id => catalogo.find(d => d.id === id)).filter(Boolean);
+  const selecionados = window._drpComponentes || [];
+  const comps = selecionados.map(id => catalogo.find(d => d.id === id)).filter(Boolean);
 
-  let rows = '';
-  if (comps.length) {
-    rows = comps.map(d => `<tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:12px 14px;color:#555;">${d.tipo || '-'}</td>
-          <td style="padding:12px 14px;font-weight:600;color:#222;">${d.nome || '-'}</td>
-          <td style="padding:12px 14px;color:#555;">${d.descricao || '-'}</td>
-          <td style="padding:12px 14px;color:#555;">${d.rto || '-'}</td>
-          <td style="padding:12px 14px;color:#555;">${d.rpo || '-'}</td>
-          <td style="padding:12px 14px;color:#555;">${d.estrategia || '-'}</td>
-          <td style="padding:12px 14px;color:#555;">${d.responsavel || '-'}</td>
-          <td style="padding:12px 6px;text-align:center;">
-            <button onclick="removerComponenteDrp(${d.id})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
-          </td>
-        </tr>`).join('');
-  } else {
-    rows = `<tr><td colspan="8" style="padding:16px 14px;color:#999;font-size:0.9em;text-align:center;">Nenhum componente adicionado. Use o campo abaixo para buscar e adicionar.</td></tr>`;
+  // Ícones por tipo
+  const tipoIcons = {
+    'Servidor': '🖥️', 'Servidores': '🖥️',
+    'Banco de Dados': '🗄️', 'Database': '🗄️',
+    'Aplicação': '📦', 'Aplicações': '📦', 'Software': '📦',
+    'Rede': '🌐', 'Network': '🌐',
+    'Storage': '💾', 'Armazenamento': '💾',
+    'Cloud': '☁️', 'Nuvem': '☁️',
+    'Segurança': '🔒',
+    'Comunicação': '📡',
+    'Outros': '⚙️'
+  };
+
+  // Exemplos por tipo
+  const tipoExamples = {
+    'Servidor': 'Ex: Servidor de aplicação, servidor web, VM de produção',
+    'Servidores': 'Ex: Servidor de aplicação, servidor web, VM de produção',
+    'Banco de Dados': 'Ex: PostgreSQL primário, SQL Server cluster, Redis cache',
+    'Database': 'Ex: PostgreSQL primário, SQL Server cluster, Redis cache',
+    'Aplicação': 'Ex: ERP Fortes, portal do cliente, API de integração',
+    'Aplicações': 'Ex: ERP Fortes, portal do cliente, API de integração',
+    'Software': 'Ex: ERP Fortes, portal do cliente, API de integração',
+    'Rede': 'Ex: Firewall, switch core, link dedicado, VPN site-to-site',
+    'Network': 'Ex: Firewall, switch core, link dedicado, VPN site-to-site',
+    'Storage': 'Ex: NAS, SAN, backup em nuvem, file server',
+    'Armazenamento': 'Ex: NAS, SAN, backup em nuvem, file server',
+    'Cloud': 'Ex: AWS EC2, Azure VM, Google Cloud Run, S3 bucket',
+    'Nuvem': 'Ex: AWS EC2, Azure VM, Google Cloud Run, S3 bucket',
+    'Segurança': 'Ex: WAF, antivírus endpoint, SIEM, cofre de senhas',
+    'Comunicação': 'Ex: E-mail corporativo, Teams/Slack, PABX, DNS'
+  };
+
+  // Obter tipos do catálogo (mesclar Certificados em Segurança)
+  const tiposMerge = { 'Certificados': 'Segurança' };
+  const tiposSet = new Set(catalogo.map(d => tiposMerge[d.tipo] || d.tipo).filter(Boolean));
+  comps.forEach(c => { if (c.tipo) tiposSet.add(tiposMerge[c.tipo] || c.tipo); });
+  const tipos = [...tiposSet].sort();
+
+  if (!tipos.length) {
+    container.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhum componente cadastrado no catálogo. Clique em "+ Novo" para criar.</p>';
+    return;
   }
 
-  container.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;font-size:0.88em;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;">
-      <thead>
-        <tr style="background:#f5f6fa;">
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Tipo</th>
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Nome</th>
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Descrição</th>
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">RTO</th>
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">RPO</th>
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Estratégia</th>
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Responsável</th>
-          <th style="padding:11px 6px;text-align:center;border-bottom:1.5px solid #e0e0e0;width:40px;"></th>
-        </tr>
-      </thead>
-      <tbody>${rows}</tbody>
-    </table>`;
+  // Agrupar selecionados por tipo (com merge)
+  const grupos = {};
+  tipos.forEach(t => { grupos[t] = []; });
+  comps.forEach(c => {
+    const t = tiposMerge[c.tipo] || c.tipo || 'Outros';
+    if (!grupos[t]) grupos[t] = [];
+    if (!grupos[t].find(x => x.id === c.id)) grupos[t].push(c);
+  });
+
+  let html = `<p style="font-size:0.78em;color:#888;margin-bottom:10px;">Pense: <em>"Se esse componente falhar, o processo é afetado?"</em> — selecione ou crie os componentes técnicos necessários.</p>`;
+  html += `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
+    <thead>
+      <tr>
+        <th style="padding:12px 0;text-align:left;font-weight:600;color:#555;font-size:0.82em;border-bottom:1.5px solid #e0e0e0;width:28%;">Tipo</th>
+        <th style="padding:12px 0 12px 20px;text-align:left;font-weight:600;color:#555;font-size:0.82em;border-bottom:1.5px solid #e0e0e0;">Componentes Selecionados</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  tipos.forEach(tipo => {
+    const itens = grupos[tipo] || [];
+    const icon = tipoIcons[tipo] || '⚙️';
+    const example = tipoExamples[tipo] || '';
+    const count = itens.length;
+    const disponiveisNoTipo = catalogo.filter(d => (tiposMerge[d.tipo] || d.tipo) === tipo && !selecionados.includes(d.id));
+
+    const tags = itens.map(c => {
+      const tooltip = [c.estrategia, c.responsavel, c.rto ? 'RTO:'+c.rto : ''].filter(Boolean).join(' • ');
+      return `<span style="display:inline-flex;align-items:center;gap:3px;background:#1a237e;color:white;padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;cursor:default;" title="${tooltip.replace(/"/g,'&quot;')}">${c.nome}<button onclick="removerComponenteDrp(${c.id})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.7);line-height:1;padding:0 3px;" onmouseenter="this.style.color='white'" onmouseleave="this.style.color='rgba(255,255,255,0.7)'" title="Remover">&times;</button></span>`;
+    }).join(' ');
+
+    const chips = disponiveisNoTipo.map(d => {
+      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="adicionarComponenteDrpById(${d.id})" title="${d.descricao || d.nome}">${d.nome}</span>`;
+    }).join(' ');
+
+    const emptyMsg = !count ? `<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum selecionado</span>` : '';
+
+    html += `
+      <tr>
+        <td style="padding:14px 0;color:#222;font-weight:600;font-size:0.92em;vertical-align:top;border-bottom:1px solid #f0f0f0;">
+          <span style="margin-right:4px;">${icon}</span>${tipo}${count ? ` <span style="font-size:0.75em;color:#888;font-weight:400;">(${count})</span>` : ''}
+          ${example ? `<div style="font-size:0.72em;font-weight:400;color:#999;margin-top:4px;line-height:1.4;font-style:italic;">${example}</div>` : ''}
+        </td>
+        <td style="padding:10px 0 10px 20px;color:#444;font-size:0.9em;line-height:2;border-bottom:1px solid #f0f0f0;vertical-align:middle;">
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:${chips ? '8px' : '0'};">
+            ${tags}
+            ${emptyMsg}
+          </div>
+          ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding-top:4px;border-top:1px dashed #f0f0f0;"><span style="font-size:0.7em;color:#999;margin-right:4px;">Disponíveis:</span>${chips}</div>` : ''}
+        </td>
+      </tr>`;
+  });
+
+  html += `</tbody></table>`;
+  container.innerHTML = html;
 }
 
 window.mostrarDropdownComponenteDrp = () => {
@@ -3217,6 +3455,96 @@ window.salvarCompDrp = async () => {
   } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
 };
 
+
+// ============================================================
+// ENVIAR BIA DEPENDÊNCIAS POR E-MAIL (formulário externo via token)
+// ============================================================
+window.enviarBIADependencias = async () => {
+  const id = Number(document.getElementById('fId').value);
+  const p = id ? window.processosData.find(proc => proc.id === id) : null;
+  if (!p) return showToast('Salve o processo antes de enviar.', '#e65100');
+
+  // Buscar email do responsável da área
+  const areas = window.areasDisponiveis || [];
+  const area = areas.find(a => a.nome === p.area);
+  const emailPadrao = area ? area.email : '';
+
+  const email = prompt('E-mail do dono do processo:', emailPadrao);
+  if (!email) return;
+
+  try {
+    showToast('📧 Enviando...', '#1a237e');
+    const result = await API.post('gerarTokenBIA', { area: p.area, processo: p.processo, email });
+    if (result.error) throw new Error(result.error);
+    showToast('✅ Formulário enviado para ' + email, '#2e7d32');
+  } catch(e) {
+    showToast('❌ ' + e.message, '#c62828');
+  }
+};
+
+// ============================================================
+// COPIAR LINK BIA (gerar token sem enviar email)
+// ============================================================
+window.copiarLinkBIA = async () => {
+  const id = Number(document.getElementById('fId').value);
+  const p = id ? window.processosData.find(proc => proc.id === id) : null;
+  if (!p) return showToast('Salve o processo antes.', '#e65100');
+
+  try {
+    showToast('🔗 Gerando link...', '#1a237e');
+    const result = await API.post('gerarTokenBIA', { area: p.area, processo: p.processo, email: '_link_only_' });
+    if (result.error) throw new Error(result.error);
+    await navigator.clipboard.writeText(result.link);
+    showToast('✅ Link copiado! Cole no chat para enviar.', '#2e7d32');
+  } catch(e) {
+    showToast('❌ ' + e.message, '#c62828');
+  }
+};
+
+// ============================================================
+// ENVIAR DRP COMPONENTES POR E-MAIL (formulário externo via token)
+// ============================================================
+window.enviarDRPComponentes = async () => {
+  const id = Number(document.getElementById('fId').value);
+  const p = id ? window.processosData.find(proc => proc.id === id) : null;
+  if (!p) return showToast('Salve o processo antes de enviar.', '#e65100');
+
+  const areas = window.areasDisponiveis || [];
+  const area = areas.find(a => a.nome === p.area);
+  const emailPadrao = area ? area.email : '';
+
+  const email = prompt('E-mail do dono do processo:', emailPadrao);
+  if (!email) return;
+
+  try {
+    showToast('📧 Enviando...', '#1a237e');
+    const result = await API.post('gerarTokenDRP', { area: p.area, processo: p.processo, email, id: String(id) });
+    if (result.error) throw new Error(result.error);
+    showToast('✅ Formulário enviado para ' + email, '#2e7d32');
+  } catch(e) {
+    showToast('❌ ' + e.message, '#c62828');
+  }
+};
+
+// ============================================================
+// COPIAR LINK DRP (gerar token sem enviar email)
+// ============================================================
+window.copiarLinkDRP = async () => {
+  const id = Number(document.getElementById('fId').value);
+  const p = id ? window.processosData.find(proc => proc.id === id) : null;
+  if (!p) return showToast('Salve o processo antes.', '#e65100');
+
+  try {
+    showToast('🔗 Gerando link...', '#1a237e');
+    const result = await API.post('gerarTokenDRP', { area: p.area, processo: p.processo, email: '_link_only_', id: String(id) });
+    if (result.error) throw new Error(result.error);
+    const link = result.link;
+    await navigator.clipboard.writeText(link);
+    showToast('✅ Link copiado! Cole no chat para enviar.', '#2e7d32');
+  } catch(e) {
+    showToast('❌ ' + e.message, '#c62828');
+  }
+};
 
 // ============================================================
 // DOSSIÊ DO PROCESSO
@@ -3515,7 +3843,10 @@ function renderFornecedoresBcp() {
   let html = `<table style="width:100%;border-collapse:collapse;font-size:0.88em;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;">
     <thead>
       <tr style="background:#f5f6fa;">
-        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;width:25%;">Fornecedor</th>
+        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Nome</th>
+        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Empresa</th>
+        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Papel</th>
+        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Telefone</th>
         <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Contingência / Plano B</th>
         <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">SLA Contratado</th>
       </tr>
@@ -3523,8 +3854,12 @@ function renderFornecedoresBcp() {
     <tbody>`;
   
   fornecedores.forEach(nome => {
+    const dep = catalogo.find(d => d.nome === nome) || {};
     html += `<tr style="border-bottom:1px solid #f0f0f0;">
       <td style="padding:10px 14px;font-weight:600;color:#222;">${nome}</td>
+      <td style="padding:10px 14px;color:#555;">${dep.empresa || '-'}</td>
+      <td style="padding:10px 14px;color:#555;">${dep.detalhes || '-'}</td>
+      <td style="padding:10px 14px;color:#555;">${dep.telefone || '-'}</td>
       <td style="padding:6px 8px;"><input type="text" class="planoB-contingencia" data-dep="${nome}" placeholder="Ex: Provedor alternativo..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
       <td style="padding:6px 8px;"><input type="text" class="sla-valor" data-dep="${nome}" placeholder="Ex: Suporte 24x7, 15min..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
     </tr>`;
@@ -3542,7 +3877,13 @@ async function pcns() {
     <div class="page-header">
       <div><h2>📋 Planos de Continuidade (PCNs)</h2><p class="page-sub">Navegue pelos PCNs gerados, organizados por área</p></div>
     </div>
-    <div class="loading" id="loading">⏳ Carregando...</div>
+    <div class="loading" id="loading">
+      <div class="skeleton-table">
+        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:100%;height:40px;border-radius:8px;"></div></div>
+        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:60%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:20%;height:14px;"></div></div>
+        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:50%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:15%;height:14px;"></div></div>
+      </div>
+    </div>
     <div id="pcns-lista"></div>`;
 
   try {
@@ -3552,7 +3893,20 @@ async function pcns() {
     document.getElementById('loading').style.display = 'none';
 
     // Filtrar apenas processos com PCN salvo
-    const comPCN = processos.filter(p => p.pcnSalvo);
+    let comPCN = processos.filter(p => p.pcnSalvo);
+
+    // Gestor: filtrar apenas sua área
+    if (window.USER_PERFIL !== 'admin' && window.USER_AREA) {
+      comPCN = comPCN.filter(p => p.area === window.USER_AREA);
+    } else if (window.USER_PERFIL !== 'admin' && !window.USER_AREA) {
+      document.getElementById('pcns-lista').innerHTML = `
+        <div style="text-align:center;padding:60px 20px;color:#999;">
+          <div style="font-size:3em;margin-bottom:16px;">🔒</div>
+          <h3 style="color:#666;margin-bottom:8px;">Acesso não configurado</h3>
+          <p>Seu e-mail ainda não está vinculado a uma área. Solicite ao administrador que configure seu acesso.</p>
+        </div>`;
+      return;
+    }
 
     if (!comPCN.length) {
       document.getElementById('pcns-lista').innerHTML = `

@@ -24,7 +24,7 @@
   <div id="app"></div>
   <div class="toast" id="toast"></div>
 
-  <script src="config.js"></script>
+  <script src="config.js?v=2"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script>
@@ -42,7 +42,8 @@
         const url = new URL(API_URL);
         url.searchParams.append('action', 'getPerfil');
         url.searchParams.append('email', user.email);
-        const res = await fetch(url);
+        url.searchParams.append('_t', Date.now());
+        const res = await fetch(url, { cache: 'no-store' });
         const perfil = await res.json();
         window.USER_PERFIL = perfil.perfil || 'gestor';
         window.USER_AREA = perfil.area || null;
@@ -62,9 +63,16 @@
         <span style="color:rgba(255,255,255,0.85);font-size:0.82em;">${user.displayName || user.email}</span>
         <button onclick="firebase.auth().signOut().then(()=>window.location.href='/login.html')" style="background:rgba(255,255,255,0.15);border:none;color:white;padding:5px 12px;border-radius:6px;font-size:0.78em;cursor:pointer;font-weight:600;">Sair</button>
       `;
+      // Perfil carregado - iniciar rota
+      window._perfilCarregado = true;
+      // Preload dados em background para navegação mais rápida
+      API.getProcessos().catch(()=>{});
+      API.getAreas().catch(()=>{});
+      API.getDependencias().catch(()=>{});
+      if (window._routePendente) route();
     });
   </script>
-  <script src="api.js"></script>
-  <script src="app.js"></script>
+  <script src="api.js?v=2"></script>
+  <script src="app.js?v=2"></script>
 </body>
 </html>
