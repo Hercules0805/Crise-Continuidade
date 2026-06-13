@@ -203,6 +203,9 @@ function doPost(e) {
       case 'salvarPCN':
         result = salvarPCNProcesso(data);
         break;
+      case 'excluirPCN':
+        result = excluirPCNProcesso(data);
+        break;
       case 'gerarTokenBIA':
         result = gerarTokenBIA(data);
         break;
@@ -355,10 +358,11 @@ function getProcessos() {
           if (!raw) return '';
           try {
             const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) return raw; // Already versioned JSON
+            if (Array.isArray(parsed)) return raw;
             return raw;
-          } catch(e) { return raw; } // Legacy HTML
+          } catch(e) { return raw; }
         })(),
+        tierManual: r[32] || '',
         score: scores[key] || 0,
         avaliado: avaliados[key] || false,
         respostas: respostas[key] || []
@@ -397,10 +401,10 @@ function salvarProcesso(p) {
     p.area, p.processo, p.descricao, p.dependencia, p.rto || '', p.rpo || '', p.mtpd || '', p.biaHomologada || '', '',
     p.bcpStatus || '', p.descricaoFuncional || '', impacto, p.bcpObjetivo || '', p.bcpEscopo || '', bcpContatos, bcpRiscos, bcpPreventivas,
     p.drpStatus || '', p.drpObjetivo || '', p.drpEscopo || '', p.drpProcedimentos || '', p.drpCriterios || '', drpComponentes,
-    p.mtd || '', p.workaround || '', impactoJanela, p.bcpPlanoBProvedores || '', p.bcpSlas || '', p.bcpGatilhos || '', p.bcpReconstituicao || '', p.bcpPapeisCrise || '', p.pcnSalvo || ''
+    p.mtd || '', p.workaround || '', impactoJanela, p.bcpPlanoBProvedores || '', p.bcpSlas || '', p.bcpGatilhos || '', p.bcpReconstituicao || '', p.bcpPapeisCrise || '', p.pcnSalvo || '', p.tierManual || ''
   ];
   if (p.id) {
-    sheet.getRange(p.id, 1, 1, 32).setValues([row]);
+    sheet.getRange(p.id, 1, 1, 33).setValues([row]);
     return { success: true, id: Number(p.id) };
   } else {
     sheet.appendRow(row);
@@ -1409,12 +1413,14 @@ function listarModelosGemini() {
 // ============================================================
 function salvarPCNProcesso(data) {
   try {
-    const id = Number(data.id);
     let pcnHtml = data.pcnHtml || '';
-    if (!id) return { error: 'ID do processo não informado.' };
+    const area = data.area || '';
+    const processo = data.processo || '';
+    const idFallback = Number(data.id);
     
-    // Limitar tamanho do HTML (Google Sheets tem limite de 50000 caracteres por célula)
-    // Truncar se necessário
+    if (!area && !processo && !idFallback) return { error: 'Dados do processo não informados.' };
+    
+    // Limitar tamanho do HTML
     if (pcnHtml.length > 45000) {
       pcnHtml = pcnHtml.substring(0, 45000) + '<!-- truncado -->';
     }
@@ -1422,8 +1428,25 @@ function salvarPCNProcesso(data) {
     const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
     if (!sheet) return { error: 'Aba de processos não encontrada.' };
     
+    // Buscar processo pela chave área+nome (mais seguro que por ID de linha)
+    let procRow = -1;
+    if (area && processo) {
+      const rows = sheet.getDataRange().getValues();
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][0]).trim() === area && String(rows[i][1]).trim() === processo) {
+          procRow = i + 1;
+          break;
+        }
+      }
+    }
+    // Fallback para ID se não encontrou por chave
+    if (procRow === -1 && idFallback) {
+      procRow = idFallback;
+    }
+    if (procRow === -1) return { error: 'Processo não encontrado.' };
+    
     // Ler versões existentes da coluna 32
-    const celula = sheet.getRange(id, 32).getValue();
+    const celula = sheet.getRange(procRow, 32).getValue();
     let versoes = [];
     try {
       const parsed = celula ? JSON.parse(celula) : null;
@@ -1449,21 +1472,55 @@ function salvarPCNProcesso(data) {
     };
     versoes.push(novaVersao);
     
-    // Manter no máximo 3 versões para não estourar limite da célula
+    // Manter no máximo 3 versões
     if (versoes.length > 3) versoes = versoes.slice(versoes.length - 3);
     
-    // Verificar tamanho total antes de salvar
+    // Verificar tamanho total
     const jsonStr = JSON.stringify(versoes);
     if (jsonStr.length > 50000) {
-      // Se ainda é grande demais, manter apenas a versão atual
       versoes = [novaVersao];
     }
     
-    sheet.getRange(id, 32).setValue(JSON.stringify(versoes));
+    sheet.getRange(procRow, 32).setValue(JSON.stringify(versoes));
     return { success: true, versao: novaVersao.versao, totalVersoes: versoes.length };
   } catch(err) {
     Logger.log('salvarPCNProcesso ERROR: ' + err.message);
     return { error: 'Erro ao salvar PCN: ' + err.message };
+  }
+}
+
+// ============================================================
+// EXCLUIR PCN
+// ============================================================
+function excluirPCNProcesso(data) {
+  try {
+    const area = data.area || '';
+    const processo = data.processo || '';
+    const idFallback = Number(data.id);
+    
+    const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
+    if (!sheet) return { error: 'Aba de processos não encontrada.' };
+    
+    // Buscar processo pela chave área+nome
+    let procRow = -1;
+    if (area && processo) {
+      const rows = sheet.getDataRange().getValues();
+      for (let i = 1; i < rows.length; i++) {
+        if (String(rows[i][0]).trim() === area && String(rows[i][1]).trim() === processo) {
+          procRow = i + 1;
+          break;
+        }
+      }
+    }
+    if (procRow === -1 && idFallback) procRow = idFallback;
+    if (procRow === -1) return { error: 'Processo não encontrado.' };
+    
+    // Limpar coluna 32 (pcnSalvo)
+    sheet.getRange(procRow, 32).setValue('');
+    return { success: true };
+  } catch(err) {
+    Logger.log('excluirPCNProcesso ERROR: ' + err.message);
+    return { error: 'Erro ao excluir PCN: ' + err.message };
   }
 }
 

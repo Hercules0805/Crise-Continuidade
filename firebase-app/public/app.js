@@ -958,6 +958,16 @@ async function processos() {
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição Funcional</label>
               <textarea id="fDescricaoFuncional" rows="4" placeholder="Descreva a função deste processo" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
             </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Criticidade (Pré-Avaliação)</label>
+              <select id="fTierManual" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
+                <option value="">Não definido</option>
+                <option value="Tier 1 (Crítico)">Tier 1 (Crítico)</option>
+                <option value="Tier 2 (Essencial)">Tier 2 (Essencial)</option>
+                <option value="Tier 3 (Suporte)">Tier 3 (Suporte)</option>
+              </select>
+              <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Indica a criticidade percebida antes da avaliação formal. Após a avaliação, o tier calculado prevalece.</span>
+            </div>
           </div>
 
           <!-- ABA: AVALIAÇÃO -->
@@ -1256,7 +1266,7 @@ function renderizarProcessos() {
   // Filtrar por tier
   if (processosFiltroTier) {
     data = data.filter(p => {
-      const tier = p.score >= 12 ? 'Tier 1' : p.score >= 6 ? 'Tier 2' : p.avaliado || p.score > 0 ? 'Tier 3' : 'Pendente';
+      const tier = p.score >= 12 ? 'Tier 1' : p.score >= 6 ? 'Tier 2' : (p.avaliado || p.score > 0) ? 'Tier 3' : (p.tierManual ? p.tierManual.split(' ')[0] + ' ' + p.tierManual.split(' ')[1] : 'Pendente');
       return tier === processosFiltroTier;
     });
   }
@@ -1287,8 +1297,8 @@ function renderizarProcessos() {
   
   document.getElementById('rows').innerHTML = data.length
     ? data.map(p => {
-        const status = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.avaliado ? 'Tier 3 (Suporte)' : 'Pendente';
-        const statusColor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : p.avaliado ? '#1565c0' : '#999';
+        const status = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.avaliado ? 'Tier 3 (Suporte)' : (p.tierManual || 'Pendente');
+        const statusColor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : p.avaliado ? '#1565c0' : (p.tierManual === 'Tier 1 (Crítico)' ? '#c62828' : p.tierManual === 'Tier 2 (Essencial)' ? '#f57c00' : p.tierManual === 'Tier 3 (Suporte)' ? '#1565c0' : '#999');
         return `<tr style="cursor:pointer;" onclick="editarProcesso(${p.id})">
         <td>${p.area}</td>
         <td><strong>${p.processo}</strong></td>
@@ -1544,26 +1554,23 @@ function renderDependenciaTabela() {
         e.preventDefault();
         const val = input.value.trim();
         const cat = input.dataset.categoria;
-        if (val && !window._dependenciaSelecionadas.includes(val)) {
-          adicionarDependenciaCategoria(val, cat);
+        if (val) {
+          // Se existe no catálogo, selecionar diretamente
+          const catalogo = window.dependenciasCatalogo || [];
+          const existe = catalogo.find(d => d.nome.toLowerCase() === val.toLowerCase() && d.categoria === cat);
+          if (existe && !window._dependenciaSelecionadas.includes(existe.nome)) {
+            selecionarDependenciaCategoria(existe.nome);
+            input.value = '';
+          } else {
+            // Mostrar dropdown com opção de criar
+            mostrarDropdownCategoria(input, cat);
+          }
         }
-        input.value = '';
       } else if (e.key === 'Escape') {
         const dd = input.parentElement.querySelector('.dep-cat-dropdown');
         if (dd) dd.style.display = 'none';
         input.blur();
       }
-    });
-    // Ao sair do campo, adicionar automaticamente se tiver texto
-    input.addEventListener('blur', () => {
-      setTimeout(() => {
-        const val = input.value.trim();
-        const cat = input.dataset.categoria;
-        if (val && !window._dependenciaSelecionadas.includes(val)) {
-          adicionarDependenciaCategoria(val, cat);
-          input.value = '';
-        }
-      }, 250);
     });
   });
 }
@@ -1836,6 +1843,7 @@ window.abrirModalProcesso = (p) => {
   document.getElementById('fProcesso').value = p ? p.processo : '';
   document.getElementById('fDescricao').value = p ? p.descricao : '';
   document.getElementById('fDescricaoFuncional').value = p ? (p.descricaoFuncional || '') : '';
+  document.getElementById('fTierManual').value = p ? (p.tierManual || '') : '';
   // Preencher tags de dependência
   initDependenciaTags(p ? p.dependencia : '');
   document.getElementById('fBiaHomologada').value = p ? p.biaHomologada : '';
@@ -1916,6 +1924,7 @@ window.salvarProcesso = async () => {
     biaHomologada: document.getElementById('fBiaHomologada').value.trim(),
     bcpStatus: (document.getElementById('fBcpStatus') || {value:''}).value.trim(),
     descricaoFuncional: document.getElementById('fDescricaoFuncional').value.trim(),
+    tierManual: document.getElementById('fTierManual').value,
     bcpContatos: window._bcpContatos || [],
     drpStatus: document.getElementById('fDrpStatus').value.trim(),
     drpComponentes: window._drpComponentes || [],
@@ -1978,6 +1987,8 @@ window.salvarProcesso = async () => {
     window.processosData.push(pEnriquecido);
   }
   fecharModal();
+  // Resetar botão salvar para próximo uso
+  if (btnSalvar) { btnSalvar.disabled = false; btnSalvar.innerHTML = 'Salvar'; btnSalvar.classList.remove('btn-loading'); }
   renderizarProcessos();
   showToast('✅ Salvando...', '#1a237e');
 
@@ -2522,9 +2533,9 @@ async function admin() {
   const total = processosVisiveis.length;
   const avaliados = processosVisiveis.filter(p => p.avaliado || p.score > 0).length;
   const pendentes = total - avaliados;
-  const tier1 = processosVisiveis.filter(p => p.score >= 12).length;
-  const tier2 = processosVisiveis.filter(p => p.score >= 6 && p.score < 12).length;
-  const tier3 = processosVisiveis.filter(p => (p.avaliado || p.score > 0) && p.score < 6).length;
+  const tier1 = processosVisiveis.filter(p => p.score >= 12 || (!p.score && p.tierManual === 'Tier 1 (Crítico)')).length;
+  const tier2 = processosVisiveis.filter(p => (p.score >= 6 && p.score < 12) || (!p.score && p.tierManual === 'Tier 2 (Essencial)')).length;
+  const tier3 = processosVisiveis.filter(p => ((p.avaliado || p.score > 0) && p.score < 6) || (!p.score && p.tierManual === 'Tier 3 (Suporte)')).length;
   const pct = total > 0 ? Math.round((avaliados / total) * 100) : 0;
 
   // Resumo por área
@@ -3342,18 +3353,106 @@ function renderComponentesDrp() {
           ${example ? `<div style="font-size:0.72em;font-weight:400;color:#999;margin-top:4px;line-height:1.4;font-style:italic;">${example}</div>` : ''}
         </td>
         <td style="padding:10px 0 10px 20px;color:#444;font-size:0.9em;line-height:2;border-bottom:1px solid #f0f0f0;vertical-align:middle;">
-          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:${chips ? '8px' : '0'};">
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
             ${tags}
             ${emptyMsg}
+            <div style="position:relative;flex:1;min-width:150px;">
+              <input type="text" class="drp-type-input" data-tipo="${tipo.replace(/"/g,'&quot;')}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #e8eaf6;outline:none;font-size:0.85em;padding:4px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#1a237e';mostrarDropdownCompDrp(this,'${tipo.replace(/'/g, "\\'")}')" oninput="mostrarDropdownCompDrp(this,'${tipo.replace(/'/g, "\\'")}')" onblur="this.style.borderColor='#e8eaf6';setTimeout(()=>{const dd=this.parentElement.querySelector('.drp-type-dropdown');if(dd)dd.style.display='none';},200)">
+              <div class="drp-type-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:180px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.12);"></div>
+            </div>
           </div>
-          ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;padding-top:4px;border-top:1px dashed #f0f0f0;"><span style="font-size:0.7em;color:#999;margin-right:4px;">Disponíveis:</span>${chips}</div>` : ''}
+          ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px;padding-top:4px;border-top:1px dashed #f0f0f0;"><span style="font-size:0.7em;color:#999;margin-right:4px;">Disponíveis:</span>${chips}</div>` : ''}
         </td>
       </tr>`;
   });
 
   html += `</tbody></table>`;
   container.innerHTML = html;
+
+  // Adicionar listeners de Enter nos inputs por tipo
+  container.querySelectorAll('.drp-type-input').forEach(input => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const val = input.value.trim();
+        const tipo = input.dataset.tipo;
+        if (val) {
+          // Se existe no catálogo, selecionar diretamente
+          const catalogo = window.componentesCatalogo || [];
+          const existe = catalogo.find(c => c.nome.toLowerCase() === val.toLowerCase() && (tiposMergeGlobal[c.tipo] || c.tipo) === tipo);
+          if (existe && !window._drpComponentes.includes(existe.id)) {
+            window._drpComponentes.push(existe.id);
+            renderComponentesDrp();
+            input.value = '';
+          }
+          // Se não existe, não criar automaticamente — o usuário deve usar o dropdown "+" ou modal
+        }
+      }
+    });
+  });
 }
+
+// Criar componente rápido (inline, sem modal)
+async function criarComponenteRapido(nome, tipo) {
+  const catalogo = window.componentesCatalogo || [];
+  // Verificar se já existe
+  const existe = catalogo.find(c => c.nome.toLowerCase() === nome.toLowerCase() && (tiposMergeGlobal[c.tipo] || c.tipo) === tipo);
+  if (existe) {
+    if (!window._drpComponentes.includes(existe.id)) {
+      window._drpComponentes.push(existe.id);
+      renderComponentesDrp();
+    }
+    return;
+  }
+  // Criar no backend
+  try {
+    const result = await API.salvarComponente({ tipo, nome });
+    const novComp = { id: result.id, tipo, nome };
+    window.componentesCatalogo.push(novComp);
+    window._drpComponentes.push(result.id);
+    renderComponentesDrp();
+    API.invalidate('getComponentes');
+  } catch(e) {
+    showToast('Erro ao criar: ' + e.message, '#c62828');
+  }
+}
+// Referência global para merge de tipos (usada em criarComponenteRapido)
+const tiposMergeGlobal = { 'Certificados': 'Segurança' };
+
+// Dropdown para input de componentes DRP por tipo
+window.mostrarDropdownCompDrp = (input, tipo) => {
+  const dropdown = input.parentElement.querySelector('.drp-type-dropdown');
+  if (!dropdown) return;
+  const catalogo = window.componentesCatalogo || [];
+  const selecionados = window._drpComponentes || [];
+  const filtro = input.value.toLowerCase();
+
+  const disponiveis = catalogo.filter(d =>
+    (tiposMergeGlobal[d.tipo] || d.tipo) === tipo &&
+    !selecionados.includes(d.id) &&
+    (filtro === '' || d.nome.toLowerCase().includes(filtro))
+  );
+
+  let html = '';
+  disponiveis.forEach(d => {
+    html += `<div class="drp-dd-option" onmousedown="adicionarComponenteDrpById(${d.id})" style="padding:7px 12px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
+      <div style="font-weight:500;color:#222;">${d.nome}</div>
+      ${d.descricao ? `<div style="font-size:0.75em;color:#888;margin-top:1px;">${d.descricao}</div>` : ''}
+    </div>`;
+  });
+
+  if (input.value.trim() && !catalogo.some(d => d.nome.toLowerCase() === input.value.trim().toLowerCase() && (tiposMergeGlobal[d.tipo] || d.tipo) === tipo)) {
+    html += `<div class="drp-dd-option" onmousedown="criarComponenteRapido('${input.value.trim().replace(/'/g,"\\'")}','${tipo.replace(/'/g,"\\'")}')" style="padding:8px 12px;cursor:pointer;color:#1a237e;font-weight:600;border-top:1.5px solid #e8eaf6;background:#f8f9ff;">+ Criar "${input.value.trim()}"</div>`;
+  }
+
+  if (!html) { dropdown.style.display = 'none'; return; }
+  dropdown.innerHTML = html;
+  dropdown.style.display = 'block';
+  dropdown.querySelectorAll('.drp-dd-option').forEach(el => {
+    el.addEventListener('mouseenter', () => el.style.background = '#f0f4ff');
+    el.addEventListener('mouseleave', () => el.style.background = el.style.borderTop ? '#f8f9ff' : 'transparent');
+  });
+};
 
 window.mostrarDropdownComponenteDrp = () => {
   const input = document.getElementById('drpComponenteBusca');
@@ -3732,6 +3831,8 @@ ${seletorVersoes}
 <script>
 var PROCESS_ID = ${processId};
 var PCN_API_URL = '` + API_URL + `';
+var PCN_AREA = '${(info.area || '').replace(/'/g, "\\'")}';
+var PCN_PROCESSO = '${(info.processo || '').replace(/'/g, "\\'")}';
 var PCN_VERSOES = JSON.parse('${versoesJson}');
 function buildNav(){
   var el = document.getElementById('pcn-editavel');
@@ -3782,7 +3883,7 @@ async function salvarVersaoPCN(){
   var btn=document.querySelector('button[onclick="salvarVersaoPCN()"]');
   if(btn){btn.disabled=true;btn.textContent='⏳ Salvando...';}
   try{
-    var payload = JSON.stringify({action:'salvarPCN',id:String(PROCESS_ID),pcnHtml:conteudo});
+    var payload = JSON.stringify({action:'salvarPCN',id:String(PROCESS_ID),area:PCN_AREA,processo:PCN_PROCESSO,pcnHtml:conteudo});
     var res = await fetch(PCN_API_URL, {
       method:'POST',
       headers:{'Content-Type':'text/plain;charset=UTF-8'},
@@ -3887,6 +3988,8 @@ async function pcns() {
     <div id="pcns-lista"></div>`;
 
   try {
+    // Invalidar cache para garantir dados frescos
+    API.invalidate('getProcessos');
     // Carregar processos (que contêm os PCNs salvos)
     const processos = await API.getProcessos();
     window.processosData = processos; // Garantir que está disponível para abrirPCNDireto
@@ -3949,10 +4052,9 @@ async function pcns() {
         const dataVersao = ultimaVersao && ultimaVersao.data ? new Date(ultimaVersao.data).toLocaleDateString('pt-BR') : '-';
         const numVersoes = versoes.length;
 
-        html += `<div style="display:flex;align-items:center;padding:14px 20px;border-bottom:1px solid #f0f0f0;cursor:pointer;transition:background 0.15s;" 
-                      onmouseenter="this.style.background='#f8f9ff'" onmouseleave="this.style.background='white'"
-                      onclick="abrirPCNDireto(${p.id})">
-          <div style="flex:1;">
+        html += `<div style="display:flex;align-items:center;padding:14px 20px;border-bottom:1px solid #f0f0f0;transition:background 0.15s;" 
+                      onmouseenter="this.style.background='#f8f9ff'" onmouseleave="this.style.background='white'">
+          <div style="flex:1;cursor:pointer;" onclick="abrirPCNDireto(${p.id})">
             <div style="font-weight:600;color:#222;font-size:0.95em;">${p.processo}</div>
             <div style="font-size:0.8em;color:#888;margin-top:3px;">
               Última versão: ${dataVersao} • ${numVersoes} versão${numVersoes > 1 ? 'ões' : ''}
@@ -3960,7 +4062,8 @@ async function pcns() {
           </div>
           <div style="display:flex;align-items:center;gap:12px;">
             <span style="background:${tierColor(p.score)};color:white;padding:3px 10px;border-radius:10px;font-size:0.75em;font-weight:700;">${tierLabel(p.score)} • ${p.score || 0}</span>
-            <span style="color:#1a237e;font-size:1.2em;" title="Abrir PCN">📄</span>
+            <span style="color:#1a237e;font-size:1.2em;cursor:pointer;" onclick="abrirPCNDireto(${p.id})" title="Abrir PCN">📄</span>
+            <button onclick="event.stopPropagation();excluirPCN(${p.id},'${p.area.replace(/'/g,"\\'")}','${p.processo.replace(/'/g,"\\'")}')" style="background:none;border:none;cursor:pointer;color:#999;font-size:1.1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#999'" title="Excluir PCN">🗑️</button>
           </div>
         </div>`;
       });
@@ -3977,3 +4080,23 @@ async function pcns() {
       </div>`;
   }
 }
+
+// ============================================================
+// EXCLUIR PCN
+// ============================================================
+window.excluirPCN = async (id, area, processo) => {
+  if (!confirm('Tem certeza que deseja excluir o PCN de "' + processo + '"? Esta ação não pode ser desfeita.')) return;
+  try {
+    showToast('🗑️ Excluindo PCN...', '#555');
+    const result = await API.post('excluirPCN', { id: String(id), area, processo });
+    if (result.error) throw new Error(result.error);
+    // Atualizar localmente
+    const p = window.processosData.find(proc => proc.id === id);
+    if (p) p.pcnSalvo = '';
+    showToast('✅ PCN excluído.', '#2e7d32');
+    API.invalidate('getProcessos');
+    pcns(); // Recarregar lista
+  } catch(e) {
+    showToast('❌ ' + e.message, '#c62828');
+  }
+};
