@@ -1347,7 +1347,12 @@ ${compsDetalhados.length ? compsDetalhados.map(c => `- **${c.tipo}:** ${c.nome} 
 - NÃO inclua texto introdutório, explicações ou comentários fora do HTML. Comece DIRETAMENTE com a primeira tag HTML (<h1> ou <div>).
 - NÃO use code fences. Retorne HTML puro sem marcação markdown.
 - Linguagem: Português do Brasil, técnica e direta.
-- Preencha TODAS as seções com conteúdo real ou recomendações técnicas baseadas no contexto.`;
+- Preencha TODAS as seções com conteúdo real ou recomendações técnicas baseadas no contexto.
+
+## REGRAS ESPECÍFICAS
+
+- MATRIZ DE RESPONSABILIDADE: Nos campos "Papel na Crise" e "Setor", preencha com sugestões baseadas no contexto. Porém os campos "Nome", "Telefone" e "E-mail" devem ficar EM BRANCO (célula vazia) — NÃO invente nomes, telefones ou e-mails fictícios. Use apenas os dados reais fornecidos na seção "Equipe de Crise (Contatos)" acima.
+- MATRIZ DE RISCOS: Na coluna "Probabilidade", use cores de fundo: Alta=#ffcdd2 (vermelho claro), Média=#fff3e0 (laranja claro), Baixa=#e8f5e9 (verde claro). Na coluna "Impacto", use as mesmas cores: Crítico=#ffcdd2, Alto=#fff3e0, Moderado=#e8f5e9, Baixo=#f5f5f5. Aplique style="background:COR" diretamente nas células <td>.`;
 
   // Chamar API do Gemini
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;

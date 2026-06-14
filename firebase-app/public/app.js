@@ -1193,7 +1193,7 @@ async function processos() {
         <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
         <button class="btn btn-ghost" onclick="gerarDossieProcesso()" style="color:#1565c0;border-color:#1565c0;">📄 Dossiê</button>
         <button class="btn btn-ghost" onclick="abrirPCNSalvo()" id="btnPcnSalvo" style="color:#2e7d32;border-color:#2e7d32;display:none;">📂 Abrir PCN</button>
-        <button class="btn btn-ghost" onclick="gerarPCNProcesso()" style="color:#2e7d32;border-color:#2e7d32;">🤖 Gerar PCN</button>
+        <button class="btn btn-ghost" onclick="gerarPCNProcesso()" id="btnGerarPcn" style="color:#2e7d32;border-color:#2e7d32;">🤖 Gerar PCN</button>
         <button class="btn btn-primary" onclick="salvarProcesso()">Salvar</button>
       </div>
     </div>`;
@@ -1888,6 +1888,9 @@ window.abrirModalProcesso = (p) => {
   // Mostrar/ocultar botão Abrir PCN
   const btnPcnSalvo = document.getElementById('btnPcnSalvo');
   if (btnPcnSalvo) btnPcnSalvo.style.display = (p && p.pcnSalvo) ? 'inline-block' : 'none';
+  // Mostrar botão Gerar PCN apenas para admin
+  const btnGerarPcn = document.getElementById('btnGerarPcn');
+  if (btnGerarPcn) btnGerarPcn.style.display = (window.USER_PERFIL === 'admin') ? 'inline-block' : 'none';
   // Score/Tier cards na BIA
   const scoreInfo = document.getElementById('fBiaScoreInfo');
   if (scoreInfo && p && p.score > 0) {
@@ -3684,8 +3687,15 @@ window.gerarDossieProcesso = () => {
 // GERAÇÃO DE PCN VIA IA (Gemini) - com sidebar recolhível
 // ============================================================
 window.gerarPCNProcesso = async () => {
+  // Apenas administradores podem gerar PCN
+  if (window.USER_PERFIL !== 'admin') {
+    return showToast('Apenas administradores podem gerar PCNs.', '#e65100');
+  }
+
   const id = Number(document.getElementById('fId').value);
   if (!id) return showToast('Salve o processo antes de gerar o PCN.', '#e65100');
+  
+  const p = window.processosData ? window.processosData.find(proc => proc.id === id) : null;
   
   // Abrir janela de loading (mesma origin para evitar CORS)
   const win = window.open('pcn-viewer.html?loading=1', '_blank');
@@ -3701,12 +3711,26 @@ window.gerarPCNProcesso = async () => {
     const htmlStart = pcnContent.indexOf('<');
     if (htmlStart > 0) pcnContent = pcnContent.substring(htmlStart);
     pcnContent = pcnContent.replace(/^```html\s*/i, '').replace(/```\s*$/i, '').trim();
+    
+    // Auto-salvar como nova versão
+    try {
+      const area = p ? p.area : (result.area || '');
+      const processo = p ? p.processo : (result.processo || '');
+      await API.post('salvarPCN', { id: String(id), area, processo, pcnHtml: pcnContent });
+      API.invalidate('getProcessos');
+      // Atualizar dados locais
+      if (p) {
+        const versoes = p.pcnSalvo ? _parsePCNVersoes(p.pcnSalvo) : [];
+        versoes.push({ versao: versoes.length + 1, data: new Date().toISOString(), autor: window.USER_EMAIL || 'sistema', html: pcnContent });
+        p.pcnSalvo = JSON.stringify(versoes.slice(-3));
+      }
+    } catch(saveErr) { console.warn('Auto-save PCN falhou:', saveErr); }
+
     const pcnHtml = _buildPCNPage(pcnContent, result, id);
-    // Escrever diretamente na janela aberta
     win.document.open();
     win.document.write(pcnHtml);
     win.document.close();
-    showToast('✅ PCN gerado!', '#2e7d32');
+    showToast('✅ PCN gerado e salvo!', '#2e7d32');
   } catch(err) {
     console.error('Erro PCN:', err);
     showToast('❌ ' + err.message, '#c62828');
