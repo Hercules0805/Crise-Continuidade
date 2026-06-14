@@ -1360,7 +1360,10 @@ ${compsDetalhados.length ? compsDetalhados.map(c => `- **${c.tipo}:** ${c.nome} 
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: {
       temperature: 0.7,
-      maxOutputTokens: 32768
+      maxOutputTokens: 32768,
+      thinkingConfig: {
+        thinkingBudget: 0
+      }
     }
   };
   
