@@ -1444,11 +1444,14 @@ function renderDependenciaTabela() {
     'Infraestrutura': '⚡',
     'Pessoas': '👤', 'Pessoa': '👤',
     'Sistemas': '💻', 'Sistema': '💻',
+    'Processos Internos': '🔄', 'Processo Interno': '🔄',
     'Outros': '📦'
   };
   
   // Obter categorias do catálogo
   const categoriasSet = new Set(catalogo.map(d => d.categoria));
+  // Garantir que categorias dos 5Ps sempre apareçam
+  ['Fornecedores', 'Infraestrutura', 'Pessoas', 'Sistemas', 'Processos Internos'].forEach(c => categoriasSet.add(c));
   selecionadas.forEach(nome => {
     const dep = catalogo.find(d => d.nome === nome);
     if (dep) categoriasSet.add(dep.categoria);
@@ -1502,7 +1505,9 @@ function renderDependenciaTabela() {
       'Pessoas': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
       'Pessoa': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
       'Sistemas': 'Ex: ERP Fortes, banco de dados PostgreSQL/Oracle, e-mail corporativo, Active Directory, sistema bancário',
-      'Sistema': 'Ex: ERP Fortes, banco de dados PostgreSQL/Oracle, e-mail corporativo, Active Directory, sistema bancário'
+      'Sistema': 'Ex: ERP Fortes, banco de dados PostgreSQL/Oracle, e-mail corporativo, Active Directory, sistema bancário',
+      'Processos Internos': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
+      'Processo Interno': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente'
     };
     const example = catExamples[cat] || '';
     
@@ -1518,7 +1523,8 @@ function renderDependenciaTabela() {
     // Chips de itens disponíveis no catálogo (não selecionados)
     const disponiveisNaCat = catalogo.filter(d => d.categoria === cat && !selecionadas.includes(d.nome));
     const chips = disponiveisNaCat.map(d => {
-      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="selecionarDependenciaCategoria('${d.nome.replace(/'/g, "\\'")}')" title="${[d.empresa, d.detalhes].filter(Boolean).join(' • ') || d.nome}">${d.nome}</span>`;
+      const label = d.empresa ? d.empresa + ' - ' + d.nome : d.nome;
+      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="selecionarDependenciaCategoria('${d.nome.replace(/'/g, "\\'")}')" title="${[d.detalhes, d.telefone].filter(Boolean).join(' • ') || d.nome}">${label}</span>`;
     }).join(' ');
 
     html += `
@@ -1581,11 +1587,23 @@ window.mostrarDropdownCategoria = (input, categoria) => {
   const catalogo = window.dependenciasCatalogo || [];
   const filtro = input.value.toLowerCase();
   
-  const disponiveis = catalogo.filter(d => 
-    d.categoria === categoria &&
-    !window._dependenciaSelecionadas.includes(d.nome) &&
-    (filtro === '' || d.nome.toLowerCase().includes(filtro))
-  );
+  let disponiveis;
+  let isProcessos = (categoria === 'Processos Internos' || categoria === 'Processo Interno');
+  
+  if (isProcessos) {
+    // Para Processos Internos, listar processos do sistema
+    const processos = window.processosData || [];
+    const currentId = Number(document.getElementById('fId').value);
+    disponiveis = processos
+      .filter(p => p.id !== currentId && !window._dependenciaSelecionadas.includes(p.processo) && (filtro === '' || p.processo.toLowerCase().includes(filtro)))
+      .map(p => ({ nome: p.processo, empresa: p.area, detalhes: '' }));
+  } else {
+    disponiveis = catalogo.filter(d => 
+      d.categoria === categoria &&
+      !window._dependenciaSelecionadas.includes(d.nome) &&
+      (filtro === '' || d.nome.toLowerCase().includes(filtro))
+    );
+  }
   
   if (!disponiveis.length && !input.value.trim()) {
     dropdown.style.display = 'none';
@@ -2288,8 +2306,8 @@ async function dependencias() {
         <thead>
           <tr>
             <th onclick="ordenarDependencias('categoria')" style="cursor:pointer;width:12%;">Categoria <span id="sort-dep-categoria"></span></th>
-            <th onclick="ordenarDependencias('nome')" style="cursor:pointer;width:15%;">Nome <span id="sort-dep-nome"></span></th>
             <th onclick="ordenarDependencias('empresa')" style="cursor:pointer;width:13%;">Empresa <span id="sort-dep-empresa"></span></th>
+            <th onclick="ordenarDependencias('nome')" style="cursor:pointer;width:15%;">Nome <span id="sort-dep-nome"></span></th>
             <th style="width:12%;">Papel</th>
             <th style="width:10%;">Setor</th>
             <th style="width:10%;">Telefone</th>
@@ -2387,8 +2405,8 @@ function renderizarDependencias() {
   document.getElementById('depRows').innerHTML = data.length
     ? data.map(d => `<tr>
         <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${d.categoria}</span></td>
-        <td style="font-weight:600;color:#222;">${d.nome}</td>
         <td style="font-size:0.85em;color:#555;">${d.empresa || '-'}</td>
+        <td style="font-weight:600;color:#222;">${d.nome}</td>
         <td style="font-size:0.85em;color:#555;">${d.detalhes || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${d.setor || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${d.telefone || '-'}</td>
@@ -2477,22 +2495,41 @@ window.salvarDep = async () => {
   };
   if (!d.categoria) return showToast('Informe a categoria.', '#e65100');
   if (!d.nome) return showToast('Informe o nome.', '#e65100');
+
+  // Optimistic: fechar modal e atualizar UI imediatamente
+  fecharModalDependencia();
+  const isNew = !d.id;
+  if (d.id) {
+    const idx = dependenciasData.findIndex(x => x.id === d.id);
+    if (idx !== -1) dependenciasData[idx] = { ...d };
+  } else {
+    d.id = Date.now(); // ID temporário (apenas para UI)
+    dependenciasData.push(d);
+  }
+  renderizarDependencias();
+  window.dependenciasCatalogo = dependenciasData;
+  showToast('✅ Salvando...', '#1a237e');
+
   try {
-    const result = await API.salvarDependencia(d);
-    fecharModalDependencia();
-    showToast('✅ Salvo!', '#2e7d32');
-    if (d.id) {
-      const idx = dependenciasData.findIndex(x => x.id === d.id);
-      if (idx !== -1) dependenciasData[idx] = { ...d };
-    } else {
-      d.id = result.id;
-      dependenciasData.push(d);
+    // Enviar ao backend SEM o ID temporário para novos registros
+    const payload = { ...d };
+    if (isNew) payload.id = null;
+    const result = await API.salvarDependencia(payload);
+    // Atualizar ID real se era novo
+    if (isNew && result.id) {
+      const tempIdx = dependenciasData.findIndex(x => x.id === d.id);
+      if (tempIdx !== -1) dependenciasData[tempIdx].id = result.id;
     }
-    renderizarDependencias();
     API.invalidate('getDependencias');
-    // Atualizar catálogo global se estiver carregado
-    window.dependenciasCatalogo = dependenciasData;
-  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
+    showToast('✅ Salvo!', '#2e7d32');
+  } catch(e) {
+    showToast('❌ Erro: ' + e.message, '#c62828');
+    // Reverter
+    if (!d.id || d.id > 1000000000000) {
+      dependenciasData = dependenciasData.filter(x => x.id !== d.id);
+      renderizarDependencias();
+    }
+  }
 };
 
 // ============================================================
@@ -4003,6 +4040,10 @@ async function pcns() {
     <div class="page-header">
       <div><h2>📋 Planos de Continuidade (PCNs)</h2><p class="page-sub">Navegue pelos PCNs gerados, organizados por área</p></div>
     </div>
+    <div id="pcns-resumo" style="display:none;margin-bottom:20px;"></div>
+    <div style="margin-bottom:16px;">
+      <input type="text" id="pcnBusca" placeholder="🔍 Buscar processo..." oninput="filtrarPCNs()" style="width:100%;max-width:400px;padding:10px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;">
+    </div>
     <div class="loading" id="loading">
       <div class="skeleton-table">
         <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:100%;height:40px;border-radius:8px;"></div></div>
@@ -4013,17 +4054,13 @@ async function pcns() {
     <div id="pcns-lista"></div>`;
 
   try {
-    // Invalidar cache para garantir dados frescos
     API.invalidate('getProcessos');
-    // Carregar processos (que contêm os PCNs salvos)
     const processos = await API.getProcessos();
-    window.processosData = processos; // Garantir que está disponível para abrirPCNDireto
+    window.processosData = processos;
     document.getElementById('loading').style.display = 'none';
 
-    // Filtrar apenas processos com PCN salvo
     let comPCN = processos.filter(p => p.pcnSalvo);
 
-    // Gestor: filtrar apenas sua área
     if (window.USER_PERFIL !== 'admin' && window.USER_AREA) {
       comPCN = comPCN.filter(p => p.area === window.USER_AREA);
     } else if (window.USER_PERFIL !== 'admin' && !window.USER_AREA) {
@@ -4031,10 +4068,12 @@ async function pcns() {
         <div style="text-align:center;padding:60px 20px;color:#999;">
           <div style="font-size:3em;margin-bottom:16px;">🔒</div>
           <h3 style="color:#666;margin-bottom:8px;">Acesso não configurado</h3>
-          <p>Seu e-mail ainda não está vinculado a uma área. Solicite ao administrador que configure seu acesso.</p>
+          <p>Seu e-mail ainda não está vinculado a uma área.</p>
         </div>`;
       return;
     }
+
+    window._pcnData = comPCN;
 
     if (!comPCN.length) {
       document.getElementById('pcns-lista').innerHTML = `
@@ -4046,57 +4085,36 @@ async function pcns() {
       return;
     }
 
-    // Agrupar por área
-    const porArea = {};
-    comPCN.forEach(p => {
-      const area = p.area || 'Sem Área';
-      if (!porArea[area]) porArea[area] = [];
-      porArea[area].push(p);
-    });
-
-    // Cores por tier
-    const tierColor = (score) => score >= 12 ? '#c62828' : score >= 6 ? '#f57c00' : score > 0 ? '#1565c0' : '#999';
-    const tierLabel = (score) => score >= 12 ? 'Tier 1' : score >= 6 ? 'Tier 2' : score > 0 ? 'Tier 3' : '-';
-
-    // Renderizar
-    let html = `<div style="margin-bottom:16px;display:flex;align-items:center;gap:16px;">
-      <span style="font-size:0.9em;color:#666;">${comPCN.length} PCN${comPCN.length > 1 ? 's' : ''} em ${Object.keys(porArea).length} área${Object.keys(porArea).length > 1 ? 's' : ''}</span>
-    </div>`;
-
-    Object.entries(porArea).sort((a, b) => a[0].localeCompare(b[0])).forEach(([area, procs]) => {
-      html += `<div style="margin-bottom:24px;">
-        <div style="background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:12px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;">
-          <span style="font-weight:700;font-size:1em;">📁 ${area}</span>
-          <span style="font-size:0.8em;opacity:0.8;">${procs.length} processo${procs.length > 1 ? 's' : ''}</span>
+    // Cards de resumo
+    const tier1 = comPCN.filter(p => p.score >= 12).length;
+    const tier2 = comPCN.filter(p => p.score >= 6 && p.score < 12).length;
+    const tier3 = comPCN.filter(p => p.score > 0 && p.score < 6).length;
+    document.getElementById('pcns-resumo').style.display = 'flex';
+    document.getElementById('pcns-resumo').innerHTML = `
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #1a237e;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+          <div style="font-size:1.6em;font-weight:700;color:#1a237e;">${comPCN.length}</div>
+          <div style="font-size:0.75em;color:#666;">Total PCNs</div>
         </div>
-        <div style="border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">`;
+        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #c62828;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+          <div style="font-size:1.6em;font-weight:700;color:#c62828;">${tier1}</div>
+          <div style="font-size:0.75em;color:#666;">Tier 1</div>
+        </div>
+        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #f57c00;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+          <div style="font-size:1.6em;font-weight:700;color:#f57c00;">${tier2}</div>
+          <div style="font-size:0.75em;color:#666;">Tier 2</div>
+        </div>
+        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #1565c0;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+          <div style="font-size:1.6em;font-weight:700;color:#1565c0;">${tier3}</div>
+          <div style="font-size:0.75em;color:#666;">Tier 3</div>
+        </div>
+        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #2e7d32;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+          <div style="font-size:1.6em;font-weight:700;color:#2e7d32;">${Object.keys(_agruparPorArea(comPCN)).length}</div>
+          <div style="font-size:0.75em;color:#666;">Áreas</div>
+        </div>
+      </div>`;
 
-      procs.sort((a, b) => (b.score || 0) - (a.score || 0)).forEach(p => {
-        const versoes = _parsePCNVersoes(p.pcnSalvo);
-        const ultimaVersao = versoes[versoes.length - 1];
-        const dataVersao = ultimaVersao && ultimaVersao.data ? new Date(ultimaVersao.data).toLocaleDateString('pt-BR') : '-';
-        const numVersoes = versoes.length;
-
-        html += `<div style="display:flex;align-items:center;padding:14px 20px;border-bottom:1px solid #f0f0f0;transition:background 0.15s;" 
-                      onmouseenter="this.style.background='#f8f9ff'" onmouseleave="this.style.background='white'">
-          <div style="flex:1;cursor:pointer;" onclick="abrirPCNDireto(${p.id})">
-            <div style="font-weight:600;color:#222;font-size:0.95em;">${p.processo}</div>
-            <div style="font-size:0.8em;color:#888;margin-top:3px;">
-              Última versão: ${dataVersao} • ${numVersoes} versão${numVersoes > 1 ? 'ões' : ''}
-            </div>
-          </div>
-          <div style="display:flex;align-items:center;gap:12px;">
-            <span style="background:${tierColor(p.score)};color:white;padding:3px 10px;border-radius:10px;font-size:0.75em;font-weight:700;">${tierLabel(p.score)} • ${p.score || 0}</span>
-            <span style="color:#1a237e;font-size:1.2em;cursor:pointer;" onclick="abrirPCNDireto(${p.id})" title="Abrir PCN">📄</span>
-            <button onclick="event.stopPropagation();excluirPCN(${p.id},'${p.area.replace(/'/g,"\\'")}','${p.processo.replace(/'/g,"\\'")}')" style="background:none;border:none;cursor:pointer;color:#999;font-size:1.1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#999'" title="Excluir PCN">🗑️</button>
-          </div>
-        </div>`;
-      });
-
-      html += `</div></div>`;
-    });
-
-    document.getElementById('pcns-lista').innerHTML = html;
+    renderPCNLista(comPCN);
   } catch (err) {
     document.getElementById('loading').innerHTML = `
       <div style="color:#c62828;padding:20px;text-align:center;">
@@ -4104,6 +4122,66 @@ async function pcns() {
         <p>${err.message}</p>
       </div>`;
   }
+}
+
+function _agruparPorArea(lista) {
+  const porArea = {};
+  lista.forEach(p => { const area = p.area || 'Sem Área'; if (!porArea[area]) porArea[area] = []; porArea[area].push(p); });
+  return porArea;
+}
+
+window.filtrarPCNs = () => {
+  const busca = (document.getElementById('pcnBusca') || {}).value || '';
+  const filtro = busca.toLowerCase();
+  let data = window._pcnData || [];
+  if (filtro) data = data.filter(p => p.processo.toLowerCase().includes(filtro) || p.area.toLowerCase().includes(filtro));
+  renderPCNLista(data);
+};
+
+window.toggleAreaPCN = (areaId) => {
+  const el = document.getElementById(areaId);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+};
+
+function renderPCNLista(comPCN) {
+  const porArea = _agruparPorArea(comPCN);
+  const tierColor = (score) => score >= 12 ? '#c62828' : score >= 6 ? '#f57c00' : score > 0 ? '#1565c0' : '#999';
+  const tierLabel = (score) => score >= 12 ? 'Tier 1' : score >= 6 ? 'Tier 2' : score > 0 ? 'Tier 3' : '-';
+
+  let html = '';
+  Object.entries(porArea).sort((a, b) => a[0].localeCompare(b[0])).forEach(([area, procs]) => {
+    const areaId = 'pcn-area-' + area.replace(/[^a-zA-Z0-9]/g, '_');
+    html += `<div style="margin-bottom:20px;">
+      <div onclick="toggleAreaPCN('${areaId}')" style="background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:12px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;">
+        <span style="font-weight:700;font-size:0.95em;">📁 ${area}</span>
+        <span style="font-size:0.78em;opacity:0.8;">${procs.length} processo${procs.length > 1 ? 's' : ''} ▾</span>
+      </div>
+      <div id="${areaId}" style="border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">`;
+
+    procs.sort((a, b) => (b.score || 0) - (a.score || 0)).forEach(p => {
+      const versoes = _parsePCNVersoes(p.pcnSalvo);
+      const ultimaVersao = versoes[versoes.length - 1];
+      const dataVersao = ultimaVersao && ultimaVersao.data ? new Date(ultimaVersao.data).toLocaleDateString('pt-BR') : '-';
+
+      html += `<div style="display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid #f0f0f0;transition:background 0.15s;" 
+                    onmouseenter="this.style.background='#f8f9ff'" onmouseleave="this.style.background='white'">
+        <div style="flex:1;cursor:pointer;" onclick="abrirPCNDireto(${p.id})">
+          <div style="font-weight:600;color:#222;font-size:0.92em;">${p.processo}</div>
+          <div style="font-size:0.78em;color:#999;margin-top:2px;">Atualizado: ${dataVersao}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="background:${tierColor(p.score)};color:white;padding:2px 8px;border-radius:8px;font-size:0.72em;font-weight:700;">${tierLabel(p.score)} • ${p.score || 0}</span>
+          <button onclick="abrirPCNDireto(${p.id})" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Abrir PCN">📄</button>
+          <button onclick="event.stopPropagation();excluirPCN(${p.id},'${p.area.replace(/'/g,"\\'")}','${p.processo.replace(/'/g,"\\'")}')" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#bbb'" title="Excluir PCN">🗑️</button>
+        </div>
+      </div>`;
+    });
+
+    html += `</div></div>`;
+  });
+
+  if (!html) html = '<p style="text-align:center;color:#999;padding:40px;">Nenhum PCN encontrado.</p>';
+  document.getElementById('pcns-lista').innerHTML = html;
 }
 
 // ============================================================

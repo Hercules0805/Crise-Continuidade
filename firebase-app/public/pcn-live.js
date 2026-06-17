@@ -248,3 +248,104 @@ function applyLiveEdit(type) {
 setTimeout(function() { buildNav(); }, 500);
 setTimeout(function() { buildNav(); }, 1500);
 setTimeout(function() { buildNav(); initPCNLive(); }, 3000);
+
+// ============================================================
+// MATRIZ DE RISCOS - Selects com cores para Probabilidade e Impacto
+// ============================================================
+var _riskMatrixEnhanced = false;
+function enhanceRiskMatrix() {
+  if (_riskMatrixEnhanced) return;
+  var content = document.getElementById('pcn-editavel');
+  if (!content) return;
+
+  var colors = {
+    'Alta': '#ffcdd2', 'Alto': '#fff3e0', 'Crítico': '#ffcdd2',
+    'Média': '#fff3e0', 'Médio': '#fff3e0', 'Moderado': '#e8f5e9',
+    'Baixa': '#e8f5e9', 'Baixo': '#f5f5f5'
+  };
+  var probOptions = ['Alta', 'Média', 'Baixa'];
+  var impactOptions = ['Crítico', 'Alto', 'Moderado', 'Baixo'];
+
+  // Encontrar tabela de riscos pelo heading
+  var headings = content.querySelectorAll('h1, h2, h3');
+  var riskHeading = null;
+  headings.forEach(function(h) {
+    var t = h.textContent.toLowerCase();
+    if (t.includes('risco') && (t.includes('avaliação') || t.includes('análise'))) riskHeading = h;
+  });
+  if (!riskHeading) return;
+
+  // Encontrar tabela após o heading
+  var next = riskHeading.nextElementSibling;
+  while (next && next.tagName !== 'TABLE' && next.tagName !== 'H2' && next.tagName !== 'H3') next = next.nextElementSibling;
+  if (!next || next.tagName !== 'TABLE') return;
+
+  var table = next;
+  var headers = table.querySelectorAll('thead th');
+  var probCol = -1, impactCol = -1;
+  headers.forEach(function(th, i) {
+    var t = th.textContent.toLowerCase();
+    if (t.includes('probabilidade')) probCol = i;
+    if (t.includes('impacto')) impactCol = i;
+  });
+  if (probCol === -1 && impactCol === -1) return;
+  _riskMatrixEnhanced = true;
+
+  // Transformar células em selects
+  var rows = table.querySelectorAll('tbody tr');
+  rows.forEach(function(row) {
+    var cells = row.querySelectorAll('td');
+    if (probCol >= 0 && cells[probCol]) {
+      var currentVal = cells[probCol].textContent.trim();
+      cells[probCol].setAttribute('contenteditable', 'false');
+      cells[probCol].style.background = 'white';
+      cells[probCol].innerHTML = buildRiskSelect(currentVal, probOptions, colors, 'prob');
+      cells[probCol].style.padding = '4px 8px';
+    }
+    if (impactCol >= 0 && cells[impactCol]) {
+      var currentVal = cells[impactCol].textContent.trim();
+      cells[impactCol].setAttribute('contenteditable', 'false');
+      cells[impactCol].style.background = 'white';
+      cells[impactCol].innerHTML = buildRiskSelect(currentVal, impactOptions, colors, 'impact');
+      cells[impactCol].style.padding = '4px 8px';
+    }
+  });
+}
+
+function buildRiskSelect(currentValue, options, colors, prefix) {
+  // Normalizar o valor atual (pode vir com espaços, acentos inconsistentes)
+  var normalizedCurrent = currentValue.trim();
+  // Tentar match parcial se não encontrar exato
+  var matchedOption = options.find(function(opt) { return normalizedCurrent.toLowerCase() === opt.toLowerCase(); });
+  if (!matchedOption) {
+    matchedOption = options.find(function(opt) { return normalizedCurrent.toLowerCase().includes(opt.toLowerCase()); });
+  }
+  var selectedValue = matchedOption || normalizedCurrent;
+  var bgColor = colors[selectedValue] || '#f5f5f5';
+
+  var html = '<select onchange="updateRiskColor(this)" style="width:100%;padding:6px 8px;border:1.5px solid #ddd;border-radius:5px;font-size:0.9em;font-weight:600;color:' + getTextColor(selectedValue) + ';background:white;cursor:pointer;" contenteditable="false">';
+  options.forEach(function(opt) {
+    var selected = (selectedValue === opt) ? ' selected' : '';
+    var optColor = colors[opt] || '#f5f5f5';
+    html += '<option value="' + opt + '" style="background:' + optColor + ';font-weight:600;"' + selected + '>' + opt + '</option>';
+  });
+  html += '</select>';
+  return html;
+}
+
+function getTextColor(value) {
+  var textColors = {
+    'Alta': '#c62828', 'Alto': '#e65100', 'Crítico': '#c62828',
+    'Média': '#e65100', 'Médio': '#e65100', 'Moderado': '#2e7d32',
+    'Baixa': '#2e7d32', 'Baixo': '#666'
+  };
+  return textColors[value] || '#333';
+}
+
+function updateRiskColor(select) {
+  select.style.color = getTextColor(select.value);
+}
+
+// Executar após initPCNLive
+setTimeout(enhanceRiskMatrix, 3500);
+setTimeout(enhanceRiskMatrix, 5000);

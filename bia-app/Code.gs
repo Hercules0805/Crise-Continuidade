@@ -1346,6 +1346,7 @@ ${compsDetalhados.length ? compsDetalhados.map(c => `- **${c.tipo}:** ${c.nome} 
 - NÃO inclua tags <html>, <head> ou <body> — retorne apenas o conteúdo interno.
 - NÃO inclua texto introdutório, explicações ou comentários fora do HTML. Comece DIRETAMENTE com a primeira tag HTML (<h1> ou <div>).
 - NÃO use code fences. Retorne HTML puro sem marcação markdown.
+- NÃO use sintaxe markdown como **negrito** ou *itálico*. Use SOMENTE tags HTML: <strong> para negrito, <em> para itálico.
 - Linguagem: Português do Brasil, técnica e direta.
 - Preencha TODAS as seções com conteúdo real ou recomendações técnicas baseadas no contexto.
 
@@ -1453,47 +1454,40 @@ function salvarPCNProcesso(data) {
     }
     if (procRow === -1) return { error: 'Processo não encontrado.' };
     
-    // Ler versões existentes da coluna 32
-    const celula = sheet.getRange(procRow, 32).getValue();
-    let versoes = [];
-    try {
-      const parsed = celula ? JSON.parse(celula) : null;
-      if (Array.isArray(parsed)) {
-        versoes = parsed;
-      } else if (parsed && parsed.html) {
-        versoes = [parsed];
-      } else if (typeof celula === 'string' && celula.trim().startsWith('<')) {
-        versoes = [{ versao: 1, data: new Date().toISOString(), autor: Session.getActiveUser().getEmail() || 'sistema', html: celula }];
-      }
-    } catch(e) {
-      if (celula && typeof celula === 'string' && celula.trim().length > 0) {
-        versoes = [{ versao: 1, data: new Date().toISOString(), autor: 'sistema', html: celula }];
-      }
-    }
-    
-    // Adicionar nova versão
+    // Salvar apenas a versão mais recente na planilha (1 versão = menor uso de células)
     const novaVersao = {
-      versao: versoes.length + 1,
+      versao: 1,
       data: new Date().toISOString(),
       autor: Session.getActiveUser().getEmail() || 'sistema',
       html: pcnHtml
     };
-    versoes.push(novaVersao);
     
-    // Manter no máximo 3 versões
-    if (versoes.length > 3) versoes = versoes.slice(versoes.length - 3);
-    
-    // Verificar tamanho total
-    const jsonStr = JSON.stringify(versoes);
+    // Verificar tamanho — truncar se necessário
+    const jsonStr = JSON.stringify([novaVersao]);
     if (jsonStr.length > 50000) {
-      versoes = [novaVersao];
+      novaVersao.html = pcnHtml.substring(0, 45000) + '<!-- truncado -->';
     }
     
-    sheet.getRange(procRow, 32).setValue(JSON.stringify(versoes));
-    return { success: true, versao: novaVersao.versao, totalVersoes: versoes.length };
+    sheet.getRange(procRow, 32).setValue(JSON.stringify([novaVersao]));
+    return { success: true, versao: 1, totalVersoes: 1 };
   } catch(err) {
     Logger.log('salvarPCNProcesso ERROR: ' + err.message);
     return { error: 'Erro ao salvar PCN: ' + err.message };
+  }
+}
+
+// ============================================================
+// BUSCAR CONTEÚDO DO PCN NO DRIVE
+// ============================================================
+function getPCNContent(fileId) {
+  if (!fileId) return { error: 'FileId não informado.' };
+  try {
+    const file = DriveApp.getFileById(fileId);
+    const html = file.getBlob().getDataAsString();
+    return { html: html };
+  } catch(err) {
+    Logger.log('getPCNContent ERROR: ' + err.message);
+    return { error: 'Erro ao buscar PCN: ' + err.message };
   }
 }
 
@@ -1662,7 +1656,8 @@ function salvarDependenciasBIA(data) {
     const infraestrutura = data.infraestrutura ? JSON.parse(data.infraestrutura) : [];
     const pessoas = data.pessoas ? JSON.parse(data.pessoas) : [];
     const sistemas = data.sistemas ? JSON.parse(data.sistemas) : [];
-    const todasDeps = [...new Set([...fornecedores, ...infraestrutura, ...pessoas, ...sistemas])];
+    const processosInternos = data.processos ? JSON.parse(data.processos) : [];
+    const todasDeps = [...new Set([...fornecedores, ...infraestrutura, ...pessoas, ...sistemas, ...processosInternos])];
 
     // Salvar dependências no catálogo (se não existirem)
     const catalogoSheet = _getSS().getSheetByName(ABA_DEPENDENCIAS);
@@ -1674,6 +1669,7 @@ function salvarDependenciasBIA(data) {
     infraestrutura.forEach(nome => { if (!existentes.includes(nome.toLowerCase())) novos.push(['Infraestrutura', nome, '', '', '', '', '']); });
     pessoas.forEach(nome => { if (!existentes.includes(nome.toLowerCase())) novos.push(['Pessoas', nome, '', '', '', '', '']); });
     sistemas.forEach(nome => { if (!existentes.includes(nome.toLowerCase())) novos.push(['Sistemas', nome, '', '', '', '', '']); });
+    processosInternos.forEach(nome => { if (!existentes.includes(nome.toLowerCase())) novos.push(['Processos Internos', nome, '', '', '', '', '']); });
 
     if (novos.length && catalogoSheet) {
       novos.forEach(row => catalogoSheet.appendRow(row));

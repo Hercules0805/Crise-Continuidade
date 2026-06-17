@@ -69,7 +69,7 @@
     let TOKEN = '';
     let PROCESSO_INFO = {};
     let CATALOGO = {};
-    const DEPS = { fornecedores: [], infraestrutura: [], pessoas: [], sistemas: [] };
+    const DEPS = { fornecedores: [], infraestrutura: [], pessoas: [], sistemas: [], processos: [] };
 
     async function init() {
       const params = new URLSearchParams(window.location.search);
@@ -170,6 +170,7 @@
         ${renderCategoryCard('infraestrutura', '3. Infraestrutura e Utilidades', 'Quais recursos físicos ou de infraestrutura são indispensáveis?', 'Internet, energia elétrica (rede pública + UPS + gerador), climatização, switches e roteadores, servidor de banco de dados, cluster, telefonia, impressora fiscal')}
         ${renderCategoryCard('pessoas', '4. Pessoas-chave', 'Quem são as pessoas sem as quais o processo não funciona?', 'DBA (administrador de banco de dados), analista financeiro responsável, gerente aprovador, operador do sistema, técnico de infraestrutura')}
         ${renderCategoryCard('sistemas', '5. Sistemas e Aplicações', 'Quais softwares ou sistemas são necessários para executar o processo?', 'ERP Fortes, banco de dados PostgreSQL / SQL Server / Oracle, e-mail corporativo, Active Directory, sistema bancário, portal do cliente, Zabbix')}
+        ${renderCategoryCard('processos', '6. Processos Internos', 'O seu processo depende de algum outro processo da empresa funcionar antes?', 'Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente, emissão de NF')}
 
         <div class="card">
           <h2>6. Observações (opcional)</h2>
@@ -289,7 +290,8 @@
         fornecedores: JSON.stringify(DEPS.fornecedores),
         infraestrutura: JSON.stringify(DEPS.infraestrutura),
         pessoas: JSON.stringify(DEPS.pessoas),
-        sistemas: JSON.stringify(DEPS.sistemas)
+        sistemas: JSON.stringify(DEPS.sistemas),
+        processos: JSON.stringify(DEPS.processos)
       };
 
       try {
