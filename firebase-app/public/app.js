@@ -57,6 +57,9 @@ async function perguntas() {
       <div><h2>Perguntas do Questionário</h2><p class="page-sub">Gerencie as perguntas e as opções de resposta por categoria</p></div>
       <button class="btn btn-primary" onclick="abrirModalPergunta()">+ Nova Pergunta</button>
     </div>
+    <div style="margin-bottom:16px;">
+      <input type="text" id="buscaPergunta" placeholder="🔍 Buscar pergunta..." oninput="filtrarPerguntas()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:300px;">
+    </div>
     <div class="loading" id="loading">⏳ Carregando...</div>
     <div id="lista"></div>
     <div id="lista-respostas" style="margin-top:32px;"></div>
@@ -161,6 +164,17 @@ window.abrirModalPergunta = (p) => {
 };
 
 window.editarPergunta = (id) => abrirModalPergunta(window.perguntasData.find(p => p.id === id));
+
+window.filtrarPerguntas = () => {
+  const busca = (document.getElementById('buscaPergunta') || {}).value || '';
+  const termo = busca.toLowerCase();
+  const lista = document.getElementById('lista');
+  if (!lista) return;
+  lista.querySelectorAll('.list-row').forEach(row => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = (!termo || text.includes(termo)) ? '' : 'none';
+  });
+};
 window.trocarAbaProcesso = (aba) => {
   ['identificacao','avaliacao','bia','bcp','drp'].forEach(a => {
     document.getElementById('painel-' + a).style.display = a === aba ? 'block' : 'none';
@@ -665,6 +679,9 @@ async function areas() {
       <div><h2>Áreas</h2><p class="page-sub">Cadastre as áreas da empresa que participam do BIA</p></div>
       <button class="btn btn-primary" onclick="abrirModalArea()">+ Nova Área</button>
     </div>
+    <div style="margin-bottom:16px;">
+      <input type="text" id="buscaArea" placeholder="🔍 Buscar área..." oninput="renderizarAreas()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:300px;">
+    </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table" id="lista" style="display:none;">
       <table>
@@ -715,7 +732,18 @@ async function areas() {
 }
 
 function renderizarAreas() {
-  const data = [...window.areasData];
+  let data = [...window.areasData];
+
+  // Filtrar por busca
+  const busca = (document.getElementById('buscaArea') || {}).value || '';
+  if (busca.trim()) {
+    const termo = busca.toLowerCase();
+    data = data.filter(a => 
+      (a.nome || '').toLowerCase().includes(termo) ||
+      (a.responsavel || '').toLowerCase().includes(termo) ||
+      (a.email || '').toLowerCase().includes(termo)
+    );
+  }
   
   // Ordenar
   data.sort((a, b) => {
@@ -834,6 +862,21 @@ async function processos() {
           <option value="Tier 3">Tier 3 (Suporte)</option>
           <option value="Pendente">Pendente</option>
         </select>
+      </div>
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">PCN:</label>
+        <select id="filtroPCN" onchange="renderizarProcessos()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:140px;">
+          <option value="">Todos</option>
+          <option value="com">Com PCN</option>
+          <option value="sem">Sem PCN</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">&nbsp;</label>
+        <input type="text" id="buscaProcesso" placeholder="🔍 Buscar processo..." oninput="renderizarProcessos()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:200px;">
+      </div>
+      <div style="display:flex;align-items:flex-end;">
+        <span id="contadorProcessos" style="font-size:0.82em;color:#888;padding:10px 0;white-space:nowrap;"></span>
       </div>
       <div style="margin-left:auto;display:flex;gap:8px;">
         <button id="btnEnviarArea" onclick="enviarParaArea()" style="display:none;padding:9px 18px;background:#1565c0;color:white;border:none;border-radius:7px;font-weight:600;font-size:0.88em;cursor:pointer;">
@@ -967,6 +1010,15 @@ async function processos() {
                 <option value="Tier 3 (Suporte)">Tier 3 (Suporte)</option>
               </select>
               <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Indica a criticidade percebida antes da avaliação formal. Após a avaliação, o tier calculado prevalece.</span>
+            </div>
+            <div style="margin-bottom:16px;padding-top:12px;border-top:1px solid #f0f0f0;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Levantamento PCN</label>
+              <div id="levantamentoStatus" style="font-size:0.82em;color:#999;margin-bottom:8px;"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn btn-ghost" onclick="abrirLevantamento()" id="btnAbrirLev" style="font-size:0.82em;color:#1a237e;border-color:#1a237e;padding:6px 14px;display:none;">📄 Abrir Levantamento</button>
+                <button class="btn btn-ghost" onclick="copiarLinkLevantamento()" style="font-size:0.82em;color:#555;border-color:#ccc;padding:6px 14px;">🔗 Copiar link</button>
+                <button class="btn btn-ghost" onclick="enviarLinkLevantamento()" style="font-size:0.82em;color:#1a237e;border-color:#1a237e;padding:6px 14px;">📧 Enviar por e-mail</button>
+              </div>
             </div>
           </div>
 
@@ -1263,6 +1315,17 @@ function renderizarProcessos() {
     data = data.filter(p => p.area === processosFiltroArea);
   }
 
+  // Filtrar por busca
+  const buscaProc = (document.getElementById('buscaProcesso') || {}).value || '';
+  if (buscaProc.trim()) {
+    const termo = buscaProc.toLowerCase();
+    data = data.filter(p => 
+      (p.processo || '').toLowerCase().includes(termo) ||
+      (p.area || '').toLowerCase().includes(termo) ||
+      (p.descricaoFuncional || '').toLowerCase().includes(termo)
+    );
+  }
+
   // Filtrar por tier
   if (processosFiltroTier) {
     data = data.filter(p => {
@@ -1270,6 +1333,11 @@ function renderizarProcessos() {
       return tier === processosFiltroTier;
     });
   }
+
+  // Filtrar por PCN
+  const filtroPCN = (document.getElementById('filtroPCN') || {}).value || '';
+  if (filtroPCN === 'com') data = data.filter(p => p.pcnSalvo);
+  else if (filtroPCN === 'sem') data = data.filter(p => !p.pcnSalvo);
   
   // Ordenar
   data.sort((a, b) => {
@@ -1294,6 +1362,17 @@ function renderizarProcessos() {
       }
     }
   });
+
+  // Atualizar contador de processos
+  const contadorEl = document.getElementById('contadorProcessos');
+  const total = window.processosData.length;
+  if (contadorEl) {
+    if (data.length === total) {
+      contadorEl.textContent = `${total} processo${total !== 1 ? 's' : ''}`;
+    } else {
+      contadorEl.textContent = `${data.length} de ${total} processo${total !== 1 ? 's' : ''}`;
+    }
+  }
   
   document.getElementById('rows').innerHTML = data.length
     ? data.map(p => {
@@ -1334,6 +1413,7 @@ function renderizarProcessos() {
               <line x1="16" y1="17" x2="8" y2="17"></line>
             </svg>
           </button>` : ''}
+          ${p.levantamentoPCN ? `<button class="btn-icon" onclick="abrirLevantamentoDireto(${p.id})" title="Abrir Levantamento PCN" style="color:#2e7d32;">📋</button>` : ''}
           <button class="btn-icon" onclick="excluirProcesso(${p.id})" title="Excluir">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
               <polyline points="3 6 5 6 21 6"></polyline>
@@ -1470,14 +1550,19 @@ function renderDependenciaTabela() {
     // Buscar TODAS as categorias onde esse nome existe no catálogo
     const deps = catalogo.filter(d => d.nome === nome);
     if (deps.length > 1) {
-      // Item existe em múltiplas categorias — mostrar em todas
       deps.forEach(dep => {
         if (grupos[dep.categoria] && !grupos[dep.categoria].includes(nome)) {
           grupos[dep.categoria].push(nome);
         }
       });
+    } else if (deps.length === 1) {
+      const cat = deps[0].categoria;
+      if (!grupos[cat]) grupos[cat] = [];
+      if (!grupos[cat].includes(nome)) grupos[cat].push(nome);
     } else {
-      const cat = deps.length ? deps[0].categoria : 'Outros';
+      // Não está no catálogo — verificar se é um processo interno
+      const isProcessoInterno = (window.processosData || []).some(p => p.processo === nome);
+      const cat = isProcessoInterno ? 'Processos Internos' : 'Outros';
       if (!grupos[cat]) grupos[cat] = [];
       if (!grupos[cat].includes(nome)) grupos[cat].push(nome);
     }
@@ -1538,7 +1623,7 @@ function renderDependenciaTabela() {
             ${tags}
             ${emptyMsg}
             <div style="position:relative;flex:1;min-width:180px;display:flex;align-items:center;gap:4px;">
-              <input type="text" class="dep-cat-input" data-categoria="${cat}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #e8eaf6;outline:none;font-size:0.88em;padding:5px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#1a237e';mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" oninput="mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" onblur="this.style.borderColor='#e8eaf6';setTimeout(()=>{const dd=this.parentElement.querySelector('.dep-cat-dropdown');if(dd)dd.style.display='none';},200)">
+              <input type="text" class="dep-cat-input" data-categoria="${cat}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #e8eaf6;outline:none;font-size:0.88em;padding:5px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#1a237e';mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" oninput="mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" onblur="this.style.borderColor='#e8eaf6';setTimeout(()=>{const dd=this.parentElement.querySelector('.dep-cat-dropdown');if(dd)dd.style.display='none';},300)">
               <div class="dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:200px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
             </div>
           </div>
@@ -1561,11 +1646,14 @@ function renderDependenciaTabela() {
         const val = input.value.trim();
         const cat = input.dataset.categoria;
         if (val) {
-          // Se existe no catálogo, selecionar diretamente
+          const isProcessos = (cat === 'Processos Internos' || cat === 'Processo Interno');
+          // Verificar se existe no catálogo ou nos processos do sistema
           const catalogo = window.dependenciasCatalogo || [];
           const existe = catalogo.find(d => d.nome.toLowerCase() === val.toLowerCase() && d.categoria === cat);
-          if (existe && !window._dependenciaSelecionadas.includes(existe.nome)) {
-            selecionarDependenciaCategoria(existe.nome);
+          const existeProcesso = isProcessos && (window.processosData || []).find(p => p.processo.toLowerCase() === val.toLowerCase());
+          
+          if ((existe || existeProcesso) && !window._dependenciaSelecionadas.includes(val)) {
+            selecionarDependenciaCategoria(existe ? existe.nome : existeProcesso.processo);
             input.value = '';
           } else {
             // Mostrar dropdown com opção de criar
@@ -1593,9 +1681,10 @@ window.mostrarDropdownCategoria = (input, categoria) => {
   if (isProcessos) {
     // Para Processos Internos, listar processos do sistema
     const processos = window.processosData || [];
-    const currentId = Number(document.getElementById('fId').value);
+    const currentId = Number((document.getElementById('fId') || {}).value || 0);
+    const currentProcesso = (document.getElementById('fProcesso') || {}).value || '';
     disponiveis = processos
-      .filter(p => p.id !== currentId && !window._dependenciaSelecionadas.includes(p.processo) && (filtro === '' || p.processo.toLowerCase().includes(filtro)))
+      .filter(p => p.id !== currentId && p.processo !== currentProcesso && !window._dependenciaSelecionadas.includes(p.processo) && (filtro === '' || p.processo.toLowerCase().includes(filtro) || p.area.toLowerCase().includes(filtro)))
       .map(p => ({ nome: p.processo, empresa: p.area, detalhes: '' }));
   } else {
     disponiveis = catalogo.filter(d => 
@@ -1613,14 +1702,20 @@ window.mostrarDropdownCategoria = (input, categoria) => {
   let html = '';
   disponiveis.forEach(d => {
     const info = [d.empresa, d.detalhes].filter(Boolean).join(' • ');
-    html += `<div class="dep-option" onmousedown="selecionarDependenciaCategoria('${d.nome.replace(/'/g, "\\'")}')" style="padding:8px 12px;cursor:pointer;transition:background 0.1s;border-bottom:1px solid #f8f8f8;">
+    const encodedNome = encodeURIComponent(d.nome);
+    html += `<div class="dep-option" onmousedown="selecionarDependenciaCategoria(decodeURIComponent('${encodedNome}'))" style="padding:8px 12px;cursor:pointer;transition:background 0.1s;border-bottom:1px solid #f8f8f8;">
       <div style="font-size:0.9em;font-weight:500;color:#222;">${d.nome}</div>
       ${info ? `<div style="font-size:0.75em;color:#888;margin-top:2px;">${info}</div>` : ''}
     </div>`;
   });
   
-  if (input.value.trim() && !catalogo.some(d => d.nome.toLowerCase() === input.value.trim().toLowerCase())) {
-    html += `<div class="dep-option" onmousedown="adicionarDependenciaCategoria('${input.value.trim().replace(/'/g, "\\'")}','${categoria.replace(/'/g, "\\'")}')" style="padding:9px 12px;cursor:pointer;color:#1a237e;font-weight:600;border-top:1.5px solid #e8eaf6;background:#f8f9ff;">+ Criar "${input.value.trim()}"</div>`;
+  if (input.value.trim()) {
+    const val = input.value.trim().toLowerCase();
+    const existeNoCatalogo = catalogo.some(d => d.nome.toLowerCase() === val);
+    const existeNosProcessos = isProcessos && (window.processosData || []).some(p => p.processo.toLowerCase() === val);
+    if (!existeNoCatalogo && !existeNosProcessos) {
+      html += `<div class="dep-option" onmousedown="adicionarDependenciaCategoria('${input.value.trim().replace(/'/g, "\\'")}','${categoria.replace(/'/g, "\\'")}')" style="padding:9px 12px;cursor:pointer;color:#1a237e;font-weight:600;border-top:1.5px solid #e8eaf6;background:#f8f9ff;">+ Criar "${input.value.trim()}"</div>`;
+    }
   }
   
   if (!html) {
@@ -1851,6 +1946,10 @@ window.removerPreventivaBcp = (idx) => {
 };
 
 window.abrirModalProcesso = (p) => {
+  // Recarregar catálogos se foram invalidados
+  API.getDependencias().then(deps => { window.dependenciasCatalogo = deps; }).catch(()=>{});
+  API.getComponentes().then(comps => { window.componentesCatalogo = comps; }).catch(()=>{});
+
   // Preencher dropdown de áreas
   const selectArea = document.getElementById('fArea');
   selectArea.innerHTML = '<option value="">Selecione...</option>' + 
@@ -1909,6 +2008,18 @@ window.abrirModalProcesso = (p) => {
   // Mostrar botão Gerar PCN apenas para admin
   const btnGerarPcn = document.getElementById('btnGerarPcn');
   if (btnGerarPcn) btnGerarPcn.style.display = (window.USER_PERFIL === 'admin') ? 'inline-block' : 'none';
+  // Mostrar status e botão do levantamento PCN
+  const levStatus = document.getElementById('levantamentoStatus');
+  const btnAbrirLev = document.getElementById('btnAbrirLev');
+  if (levStatus && p) {
+    if (p.levantamentoPCN) {
+      levStatus.innerHTML = '<span style="color:#2e7d32;font-weight:600;">✅ Levantamento preenchido</span>';
+      if (btnAbrirLev) btnAbrirLev.style.display = 'inline-block';
+    } else {
+      levStatus.innerHTML = '<span style="color:#999;">Pendente — envie o formulário ao dono do processo</span>';
+      if (btnAbrirLev) btnAbrirLev.style.display = 'none';
+    }
+  }
   // Score/Tier cards na BIA
   const scoreInfo = document.getElementById('fBiaScoreInfo');
   if (scoreInfo && p && p.score > 0) {
@@ -2043,11 +2154,18 @@ window.salvarProcesso = async () => {
 };
 
 window.excluirProcesso = async (id) => {
-  if (!confirm('Excluir este processo?')) return;
-  await API.excluirProcesso(id);
-  showToast('🗑️ Excluído.', '#555');
-  window.processosData = window.processosData.filter(p => p.id !== id);
-  renderizarProcessos();
+  const p = window.processosData.find(proc => proc.id === id);
+  if (!p) return;
+  if (!confirm(`Excluir o processo "${p.processo}"? Esta ação não pode ser desfeita.`)) return;
+  try {
+    await API.post('excluirProcesso', { id: String(id), area: p.area, processo: p.processo });
+    showToast('🗑️ Excluído.', '#555');
+    window.processosData = window.processosData.filter(proc => proc.id !== id);
+    API.invalidate('getProcessos');
+    renderizarProcessos();
+  } catch(e) {
+    showToast('❌ Erro ao excluir: ' + e.message, '#c62828');
+  }
 };
 
 window.verDetalhesProcesso = (id) => {
@@ -2294,11 +2412,16 @@ async function dependencias() {
       <div><h2>Catálogo de Dependências</h2><p class="page-sub">Gerencie as dependências críticas reutilizáveis nos processos</p></div>
       <button class="btn btn-primary" onclick="abrirModalDependencia()">+ Nova Dependência</button>
     </div>
-    <div style="margin-bottom:16px;">
-      <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Categoria:</label>
-      <select id="filtroDepCategoria" onchange="filtrarDependencias()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
-        <option value="">Todas as categorias</option>
-      </select>
+    <div style="margin-bottom:16px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Categoria:</label>
+        <select id="filtroDepCategoria" onchange="filtrarDependencias()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
+          <option value="">Todas as categorias</option>
+        </select>
+      </div>
+      <div>
+        <input type="text" id="buscaDep" placeholder="🔍 Buscar dependência..." oninput="filtrarDependencias()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:250px;">
+      </div>
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table" id="listaDeps" style="display:none;">
@@ -2388,6 +2511,19 @@ function renderizarDependencias() {
   const filtro = document.getElementById('filtroDepCategoria');
   if (filtro && filtro.value) {
     data = data.filter(d => d.categoria === filtro.value);
+  }
+
+  // Filtrar por busca
+  const busca = (document.getElementById('buscaDep') || {}).value || '';
+  if (busca.trim()) {
+    const termo = busca.toLowerCase();
+    data = data.filter(d => 
+      (d.nome || '').toLowerCase().includes(termo) ||
+      (d.empresa || '').toLowerCase().includes(termo) ||
+      (d.categoria || '').toLowerCase().includes(termo) ||
+      (d.setor || '').toLowerCase().includes(termo) ||
+      (d.detalhes || '').toLowerCase().includes(termo)
+    );
   }
 
   data.sort((a, b) => {
@@ -3105,11 +3241,16 @@ async function componentes() {
       <div><h2>Componentes de Serviço</h2><p class="page-sub">Gerencie os componentes de infraestrutura e serviços para o DRP</p></div>
       <button class="btn btn-primary" onclick="abrirModalComponente()">+ Novo Componente</button>
     </div>
-    <div style="margin-bottom:16px;">
-      <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Tipo:</label>
-      <select id="filtroCompTipo" onchange="filtrarComponentes()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
-        <option value="">Todos os tipos</option>
-      </select>
+    <div style="margin-bottom:16px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Tipo:</label>
+        <select id="filtroCompTipo" onchange="filtrarComponentes()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
+          <option value="">Todos os tipos</option>
+        </select>
+      </div>
+      <div>
+        <input type="text" id="buscaComp" placeholder="🔍 Buscar componente..." oninput="filtrarComponentes()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:250px;">
+      </div>
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table" id="listaComps" style="display:none;">
@@ -3193,6 +3334,18 @@ function renderizarComponentes() {
   let data = [...componentesData];
   const filtro = document.getElementById('filtroCompTipo');
   if (filtro && filtro.value) data = data.filter(d => d.tipo === filtro.value);
+
+  // Filtrar por busca
+  const busca = (document.getElementById('buscaComp') || {}).value || '';
+  if (busca.trim()) {
+    const termo = busca.toLowerCase();
+    data = data.filter(d => 
+      (d.nome || '').toLowerCase().includes(termo) ||
+      (d.tipo || '').toLowerCase().includes(termo) ||
+      (d.descricao || '').toLowerCase().includes(termo) ||
+      (d.responsavel || '').toLowerCase().includes(termo)
+    );
+  }
 
   data.sort((a, b) => {
     const valA = (a[componentesOrdenacao.coluna] || '').toString().toLowerCase();
@@ -3641,8 +3794,88 @@ window.copiarLinkBIA = async () => {
 };
 
 // ============================================================
+// LEVANTAMENTO PCN - Enviar, Copiar Link, Abrir
+// ============================================================
+window.enviarLinkLevantamento = async () => {
+  const id = Number(document.getElementById('fId').value);
+  const p = id ? window.processosData.find(proc => proc.id === id) : null;
+  if (!p) return showToast('Salve o processo antes.', '#e65100');
+  const areas = window.areasDisponiveis || [];
+  const area = areas.find(a => a.nome === p.area);
+  const emailPadrao = area ? area.email : '';
+  const email = prompt('E-mail do dono do processo:', emailPadrao);
+  if (!email) return;
+  try {
+    showToast('📧 Enviando...', '#1a237e');
+    const result = await API.post('gerarTokenLevantamento', { area: p.area, processo: p.processo, email });
+    if (result.error) throw new Error(result.error);
+    showToast('✅ Formulário enviado para ' + email, '#2e7d32');
+  } catch(e) { showToast('❌ ' + e.message, '#c62828'); }
+};
+
+window.copiarLinkLevantamento = async () => {
+  const id = Number(document.getElementById('fId').value);
+  const p = id ? window.processosData.find(proc => proc.id === id) : null;
+  if (!p) return showToast('Salve o processo antes.', '#e65100');
+  try {
+    showToast('🔗 Gerando link...', '#1a237e');
+    const result = await API.post('gerarTokenLevantamento', { area: p.area, processo: p.processo, email: '_link_only_' });
+    if (result.error) throw new Error(result.error);
+    await navigator.clipboard.writeText(result.link);
+    showToast('✅ Link copiado!', '#2e7d32');
+  } catch(e) { showToast('❌ ' + e.message, '#c62828'); }
+};
+
+window.abrirLevantamento = () => {
+  const id = Number(document.getElementById('fId').value);
+  const p = id ? window.processosData.find(proc => proc.id === id) : null;
+  if (!p || !p.levantamentoPCN) return showToast('Nenhum levantamento preenchido.', '#e65100');
+  // Abrir visualização (buscar dados do backend)
+  showToast('📄 Carregando...', '#1a237e');
+  API.get('getLevantamentoPCN', { area: p.area, processo: p.processo }).then(data => {
+    if (data.error) return showToast('❌ ' + data.error, '#c62828');
+    const win = window.open('', '_blank');
+    if (!win) return showToast('Popup bloqueado.', '#e65100');
+    win.document.write(_buildLevantamentoView(data, p));
+    win.document.close();
+  }).catch(e => showToast('❌ ' + e.message, '#c62828'));
+};
+
+function _buildLevantamentoView(lev, p) {
+  const field = (label, val) => val ? '<tr><td style="padding:8px 12px;font-weight:600;color:#444;width:35%;border-bottom:1px solid #f0f0f0;">' + label + '</td><td style="padding:8px 12px;border-bottom:1px solid #f0f0f0;">' + val + '</td></tr>' : '';
+  const list = (val) => { try { return JSON.parse(val).join(', '); } catch(e) { return val; } };
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Levantamento PCN - ${p.processo}</title>
+  <style>body{font-family:Segoe UI,Arial;max-width:800px;margin:0 auto;padding:40px 20px;color:#333;} h1{color:#1a237e;font-size:1.4em;} h2{color:#1a237e;font-size:1.1em;margin-top:28px;padding:8px 12px;background:#e8eaf6;border-left:4px solid #1a237e;border-radius:0 6px 6px 0;} table{width:100%;border-collapse:collapse;margin:12px 0;} @media print{h2{page-break-after:avoid;}}</style></head><body>
+  <h1>📋 Levantamento PCN: ${p.processo}</h1>
+  <p style="color:#666;">Área: ${p.area} • Preenchido em: ${lev.data ? new Date(lev.data).toLocaleDateString('pt-BR') : '-'}</p>
+  <h2>1. Identificação</h2><table>${field('Gestor',lev.gestor)}${field('Substituto',lev.substituto)}</table>
+  <h2>2. Escopo</h2><table>${field('Funcionamento',lev.escopo)}${field('Entrega Principal',lev.entrega)}</table>
+  <h2>3. Ativação da Continuidade</h2><table>${field('Situações',list(lev.ativacao))}${field('Outro',lev.ativacaoOutro)}</table>
+  <h2>4. Operação em Contingência</h2><table>${field('Pode operar sem sistemas?',lev.semSistema)}${field('Procedimentos alternativos',lev.contingencia)}${field('Controles manuais',lev.controlesManuais)}${field('Docs de contingência',lev.docsContingencia)}</table>
+  <h2>5. Pessoas Necessárias</h2><table>${field('Funções',lev.funcoes)}${field('Substitutos treinados?',lev.substitutos)}${field('Doc para execução?',lev.docExecucao)}</table>
+  <h2>6. Recursos</h2><table>${field('Sistemas',lev.sistemas)}${field('Bancos de dados',lev.bancos)}${field('Integrações',lev.integracoes)}${field('Infraestrutura',list(lev.infra))}${field('Outro',lev.infraOutro)}</table>
+  <h2>7. Fornecedores</h2><table>${field('Fornecedores essenciais',lev.fornecedores)}</table>
+  <h2>8. Comunicação</h2><table>${field('Comunicação',lev.comunicacao)}${field('Modelo definido?',lev.modeloComunicacao)}</table>
+  <h2>9. Recuperação</h2><table>${field('Atividades de retorno',lev.recuperacao)}${field('Reconciliar dados?',lev.reconciliacao)}${field('Descrição',lev.reconciliacaoDesc)}${field('Pós-recuperação',lev.posRecuperacao)}</table>
+  <h2>10. Documentação</h2><table>${field('Documentos',list(lev.docs))}${field('Local',lev.docsLocal)}</table>
+  </body></html>`;
+}
+
+// ============================================================
 // ENVIAR DRP COMPONENTES POR E-MAIL (formulário externo via token)
 // ============================================================
+window.abrirLevantamentoDireto = (id) => {
+  const p = window.processosData.find(proc => proc.id === id);
+  if (!p || !p.levantamentoPCN) return showToast('Nenhum levantamento preenchido.', '#e65100');
+  showToast('📄 Carregando...', '#1a237e');
+  API.get('getLevantamentoPCN', { area: p.area, processo: p.processo }).then(data => {
+    if (data.error) return showToast('❌ ' + data.error, '#c62828');
+    const win = window.open('', '_blank');
+    if (!win) return showToast('Popup bloqueado.', '#e65100');
+    win.document.write(_buildLevantamentoView(data, p));
+    win.document.close();
+  }).catch(e => showToast('❌ ' + e.message, '#c62828'));
+};
 window.enviarDRPComponentes = async () => {
   const id = Number(document.getElementById('fId').value);
   const p = id ? window.processosData.find(proc => proc.id === id) : null;

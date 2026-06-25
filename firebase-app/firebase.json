@@ -30,6 +30,10 @@
         "destination": "/drp-componentes.html"
       },
       {
+        "source": "/pcn-levantamento.html",
+        "destination": "/pcn-levantamento.html"
+      },
+      {
         "source": "/avaliar.html",
         "destination": "/avaliar.html"
       },

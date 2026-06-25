@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Levantamento PCN</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f6fa; min-height: 100vh; color: #333; }
+    .header { background: linear-gradient(135deg, #1a237e, #283593); color: white; padding: 30px 20px; text-align: center; }
+    .header h1 { font-size: 1.4em; margin-bottom: 6px; }
+    .header p { font-size: 0.9em; opacity: 0.85; }
+    .container { max-width: 800px; margin: -20px auto 40px; padding: 0 16px; }
+    .card { background: white; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 28px 32px; margin-bottom: 20px; }
+    .card h2 { font-size: 1.1em; color: #1a237e; margin-bottom: 12px; }
+    .card p.desc { font-size: 0.85em; color: #666; margin-bottom: 14px; line-height: 1.5; }
+    .info-box { background: #e8eaf6; border-left: 4px solid #1a237e; padding: 14px 18px; border-radius: 0 8px 8px 0; margin-bottom: 20px; }
+    .info-box strong { color: #1a237e; }
+    .campo { margin-bottom: 14px; }
+    .campo label { display: block; font-size: 0.82em; font-weight: 600; color: #444; margin-bottom: 5px; }
+    .campo input, .campo textarea, .campo select { width: 100%; padding: 10px 12px; border: 1.5px solid #e0e0e0; border-radius: 8px; font-size: 0.93em; }
+    .campo input:focus, .campo textarea:focus { border-color: #1a237e; outline: none; }
+    .campo .hint { font-size: 0.75em; color: #999; margin-top: 3px; }
+    .check-group { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+    .check-group label { display: flex; align-items: center; gap: 6px; font-size: 0.88em; color: #333; cursor: pointer; padding: 6px 12px; border: 1px solid #e0e0e0; border-radius: 6px; transition: all 0.15s; }
+    .check-group label:hover { background: #e8eaf6; border-color: #1a237e; }
+    .check-group input:checked + span { font-weight: 600; color: #1a237e; }
+    .table-input { width: 100%; border-collapse: collapse; margin-bottom: 8px; }
+    .table-input th { background: #f5f6fa; padding: 8px 10px; font-size: 0.78em; font-weight: 600; text-align: left; }
+    .table-input td { padding: 4px 6px; }
+    .table-input input { width: 100%; padding: 6px 8px; border: 1px solid #e0e0e0; border-radius: 4px; font-size: 0.88em; }
+    .btn-add-row { background: none; border: 1px dashed #1a237e; color: #1a237e; padding: 6px 14px; border-radius: 6px; font-size: 0.82em; cursor: pointer; }
+    .btn-primary { background: #1a237e; color: white; border: none; padding: 14px 32px; border-radius: 8px; font-size: 1em; font-weight: 600; cursor: pointer; width: 100%; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .loading { text-align: center; padding: 60px 20px; color: #666; }
+    .error { text-align: center; padding: 60px 20px; color: #c62828; }
+    @media (max-width: 600px) { .card { padding: 20px 16px; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>📋 Levantamento para Plano de Continuidade</h1>
+    <p>Preencha as informações necessárias para construção do PCN do seu processo</p>
+  </div>
+  <div class="container">
+    <div id="content"><div class="loading">⏳ Validando acesso...</div></div>
+  </div>
+  <script src="config.js?v=3"></script>
+  <script>
+    var TOKEN = '', INFO = {};
+
+    async function init() {
+      var params = new URLSearchParams(window.location.search);
+      TOKEN = params.get('token');
+      if (!TOKEN) return showError('Link inválido.');
+      try {
+        var url = new URL(API_URL);
+        url.searchParams.append('action', 'validarTokenLevantamento');
+        url.searchParams.append('token', TOKEN);
+        var res = await fetch(url, { redirect: 'follow' });
+        var data = JSON.parse(await res.text());
+        if (data.error) return showError(data.error);
+        INFO = data;
+        renderForm();
+      } catch(e) { showError(e.message); }
+    }
+
+    function showError(msg) {
+      document.getElementById('content').innerHTML = '<div class="card"><div class="error"><h2>❌ ' + msg + '</h2></div></div>';
+    }
+
+    function renderForm() {
+      document.getElementById('content').innerHTML = `
+        <div class="card">
+          <div class="info-box">
+            <strong>Processo:</strong> ${INFO.processo}<br>
+            <strong>Área:</strong> ${INFO.area}
+          </div>
+          <p class="desc">Preencha este formulário para levantar as informações necessárias à construção do Plano de Continuidade de Negócios (PCN) do seu processo. Leva cerca de 10-15 minutos.</p>
+        </div>
+
+        <div class="card">
+          <h2>1. Identificação</h2>
+          <div class="campo"><label>Gestor Responsável</label><input type="text" id="f_gestor" value="${INFO.responsavel || ''}"></div>
+          <div class="campo"><label>Substituto do Gestor</label><input type="text" id="f_substituto"></div>
+        </div>
+
+        <div class="card">
+          <h2>2. Escopo do Processo</h2>
+          <div class="campo"><label>Como o processo funciona atualmente?</label><textarea id="f_escopo" rows="4" placeholder="Descreva resumidamente o funcionamento..."></textarea></div>
+          <div class="campo"><label>Qual o principal resultado (entrega) produzido?</label><textarea id="f_entrega" rows="3" placeholder="Ex: Emissão de boletos, processamento da folha..."></textarea></div>
+        </div>
+
+        <div class="card">
+          <h2>3. Ativação da Continuidade</h2>
+          <p class="desc">Em quais situações o plano de continuidade deve ser acionado?</p>
+          <div class="check-group" id="ativacao">
+            ${['Indisponibilidade de sistemas','Indisponibilidade de banco de dados','Falha de infraestrutura cloud','Falha de energia','Falha de internet','Ausência de pessoal-chave','Ataque cibernético','Indisponibilidade de fornecedor','Indisponibilidade do prédio/escritório'].map(o => '<label><input type="checkbox" value="'+o+'"><span>'+o+'</span></label>').join('')}
+          </div>
+          <div class="campo"><label>Outro (especifique)</label><input type="text" id="f_ativacao_outro"></div>
+        </div>
+
+        <div class="card">
+          <h2>4. Operação em Contingência</h2>
+          <div class="campo"><label>O processo pode continuar sem os sistemas principais?</label>
+            <select id="f_sem_sistema"><option value="">Selecione...</option><option>Sim</option><option>Parcialmente</option><option>Não</option></select>
+          </div>
+          <div class="campo"><label>Procedimentos alternativos de contingência</label><textarea id="f_contingencia" rows="4" placeholder="Descreva como o processo pode ser executado em modo de contingência..."></textarea></div>
+          <div class="campo"><label>Controles manuais que substituem temporariamente</label><textarea id="f_controles_manuais" rows="3" placeholder="Ex: Planilha de controle, processo manual via papel..."></textarea></div>
+          <div class="campo"><label>Planilhas/formulários/documentos de contingência existentes</label><textarea id="f_docs_contingencia" rows="2" placeholder="Liste documentos disponíveis..."></textarea></div>
+        </div>
+
+        <div class="card">
+          <h2>5. Pessoas Necessárias</h2>
+          <div class="campo"><label>Funções indispensáveis durante contingência (uma por linha: Função - Quantidade)</label><textarea id="f_funcoes" rows="4" placeholder="Ex: Analista Financeiro - 2\nGerente Aprovador - 1"></textarea></div>
+          <div class="campo"><label>Existem substitutos treinados?</label>
+            <select id="f_substitutos"><option value="">Selecione...</option><option>Sim</option><option>Não</option></select>
+          </div>
+          <div class="campo"><label>Documentação suficiente para outra pessoa executar?</label>
+            <select id="f_doc_execucao"><option value="">Selecione...</option><option>Sim</option><option>Parcialmente</option><option>Não</option></select>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>6. Recursos Necessários</h2>
+          <div class="campo"><label>Sistemas necessários (um por linha: Sistema - Obrigatório S/N)</label><textarea id="f_sistemas" rows="4" placeholder="Ex: ERP Fortes - S\nE-mail - S\nBI - N"></textarea></div>
+          <div class="campo"><label>Bancos de dados necessários</label><textarea id="f_bancos" rows="2" placeholder="Ex: PostgreSQL Produção - S"></textarea></div>
+          <div class="campo"><label>Integrações necessárias</label><textarea id="f_integracoes" rows="2" placeholder="Ex: API bancária - S\nWebhook de pagamentos - N"></textarea></div>
+          <p class="desc">Recursos de infraestrutura necessários:</p>
+          <div class="check-group" id="infra">
+            ${['Internet','VPN','Cloud','Data Center','Servidor de Aplicação','Banco de Dados','E-mail','Telefonia','Chat'].map(o => '<label><input type="checkbox" value="'+o+'"><span>'+o+'</span></label>').join('')}
+          </div>
+          <div class="campo"><label>Outro recurso</label><input type="text" id="f_infra_outro"></div>
+        </div>
+
+        <div class="card">
+          <h2>7. Fornecedores Essenciais</h2>
+          <div class="campo"><label>Fornecedores sem os quais o processo não funciona (um por linha: Fornecedor - Serviço)</label><textarea id="f_fornecedores" rows="4" placeholder="Ex: AWS - Hospedagem cloud\nDataprev - Processamento eSocial"></textarea></div>
+        </div>
+
+        <div class="card">
+          <h2>8. Comunicação Durante Contingência</h2>
+          <div class="campo"><label>Quem deve ser comunicado? (um por linha: Público - Contato)</label><textarea id="f_comunicacao" rows="4" placeholder="Ex: Diretoria - diretor@empresa.com\nClientes VIP - gerente comercial"></textarea></div>
+          <div class="campo"><label>Existe modelo de comunicação definido?</label>
+            <select id="f_modelo_comunicacao"><option value="">Selecione...</option><option>Sim</option><option>Não</option></select>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>9. Recuperação do Processo</h2>
+          <div class="campo"><label>Atividades para retornar da contingência à operação normal</label><textarea id="f_recuperacao" rows="4" placeholder="Descreva os passos para voltar ao normal..."></textarea></div>
+          <div class="campo"><label>Necessidade de reconciliar dados após recuperação?</label>
+            <select id="f_reconciliacao"><option value="">Selecione...</option><option>Sim</option><option>Não</option></select>
+          </div>
+          <div class="campo"><label>Se sim, descreva</label><textarea id="f_reconciliacao_desc" rows="2"></textarea></div>
+          <div class="campo"><label>Atividades pós-recuperação para eliminar retrabalho</label><textarea id="f_pos_recuperacao" rows="3"></textarea></div>
+        </div>
+
+        <div class="card">
+          <h2>10. Documentação de Apoio</h2>
+          <p class="desc">Documentos que auxiliam a execução em contingência:</p>
+          <div class="check-group" id="docs">
+            ${['Procedimento Operacional (SOP)','Runbook','Manual do Usuário','Instrução de Trabalho','Fluxograma','Playbook','Não existe documentação'].map(o => '<label><input type="checkbox" value="'+o+'"><span>'+o+'</span></label>').join('')}
+          </div>
+          <div class="campo"><label>Onde estão armazenados?</label><input type="text" id="f_docs_local" placeholder="Ex: SharePoint, Google Drive, pasta de rede..."></div>
+        </div>
+
+        <div class="card" style="text-align:center;">
+          <button class="btn-primary" id="btnEnviar" onclick="enviar()">✅ Enviar Levantamento</button>
+          <p style="font-size:0.78em;color:#999;margin-top:10px;">Suas respostas serão salvas e utilizadas para construção do PCN.</p>
+        </div>
+      `;
+    }
+
+    function getChecked(id) {
+      return Array.from(document.querySelectorAll('#' + id + ' input:checked')).map(i => i.value);
+    }
+
+    async function enviar() {
+      var btn = document.getElementById('btnEnviar');
+      btn.disabled = true; btn.textContent = '⏳ Enviando...';
+      var payload = {
+        action: 'salvarLevantamentoPCN',
+        token: TOKEN,
+        gestor: document.getElementById('f_gestor').value,
+        substituto: document.getElementById('f_substituto').value,
+        escopo: document.getElementById('f_escopo').value,
+        entrega: document.getElementById('f_entrega').value,
+        ativacao: JSON.stringify(getChecked('ativacao')),
+        ativacaoOutro: document.getElementById('f_ativacao_outro').value,
+        semSistema: document.getElementById('f_sem_sistema').value,
+        contingencia: document.getElementById('f_contingencia').value,
+        controlesManuais: document.getElementById('f_controles_manuais').value,
+        docsContingencia: document.getElementById('f_docs_contingencia').value,
+        funcoes: document.getElementById('f_funcoes').value,
+        substitutos: document.getElementById('f_substitutos').value,
+        docExecucao: document.getElementById('f_doc_execucao').value,
+        sistemas: document.getElementById('f_sistemas').value,
+        bancos: document.getElementById('f_bancos').value,
+        integracoes: document.getElementById('f_integracoes').value,
+        infra: JSON.stringify(getChecked('infra')),
+        infraOutro: document.getElementById('f_infra_outro').value,
+        fornecedores: document.getElementById('f_fornecedores').value,
+        comunicacao: document.getElementById('f_comunicacao').value,
+        modeloComunicacao: document.getElementById('f_modelo_comunicacao').value,
+        recuperacao: document.getElementById('f_recuperacao').value,
+        reconciliacao: document.getElementById('f_reconciliacao').value,
+        reconciliacaoDesc: document.getElementById('f_reconciliacao_desc').value,
+        posRecuperacao: document.getElementById('f_pos_recuperacao').value,
+        docs: JSON.stringify(getChecked('docs')),
+        docsLocal: document.getElementById('f_docs_local').value
+      };
+      try {
+        var res = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=UTF-8'}, body:JSON.stringify(payload), redirect:'follow' });
+        var data = JSON.parse(await res.text());
+        if (data.error) throw new Error(data.error);
+        document.getElementById('content').innerHTML = '<div class="card"><div style="text-align:center;padding:40px;"><div style="font-size:3em;margin-bottom:12px;">✅</div><h2 style="color:#2e7d32;">Levantamento enviado!</h2><p style="color:#666;margin-top:8px;">Obrigado. A equipe de SI utilizará suas respostas para construir o PCN.</p></div></div>';
+      } catch(e) {
+        alert('❌ Erro: ' + e.message);
+        btn.disabled = false; btn.textContent = '✅ Enviar Levantamento';
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

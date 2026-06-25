@@ -77,6 +77,12 @@ function doGet(e) {
       case 'validarTokenDRP':
         result = validarTokenDRP(e.parameter.token);
         break;
+      case 'validarTokenLevantamento':
+        result = validarTokenLevantamento(e.parameter.token);
+        break;
+      case 'getLevantamentoPCN':
+        result = getLevantamentoPCN(e.parameter.area, e.parameter.processo);
+        break;
       default:
         result = { error: 'Action não especificada' };
     }
@@ -156,7 +162,7 @@ function doPost(e) {
         result = salvarProcesso(data);
         break;
       case 'excluirProcesso':
-        result = excluirProcesso(data.id);
+        result = excluirProcesso(data);
         break;
       case 'salvarRespostas':
         if (data.scores && typeof data.scores === 'string') data.scores = JSON.parse(data.scores);
@@ -220,6 +226,12 @@ function doPost(e) {
         break;
       case 'salvarComponentesDRP':
         result = salvarComponentesDRP(data);
+        break;
+      case 'gerarTokenLevantamento':
+        result = gerarTokenLevantamento(data);
+        break;
+      case 'salvarLevantamentoPCN':
+        result = salvarLevantamentoPCN(data);
         break;
       case 'listarModelos':
         result = listarModelosGemini();
@@ -363,6 +375,7 @@ function getProcessos() {
           } catch(e) { return raw; }
         })(),
         tierManual: r[32] || '',
+        levantamentoPCN: r[33] ? true : false,
         score: scores[key] || 0,
         avaliado: avaliados[key] || false,
         respostas: respostas[key] || []
@@ -412,9 +425,33 @@ function salvarProcesso(p) {
   }
 }
 
-function excluirProcesso(rowIndex) {
-  _getSS().getSheetByName(ABA_PROCESSOS).deleteRow(rowIndex);
-  return { success: true };
+function excluirProcesso(data) {
+  try {
+    const id = Number(data.id || data);
+    const area = data.area || '';
+    const processo = data.processo || '';
+    const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
+    
+    // Buscar por área+processo (seguro) ou fallback por ID
+    let rowToDelete = -1;
+    if (area && processo) {
+      const rows = sheet.getDataRange().getValues();
+      for (let i = 1; i < rows.length; i++) {
+        if (_normalizar(rows[i][0]) === _normalizar(area) && _normalizar(rows[i][1]) === _normalizar(processo)) {
+          rowToDelete = i + 1;
+          break;
+        }
+      }
+    }
+    if (rowToDelete === -1 && id) rowToDelete = id;
+    if (rowToDelete === -1) return { error: 'Processo não encontrado.' };
+    
+    sheet.deleteRow(rowToDelete);
+    return { success: true };
+  } catch(err) {
+    Logger.log('excluirProcesso ERROR: ' + err.message);
+    return { error: 'Erro ao excluir: ' + err.message };
+  }
 }
 
 function getProcessosPorArea(area) {
@@ -819,30 +856,8 @@ function salvarRespostasToken(data) {
 // NOTIFICAÇÃO DE AVALIAÇÃO
 // ============================================================
 function _enviarNotificacaoAvaliacao(area, processo, respondente, score, tier) {
-  try {
-    const corTier = tier === 'Tier 1 (Crítico)' ? '#c62828' : tier === 'Tier 2 (Essencial)' ? '#f57c00' : '#1565c0';
-    const htmlBody =
-      '<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">' +
-      '<div style="background:#1a237e;padding:24px 32px;border-radius:8px 8px 0 0;">' +
-      '<h1 style="color:white;margin:0;font-size:18px;">BIA — Processo Avaliado</h1>' +
-      '</div>' +
-      '<div style="background:#f5f6fa;padding:24px 32px;border-radius:0 0 8px 8px;">' +
-      '<table style="width:100%;border-collapse:collapse;background:white;border-radius:8px;overflow:hidden;">' +
-      '<tr><td style="padding:12px 16px;font-size:13px;color:#666;border-bottom:1px solid #f0f0f0;">Respondente</td><td style="padding:12px 16px;font-size:13px;font-weight:600;border-bottom:1px solid #f0f0f0;">' + respondente + '</td></tr>' +
-      '<tr><td style="padding:12px 16px;font-size:13px;color:#666;border-bottom:1px solid #f0f0f0;">Área</td><td style="padding:12px 16px;font-size:13px;font-weight:600;border-bottom:1px solid #f0f0f0;">' + area + '</td></tr>' +
-      '<tr><td style="padding:12px 16px;font-size:13px;color:#666;border-bottom:1px solid #f0f0f0;">Processo</td><td style="padding:12px 16px;font-size:13px;font-weight:600;border-bottom:1px solid #f0f0f0;">' + processo + '</td></tr>' +
-      '<tr><td style="padding:12px 16px;font-size:13px;color:#666;border-bottom:1px solid #f0f0f0;">Score</td><td style="padding:12px 16px;font-size:15px;font-weight:700;color:#1a237e;border-bottom:1px solid #f0f0f0;">' + score + '</td></tr>' +
-      '<tr><td style="padding:12px 16px;font-size:13px;color:#666;">Tier</td><td style="padding:12px 16px;"><span style="background:' + corTier + ';color:white;padding:4px 12px;border-radius:12px;font-size:12px;font-weight:600;">' + tier + '</span></td></tr>' +
-      '</table>' +
-      '<div style="text-align:center;margin:24px 0 8px;">' +
-      '<a href="https://bia-forte-2025.web.app" style="background:#1a237e;color:white;padding:10px 28px;border-radius:8px;text-decoration:none;font-weight:600;font-size:13px;">Ver no Sistema BIA</a>' +
-      '</div>' +
-      '<p style="color:#999;font-size:11px;text-align:center;margin-top:16px;">Notificação automática do Sistema BIA · Fortes Tecnologia</p>' +
-      '</div></div>';
-    GmailApp.sendEmail(NOTIFICACAO_EMAIL, 'BIA — Avaliação: ' + processo + ' (' + tier + ')', '', { htmlBody: htmlBody });
-  } catch(err) {
-    Logger.log('_enviarNotificacaoAvaliacao ERROR: ' + err.message);
-  }
+  // SUSPENSO - notificações de avaliação desativadas temporariamente
+  return;
 }
 
 // ============================================================
@@ -988,6 +1003,8 @@ function excluirConfigResposta(data) {
 // AUXILIARES
 // ============================================================
 function _getSS() { return SpreadsheetApp.getActiveSpreadsheet(); }
+
+function _normalizar(str) { return String(str || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 
 function _calcularTier(score) {
   if (score >= 12) return 'Tier 1 (Crítico)';
@@ -1307,7 +1324,11 @@ ${compsDetalhados.length ? compsDetalhados.map(c => `- **${c.tipo}:** ${c.nome} 
 
 ## PARTE 1: ANÁLISE DE IMPACTO DE NEGÓCIOS (BIA)
 1. Identificação do Processo (Nome, Área, Dono, Descrição Funcional)
-2. Classificação de Criticidade (marcar o Tier correto com [x])
+2. Classificação de Criticidade — OBRIGATÓRIO usar EXATAMENTE estes 3 tiers com estes nomes (NÃO INVENTE OUTROS):
+   - [ ] Tier 1 - Crítico: Impacto severo e imediato (score >= 12)
+   - [ ] Tier 2 - Essencial: Tolera curto período de indisponibilidade (score 6-11)
+   - [ ] Tier 3 - Suporte: Baixo impacto imediato (score < 6)
+   Marcar com [x] o tier correto baseado no score ${p.score}. NÃO USE 4 tiers. NÃO USE nomes como "Importante" ou "Tolerável". São APENAS 3 tiers.
 3. Matriz de Impacto da Indisponibilidade (tabela: Dimensão × Janelas 1h/4h/24h para Operacional, Reputacional, Financeiro, Legal)
 4. Mapeamento de Dependências Críticas (tabela: Tipo × Recursos — Pessoas, Sistemas, Fornecedores, Infraestrutura)
 5. Objetivos de Recuperação RTO e RPO (tabela: Recurso × RTO × RPO)
@@ -1352,8 +1373,8 @@ ${compsDetalhados.length ? compsDetalhados.map(c => `- **${c.tipo}:** ${c.nome} 
 
 ## REGRAS ESPECÍFICAS
 
-- MATRIZ DE RESPONSABILIDADE: Nos campos "Papel na Crise" e "Setor", preencha com sugestões baseadas no contexto. Porém os campos "Nome", "Telefone" e "E-mail" devem ficar EM BRANCO (célula vazia) — NÃO invente nomes, telefones ou e-mails fictícios. Use apenas os dados reais fornecidos na seção "Equipe de Crise (Contatos)" acima.
-- MATRIZ DE RISCOS: Na coluna "Probabilidade", use cores de fundo: Alta=#ffcdd2 (vermelho claro), Média=#fff3e0 (laranja claro), Baixa=#e8f5e9 (verde claro). Na coluna "Impacto", use as mesmas cores: Crítico=#ffcdd2, Alto=#fff3e0, Moderado=#e8f5e9, Baixo=#f5f5f5. Aplique style="background:COR" diretamente nas células <td>.`;
+- MATRIZ DE RESPONSABILIDADE: Se houver contatos fornecidos na seção "Equipe de Crise (Contatos)" acima, use os dados reais (nome, telefone, e-mail, setor) EXATAMENTE como fornecidos. Complete o "Papel na Crise" com sugestões adequadas ao contexto. Se NÃO houver contatos fornecidos, preencha apenas "Papel na Crise" e "Setor" com sugestões funcionais (ex: "Coordenador de Crise", "Líder Técnico"), deixando "Nome", "Telefone" e "E-mail" EM BRANCO — NÃO invente dados pessoais fictícios.
+- MATRIZ DE RISCOS: Analise CADA evento de risco individualmente e atribua Probabilidade (Alta, Média ou Baixa) e Impacto (Crítico, Alto, Moderado ou Baixo) de forma REALISTA e DIFERENCIADA — NÃO use o mesmo valor para todos os riscos. Considere o contexto do processo, setor e dependências para variar as classificações. Por exemplo: falha de energia pode ser "Baixa" probabilidade mas "Crítico" impacto; erro humano pode ser "Alta" probabilidade mas "Moderado" impacto.`;
 
   // Chamar API do Gemini
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
@@ -1442,7 +1463,7 @@ function salvarPCNProcesso(data) {
     if (area && processo) {
       const rows = sheet.getDataRange().getValues();
       for (let i = 1; i < rows.length; i++) {
-        if (String(rows[i][0]).trim() === area && String(rows[i][1]).trim() === processo) {
+        if (_normalizar(rows[i][0]) === _normalizar(area) && _normalizar(rows[i][1]) === _normalizar(processo)) {
           procRow = i + 1;
           break;
         }
@@ -1508,7 +1529,7 @@ function excluirPCNProcesso(data) {
     if (area && processo) {
       const rows = sheet.getDataRange().getValues();
       for (let i = 1; i < rows.length; i++) {
-        if (String(rows[i][0]).trim() === area && String(rows[i][1]).trim() === processo) {
+        if (_normalizar(rows[i][0]) === _normalizar(area) && _normalizar(rows[i][1]) === _normalizar(processo)) {
           procRow = i + 1;
           break;
         }
@@ -1644,7 +1665,7 @@ function salvarDependenciasBIA(data) {
     const procRows = sheetProc.getDataRange().getValues();
     let procRow = -1;
     for (let i = 1; i < procRows.length; i++) {
-      if (String(procRows[i][0]).trim() === area && String(procRows[i][1]).trim() === processo) {
+      if (_normalizar(procRows[i][0]) === _normalizar(area) && _normalizar(procRows[i][1]) === _normalizar(processo)) {
         procRow = i + 1;
         break;
       }
@@ -1898,7 +1919,7 @@ function salvarComponentesDRP(data) {
     const sheetProc = _getSS().getSheetByName(ABA_PROCESSOS);
     const procRows = sheetProc.getDataRange().getValues();
     for (let i = 1; i < procRows.length; i++) {
-      if (String(procRows[i][0]).trim() === area && String(procRows[i][1]).trim() === processo) {
+      if (_normalizar(procRows[i][0]) === _normalizar(area) && _normalizar(procRows[i][1]) === _normalizar(processo)) {
         sheetProc.getRange(i + 1, 23).setValue(JSON.stringify(idsFinais));
         break;
       }
@@ -1921,4 +1942,157 @@ function salvarComponentesDRP(data) {
     Logger.log('salvarComponentesDRP ERROR: ' + err.message);
     return { error: 'Erro ao salvar: ' + err.message };
   }
+}
+
+
+// ============================================================
+// LEVANTAMENTO PCN - Formulário de levantamento para construção do PCN
+// ============================================================
+function gerarTokenLevantamento(data) {
+  const ss = _getSS();
+  let sheet = ss.getSheetByName(ABA_TOKENS);
+  if (!sheet) {
+    sheet = ss.insertSheet(ABA_TOKENS);
+    sheet.appendRow(['Token', 'Área', 'Processo', 'Email', 'Criado em', 'Expira em', 'Usado']);
+  }
+  const token = Utilities.getUuid();
+  const agora = new Date();
+  const expira = new Date(agora.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 dias
+  sheet.appendRow([token, data.area, '_LEV_' + data.processo, data.email || '_link_only_', agora, expira, false]);
+
+  const link = 'https://bia-forte-2025.web.app/pcn-levantamento.html?token=' + token;
+
+  if (data.email && data.email !== '_link_only_') {
+    const assunto = 'PCN — Levantamento de Continuidade: ' + data.processo;
+    const corpo = `Olá,
+
+Precisamos da sua ajuda para levantar informações necessárias à construção do Plano de Continuidade de Negócios (PCN) do processo abaixo:
+
+Área: ${data.area}
+Processo: ${data.processo}
+
+Clique no link abaixo para preencher o formulário (leva cerca de 10-15 minutos):
+${link}
+
+O formulário abrange: operação em contingência, pessoas necessárias, sistemas e recursos, fornecedores, comunicação e recuperação.
+
+Este link é válido por 30 dias.
+
+Atenciosamente,
+Equipe SI - Fortes Tecnologia`;
+    try { GmailApp.sendEmail(data.email, assunto, corpo); } catch(e) { Logger.log('gerarTokenLevantamento EMAIL: ' + e.message); }
+  }
+
+  return { success: true, token, link };
+}
+
+function validarTokenLevantamento(token) {
+  if (!token) return { error: 'Token não informado.' };
+  const sheet = _getSS().getSheetByName(ABA_TOKENS);
+  if (!sheet) return { error: 'Token inválido.' };
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (rows[i][0] === token && String(rows[i][2]).startsWith('_LEV_')) {
+      if (rows[i][6] === true) return { error: 'Este link já foi utilizado.' };
+      if (new Date() > new Date(rows[i][5])) return { error: 'Este link expirou.' };
+      const area = rows[i][1];
+      const processo = String(rows[i][2]).replace('_LEV_', '');
+      // Buscar responsável da área
+      const areas = getAreas();
+      const areaObj = areas.find(a => a.nome === area);
+      return { area, processo, responsavel: areaObj ? areaObj.responsavel : '' };
+    }
+  }
+  return { error: 'Link inválido ou expirado.' };
+}
+
+function salvarLevantamentoPCN(data) {
+  try {
+    const sheet = _getSS().getSheetByName(ABA_TOKENS);
+    if (!sheet) return { error: 'Token inválido.' };
+    const rows = sheet.getDataRange().getValues();
+    let tokenRow = -1, area = '', processo = '';
+    for (let i = 1; i < rows.length; i++) {
+      if (rows[i][0] === data.token && String(rows[i][2]).startsWith('_LEV_')) {
+        if (rows[i][6] === true) return { error: 'Este link já foi utilizado.' };
+        tokenRow = i + 1;
+        area = rows[i][1];
+        processo = String(rows[i][2]).replace('_LEV_', '');
+        break;
+      }
+    }
+    if (tokenRow === -1) return { error: 'Token inválido.' };
+
+    // Montar JSON com todas as respostas
+    const levantamento = {
+      data: new Date().toISOString(),
+      gestor: data.gestor || '',
+      substituto: data.substituto || '',
+      escopo: data.escopo || '',
+      entrega: data.entrega || '',
+      ativacao: data.ativacao || '[]',
+      ativacaoOutro: data.ativacaoOutro || '',
+      semSistema: data.semSistema || '',
+      contingencia: data.contingencia || '',
+      controlesManuais: data.controlesManuais || '',
+      docsContingencia: data.docsContingencia || '',
+      funcoes: data.funcoes || '',
+      substitutos: data.substitutos || '',
+      docExecucao: data.docExecucao || '',
+      sistemas: data.sistemas || '',
+      bancos: data.bancos || '',
+      integracoes: data.integracoes || '',
+      infra: data.infra || '[]',
+      infraOutro: data.infraOutro || '',
+      fornecedores: data.fornecedores || '',
+      comunicacao: data.comunicacao || '',
+      modeloComunicacao: data.modeloComunicacao || '',
+      recuperacao: data.recuperacao || '',
+      reconciliacao: data.reconciliacao || '',
+      reconciliacaoDesc: data.reconciliacaoDesc || '',
+      posRecuperacao: data.posRecuperacao || '',
+      docs: data.docs || '[]',
+      docsLocal: data.docsLocal || ''
+    };
+
+    // Salvar na coluna 34 do processo
+    const sheetProc = _getSS().getSheetByName(ABA_PROCESSOS);
+    const procRows = sheetProc.getDataRange().getValues();
+    for (let i = 1; i < procRows.length; i++) {
+      if (_normalizar(procRows[i][0]) === _normalizar(area) && _normalizar(procRows[i][1]) === _normalizar(processo)) {
+        sheetProc.getRange(i + 1, 34).setValue(JSON.stringify(levantamento));
+        break;
+      }
+    }
+
+    // Marcar token como usado
+    sheet.getRange(tokenRow, 7).setValue(true);
+
+    // Notificar admin
+    try {
+      GmailApp.sendEmail(NOTIFICACAO_EMAIL, 'PCN — Levantamento preenchido: ' + processo,
+        'O gestor do processo "' + processo + '" (Área: ' + area + ') preencheu o formulário de levantamento PCN.\n\nGestor: ' + (data.gestor || '-'));
+    } catch(e) {}
+
+    return { success: true };
+  } catch(err) {
+    Logger.log('salvarLevantamentoPCN ERROR: ' + err.message);
+    return { error: 'Erro ao salvar: ' + err.message };
+  }
+}
+
+
+// ============================================================
+function getLevantamentoPCN(area, processo) {
+  if (!area || !processo) return { error: 'Área e processo são obrigatórios.' };
+  const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
+  const rows = sheet.getDataRange().getValues();
+  for (let i = 1; i < rows.length; i++) {
+    if (_normalizar(rows[i][0]) === _normalizar(area) && _normalizar(rows[i][1]) === _normalizar(processo)) {
+      const raw = rows[i][33] || '';
+      if (!raw) return { error: 'Nenhum levantamento encontrado.' };
+      try { return JSON.parse(raw); } catch(e) { return { error: 'Dados corrompidos.' }; }
+    }
+  }
+  return { error: 'Processo não encontrado.' };
 }
