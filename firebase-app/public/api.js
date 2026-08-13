@@ -13,7 +13,7 @@ const _cache = {};
 // Só use em requisições de LEITURA: repetir um POST duplicaria a escrita,
 // porque o script já executou antes do 404 no redirect.
 // ============================================================
-const API_MAX_TENTATIVAS = 4;
+const API_MAX_TENTATIVAS = 5;
 
 function _apiEsperar(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -23,19 +23,26 @@ async function apiGetJSON(url, tentativas = API_MAX_TENTATIVAS) {
   let ultimoErro;
 
   for (let tentativa = 1; tentativa <= tentativas; tentativa++) {
+    // URL nova a cada tentativa. Repetir a URL idêntica tende a reproduzir a
+    // mesma falha, porque o Google reaproveita o mapeamento do redirect.
+    const alvo = new URL(url);
+    alvo.searchParams.set('_t', Date.now() + '-' + Math.random().toString(36).slice(2, 8));
+
     try {
-      const res = await fetch(url, { redirect: 'follow', cache: 'no-store' });
-      if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + res.statusText);
+      const res = await fetch(alvo, { redirect: 'follow' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
 
       const text = await res.text();
       if (!text || text.startsWith('<!') || text.startsWith('<html')) {
         throw new Error('Resposta HTML em vez de JSON');
       }
-      return JSON.parse(text);
+      const json = JSON.parse(text);
+      if (tentativa > 1) console.info('API: recuperado na tentativa ' + tentativa + '/' + tentativas + '.');
+      return json;
     } catch (err) {
       ultimoErro = err;
       if (tentativa < tentativas) {
-        const espera = 400 * Math.pow(2, tentativa - 1); // 400ms, 800ms, 1600ms
+        const espera = Math.min(300 * Math.pow(2, tentativa - 1), 2400); // 300, 600, 1200, 2400
         console.warn('API: tentativa ' + tentativa + '/' + tentativas + ' falhou (' + err.message + '). Nova tentativa em ' + espera + 'ms.');
         await _apiEsperar(espera);
       }
@@ -57,9 +64,8 @@ const API = {
       const url = new URL(API_URL);
       url.searchParams.append('action', action);
       Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-      url.searchParams.append('_t', Date.now());
 
-      const data = await apiGetJSON(url);
+      const data = await apiGetJSON(url); // apiGetJSON já adiciona o cache-buster
       if (data.error) throw new Error(data.error);
       _cache[cacheKey] = data;
       return data;

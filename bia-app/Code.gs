@@ -401,40 +401,46 @@ function getProcessos() {
   } catch(err) { Logger.log('getProcessos ERROR: %s', err.message); return []; }
 }
 
+// Colunas 1-33 da aba Processos, na ordem em que a linha é escrita.
+// Usado para fazer merge com o valor atual quando o campo não vem no payload
+// (formulários diferentes do sistema enviam subconjuntos diferentes de campos).
+const _CAMPOS_PROCESSO = [
+  'area', 'processo', 'descricao', 'dependencia', 'rto', 'rpo', 'mtpd', 'biaHomologada', 'tier',
+  'bcpStatus', 'descricaoFuncional', 'impactoIndisponibilidade', 'bcpObjetivo', 'bcpEscopo', 'bcpContatos', 'bcpRiscos', 'bcpPreventivas',
+  'drpStatus', 'drpObjetivo', 'drpEscopo', 'drpProcedimentos', 'drpCriterios', 'drpComponentes',
+  'mtd', 'workaround', 'impactoJanela', 'bcpPlanoBProvedores', 'bcpSlas', 'bcpGatilhos', 'bcpReconstituicao', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual'
+];
+// Campos que guardam JSON (arrays/objetos) e precisam de stringify quando vêm como objeto.
+const _CAMPOS_PROCESSO_JSON = new Set(['impactoIndisponibilidade', 'bcpContatos', 'bcpRiscos', 'bcpPreventivas', 'drpComponentes', 'impactoJanela']);
+
+function _valorCampoProcesso(campo, valor) {
+  if (!_CAMPOS_PROCESSO_JSON.has(campo)) return valor || '';
+  if (!valor) return '';
+  return typeof valor === 'string' ? valor : JSON.stringify(valor);
+}
+
 function salvarProcesso(p) {
   const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
-  let impacto = '';
-  if (p.impactoIndisponibilidade) {
-    impacto = typeof p.impactoIndisponibilidade === 'string' ? p.impactoIndisponibilidade : JSON.stringify(p.impactoIndisponibilidade);
-  }
-  let bcpContatos = '';
-  if (p.bcpContatos) {
-    bcpContatos = typeof p.bcpContatos === 'string' ? p.bcpContatos : JSON.stringify(p.bcpContatos);
-  }
-  let bcpRiscos = '';
-  if (p.bcpRiscos) {
-    bcpRiscos = typeof p.bcpRiscos === 'string' ? p.bcpRiscos : JSON.stringify(p.bcpRiscos);
-  }
-  let bcpPreventivas = '';
-  if (p.bcpPreventivas) {
-    bcpPreventivas = typeof p.bcpPreventivas === 'string' ? p.bcpPreventivas : JSON.stringify(p.bcpPreventivas);
-  }
-  let drpComponentes = '';
-  if (p.drpComponentes) {
-    drpComponentes = typeof p.drpComponentes === 'string' ? p.drpComponentes : JSON.stringify(p.drpComponentes);
-  }
-  let impactoJanela = '';
-  if (p.impactoJanela) {
-    impactoJanela = typeof p.impactoJanela === 'string' ? p.impactoJanela : JSON.stringify(p.impactoJanela);
-  }
-  const row = [
-    p.area, p.processo, p.descricao, p.dependencia, p.rto || '', p.rpo || '', p.mtpd || '', p.biaHomologada || '', '',
-    p.bcpStatus || '', p.descricaoFuncional || '', impacto, p.bcpObjetivo || '', p.bcpEscopo || '', bcpContatos, bcpRiscos, bcpPreventivas,
-    p.drpStatus || '', p.drpObjetivo || '', p.drpEscopo || '', p.drpProcedimentos || '', p.drpCriterios || '', drpComponentes,
-    p.mtd || '', p.workaround || '', impactoJanela, p.bcpPlanoBProvedores || '', p.bcpSlas || '', p.bcpGatilhos || '', p.bcpReconstituicao || '', p.bcpPapeisCrise || '', p.pcnSalvo || '', p.tierManual || ''
-  ];
+
+  // Linha existente (para merge). Campos ausentes no payload mantêm o valor
+  // já salvo, em vez de serem apagados. Isso evita perder PCN gerado,
+  // avaliação de riscos do BCP, dados do DRP etc. ao editar o processo
+  // por um formulário que não conhece todos os campos.
+  let linhaAtual = null;
   if (p.id) {
-    sheet.getRange(p.id, 1, 1, 33).setValues([row]);
+    const valoresAtuais = sheet.getRange(Number(p.id), 1, 1, _CAMPOS_PROCESSO.length).getValues()[0];
+    linhaAtual = valoresAtuais;
+  }
+
+  const row = _CAMPOS_PROCESSO.map((campo, idx) => {
+    if (Object.prototype.hasOwnProperty.call(p, campo) && p[campo] !== undefined) {
+      return _valorCampoProcesso(campo, p[campo]);
+    }
+    return linhaAtual ? linhaAtual[idx] : '';
+  });
+
+  if (p.id) {
+    sheet.getRange(Number(p.id), 1, 1, row.length).setValues([row]);
     return { success: true, id: Number(p.id) };
   } else {
     sheet.appendRow(row);
