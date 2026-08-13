@@ -30,11 +30,25 @@ const PERGUNTAS_DEFAULT = [
 // ============================================================
 function doGet(e) {
   try {
+    // Garante que e.parameter existe mesmo em execução manual pelo editor
+    const p = (e && e.parameter) ? e.parameter : {};
+    const action = p.action || null;
+    const area = p.area;
+
+    // Ping de diagnóstico: não toca na planilha, valida apenas a implantação
+    if (action === 'ping') {
+      return ContentService
+        .createTextOutput(JSON.stringify({
+          ok: true,
+          action: 'ping',
+          hora: new Date().toISOString(),
+          planilha: _getSSInfo()
+        }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
     const ss = _getSS();
     if (!ss.getSheetByName(ABA_PERGUNTAS)) setupInicial();
-
-    const action = e.parameter.action;
-    const area = e.parameter.area;
 
     let result = {};
     switch(action) {
@@ -54,16 +68,16 @@ function doGet(e) {
         result = getResumoRespostas();
         break;
       case 'validarToken':
-        result = validarToken(e.parameter.token);
+        result = validarToken(p.token);
         break;
       case 'validarTokenArea':
-        result = validarTokenArea(e.parameter.token);
+        result = validarTokenArea(p.token);
         break;
       case 'getConfigRespostas':
         result = getConfigRespostas();
         break;
       case 'getPerfil':
-        result = getPerfil(e.parameter.email);
+        result = getPerfil(p.email);
         break;
       case 'getDependencias':
         result = getDependencias();
@@ -72,19 +86,19 @@ function doGet(e) {
         result = getComponentes();
         break;
       case 'validarTokenBIA':
-        result = validarTokenBIA(e.parameter.token);
+        result = validarTokenBIA(p.token);
         break;
       case 'validarTokenDRP':
-        result = validarTokenDRP(e.parameter.token);
+        result = validarTokenDRP(p.token);
         break;
       case 'validarTokenLevantamento':
-        result = validarTokenLevantamento(e.parameter.token);
+        result = validarTokenLevantamento(p.token);
         break;
       case 'getLevantamentoPCN':
-        result = getLevantamentoPCN(e.parameter.area, e.parameter.processo);
+        result = getLevantamentoPCN(p.area, p.processo);
         break;
       default:
-        result = { error: 'Action não especificada' };
+        result = { error: 'Action inválida ou não informada', actionRecebida: action };
     }
 
     return ContentService
@@ -104,11 +118,14 @@ function doGet(e) {
 // ============================================================
 function doPost(e) {
   try {
+    // Garante que "e" existe mesmo em execução manual pelo editor
+    e = e || {};
+
     // Log completo do que chegou
     Logger.log('doPost chamado');
     Logger.log('e.parameter: ' + JSON.stringify(e.parameter));
     Logger.log('e.postData: ' + JSON.stringify(e.postData));
-    
+
     let action, data;
     
     // Tentar pegar action do parameter (form-urlencoded)
@@ -1002,7 +1019,30 @@ function excluirConfigResposta(data) {
 // ============================================================
 // AUXILIARES
 // ============================================================
-function _getSS() { return SpreadsheetApp.getActiveSpreadsheet(); }
+// Obtém a planilha. Funciona em script container-bound (getActiveSpreadsheet)
+// e também em script standalone, caso a propriedade SPREADSHEET_ID esteja definida
+// em Configurações do projeto → Propriedades do script.
+function _getSS() {
+  const id = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+  if (id) return SpreadsheetApp.openById(id);
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    throw new Error('Planilha não encontrada. Este script não está vinculado a uma planilha. ' +
+      'Defina a propriedade de script SPREADSHEET_ID com o ID da planilha.');
+  }
+  return ss;
+}
+
+// Info da planilha para diagnóstico (nunca lança exceção)
+function _getSSInfo() {
+  try {
+    const ss = _getSS();
+    return { ok: true, id: ss.getId(), nome: ss.getName() };
+  } catch (err) {
+    return { ok: false, erro: err.message };
+  }
+}
 
 function _normalizar(str) { return String(str || '').trim().toLowerCase().replace(/\s+/g, ' '); }
 

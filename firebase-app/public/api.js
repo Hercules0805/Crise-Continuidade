@@ -4,6 +4,50 @@
 
 const _cache = {};
 
+// ============================================================
+// FETCH RESILIENTE
+// O Apps Script responde /exec com um 302 para
+// script.googleusercontent.com/macros/echo. Esse segundo request falha de
+// forma intermitente (404 / 302 sem Location), o que derrubava a leitura de
+// perfil e o carregamento das telas. A correção é tentar novamente com backoff.
+// Só use em requisições de LEITURA: repetir um POST duplicaria a escrita,
+// porque o script já executou antes do 404 no redirect.
+// ============================================================
+const API_MAX_TENTATIVAS = 4;
+
+function _apiEsperar(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function apiGetJSON(url, tentativas = API_MAX_TENTATIVAS) {
+  let ultimoErro;
+
+  for (let tentativa = 1; tentativa <= tentativas; tentativa++) {
+    try {
+      const res = await fetch(url, { redirect: 'follow', cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + res.statusText);
+
+      const text = await res.text();
+      if (!text || text.startsWith('<!') || text.startsWith('<html')) {
+        throw new Error('Resposta HTML em vez de JSON');
+      }
+      return JSON.parse(text);
+    } catch (err) {
+      ultimoErro = err;
+      if (tentativa < tentativas) {
+        const espera = 400 * Math.pow(2, tentativa - 1); // 400ms, 800ms, 1600ms
+        console.warn('API: tentativa ' + tentativa + '/' + tentativas + ' falhou (' + err.message + '). Nova tentativa em ' + espera + 'ms.');
+        await _apiEsperar(espera);
+      }
+    }
+  }
+
+  throw new Error('Falha ao comunicar com a API após ' + tentativas + ' tentativas: ' + ultimoErro.message);
+}
+
+// Disponível para o index.html, que busca o perfil antes de carregar o app
+window.apiGetJSON = apiGetJSON;
+
 const API = {
   async get(action, params = {}) {
     try {
@@ -13,12 +57,9 @@ const API = {
       const url = new URL(API_URL);
       url.searchParams.append('action', action);
       Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-      const res = await fetch(url, { redirect: 'follow' });
-      const text = await res.text();
-      if (text.startsWith('<!') || text.startsWith('<html')) {
-        throw new Error('Resposta inválida do servidor. Tente recarregar a página (Ctrl+Shift+R).');
-      }
-      const data = JSON.parse(text);
+      url.searchParams.append('_t', Date.now());
+
+      const data = await apiGetJSON(url);
       if (data.error) throw new Error(data.error);
       _cache[cacheKey] = data;
       return data;
@@ -60,6 +101,14 @@ const API = {
       clearTimeout(timeoutId);
 
       const text = await res.text();
+
+      // O redirect do Apps Script pode falhar depois de a gravação já ter
+      // ocorrido. Não repetimos automaticamente para não duplicar o registro.
+      if (!res.ok || !text || text.startsWith('<!') || text.startsWith('<html')) {
+        throw new Error('O servidor não retornou a confirmação (HTTP ' + res.status + '). ' +
+          'A operação pode ter sido gravada. Recarregue a página e confira antes de repetir.');
+      }
+
       const data = JSON.parse(text);
       if (data.error) throw new Error(data.error);
       return data;
