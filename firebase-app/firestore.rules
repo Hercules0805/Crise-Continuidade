@@ -1,0 +1,115 @@
+rules_version = '2';
+
+// Regras de segurança do Firestore — projeto bia-forte-2025.
+//
+// Modelo de perfis (espelha o controle atual do sistema):
+//   - Acesso exige usuário autenticado com e-mail @fortestecnologia.com.br.
+//   - Leitura de todas as coleções de dados: qualquer usuário do domínio.
+//   - Escrita em catálogos e configurações (perguntas, areas, dependencias,
+//     componentes, config_respostas, config_perfis): somente admin.
+//   - Escrita em processos e respostas_bia: admin, ou gestor da própria área.
+//   - Perfil (admin/gestor) vem de config_perfis/{email}.
+//   - tokens de avaliação externa (sem login) são tratados na Task 8; por ora
+//     só admin escreve e usuários do domínio leem.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---- Helpers ----
+    function isCorpUser() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.matches('.*@fortestecnologia[.]com[.]br$');
+    }
+
+    function emailKey() {
+      return request.auth.token.email.lower();
+    }
+
+    function perfilDoc() {
+      return get(/databases/$(database)/documents/config_perfis/$(emailKey()));
+    }
+
+    function hasPerfil() {
+      return exists(/databases/$(database)/documents/config_perfis/$(emailKey()));
+    }
+
+    function isAdmin() {
+      return isCorpUser() && hasPerfil() && perfilDoc().data.perfil == 'admin';
+    }
+
+    // Área vinculada ao gestor: em config_perfis (campo area) OU, se ausente,
+    // pela área cujo e-mail de responsável é o do usuário (resolvido no cliente
+    // e replicado aqui via config_perfis.area quando disponível).
+    function gestorArea() {
+      return hasPerfil() && ('area' in perfilDoc().data) ? perfilDoc().data.area : null;
+    }
+
+    function isGestorDaArea(area) {
+      return isCorpUser() && gestorArea() != null && gestorArea() == area;
+    }
+
+    // ---- Catálogos e configurações: leitura p/ domínio, escrita p/ admin ----
+    match /perguntas/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin();
+    }
+
+    match /areas/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin();
+    }
+
+    match /dependencias/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin();
+    }
+
+    match /componentes/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin();
+    }
+
+    match /config_respostas/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin();
+    }
+
+    match /config_perfis/{email} {
+      // Qualquer usuário do domínio lê (necessário para resolver o próprio perfil);
+      // apenas admin altera perfis.
+      allow read: if isCorpUser();
+      allow write: if isAdmin();
+    }
+
+    // ---- Dados operacionais: admin (tudo) ou gestor (própria área) ----
+    match /processos/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin()
+        || isGestorDaArea(request.resource.data.area)
+        || (resource != null && isGestorDaArea(resource.data.area));
+    }
+
+    match /respostas_bia/{id} {
+      allow read: if isCorpUser();
+      allow create: if isAdmin() || isGestorDaArea(request.resource.data.area);
+      // Respostas são registros históricos: não permitir update/delete pelo app.
+      allow update, delete: if isAdmin();
+    }
+
+    // ---- Tokens ----
+    // Leitura p/ domínio (o app admin lista/gera). Escrita p/ admin.
+    // As páginas públicas (sem login) NÃO acessam tokens diretamente: elas
+    // chamam a Cloud Function tokenApi, que usa o Admin SDK (ignora as rules)
+    // para validar o token e gravar os dados. Assim, escrita anônima permanece
+    // negada aqui.
+    match /tokens/{token} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin();
+    }
+
+    // Nega tudo que não casou acima.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

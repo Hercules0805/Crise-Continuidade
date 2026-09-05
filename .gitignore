@@ -34,3 +34,13 @@ Thumbs.db
 # Build outputs
 dist/
 build/
+
+# Migração Firestore (dados exportados e credenciais)
+migracao/export/
+migracao/backup-pcn/
+migracao/service-account.json
+migracao/.env
+
+# Cloud Functions
+firebase-app/functions/node_modules/
+firebase-app/tests/node_modules/
