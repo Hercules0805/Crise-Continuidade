@@ -80,7 +80,7 @@
   </div>
 
   <div class="toast" id="toast"></div>
-  <script src="config.js"></script>
+  <script src="config.js?v=6"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
@@ -96,7 +96,7 @@
     async function init() {
       if (!token) return mostrarErro('Link inválido. Nenhum token encontrado.');
       try {
-        const url = new URL(API_URL);
+        const url = new URL(TOKEN_API_URL);
         url.searchParams.append('action', 'validarToken');
         url.searchParams.append('token', token);
         const res = await fetch(url);
@@ -183,13 +183,11 @@
       });
       if (!todasRespondidas) return showToast('Por favor, responda todas as perguntas.', '#e65100');
       try {
-        const formData = new FormData();
-        formData.append('action', 'salvarRespostasToken');
-        formData.append('token', token);
-        formData.append('nome', nome);
-        formData.append('cargo', cargo);
-        formData.append('scores', JSON.stringify(scores));
-        const res = await fetch(API_URL, { method: 'POST', body: formData });
+        const res = await fetch(TOKEN_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ action: 'salvarRespostasToken', token, nome, cargo, scores: JSON.stringify(scores) }),
+        });
         const result = await res.json();
         if (result.error) throw new Error(result.error);
         document.getElementById('estado-form').style.display = 'none';

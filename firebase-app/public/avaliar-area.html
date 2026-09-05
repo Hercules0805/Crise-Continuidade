@@ -96,7 +96,7 @@
   </div>
 
   <div class="toast" id="toast"></div>
-  <script src="config.js"></script>
+  <script src="config.js?v=6"></script>
   <script>
     const params = new URLSearchParams(window.location.search);
     const token = params.get('token');
@@ -116,7 +116,7 @@
     async function init() {
       if (!token) return mostrarErro('Link inválido.');
       try {
-        const url = new URL(API_URL);
+        const url = new URL(TOKEN_API_URL);
         url.searchParams.append('action', 'validarTokenArea');
         url.searchParams.append('token', token);
         const res = await fetch(url);
@@ -128,7 +128,7 @@
 
         // Carregar config de respostas
         try {
-          const urlCfg = new URL(API_URL);
+          const urlCfg = new URL(TOKEN_API_URL);
           urlCfg.searchParams.append('action', 'getConfigRespostas');
           const resCfg = await fetch(urlCfg);
           configRespostas = await resCfg.json();
@@ -280,13 +280,17 @@
 
       try {
         const payload = processos.map(p => ({ area: p.area, processo: p.processo, scores: respostas[p.processo] || {} }));
-        const formData = new FormData();
-        formData.append('action', 'salvarRespostasArea');
-        formData.append('token', token);
-        formData.append('nome', nome);
-        formData.append('cargo', document.getElementById('respondente-cargo').value.trim());
-        formData.append('respostas', JSON.stringify(payload));
-        const res = await fetch(API_URL, { method: 'POST', body: formData });
+        const res = await fetch(TOKEN_API_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({
+            action: 'salvarRespostasArea',
+            token,
+            nome,
+            cargo: document.getElementById('respondente-cargo').value.trim(),
+            respostas: JSON.stringify(payload),
+          }),
+        });
         const result = await res.json();
         if (result.error) throw new Error(result.error);
         document.getElementById('estado-form').style.display = 'none';

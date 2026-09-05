@@ -46,7 +46,7 @@
   <div class="container">
     <div id="content"><div class="loading">⏳ Validando acesso...</div></div>
   </div>
-  <script src="config.js?v=3"></script>
+  <script src="config.js?v=6"></script>
   <script>
     var TOKEN = '', INFO = {};
 
@@ -55,7 +55,7 @@
       TOKEN = params.get('token');
       if (!TOKEN) return showError('Link inválido.');
       try {
-        var url = new URL(API_URL);
+        var url = new URL(TOKEN_API_URL);
         url.searchParams.append('action', 'validarTokenLevantamento');
         url.searchParams.append('token', TOKEN);
         var res = await fetch(url, { redirect: 'follow' });
@@ -212,7 +212,7 @@
         docsLocal: document.getElementById('f_docs_local').value
       };
       try {
-        var res = await fetch(API_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=UTF-8'}, body:JSON.stringify(payload), redirect:'follow' });
+        var res = await fetch(TOKEN_API_URL, { method:'POST', headers:{'Content-Type':'text/plain;charset=UTF-8'}, body:JSON.stringify(payload), redirect:'follow' });
         var data = JSON.parse(await res.text());
         if (data.error) throw new Error(data.error);
         document.getElementById('content').innerHTML = '<div class="card"><div style="text-align:center;padding:40px;"><div style="font-size:3em;margin-bottom:12px;">✅</div><h2 style="color:#2e7d32;">Levantamento enviado!</h2><p style="color:#666;margin-top:8px;">Obrigado. A equipe de SI utilizará suas respostas para construir o PCN.</p></div></div>';
