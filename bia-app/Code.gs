@@ -654,7 +654,7 @@ function gerarRelatorioArea(data) {
     const email = data.email;
     if (!area || !email) return { error: 'Área e e-mail são obrigatórios.' };
 
-    const processos = getProcessos().filter(p => p.area === area);
+    const processos = fsGetProcessosPorArea(area);
     if (processos.length === 0) return { error: 'Nenhum processo encontrado para esta área.' };
 
     const agora = new Date();
@@ -736,6 +736,7 @@ function gerarTokenArea(data) {
   const expira = new Date(agora.getTime() + 7 * 24 * 60 * 60 * 1000);
   // Gravar token com processo vazio para indicar que é de área inteira
   sheet.appendRow([token, data.area, '_AREA_', data.email, agora, expira, false]);
+  fsGravarToken(token, data.area, '_AREA_', data.email, agora, expira);
 
   const link = 'https://bia-forte-2025.web.app/avaliar-area.html?token=' + token;
   const assunto = 'BIA — Avaliação de Processos: ' + data.area;
@@ -793,6 +794,7 @@ function gerarTokenAvaliacao(data) {
   const agora = new Date();
   const expira = new Date(agora.getTime() + 7 * 24 * 60 * 60 * 1000);
   sheet.appendRow([token, data.area, data.processo, data.email, agora, expira, false]);
+  fsGravarToken(token, data.area, data.processo, data.email, agora, expira);
 
   const link = 'https://bia-forte-2025.web.app/avaliar.html?token=' + token;
   const assunto = 'BIA — Avaliação de Processo: ' + data.processo;
@@ -1281,17 +1283,18 @@ function gerarPCN(data) {
   const apiKey = PropertiesService.getScriptProperties().getProperty('GEMINI_API_KEY');
   if (!apiKey) return { error: 'API Key do Gemini não configurada. Configure em Propriedades do Script.' };
   
-  const processoId = Number(data.id);
+  const processoId = data.id ? String(data.id) : '';
   if (!processoId) return { error: 'ID do processo não informado.' };
-  
-  // Buscar dados completos do processo
-  const processos = getProcessos();
-  const p = processos.find(proc => proc.id === processoId);
+
+  // Buscar dados completos do processo no Firestore (docId = id).
+  const p = fsGetDoc('processos', processoId);
   if (!p) return { error: 'Processo não encontrado.' };
-  
-  // Buscar dependências e componentes
-  const dependencias = getDependencias();
-  const componentes = getComponentes();
+  // score não é campo do processo no Firestore; deriva da última resposta.
+  if (p.score === undefined || p.score === null) p.score = _fsScoreProcesso(p.area, p.processo);
+
+  // Buscar dependências e componentes do catálogo (Firestore).
+  const dependencias = fsGetAll('dependencias');
+  const componentes = fsGetAll('componentes');
   
   // Montar contexto das dependências do processo
   const depsNomes = (p.dependencia || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -1492,50 +1495,29 @@ function salvarPCNProcesso(data) {
     let pcnHtml = data.pcnHtml || '';
     const area = data.area || '';
     const processo = data.processo || '';
-    const idFallback = Number(data.id);
-    
-    if (!area && !processo && !idFallback) return { error: 'Dados do processo não informados.' };
-    
-    // Limitar tamanho do HTML
+    const idExplicito = data.id ? String(data.id) : '';
+
+    if (!area && !processo && !idExplicito) return { error: 'Dados do processo não informados.' };
+
+    // Limitar tamanho do HTML (mantém o comportamento anterior).
     if (pcnHtml.length > 45000) {
       pcnHtml = pcnHtml.substring(0, 45000) + '<!-- truncado -->';
     }
-    
-    const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
-    if (!sheet) return { error: 'Aba de processos não encontrada.' };
-    
-    // Buscar processo pela chave área+nome (mais seguro que por ID de linha)
-    let procRow = -1;
-    if (area && processo) {
-      const rows = sheet.getDataRange().getValues();
-      for (let i = 1; i < rows.length; i++) {
-        if (_normalizar(rows[i][0]) === _normalizar(area) && _normalizar(rows[i][1]) === _normalizar(processo)) {
-          procRow = i + 1;
-          break;
-        }
-      }
-    }
-    // Fallback para ID se não encontrou por chave
-    if (procRow === -1 && idFallback) {
-      procRow = idFallback;
-    }
-    if (procRow === -1) return { error: 'Processo não encontrado.' };
-    
-    // Salvar apenas a versão mais recente na planilha (1 versão = menor uso de células)
+
+    // Localizar o processo no Firestore (por id explícito ou área+nome).
+    let docId = idExplicito;
+    if (!docId && area && processo) docId = fsAcharProcessoId(area, processo);
+    if (!docId) return { error: 'Processo não encontrado.' };
+
     const novaVersao = {
       versao: 1,
       data: new Date().toISOString(),
       autor: Session.getActiveUser().getEmail() || 'sistema',
       html: pcnHtml
     };
-    
-    // Verificar tamanho — truncar se necessário
-    const jsonStr = JSON.stringify([novaVersao]);
-    if (jsonStr.length > 50000) {
-      novaVersao.html = pcnHtml.substring(0, 45000) + '<!-- truncado -->';
-    }
-    
-    sheet.getRange(procRow, 32).setValue(JSON.stringify([novaVersao]));
+
+    // Grava pcnSalvo como string JSON (mesmo formato consumido pelo front).
+    fsSet('processos', docId, { pcnSalvo: JSON.stringify([novaVersao]) });
     return { success: true, versao: 1, totalVersoes: 1 };
   } catch(err) {
     Logger.log('salvarPCNProcesso ERROR: ' + err.message);
@@ -1565,27 +1547,14 @@ function excluirPCNProcesso(data) {
   try {
     const area = data.area || '';
     const processo = data.processo || '';
-    const idFallback = Number(data.id);
-    
-    const sheet = _getSS().getSheetByName(ABA_PROCESSOS);
-    if (!sheet) return { error: 'Aba de processos não encontrada.' };
-    
-    // Buscar processo pela chave área+nome
-    let procRow = -1;
-    if (area && processo) {
-      const rows = sheet.getDataRange().getValues();
-      for (let i = 1; i < rows.length; i++) {
-        if (_normalizar(rows[i][0]) === _normalizar(area) && _normalizar(rows[i][1]) === _normalizar(processo)) {
-          procRow = i + 1;
-          break;
-        }
-      }
-    }
-    if (procRow === -1 && idFallback) procRow = idFallback;
-    if (procRow === -1) return { error: 'Processo não encontrado.' };
-    
-    // Limpar coluna 32 (pcnSalvo)
-    sheet.getRange(procRow, 32).setValue('');
+    const idExplicito = data.id ? String(data.id) : '';
+
+    let docId = idExplicito;
+    if (!docId && area && processo) docId = fsAcharProcessoId(area, processo);
+    if (!docId) return { error: 'Processo não encontrado.' };
+
+    // Limpar pcnSalvo no Firestore.
+    fsSet('processos', docId, { pcnSalvo: '' });
     return { success: true };
   } catch(err) {
     Logger.log('excluirPCNProcesso ERROR: ' + err.message);
@@ -1609,6 +1578,7 @@ function gerarTokenBIA(data) {
   const agora = new Date();
   const expira = new Date(agora.getTime() + 14 * 24 * 60 * 60 * 1000); // 14 dias
   sheet.appendRow([token, data.area, '_BIA_' + data.processo, data.email, agora, expira, false]);
+  fsGravarToken(token, data.area, '_BIA_' + data.processo, data.email, agora, expira);
 
   const link = 'https://bia-forte-2025.web.app/bia-dependencias.html?token=' + token;
 
@@ -1833,6 +1803,7 @@ function gerarTokenDRP(data) {
   const agora = new Date();
   const expira = new Date(agora.getTime() + 14 * 24 * 60 * 60 * 1000);
   sheet.appendRow([token, data.area, '_DRP_' + data.processo, data.email, agora, expira, false]);
+  fsGravarToken(token, data.area, '_DRP_' + data.processo, data.email, agora, expira);
 
   const link = 'https://bia-forte-2025.web.app/drp-componentes.html?token=' + token;
 
@@ -2005,6 +1976,7 @@ function gerarTokenLevantamento(data) {
   const agora = new Date();
   const expira = new Date(agora.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 dias
   sheet.appendRow([token, data.area, '_LEV_' + data.processo, data.email || '_link_only_', agora, expira, false]);
+  fsGravarToken(token, data.area, '_LEV_' + data.processo, data.email || '_link_only_', agora, expira);
 
   const link = 'https://bia-forte-2025.web.app/pcn-levantamento.html?token=' + token;
 

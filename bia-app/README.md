@@ -82,3 +82,48 @@ Google Sheets ("Cobertura BIA")
 Antes de usar, verifique se os **nomes dos critérios** no `Code.gs` correspondem exatamente aos cabeçalhos das colunas M-V da sua planilha. Ajuste o array `CRITERIOS` se necessário.
 
 Se as colunas de Score e Tier na sua planilha tiverem nomes diferentes de "Score" e "Tier", ajuste a lógica em `salvarRespostas()`.
+
+---
+
+## Integração com Firestore (pós-migração)
+
+A persistência do sistema foi migrada da planilha para o **Firestore** (projeto
+`bia-forte-2025`). O Apps Script permanece apenas para funções residuais que
+não são "banco": geração de PCN (Gemini), geração/e-mail de tokens e relatório
+de área. Essas funções agora leem/escrevem no Firestore via REST
+(`Firestore.gs`), não mais na planilha.
+
+### Configuração da service account (Propriedades do Script)
+
+Em **Configurações do projeto → Propriedades do script**, defina:
+
+| Propriedade | Valor |
+|-------------|-------|
+| `FIREBASE_PROJECT_ID` | `bia-forte-2025` (opcional; é o default) |
+| `FIREBASE_SA_CLIENT_EMAIL` | `client_email` do JSON da service account |
+| `FIREBASE_SA_PRIVATE_KEY` | `private_key` do JSON (com `\n` literais) |
+
+A service account precisa do papel **Cloud Datastore User** (ou Firebase Admin)
+no projeto GCP. Gere a chave em: Console GCP → IAM → Contas de serviço → Criar
+chave (JSON).
+
+### O que `Firestore.gs` faz
+
+- `fsGetAll(col)`, `fsGetDoc(col, id)`, `fsSet(col, id, data)`, `fsAdd(col, data)`
+  — CRUD via Firestore REST com autenticação por JWT (token em cache de 55 min).
+- `fsGravarToken(...)` — grava o token no Firestore (docId = token) para que a
+  Cloud Function `tokenApi` consiga validá-lo. Chamado por cada gerador de token.
+- `fsAcharProcessoId`, `fsGetProcessosPorArea`, `_fsScoreProcesso` — leitura de
+  processos/scores para PCN e relatório.
+
+### Deploy do Apps Script
+
+Após alterar `Code.gs`/`Firestore.gs`:
+
+```
+cd bia-app
+clasp push --force
+```
+
+Depois, publique uma nova versão em script.google.com:
+**Implantar → Gerenciar implantações → editar → Nova versão → Implantar**.
