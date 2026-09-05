@@ -1,0 +1,25 @@
+{
+  "name": "bia-migracao-firestore",
+  "version": "1.0.0",
+  "private": true,
+  "description": "ETL: exporta dados do Google Sheets e importa no Firestore (projeto bia-forte-2025)",
+  "type": "commonjs",
+  "scripts": {
+    "export": "ts-node src/export-sheets.ts",
+    "backup-pcn": "ts-node src/backup-pcn.ts",
+    "import": "ts-node src/import-firestore.ts",
+    "verify": "ts-node src/verify.ts",
+    "migrar": "ts-node src/migrar.ts",
+    "test": "ts-node src/__test-transform.ts && ts-node src/__test-tier.ts"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "firebase-admin": "^13.0.2",
+    "googleapis": "^144.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}
