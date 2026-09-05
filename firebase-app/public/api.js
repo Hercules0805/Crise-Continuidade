@@ -1,142 +1,527 @@
 // ============================================================
-// API CLIENT - Comunicação com Google Apps Script
+// API CLIENT - Firestore (SDK no navegador)
+//
+// Substitui o acesso ao Google Apps Script/Sheets pela leitura/escrita direta
+// no Firestore do projeto bia-forte-2025. Mantém EXATAMENTE a mesma interface
+// pública (objeto API) que o app.js e as telas já consomem, de modo que o
+// restante do front não precise mudar.
+//
+// Ações de dados  -> Firestore.
+// Ações residuais (PCN/Drive, e-mail, Gemini, tokens externos) -> Apps Script
+// via o cliente legado (api-legacy.js), mantido para essas rotas.
 // ============================================================
 
+// ------------------------------------------------------------
+// Firestore
+// ------------------------------------------------------------
+if (typeof firebase !== 'undefined' && typeof firebase.firestore === 'function') {
+  if (!firebase.apps || !firebase.apps.length) {
+    firebase.initializeApp(FIREBASE_CONFIG);
+  }
+}
+const _db = firebase.firestore();
+
+const COLLECTION = {
+  perguntas: 'perguntas',
+  areas: 'areas',
+  processos: 'processos',
+  respostas: 'respostas_bia',
+  tokens: 'tokens',
+  configRespostas: 'config_respostas',
+  configPerfis: 'config_perfis',
+  dependencias: 'dependencias',
+  componentes: 'componentes',
+};
+
+// ------------------------------------------------------------
+// Cache simples (mesma semântica do cliente antigo)
+// ------------------------------------------------------------
 const _cache = {};
 
-// ============================================================
-// FETCH RESILIENTE
-// O Apps Script responde /exec com um 302 para
-// script.googleusercontent.com/macros/echo. Esse segundo request falha de
-// forma intermitente (404 / 302 sem Location), o que derrubava a leitura de
-// perfil e o carregamento das telas. A correção é tentar novamente com backoff.
-// Só use em requisições de LEITURA: repetir um POST duplicaria a escrita,
-// porque o script já executou antes do 404 no redirect.
-// ============================================================
-const API_MAX_TENTATIVAS = 5;
-
-function _apiEsperar(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+// ------------------------------------------------------------
+// Helpers de domínio (espelham bia-app/Code.gs)
+// ------------------------------------------------------------
+function _calcularTier(score) {
+  if (score >= 12) return 'Tier 1 (Crítico)';
+  if (score >= 6) return 'Tier 2 (Essencial)';
+  return 'Tier 3 (Suporte)';
 }
 
-async function apiGetJSON(url, tentativas = API_MAX_TENTATIVAS) {
-  let ultimoErro;
+function _calcularRTO(tier) {
+  if (tier === 'Tier 1 (Crítico)') return '< 4 horas';
+  if (tier === 'Tier 2 (Essencial)') return '4h a 24 horas';
+  return '> 24 horas';
+}
 
-  for (let tentativa = 1; tentativa <= tentativas; tentativa++) {
-    // URL nova a cada tentativa. Repetir a URL idêntica tende a reproduzir a
-    // mesma falha, porque o Google reaproveita o mapeamento do redirect.
-    const alvo = new URL(url);
-    alvo.searchParams.set('_t', Date.now() + '-' + Math.random().toString(36).slice(2, 8));
+function _norm(str) {
+  return String(str || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
 
-    try {
-      const res = await fetch(alvo, { redirect: 'follow' });
-      if (!res.ok) throw new Error('HTTP ' + res.status);
+// docId estável para processos (mesma regra do ETL em migracao/src/transform.ts)
+function _slug(s) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 200);
+}
+function _processoKey(area, processo) {
+  return `${_slug(area)}__${_slug(processo)}`;
+}
 
-      const text = await res.text();
-      if (!text || text.startsWith('<!') || text.startsWith('<html')) {
-        throw new Error('Resposta HTML em vez de JSON');
-      }
-      const json = JSON.parse(text);
-      if (tentativa > 1) console.info('API: recuperado na tentativa ' + tentativa + '/' + tentativas + '.');
-      return json;
-    } catch (err) {
-      ultimoErro = err;
-      if (tentativa < tentativas) {
-        const espera = Math.min(300 * Math.pow(2, tentativa - 1), 2400); // 300, 600, 1200, 2400
-        console.warn('API: tentativa ' + tentativa + '/' + tentativas + ' falhou (' + err.message + '). Nova tentativa em ' + espera + 'ms.');
-        await _apiEsperar(espera);
+async function _getAll(collection) {
+  const snap = await _db.collection(collection).get();
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+}
+
+// ------------------------------------------------------------
+// Leitura das coleções -> mesmo shape que o front espera
+// ------------------------------------------------------------
+async function _lerPerguntas() {
+  const docs = await _getAll(COLLECTION.perguntas);
+  return docs
+    .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
+    .map((d) => ({
+      id: d.id,
+      categoria: d.categoria || '',
+      pergunta: d.pergunta || '',
+      descricao: d.descricao || '',
+      ativa: d.ativa !== false,
+    }));
+}
+
+async function _lerAreas() {
+  const docs = await _getAll(COLLECTION.areas);
+  return docs.map((d) => ({
+    id: d.id,
+    nome: d.nome || '',
+    responsavel: d.responsavel || '',
+    email: d.email || '',
+    solucao: d.solucao || '',
+  }));
+}
+
+// Resolve perfil (admin/gestor) e área do usuário.
+// - perfil: doc config_perfis/{emailLower}; default 'gestor' se ausente.
+// - área do gestor: área cujo campo email casa com o do usuário (mesma regra
+//   do getPerfil antigo). Persiste o campo `area` em config_perfis para que as
+//   Security Rules (que leem config_perfis.area) autorizem o gestor.
+async function _lerPerfil(email) {
+  const emailLower = String(email || '').trim().toLowerCase();
+  if (!emailLower) return { perfil: 'gestor', area: null };
+
+  const perfilSnap = await _db.collection(COLLECTION.configPerfis).doc(emailLower).get();
+  const perfilData = perfilSnap.exists ? perfilSnap.data() : null;
+  const perfil = perfilData && perfilData.perfil ? String(perfilData.perfil).trim().toLowerCase() : 'gestor';
+
+  if (perfil === 'admin') {
+    return { perfil: 'admin', area: null };
+  }
+
+  // Gestor: área já registrada no perfil, senão resolve pela aba Áreas (email).
+  let area = perfilData && perfilData.area ? String(perfilData.area).trim() : null;
+  if (!area) {
+    const areas = await _getAll(COLLECTION.areas);
+    const match = areas.find((a) => String(a.email || '').trim().toLowerCase() === emailLower);
+    if (match) area = String(match.nome).trim();
+
+    // Persistir a área resolvida no perfil (necessário para as rules do gestor).
+    if (area) {
+      try {
+        await _db.collection(COLLECTION.configPerfis).doc(emailLower).set(
+          { email: emailLower, perfil: 'gestor', area },
+          { merge: true }
+        );
+      } catch (e) {
+        // Sem permissão de escrita (rules) não é fatal para a leitura do perfil.
+        console.warn('Não foi possível persistir área do perfil:', e.message);
       }
     }
   }
 
-  throw new Error('Falha ao comunicar com a API após ' + tentativas + ' tentativas: ' + ultimoErro.message);
+  return { perfil: 'gestor', area: area || null };
 }
 
-// Disponível para o index.html, que busca o perfil antes de carregar o app
-window.apiGetJSON = apiGetJSON;
+async function _lerConfigRespostas() {
+  const docs = await _getAll(COLLECTION.configRespostas);
+  docs.sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+  const config = {};
+  docs.forEach((d) => {
+    const cat = d.categoria;
+    if (!config[cat]) config[cat] = [];
+    config[cat].push({
+      // rowIndex mantido para compatibilidade com o front (que usa como chave de edição)
+      rowIndex: d.id,
+      id: d.id,
+      valor: String(d.valor),
+      label: d.label,
+      cor: d.cor,
+      background: d.background,
+    });
+  });
+  return config;
+}
 
+async function _lerDependencias() {
+  const docs = await _getAll(COLLECTION.dependencias);
+  return docs.map((d) => ({
+    id: d.id,
+    categoria: d.categoria || '',
+    nome: d.nome || '',
+    detalhes: d.detalhes || '',
+    setor: d.setor || '',
+    empresa: d.empresa || '',
+    telefone: d.telefone || '',
+    email: d.email || '',
+    endereco: d.endereco || '',
+  }));
+}
+
+async function _lerComponentes() {
+  const docs = await _getAll(COLLECTION.componentes);
+  return docs.map((d) => ({
+    id: d.id,
+    tipo: d.tipo || '',
+    nome: d.nome || '',
+    descricao: d.descricao || '',
+    rto: d.rto || '',
+    rpo: d.rpo || '',
+    estrategia: d.estrategia || '',
+    responsavel: d.responsavel || '',
+  }));
+}
+
+// Última resposta por area||processo -> score/tier/avaliado/respostas
+async function _lerRespostasIndexadas() {
+  const docs = await _getAll(COLLECTION.respostas);
+  docs.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+  const porChave = {};
+  docs.forEach((r) => {
+    const key = `${r.area}||${r.processo}`;
+    if (!porChave[key]) {
+      porChave[key] = {
+        score: Number(r.score) || 0,
+        tier: r.tier || '',
+        avaliado: true,
+        respostas: r.scores || {},
+        timestamp: r.timestamp,
+        respondente: r.respondente,
+      };
+    }
+  });
+  return porChave;
+}
+
+async function _lerProcessos() {
+  const [docs, respIdx] = await Promise.all([_getAll(COLLECTION.processos), _lerRespostasIndexadas()]);
+  return docs.map((d) => {
+    const key = `${d.area}||${d.processo}`;
+    const resp = respIdx[key];
+    return {
+      id: d.id,
+      area: d.area || '',
+      processo: d.processo || '',
+      descricao: d.descricao || '',
+      dependencia: d.dependencia || '',
+      rto: d.rto || '',
+      rpo: d.rpo || '',
+      mtpd: d.mtpd || '',
+      biaHomologada: d.biaHomologada || '',
+      tier: d.tier || '',
+      bcpStatus: d.bcpStatus || '',
+      descricaoFuncional: d.descricaoFuncional || '',
+      impactoIndisponibilidade: d.impactoIndisponibilidade || null,
+      bcpObjetivo: d.bcpObjetivo || '',
+      bcpEscopo: d.bcpEscopo || '',
+      bcpContatos: d.bcpContatos || [],
+      bcpRiscos: d.bcpRiscos || [],
+      bcpPreventivas: d.bcpPreventivas || [],
+      drpStatus: d.drpStatus || '',
+      drpObjetivo: d.drpObjetivo || '',
+      drpEscopo: d.drpEscopo || '',
+      drpProcedimentos: d.drpProcedimentos || '',
+      drpCriterios: d.drpCriterios || '',
+      drpComponentes: d.drpComponentes || [],
+      mtd: d.mtd || '',
+      workaround: d.workaround || '',
+      impactoJanela: d.impactoJanela || '',
+      bcpPlanoBProvedores: d.bcpPlanoBProvedores || '',
+      bcpSlas: d.bcpSlas || '',
+      bcpGatilhos: d.bcpGatilhos || '',
+      bcpReconstituicao: d.bcpReconstituicao || '',
+      bcpPapeisCrise: d.bcpPapeisCrise || '',
+      pcnSalvo: d.pcnSalvo || '',
+      tierManual: d.tierManual || '',
+      levantamentoPCN: d.levantamentoPCN ? true : false,
+      score: resp ? resp.score : 0,
+      avaliado: resp ? resp.avaliado : false,
+      respostas: resp ? resp.respostas : [],
+    };
+  });
+}
+
+// ------------------------------------------------------------
+// Escrita das coleções
+// ------------------------------------------------------------
+async function _salvarPergunta(p) {
+  const data = {
+    categoria: p.categoria || '',
+    pergunta: p.pergunta || '',
+    descricao: p.descricao || '',
+    ativa: p.ativa !== false,
+  };
+  if (p.id) {
+    await _db.collection(COLLECTION.perguntas).doc(String(p.id)).set(data, { merge: true });
+    return { success: true, id: p.id };
+  }
+  const ref = await _db.collection(COLLECTION.perguntas).add({ ...data, ordem: Date.now() });
+  return { success: true, id: ref.id };
+}
+
+async function _salvarArea(a) {
+  const data = {
+    nome: a.nome || '',
+    responsavel: a.responsavel || '',
+    email: a.email || '',
+    solucao: a.solucao || '',
+  };
+  if (a.id) {
+    await _db.collection(COLLECTION.areas).doc(String(a.id)).set(data, { merge: true });
+    return { success: true, id: a.id };
+  }
+  const ref = await _db.collection(COLLECTION.areas).add(data);
+  return { success: true, id: ref.id };
+}
+
+async function _salvarConfigResposta(d) {
+  const data = {
+    categoria: d.categoria || '',
+    valor: String(d.valor ?? ''),
+    label: d.label || '',
+    cor: d.cor || '',
+    background: d.background || '',
+  };
+  // O front envia rowIndex (que agora é o docId) ao editar.
+  const docId = d.rowIndex || d.id;
+  if (docId) {
+    await _db.collection(COLLECTION.configRespostas).doc(String(docId)).set(data, { merge: true });
+    return { success: true, id: docId };
+  }
+  const ref = await _db.collection(COLLECTION.configRespostas).add({ ...data, ordem: Date.now() });
+  return { success: true, id: ref.id };
+}
+
+async function _salvarDependencia(d) {
+  const data = {
+    categoria: d.categoria || '',
+    nome: d.nome || '',
+    detalhes: d.detalhes || '',
+    setor: d.setor || '',
+    empresa: d.empresa || '',
+    telefone: d.telefone || '',
+    email: d.email || '',
+    endereco: d.endereco || '',
+  };
+  if (d.id) {
+    await _db.collection(COLLECTION.dependencias).doc(String(d.id)).set(data, { merge: true });
+    return { success: true, id: d.id };
+  }
+  const ref = await _db.collection(COLLECTION.dependencias).add(data);
+  return { success: true, id: ref.id };
+}
+
+async function _salvarComponente(d) {
+  const data = {
+    tipo: d.tipo || '',
+    nome: d.nome || '',
+    descricao: d.descricao || '',
+    rto: d.rto || '',
+    rpo: d.rpo || '',
+    estrategia: d.estrategia || '',
+    responsavel: d.responsavel || '',
+  };
+  if (d.id) {
+    await _db.collection(COLLECTION.componentes).doc(String(d.id)).set(data, { merge: true });
+    return { success: true, id: d.id };
+  }
+  const ref = await _db.collection(COLLECTION.componentes).add(data);
+  return { success: true, id: ref.id };
+}
+
+// Campos de processo que guardam JSON (mantidos como objeto/array nativo).
+const _CAMPOS_PROCESSO = [
+  'area', 'processo', 'descricao', 'dependencia', 'rto', 'rpo', 'mtpd', 'biaHomologada', 'tier',
+  'bcpStatus', 'descricaoFuncional', 'impactoIndisponibilidade', 'bcpObjetivo', 'bcpEscopo', 'bcpContatos', 'bcpRiscos', 'bcpPreventivas',
+  'drpStatus', 'drpObjetivo', 'drpEscopo', 'drpProcedimentos', 'drpCriterios', 'drpComponentes',
+  'mtd', 'workaround', 'impactoJanela', 'bcpPlanoBProvedores', 'bcpSlas', 'bcpGatilhos', 'bcpReconstituicao', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual',
+];
+
+// Localiza o docId de um processo por id explícito ou por área+processo.
+async function _acharProcessoId(p) {
+  if (p.id) return String(p.id);
+  if (p.area && p.processo) {
+    const chave = _processoKey(p.area, p.processo);
+    const byKey = await _db.collection(COLLECTION.processos).doc(chave).get();
+    if (byKey.exists) return chave;
+    // fallback: busca por campos (caso docId legado não siga a convenção)
+    const q = await _db
+      .collection(COLLECTION.processos)
+      .where('area', '==', p.area)
+      .where('processo', '==', p.processo)
+      .limit(1)
+      .get();
+    if (!q.empty) return q.docs[0].id;
+  }
+  return null;
+}
+
+// Merge: só grava os campos presentes no payload; ausentes preservam o valor
+// atual (mesma semântica de salvarProcesso em Code.gs).
+async function _salvarProcesso(p) {
+  const data = {};
+  _CAMPOS_PROCESSO.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(p, campo) && p[campo] !== undefined) {
+      data[campo] = p[campo];
+    }
+  });
+
+  let docId = await _acharProcessoId(p);
+  if (!docId) {
+    docId = _processoKey(p.area, p.processo);
+  }
+  await _db.collection(COLLECTION.processos).doc(docId).set(data, { merge: true });
+  return { success: true, id: docId };
+}
+
+async function _excluirProcesso(payload) {
+  const docId = await _acharProcessoId(payload);
+  if (!docId) return { error: 'Processo não encontrado.' };
+  await _db.collection(COLLECTION.processos).doc(docId).delete();
+  return { success: true };
+}
+
+// Salvar respostas de avaliação (calcula score/tier e atualiza o processo).
+async function _salvarRespostas(payload) {
+  const email = (window.USER_EMAIL || '').toLowerCase();
+  const perguntas = (await _lerPerguntas()).filter((p) => p.ativa);
+  const respostas = payload.respostas || [payload];
+  const timestampIso = new Date().toISOString();
+
+  for (const resp of respostas) {
+    const scores = {};
+    let score = 0;
+    perguntas.forEach((perg) => {
+      const v = Number(resp.scores?.[perg.pergunta]) || 0;
+      scores[perg.pergunta] = v;
+      score += v;
+    });
+    const tier = _calcularTier(score);
+    const rto = _calcularRTO(tier);
+
+    await _db.collection(COLLECTION.respostas).add({
+      timestamp: timestampIso,
+      respondente: resp.respondente || email,
+      cargo: resp.cargo || '',
+      area: resp.area,
+      processo: resp.processo,
+      scores,
+      score,
+      tier,
+    });
+
+    // Atualizar tier/rto no processo correspondente
+    const docId = await _acharProcessoId({ area: resp.area, processo: resp.processo });
+    if (docId) {
+      await _db.collection(COLLECTION.processos).doc(docId).set({ tier, rto }, { merge: true });
+    }
+  }
+
+  return { success: true, total: respostas.length };
+}
+
+// ------------------------------------------------------------
+// Roteamento de ações
+// ------------------------------------------------------------
+// Ações de LEITURA atendidas pelo Firestore
+const _GET_FIRESTORE = {
+  getPerguntas: () => _lerPerguntas(),
+  getAreas: () => _lerAreas(),
+  getProcessos: () => _lerProcessos(),
+  getProcessosPorArea: (params) => _lerProcessos().then((ps) => (params.area ? ps.filter((p) => p.area === params.area) : ps)),
+  getConfigRespostas: () => _lerConfigRespostas(),
+  getDependencias: () => _lerDependencias(),
+  getComponentes: () => _lerComponentes(),
+  getPerfil: (params) => _lerPerfil(params.email),
+};
+
+// Ações de ESCRITA atendidas pelo Firestore
+const _POST_FIRESTORE = {
+  salvarPergunta: (b) => _salvarPergunta(b),
+  excluirPergunta: (b) => _db.collection(COLLECTION.perguntas).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarArea: (b) => _salvarArea(b),
+  excluirArea: (b) => _db.collection(COLLECTION.areas).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarProcesso: (b) => _salvarProcesso(b),
+  excluirProcesso: (b) => _excluirProcesso(b),
+  salvarRespostas: (b) => _salvarRespostas(b),
+  salvarConfigResposta: (b) => _salvarConfigResposta(b),
+  excluirConfigResposta: (b) => _db.collection(COLLECTION.configRespostas).doc(String(b.rowIndex || b.id)).delete().then(() => ({ success: true })),
+  salvarDependencia: (b) => _salvarDependencia(b),
+  excluirDependencia: (b) => _db.collection(COLLECTION.dependencias).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarComponente: (b) => _salvarComponente(b),
+  excluirComponente: (b) => _db.collection(COLLECTION.componentes).doc(String(b.id)).delete().then(() => ({ success: true })),
+};
+
+// ------------------------------------------------------------
+// API pública (mesma interface do cliente antigo)
+// ------------------------------------------------------------
 const API = {
   async get(action, params = {}) {
-    try {
-      const cacheKey = action + JSON.stringify(params);
-      if (_cache[cacheKey]) return _cache[cacheKey];
+    const cacheKey = action + JSON.stringify(params);
+    if (_cache[cacheKey]) return _cache[cacheKey];
 
-      const url = new URL(API_URL);
-      url.searchParams.append('action', action);
-      Object.entries(params).forEach(([k, v]) => url.searchParams.append(k, v));
-
-      const data = await apiGetJSON(url); // apiGetJSON já adiciona o cache-buster
-      if (data.error) throw new Error(data.error);
+    if (_GET_FIRESTORE[action]) {
+      const data = await _GET_FIRESTORE[action](params);
       _cache[cacheKey] = data;
       return data;
-    } catch (err) {
-      console.error('API GET Error:', err);
-      throw err;
     }
+
+    // Ações de leitura residuais (ex.: getLevantamentoPCN) vão ao Apps Script.
+    const data = await LegacyAPI.get(action, params);
+    _cache[cacheKey] = data;
+    return data;
   },
 
   invalidate(...actions) {
-    actions.forEach(a => { Object.keys(_cache).filter(k => k.startsWith(a)).forEach(k => delete _cache[k]); });
+    actions.forEach((a) => {
+      Object.keys(_cache)
+        .filter((k) => k.startsWith(a))
+        .forEach((k) => delete _cache[k]);
+    });
   },
 
   async post(action, body, options = {}) {
-    try {
-      const payload = { action };
-      // Adicionar campos do body, serializando objetos e arrays como JSON string
-      Object.entries(body).forEach(([key, value]) => {
-        if (value === null || value === undefined) return;
-        if (typeof value === 'object') {
-          payload[key] = JSON.stringify(value);
-        } else {
-          payload[key] = value;
-        }
-      });
-
-      // Timeout configurável (padrão 120s, ações pesadas como gerarPCN usam 300s)
-      const timeoutMs = options.timeout || (action === 'gerarPCN' ? 300000 : 120000);
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-
-      const res = await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify(payload),
-        redirect: 'follow',
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-
-      const text = await res.text();
-
-      // O redirect do Apps Script pode falhar depois de a gravação já ter
-      // ocorrido. Não repetimos automaticamente para não duplicar o registro.
-      if (!res.ok || !text || text.startsWith('<!') || text.startsWith('<html')) {
-        throw new Error('O servidor não retornou a confirmação (HTTP ' + res.status + '). ' +
-          'A operação pode ter sido gravada. Recarregue a página e confira antes de repetir.');
-      }
-
-      const data = JSON.parse(text);
-      if (data.error) throw new Error(data.error);
-      return data;
-    } catch (err) {
-      if (err.name === 'AbortError') {
-        throw new Error('Timeout: a requisição demorou demais. Tente novamente.');
-      }
-      console.error('API POST Error:', err);
-      throw err;
+    if (_POST_FIRESTORE[action]) {
+      const result = await _POST_FIRESTORE[action](body);
+      // Invalida caches afetados de forma conservadora.
+      API.invalidate('getProcessos', 'getAreas', 'getPerguntas', 'getConfigRespostas', 'getDependencias', 'getComponentes', 'getProcessosPorArea');
+      return result;
     }
+    // PCN/Drive, e-mail, Gemini, tokens externos -> Apps Script.
+    return LegacyAPI.post(action, body, options);
   },
 
-  // Endpoints
+  // Endpoints nomeados (mesma assinatura de antes)
   getUsuarioLogado: () => API.get('getUsuarioLogado'),
+  getPerfil: (email) => _lerPerfil(email),
   getPerguntas: () => API.get('getPerguntas'),
   getAreas: () => API.get('getAreas'),
   getProcessos: () => API.get('getProcessos'),
   getProcessosPorArea: (area) => API.get('getProcessosPorArea', { area }),
   getResumoRespostas: () => API.get('getResumoRespostas'),
-
   getConfigRespostas: () => API.get('getConfigRespostas'),
-
   salvarPergunta: (p) => API.post('salvarPergunta', p),
   excluirPergunta: (id) => API.post('excluirPergunta', { id }),
   salvarArea: (a) => API.post('salvarArea', a),
@@ -153,3 +538,5 @@ const API = {
   salvarComponente: (d) => API.post('salvarComponente', d),
   excluirComponente: (id) => API.post('excluirComponente', { id }),
 };
+
+window.API = API;

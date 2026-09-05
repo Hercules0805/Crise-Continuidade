@@ -4,6 +4,13 @@
 const API_URL = 'https://script.google.com/macros/s/AKfycbz7NAIYV3DYGnaJI9ILs4hdjK7PL15k1TKfLmhvMQDgZR9wODrgf5o97FoJteu-i3rf/exec';
 
 // ============================================================
+// CONFIGURAÇÃO - Cloud Function de tokens externos (páginas públicas sem login)
+// Atualize se a região/projeto mudar. Formato:
+//   https://<region>-<projectId>.cloudfunctions.net/tokenApi
+// ============================================================
+const TOKEN_API_URL = 'https://us-central1-bia-forte-2025.cloudfunctions.net/tokenApi';
+
+// ============================================================
 // CONFIGURAÇÃO - Firebase
 // ============================================================
 const FIREBASE_CONFIG = {

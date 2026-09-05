@@ -105,8 +105,8 @@ async function perguntas() {
         </div>
         <div class="list-row-actions">
           ${p.ativa ? '<span class="badge badge-green">Ativa</span>' : '<span class="badge badge-gray">Inativa</span>'}
-          <button class="btn-icon" onclick="editarPergunta(${p.id})">✏️</button>
-          <button class="btn-icon" onclick="excluirPergunta(${p.id})">🗑️</button>
+          <button class="btn-icon" onclick="editarPergunta('${p.id}')">✏️</button>
+          <button class="btn-icon" onclick="excluirPergunta('${p.id}')">🗑️</button>
         </div>
       </div>`).join('')}</div>`;
   }).join('');
@@ -225,7 +225,7 @@ window.renderAvaliacaoInline = () => {
   const resumoContainer = document.getElementById('avaliacaoScoreResumo');
   if (!container) return;
   
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   
   // Mostrar score/tier se já avaliado
@@ -408,7 +408,7 @@ window.mostrarDropdownContatoBcp = () => {
     html += `<div style="padding:6px 12px 3px;font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;background:#fafafa;">${cat}</div>`;
     itens.forEach(d => {
       const info = [d.setor, d.empresa].filter(Boolean).join(' • ');
-      html += `<div class="bcp-contato-option" onmousedown="adicionarContatoBcpById(${d.id})" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
+      html += `<div class="bcp-contato-option" onmousedown="adicionarContatoBcpById('${d.id}')" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
         <div style="font-weight:600;color:#222;">${d.nome}</div>
         ${info ? `<div style="font-size:0.82em;color:#888;margin-top:2px;">${info}</div>` : ''}
       </div>`;
@@ -477,7 +477,7 @@ function renderContatosBcp() {
           <td style="padding:12px 14px;color:#555;">${d.telefone || '-'}</td>
           <td style="padding:12px 14px;color:#555;">${d.email || '-'}</td>
           <td style="padding:12px 6px;text-align:center;">
-            <button onclick="removerContatoBcp(${d.id})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
+            <button onclick="removerContatoBcp('${d.id}')" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
           </td>
         </tr>`).join('');
   } else {
@@ -581,13 +581,8 @@ window.abrirModalConfigResposta = (cat, idx) => {
   document.getElementById('modalConfigRespostaTitulo').textContent = isEdit ? 'Editar Opção' : 'Nova Opção de Resposta';
   if (isEdit) {
     const op = window.configRespostasData[cat][idx];
-    // Calcular rowIndex real na planilha (header + posição)
-    let rowIndex = 2;
-    for (const c of Object.keys(window.configRespostasData)) {
-      if (c === cat) { rowIndex += idx; break; }
-      rowIndex += window.configRespostasData[c].length;
-    }
-    document.getElementById('crRowIndex').value = rowIndex;
+    // docId do documento no Firestore (exposto como rowIndex/id pelo api.js)
+    document.getElementById('crRowIndex').value = op.rowIndex || op.id || '';
     document.getElementById('crCategoria').value = cat;
     document.getElementById('crValor').value = op.valor;
     document.getElementById('crLabel').value = op.label;
@@ -633,11 +628,8 @@ window.salvarConfigResposta = async () => {
 
 window.excluirConfigResposta = async (cat, idx) => {
   if (!confirm('Excluir esta opção?')) return;
-  let rowIndex = 2;
-  for (const c of Object.keys(window.configRespostasData)) {
-    if (c === cat) { rowIndex += idx; break; }
-    rowIndex += window.configRespostasData[c].length;
-  }
+  const op = window.configRespostasData[cat][idx];
+  const rowIndex = op.rowIndex || op.id;
   await API.excluirConfigResposta({ rowIndex });
   API.invalidate('getConfigRespostas');
   showToast('🗑️ Excluído.', '#555');
@@ -648,7 +640,7 @@ window.excluirConfigResposta = async (cat, idx) => {
 
 window.salvarPergunta = async () => {
   const p = {
-    id: document.getElementById('fId').value ? Number(document.getElementById('fId').value) : null,
+    id: document.getElementById('fId').value || null,
     categoria: document.getElementById('fCategoria').value,
     pergunta: document.getElementById('fPergunta').value.trim(),
     descricao: document.getElementById('fDescricao').value.trim(),
@@ -772,13 +764,13 @@ function renderizarAreas() {
         <td>${a.email || ''}</td>
         <td>${a.solucao || ''}</td>
         <td style="text-align:center;">
-          <button class="btn-icon" onclick="editarArea(${a.id})" title="Editar">
+          <button class="btn-icon" onclick="editarArea('${a.id}')" title="Editar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
             </svg>
           </button>
-          <button class="btn-icon" onclick="excluirArea(${a.id})" title="Excluir">
+          <button class="btn-icon" onclick="excluirArea('${a.id}')" title="Excluir">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -813,7 +805,7 @@ window.editarArea = (id) => abrirModalArea(window.areasData.find(a => a.id === i
 
 window.salvarArea = async () => {
   const a = {
-    id: document.getElementById('fId').value ? Number(document.getElementById('fId').value) : null,
+    id: document.getElementById('fId').value || null,
     nome: document.getElementById('fNome').value.trim(),
     responsavel: document.getElementById('fResponsavel').value.trim(),
     email: document.getElementById('fEmail').value.trim(),
@@ -1378,7 +1370,7 @@ function renderizarProcessos() {
     ? data.map(p => {
         const status = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.avaliado ? 'Tier 3 (Suporte)' : (p.tierManual || 'Pendente');
         const statusColor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : p.avaliado ? '#1565c0' : (p.tierManual === 'Tier 1 (Crítico)' ? '#c62828' : p.tierManual === 'Tier 2 (Essencial)' ? '#f57c00' : p.tierManual === 'Tier 3 (Suporte)' ? '#1565c0' : '#999');
-        return `<tr style="cursor:pointer;" onclick="editarProcesso(${p.id})">
+        return `<tr style="cursor:pointer;" onclick="editarProcesso('${p.id}')">
         <td>${p.area}</td>
         <td><strong>${p.processo}</strong></td>
         <td>${p.responsavelArea || p.responsavel || ''}</td>
@@ -1388,24 +1380,24 @@ function renderizarProcessos() {
         <td style="font-size:0.8em;color:#555;">${p.bcpStatus || '-'}</td>
         <td style="font-size:0.8em;color:#555;">${p.drpStatus || '-'}</td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
-          <button class="btn-icon" onclick="editarProcesso(${p.id})" title="Editar">
+          <button class="btn-icon" onclick="editarProcesso('${p.id}')" title="Editar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
               <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
             </svg>
           </button>
-          <button class="btn-icon" onclick="avaliarProcesso(${p.id})" title="Avaliar">
+          <button class="btn-icon" onclick="avaliarProcesso('${p.id}')" title="Avaliar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a237e" stroke-width="2">
               <path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
             </svg>
           </button>
-          <button class="btn-icon" onclick="abrirModalEnviar(${p.id})" title="Enviar por e-mail">
+          <button class="btn-icon" onclick="abrirModalEnviar('${p.id}')" title="Enviar por e-mail">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2">
               <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
               <polyline points="22,6 12,13 2,6"></polyline>
             </svg>
           </button>
-          ${p.pcnSalvo ? `<button class="btn-icon" onclick="abrirPCNDireto(${p.id})" title="Abrir PCN">
+          ${p.pcnSalvo ? `<button class="btn-icon" onclick="abrirPCNDireto('${p.id}')" title="Abrir PCN">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1565c0" stroke-width="2">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
               <polyline points="14 2 14 8 20 8"></polyline>
@@ -1413,8 +1405,8 @@ function renderizarProcessos() {
               <line x1="16" y1="17" x2="8" y2="17"></line>
             </svg>
           </button>` : ''}
-          ${p.levantamentoPCN ? `<button class="btn-icon" onclick="abrirLevantamentoDireto(${p.id})" title="Abrir Levantamento PCN" style="color:#2e7d32;">📋</button>` : ''}
-          <button class="btn-icon" onclick="excluirProcesso(${p.id})" title="Excluir">
+          ${p.levantamentoPCN ? `<button class="btn-icon" onclick="abrirLevantamentoDireto('${p.id}')" title="Abrir Levantamento PCN" style="color:#2e7d32;">📋</button>` : ''}
+          <button class="btn-icon" onclick="excluirProcesso('${p.id}')" title="Excluir">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -1448,12 +1440,7 @@ window.enviarRelatorioArea = async () => {
   if (!confirm(`Enviar relatório de "${area}" para ${areaObj.responsavel} (${areaObj.email})?`)) return;
   try {
     showToast('⏳ Gerando relatório...', '#1565c0');
-    const formData = new FormData();
-    formData.append('action', 'gerarRelatorioArea');
-    formData.append('area', area);
-    formData.append('email', areaObj.email);
-    const res = await fetch(API_URL, { method: 'POST', body: formData });
-    const result = await res.json();
+    const result = await API.post('gerarRelatorioArea', { area, email: areaObj.email });
     if (result.error) throw new Error(result.error);
     showToast('✅ Relatório enviado para ' + areaObj.email, '#2e7d32');
   } catch(err) {
@@ -1468,13 +1455,7 @@ window.enviarParaArea = async () => {
   if (!areaObj || !areaObj.email) return showToast('E-mail do responsável não cadastrado para esta área.', '#e65100');
   if (!confirm(`Enviar questionário para ${areaObj.responsavel} (${areaObj.email})?`)) return;
   try {
-    const formData = new FormData();
-    formData.append('action', 'gerarTokenArea');
-    formData.append('area', area);
-    formData.append('email', areaObj.email);
-    formData.append('nomeResponsavel', areaObj.responsavel || '');
-    const res = await fetch(API_URL, { method: 'POST', body: formData });
-    const result = await res.json();
+    const result = await API.post('gerarTokenArea', { area, email: areaObj.email, nomeResponsavel: areaObj.responsavel || '' });
     if (result.error) throw new Error(result.error);
     showToast('✅ Questionário enviado para ' + areaObj.email, '#2e7d32');
   } catch(err) {
@@ -1793,7 +1774,7 @@ window.editarContatoBcp = (id) => {
 
 window.salvarDepBcp = async () => {
   const d = {
-    id: document.getElementById('depBcpId').value ? Number(document.getElementById('depBcpId').value) : null,
+    id: document.getElementById('depBcpId').value || null,
     categoria: document.getElementById('depBcpCategoria').value.trim(),
     nome: document.getElementById('depBcpNome').value.trim(),
     detalhes: document.getElementById('depBcpDetalhes').value.trim(),
@@ -2037,7 +2018,7 @@ window.abrirModalProcesso = (p) => {
 window.editarProcesso = (id) => abrirModalProcesso(window.processosData.find(p => p.id === id));
 
 window.avaliarProcessoFromBia = () => {
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   if (!id) return;
   fecharModal();
   setTimeout(() => avaliarProcesso(id), 300);
@@ -2045,7 +2026,7 @@ window.avaliarProcessoFromBia = () => {
 
 window.salvarProcesso = async () => {
   const p = {
-    id: document.getElementById('fId').value ? Number(document.getElementById('fId').value) : null,
+    id: document.getElementById('fId').value || null,
     area: document.getElementById('fArea').value.trim(),
     processo: document.getElementById('fProcesso').value.trim(),
     descricao: document.getElementById('fDescricao').value.trim(),
@@ -2113,7 +2094,7 @@ window.salvarProcesso = async () => {
       window.processosData[idx] = pEnriquecido;
     }
   } else {
-    pEnriquecido.id = Date.now(); // ID temporário
+    pEnriquecido.id = '_tmp_' + Date.now(); // ID temporário (string)
     pEnriquecido.score = temResposta ? avalTotal : 0;
     pEnriquecido.respostas = temResposta ? avalScores : {};
     window.processosData.push(pEnriquecido);
@@ -2382,16 +2363,10 @@ window.enviarConvite = async () => {
   const processoId = document.getElementById('enviarProcessoId').value;
   const email = document.getElementById('enviarEmail').value.trim();
   if (!email) return showToast('Informe o e-mail do respondente.', '#e65100');
-  const p = window.processosData.find(proc => proc.id === Number(processoId));
+  const p = window.processosData.find(proc => proc.id === processoId);
   if (!p) return;
   try {
-    const formData = new FormData();
-    formData.append('action', 'gerarToken');
-    formData.append('area', p.area);
-    formData.append('processo', p.processo);
-    formData.append('email', email);
-    const res = await fetch(API_URL, { method: 'POST', body: formData });
-    const result = await res.json();
+    const result = await API.post('gerarToken', { area: p.area, processo: p.processo, email });
     if (result.error) throw new Error(result.error);
     fecharModalEnviar();
     showToast('✅ Convite enviado para ' + email, '#2e7d32');
@@ -2549,10 +2524,10 @@ function renderizarDependencias() {
         <td style="font-size:0.85em;color:#555;">${d.email || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${d.endereco || '-'}</td>
         <td style="text-align:center;white-space:nowrap;">
-          <button class="btn-icon" onclick="editarDep(${d.id})" title="Editar">
+          <button class="btn-icon" onclick="editarDep('${d.id}')" title="Editar">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button class="btn-icon" onclick="excluirDep(${d.id})" title="Excluir">
+          <button class="btn-icon" onclick="excluirDep('${d.id}')" title="Excluir">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           </button>
         </td>
@@ -2619,7 +2594,7 @@ window.excluirDep = async (id) => {
 
 window.salvarDep = async () => {
   const d = {
-    id: document.getElementById('depId').value ? Number(document.getElementById('depId').value) : null,
+    id: document.getElementById('depId').value || null,
     categoria: document.getElementById('depCategoria').value.trim(),
     nome: document.getElementById('depNome').value.trim(),
     detalhes: document.getElementById('depDetalhes').value.trim(),
@@ -2635,11 +2610,13 @@ window.salvarDep = async () => {
   // Optimistic: fechar modal e atualizar UI imediatamente
   fecharModalDependencia();
   const isNew = !d.id;
+  let tempId = null;
   if (d.id) {
     const idx = dependenciasData.findIndex(x => x.id === d.id);
     if (idx !== -1) dependenciasData[idx] = { ...d };
   } else {
-    d.id = Date.now(); // ID temporário (apenas para UI)
+    tempId = '_tmp_' + Date.now(); // ID temporário (apenas para UI)
+    d.id = tempId;
     dependenciasData.push(d);
   }
   renderizarDependencias();
@@ -2653,16 +2630,16 @@ window.salvarDep = async () => {
     const result = await API.salvarDependencia(payload);
     // Atualizar ID real se era novo
     if (isNew && result.id) {
-      const tempIdx = dependenciasData.findIndex(x => x.id === d.id);
+      const tempIdx = dependenciasData.findIndex(x => x.id === tempId);
       if (tempIdx !== -1) dependenciasData[tempIdx].id = result.id;
     }
     API.invalidate('getDependencias');
     showToast('✅ Salvo!', '#2e7d32');
   } catch(e) {
     showToast('❌ Erro: ' + e.message, '#c62828');
-    // Reverter
-    if (!d.id || d.id > 1000000000000) {
-      dependenciasData = dependenciasData.filter(x => x.id !== d.id);
+    // Reverter (remove o registro temporário criado nesta operação)
+    if (isNew && tempId) {
+      dependenciasData = dependenciasData.filter(x => x.id !== tempId);
       renderizarDependencias();
     }
   }
@@ -3369,10 +3346,10 @@ function renderizarComponentes() {
         <td style="font-size:0.85em;color:#555;">${d.estrategia || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${d.responsavel || '-'}</td>
         <td style="text-align:center;white-space:nowrap;">
-          <button class="btn-icon" onclick="editarComp(${d.id})" title="Editar">
+          <button class="btn-icon" onclick="editarComp('${d.id}')" title="Editar">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
-          <button class="btn-icon" onclick="excluirComp(${d.id})" title="Excluir">
+          <button class="btn-icon" onclick="excluirComp('${d.id}')" title="Excluir">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           </button>
         </td>
@@ -3419,7 +3396,7 @@ window.excluirComp = async (id) => {
 };
 window.salvarComp = async () => {
   const d = {
-    id: document.getElementById('compId').value ? Number(document.getElementById('compId').value) : null,
+    id: document.getElementById('compId').value || null,
     tipo: document.getElementById('compTipo').value.trim(),
     nome: document.getElementById('compNome').value.trim(),
     descricao: document.getElementById('compDescricao').value.trim(),
@@ -3530,11 +3507,11 @@ function renderComponentesDrp() {
 
     const tags = itens.map(c => {
       const tooltip = [c.estrategia, c.responsavel, c.rto ? 'RTO:'+c.rto : ''].filter(Boolean).join(' • ');
-      return `<span style="display:inline-flex;align-items:center;gap:3px;background:#1a237e;color:white;padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;cursor:default;" title="${tooltip.replace(/"/g,'&quot;')}">${c.nome}<button onclick="removerComponenteDrp(${c.id})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.7);line-height:1;padding:0 3px;" onmouseenter="this.style.color='white'" onmouseleave="this.style.color='rgba(255,255,255,0.7)'" title="Remover">&times;</button></span>`;
+      return `<span style="display:inline-flex;align-items:center;gap:3px;background:#1a237e;color:white;padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;cursor:default;" title="${tooltip.replace(/"/g,'&quot;')}">${c.nome}<button onclick="removerComponenteDrp('${c.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.7);line-height:1;padding:0 3px;" onmouseenter="this.style.color='white'" onmouseleave="this.style.color='rgba(255,255,255,0.7)'" title="Remover">&times;</button></span>`;
     }).join(' ');
 
     const chips = disponiveisNoTipo.map(d => {
-      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="adicionarComponenteDrpById(${d.id})" title="${d.descricao || d.nome}">${d.nome}</span>`;
+      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="adicionarComponenteDrpById('${d.id}')" title="${d.descricao || d.nome}">${d.nome}</span>`;
     }).join(' ');
 
     const emptyMsg = !count ? `<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum selecionado</span>` : '';
@@ -3628,7 +3605,7 @@ window.mostrarDropdownCompDrp = (input, tipo) => {
 
   let html = '';
   disponiveis.forEach(d => {
-    html += `<div class="drp-dd-option" onmousedown="adicionarComponenteDrpById(${d.id})" style="padding:7px 12px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
+    html += `<div class="drp-dd-option" onmousedown="adicionarComponenteDrpById('${d.id}')" style="padding:7px 12px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
       <div style="font-weight:500;color:#222;">${d.nome}</div>
       ${d.descricao ? `<div style="font-size:0.75em;color:#888;margin-top:1px;">${d.descricao}</div>` : ''}
     </div>`;
@@ -3669,7 +3646,7 @@ window.mostrarDropdownComponenteDrp = () => {
   Object.entries(grupos).sort((a,b) => a[0].localeCompare(b[0])).forEach(([tipo, itens]) => {
     html += `<div style="padding:6px 12px 3px;font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;background:#fafafa;">${tipo}</div>`;
     itens.forEach(d => {
-      html += `<div class="drp-comp-option" onmousedown="adicionarComponenteDrpById(${d.id})" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
+      html += `<div class="drp-comp-option" onmousedown="adicionarComponenteDrpById('${d.id}')" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
         <div style="font-weight:600;color:#222;">${d.nome}</div>
         ${d.descricao ? `<div style="font-size:0.82em;color:#888;margin-top:2px;">${d.descricao}</div>` : ''}
       </div>`;
@@ -3716,8 +3693,9 @@ window.abrirModalCompDrp = (d) => {
 window.fecharModalCompDrp = () => document.getElementById('modalCompDrp').classList.remove('open');
 window.salvarCompDrp = async () => {
   const d = {
-    id: document.getElementById('compDrpId').value ? Number(document.getElementById('compDrpId').value) : null,
+    id: document.getElementById('compDrpId').value || null,
     tipo: document.getElementById('compDrpTipo').value.trim(),
+
     nome: document.getElementById('compDrpNome').value.trim(),
     descricao: document.getElementById('compDrpDescricao').value.trim(),
     rto: document.getElementById('compDrpRto').value.trim(),
@@ -3752,7 +3730,7 @@ window.salvarCompDrp = async () => {
 // ENVIAR BIA DEPENDÊNCIAS POR E-MAIL (formulário externo via token)
 // ============================================================
 window.enviarBIADependencias = async () => {
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p) return showToast('Salve o processo antes de enviar.', '#e65100');
 
@@ -3778,7 +3756,7 @@ window.enviarBIADependencias = async () => {
 // COPIAR LINK BIA (gerar token sem enviar email)
 // ============================================================
 window.copiarLinkBIA = async () => {
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p) return showToast('Salve o processo antes.', '#e65100');
 
@@ -3797,7 +3775,7 @@ window.copiarLinkBIA = async () => {
 // LEVANTAMENTO PCN - Enviar, Copiar Link, Abrir
 // ============================================================
 window.enviarLinkLevantamento = async () => {
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p) return showToast('Salve o processo antes.', '#e65100');
   const areas = window.areasDisponiveis || [];
@@ -3814,7 +3792,7 @@ window.enviarLinkLevantamento = async () => {
 };
 
 window.copiarLinkLevantamento = async () => {
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p) return showToast('Salve o processo antes.', '#e65100');
   try {
@@ -3827,7 +3805,7 @@ window.copiarLinkLevantamento = async () => {
 };
 
 window.abrirLevantamento = () => {
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p || !p.levantamentoPCN) return showToast('Nenhum levantamento preenchido.', '#e65100');
   // Abrir visualização (buscar dados do backend)
@@ -3877,7 +3855,7 @@ window.abrirLevantamentoDireto = (id) => {
   }).catch(e => showToast('❌ ' + e.message, '#c62828'));
 };
 window.enviarDRPComponentes = async () => {
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p) return showToast('Salve o processo antes de enviar.', '#e65100');
 
@@ -3902,7 +3880,7 @@ window.enviarDRPComponentes = async () => {
 // COPIAR LINK DRP (gerar token sem enviar email)
 // ============================================================
 window.copiarLinkDRP = async () => {
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p) return showToast('Salve o processo antes.', '#e65100');
 
@@ -3922,7 +3900,7 @@ window.copiarLinkDRP = async () => {
 // DOSSIÊ DO PROCESSO
 // ============================================================
 window.gerarDossieProcesso = () => {
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p) return showToast('Salve o processo antes de gerar o dossiê.', '#e65100');
   const catalogo = window.dependenciasCatalogo || [];
@@ -3962,7 +3940,7 @@ window.gerarPCNProcesso = async () => {
     return showToast('Apenas administradores podem gerar PCNs.', '#e65100');
   }
 
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   if (!id) return showToast('Salve o processo antes de gerar o PCN.', '#e65100');
   
   const p = window.processosData ? window.processosData.find(proc => proc.id === id) : null;
@@ -4012,7 +3990,7 @@ window.gerarPCNProcesso = async () => {
 // ABRIR PCN SALVO
 // ============================================================
 window.abrirPCNSalvo = () => {
-  const id = Number(document.getElementById('fId').value);
+  const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p || !p.pcnSalvo) return showToast('Nenhum PCN salvo.', '#e65100');
   const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.score > 0 ? 'Tier 3 (Suporte)' : 'Não avaliado';
@@ -4123,7 +4101,7 @@ ${seletorVersoes}
   </div>
 </div>
 <script>
-var PROCESS_ID = ${processId};
+var PROCESS_ID = '${String(processId).replace(/'/g, "\\'")}';
 var PCN_API_URL = '` + API_URL + `';
 var PCN_AREA = '${(info.area || '').replace(/'/g, "\\'")}';
 var PCN_PROCESSO = '${(info.processo || '').replace(/'/g, "\\'")}';
@@ -4398,14 +4376,14 @@ function renderPCNLista(comPCN) {
 
       html += `<div style="display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid #f0f0f0;transition:background 0.15s;" 
                     onmouseenter="this.style.background='#f8f9ff'" onmouseleave="this.style.background='white'">
-        <div style="flex:1;cursor:pointer;" onclick="abrirPCNDireto(${p.id})">
+        <div style="flex:1;cursor:pointer;" onclick="abrirPCNDireto('${p.id}')">
           <div style="font-weight:600;color:#222;font-size:0.92em;">${p.processo}</div>
           <div style="font-size:0.78em;color:#999;margin-top:2px;">Atualizado: ${dataVersao}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
           <span style="background:${tierColor(p.score)};color:white;padding:2px 8px;border-radius:8px;font-size:0.72em;font-weight:700;">${tierLabel(p.score)} • ${p.score || 0}</span>
-          <button onclick="abrirPCNDireto(${p.id})" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Abrir PCN">📄</button>
-          <button onclick="event.stopPropagation();excluirPCN(${p.id},'${p.area.replace(/'/g,"\\'")}','${p.processo.replace(/'/g,"\\'")}')" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#bbb'" title="Excluir PCN">🗑️</button>
+          <button onclick="abrirPCNDireto('${p.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Abrir PCN">📄</button>
+          <button onclick="event.stopPropagation();excluirPCN('${p.id}','${p.area.replace(/'/g,"\\'")}','${p.processo.replace(/'/g,"\\'")}')" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#bbb'" title="Excluir PCN">🗑️</button>
         </div>
       </div>`;
     });
