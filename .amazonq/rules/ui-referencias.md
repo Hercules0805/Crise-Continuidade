@@ -1,71 +1,148 @@
-# Referências de UI - BIA
+# Guia de Identidade Visual e Padronização — Crise-Continuidade
 
-## Paleta de Cores
-- Primária: `#1a237e` (azul escuro)
-- Primária clara: `#3949ab`
-- Destaque: `#ff6b35` (laranja)
-- Sucesso: `#2e7d32`
-- Erro: `#c62828`
-- Alerta: `#f57c00`
-- Info: `#1565c0`
-- Fundo: `#f5f6fa`
-- Superfície: `white`
-- Borda: `#e0e0e0`
-- Texto principal: `#1a1a2e`
-- Texto secundário: `#555`
-- Texto desabilitado: `#999`
+> **Antes de criar ou alterar qualquer tela ou componente visual neste projeto, consulte este guia.**
+> Qualquer decisão visual nova (cor, espaçamento, componente) que não se encaixe no que já existe aqui deve ser **adicionada a este arquivo**, não só ao código — para não voltarmos a divergir.
+>
+> Este documento reflete o que o código **realmente faz hoje** (levantado diretamente de `firebase-app/public/styles.css` e `app.js`), não uma aspiração. Onde o código diverge de si mesmo, isso está anotado na seção "Divergências conhecidas" no final — não escondido.
 
-## Tiers
-- Tier 1 (Crítico): `#c62828` (vermelho)
-- Tier 2 (Essencial): `#f57c00` (laranja)
-- Tier 3 (Suporte): `#1565c0` (azul)
-- Pendente: `#999` (cinza)
+## 1. Paleta de cores
 
-## Tipografia
-- Font family: sistema (sans-serif)
-- Título de página (h2): 1.6em, bold, `#1a237e`
-- Subtítulo: 0.9em, `#666`
-- Label de campo: 0.85em, font-weight 600, `#444`
-- Texto de input: 0.95em
-- Texto de apoio: 0.8em, `#888`
+### Marca (indigo/navy)
+| Token | Hex | Uso |
+|---|---|---|
+| Primária | `#1a237e` | Nav, `.btn-primary`, títulos de página/modal/drawer, cabeçalho de tabela, borda ativa de aba, texto da 1ª coluna de tabela |
+| Primária (hover/gradiente) | `#283593` | Sempre em par com `#1a237e` num `linear-gradient(135deg, #1a237e, #283593)` ou como hover de `.btn-primary` |
+| Primária clara (tint) | `#e8eaf6` | Fundo de badge de categoria/pilar, bordas de abas, caixas de destaque |
 
-## Componentes
+### Status / severidade (usar sempre estes 4 pares — não inventar variações)
+| Semântica | Texto/forte | Fundo claro |
+|---|---|---|
+| Sucesso | `#2e7d32` | `#e8f5e9` |
+| Alerta | `#f57c00` | `#fff3e0` |
+| Perigo/Crítico | `#c62828` | `#ffebee` |
+| Neutro/Pendente | `#757575` | `#f5f5f5` |
+| Info | `#1565c0` | (sem par claro definido; usar `#e3f2fd` se precisar) |
 
-### Modal
-- max-width: 600px (padrão), 700px (grande)
-- border-radius: 12px
-- padding: 28px 32px
-- box-shadow: 0 8px 32px rgba(0,0,0,0.18)
-- Título: 1.2em, bold, `#1a237e`, border-bottom 2px solid `#e8eaf6`, padding-bottom 12px, margin-bottom 20px
+**Exceção documentada**: `#e65100` (mais escuro que `#f57c00`) é usado especificamente como cor de **texto de validação de formulário** (`showToast('Informe X.', '#e65100')`) e como cor de texto de opções qualitativas "Alto/Média" em alguns badges de prob./impacto — é uma variação intencional de "alerta" para texto (mais legível que `#f57c00` em fonte pequena sobre fundo branco), não um erro. Não usar `#e65100` como cor de fundo; fundos de alerta são sempre `#fff3e0`.
 
-### Campos de formulário
-- Layout: grid 2 colunas quando possível (campos curtos como RTO/RPO/MTPD)
-- Label: display block, margin-bottom 5px, font-size 0.82em, font-weight 600, color `#444`, text-transform uppercase, letter-spacing 0.4px
-- Input/Select/Textarea: width 100%, padding 9px 12px, border 1.5px solid `#e0e0e0`, border-radius 7px, font-size 0.93em, transition border-color 0.2s
-- Input focus: border-color `#1a237e`, outline none, box-shadow 0 0 0 3px rgba(26,35,126,0.08)
-- Textarea: min-height 90px, resize vertical
+### Texto e neutros
+| Token | Hex | Uso |
+|---|---|---|
+| Texto principal | `#222` / `#333` | Texto forte em células, corpo da página |
+| Texto secundário | `#555` | Labels de modal simples, texto secundário padrão |
+| Texto muted | `#888` | `.page-sub`, texto de apoio — use este como padrão para "texto secundário/muted" em componentes novos |
+| Borda padrão (modal simples) | `#ddd` | `.modal input`, filtros |
+| Borda padrão (drawer/formulário) | `#e0e0e0` | Inputs de drawer, `.btn-ghost` |
+
+### Cor de ação (ícones)
+- Editar (lápis, SVG inline): `stroke="#ff6b35"` (laranja de destaque — **só para o ícone de editar**, não usar em outro contexto)
+- Excluir (lixeira, SVG inline): `stroke="#999"`
+
+### Verde de navegação ativa
+- `#69f0ae` — usado **exclusivamente** para indicar item ativo no menu principal (`.nav-group.has-active`, `.nav-link.active`). Não é a mesma cor do "sucesso" (`#2e7d32`) e não deve ser usado fora da nav.
+
+### Paleta de categorias (rotativa, 10 cores)
+Usada para colorir tags de categoria dinâmicas (ex.: categorias de dependências na BIA). Definida como **uma única constante** `CATEGORIA_CORES` no topo de `app.js` (ver `_categoriaCor()` / uso em `app.js`):
+```
+['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1b9a','#00695c','#1565c0','#4e342e','#558b2f']
+```
+`avaliar.html` mantém sua própria cópia porque é uma página pública standalone, sem acesso ao `app.js` da SPA — isso é aceitável, não uma duplicação a eliminar.
+
+## 2. Espaçamento e raio de borda
+
+Não há (nem deve haver, por enquanto) um grid rígido de 4/8px — os valores abaixo são o **padrão dominante observado**, use-os para manter consistência com o que já existe:
+
+| Componente | Padding | Border-radius |
+|---|---|---|
+| `.btn` | `9px 20px` | `7px` |
+| `.btn-icon` | `6px` | `4px` |
+| Input/select de modal simples | `9px 12px` | `7px` |
+| Input/select de drawer/filtro | `9px 12px` | `7px` |
+| Input de busca (`buscaX`) | `8px 14px` | `8px` |
+| Badge/pill (categoria, status, tier) | `3-4px 9-12px` | `10-12px` |
+| `.modal` | `28px` | `12px` |
+| `.drawer` | — | `0` (painel lateral, sem cantos arredondados) |
+| `.toast` | `11px 22px` | `8px` |
+| Card branco (`.group-card`, `.data-table`, tiles de resumo) | `20px` | `10px` |
+
+**Sombra de card branco** (canônica, usar sempre esta): `box-shadow: 0 1px 4px rgba(0,0,0,0.08);`
+
+## 3. Tipografia
+
+- `font-family: 'Segoe UI', Roboto, sans-serif` (definido em `body`, `styles.css`).
+- Escala de tamanho (aproximada, em `em`): `0.72` (hints/badges pequenos) · `0.8-0.85` (labels, texto secundário) · `0.88-0.9` (corpo/inputs/tabela) · `1-1.1` (títulos de modal/drawer) · `1.6` (título de página `h2`) · `1.8-2.5` (números de destaque, ex. score).
+- **Labels de campo** (modal/drawer com formulário estruturado): uppercase, `letter-spacing:0.4px`, `font-weight:700`, `color:#444`, `font-size:0.78em`.
+- **Peso**: label = sempre `700` (ou `600` em modais simples de campo único); valor/conteúdo = `500` ou `600`; títulos de página/seção = `700`.
+
+## 4. Componentes
 
 ### Botões
-- Primário: background `#1a237e`, color white, padding 10px 24px, border-radius 7px, font-weight 600, font-size 0.93em
-- Ghost: background white, color `#555`, border 1.5px solid `#ddd`, padding 10px 20px, border-radius 7px
-- Hover primário: background `#283593`
-- Ícone: padding 6px, border-radius 6px, hover background `#f5f5f5`
+- `.btn-primary` — ação principal (Salvar, Novo Registro). `#1a237e` → hover `#283593`.
+- `.btn-ghost` — ação secundária (Cancelar, filtros, exportar). Fundo `#f0f0f0`, texto `#555`.
+- `.btn-ghost` com cor sobrescrita inline (`color:#c62828;border-color:#c62828;`) — convenção usada hoje para variações semânticas (excluir em lote, importar) já que não existe `.btn-danger`/`.btn-outline`. **Ao criar uma ação nova assim, reutilize exatamente essa convenção** (`.btn-ghost` + `color`/`border-color` inline na cor de status correspondente da seção 1) em vez de inventar uma cor nova.
+- `.btn-icon` — ação em linha de tabela (editar/excluir), sempre com SVG inline (ver seção Ícones).
 
-### Badges / Status
-- display inline-block, padding 4px 10px, border-radius 12px, font-size 0.78em, font-weight 600, color white
+### Badges / Pills
+Duas famílias coexistem, ambas válidas:
+1. Classes fixas `.badge`/`.badge-green`/`.badge-gray` (styles.css) — usar para os 2 estados binários simples (ativo/inativo).
+2. Pills inline geradas por função helper (`_badgeStatusRisco`, `_badgeProbImpactoRisco`, `_badgeDesvioIndicador`, badge de tier) — usar este padrão para qualquer status com **3 ou mais** estados ou cor dinâmica. Ao criar um badge novo desse tipo, siga o template:
+   ```js
+   `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:white;background:${cor};">${texto}</span>`
+   ```
+   usando as cores da seção 1 (nunca uma cor nova sem adicionar à paleta de status primeiro).
 
-### Tabela
-- header: background `#1a237e`, color white, font-size 0.82em, text-transform uppercase, letter-spacing 0.5px, padding 12px
-- row: border-bottom 1px solid `#f0f0f0`, hover background `#f8f9ff`
-- cell: padding 12px, font-size 0.9em
+### Modal vs. Drawer
+- **Modal** (`.modal-overlay`/`.modal`, centralizado, `max-width` 480-580px conforme o formulário): para entidades de **tela única** (Perguntas, Áreas, Config. de Respostas, Dependências, Componentes, Indicadores).
+- **Drawer** (`.drawer-overlay`/`.drawer`, painel lateral de `70vw`): para entidades com **abas internas** (Processo, Risco). Se uma tela nova precisar de mais de uma seção/aba de formulário, use drawer; se for um formulário só, use modal.
 
-### Cards (Painel)
-- background white, border-radius 10px, padding 20px, box-shadow 0 1px 4px rgba(0,0,0,0.08)
-- border-top 4px solid (cor do tier/status)
+### Abas (tabs)
+Um único padrão de aba, usado (e que deve continuar sendo usado) em `trocarAbaProcesso`, `trocarAbaRisco` e `trocarAbaIndicadores`:
+- Ativa: `color:#1a237e; border-bottom:3px solid #1a237e; font-weight:700;`
+- Inativa: `color:#999; border-bottom:3px solid transparent;`
+- Padding `10px 20px`, `font-size:0.88em`, faixa com `border-bottom:2px solid #e8eaf6`.
+- Largura: `flex:1` (abas dividem o espaço) quando há muitas abas dentro de um drawer estreito; largura fixa quando são poucas abas (2-3) numa tela cheia — escolha conforme o espaço disponível, não é uma regra rígida.
 
-## Padrões de Layout
-- Espaçamento entre campos: 16px (gap no grid)
-- Espaçamento entre seções: 24px
-- Campos agrupados (RTO/RPO/MTPD): grid 3 colunas
-- Campos de texto longo (Descrição, Dependência): largura total
-- Campos curtos (Área, BIA Homologada): podem ser lado a lado em 2 colunas
+### Tabela + paginação
+- `.data-table`: cabeçalho `#1a237e`/branco/uppercase, linha com hover `#f8f9fa`, 1ª coluna em negrito `#1a237e`.
+- Cabeçalho ordenável: `onclick="ordenarX('campo')"` + `<span id="sort-...">` preenchido com `▲`/`▼`.
+- **Paginação**: obrigatória para qualquer lista que possa passar de ~20-30 registros (ver implementação em Indicadores: `INDICADORES_POR_PAGINA`, rodapé "Mostrando X–Y de Z" + botões `‹ Anterior`/`Próxima ›` com `.btn-ghost`). Ao criar uma tela nova com potencial de crescer, adicione paginação desde o início nesse mesmo padrão — não espere virar um problema.
+
+### Barra de filtros
+Padrão único (label + input/select), usado em Processos/Dependências/Componentes/Riscos/Indicadores:
+```
+label: font-size:0.9em; font-weight:600; color:#555; margin-bottom:6px; display:block;
+select/input: padding:8px 12px; border:1px solid #ddd; border-radius:7px; font-size:0.9em; min-width:180-300px conforme o campo;
+input de busca: padding:8px 14px; border-radius:8px;
+```
+
+### Formulários em modal/drawer
+Convenção recomendada para telas novas (a mesma usada em Processo/Risco/Dependência/Componente): label uppercase (ver seção Tipografia) + input `border:1.5px solid #e0e0e0; border-radius:7px; padding:9px 12px; font-size:0.93em;`, foco com `border-color:#1a237e`.
+
+### Toasts (`showToast(mensagem, cor)`)
+Não existe uma API por nome de severidade — a cor é passada como hex literal em cada chamada. Use sempre uma destas (não invente uma nova):
+| Tipo de mensagem | Cor |
+|---|---|
+| Sucesso (salvo, excluído) | `#2e7d32` |
+| Erro | `#c62828` |
+| Validação (campo obrigatório faltando) | `#e65100` |
+| Em andamento ("Salvando...", "Gerando...") | `#1a237e` ou `#1565c0` |
+| Confirmação neutra (ex. exclusão já efetivada) | `#555` |
+
+### Skeleton loading
+`.skeleton`/`.skeleton-row` (efeito shimmer) — usado hoje só em Perguntas e no carregamento de PCN. Para telas novas, o padrão mais simples e já dominante é o texto `<div class="loading">⏳ Carregando...</div>`; use skeleton só se a tela tiver uma tabela grande onde o "pulo" de conteúdo incomodaria.
+
+### Navegação
+`.nav`/`.nav-group`/`.nav-dropdown` (definidos em `styles.css`, markup em `index.html`). Uma tela nova entra como item dentro de um dos 4 grupos existentes (Continuidade de Negócio, Riscos, Cadastros, Administração) — evite criar um 5º grupo sem necessidade clara.
+
+### Ícones
+**Convenção para telas novas: SVG inline, não emoji**, para ações de linha de tabela (editar/excluir) — copie o par de ícones já usado em Áreas/Processos/Dependências/Componentes/Riscos/Indicadores (lápis laranja `#ff6b35` + lixeira cinza `#999`). Emoji continuam aceitáveis em: texto de botão/cabeçalho (📥 Importar, 📁 pasta, 🔍 placeholder de busca) e prefixo de toast (✅/❌/⏳) — isso já é consistente em toda a base.
+
+## 5. Divergências conhecidas (não corrigidas nesta rodada — cuidado ao copiar o "padrão errado")
+
+Estas inconsistências existem hoje no código e são conhecidas; normalizar aos poucos, ao tocar em cada tela — não foram corrigidas de uma vez por exigirem mudança em muitos pontos sem verificação visual disponível neste ambiente:
+
+- **5 tons de cinza quase idênticos** (`#888`, `#999`, `#666`, `#555`, mais `#757575`) usados de forma intercambiável para "texto secundário" dependendo de qual tela foi escrita quando. Ao criar algo novo, prefira `#888`.
+- **3 estilos de label diferentes** em modais/drawers (uppercase 0.78em/700, `.modal label` simples 0.82em/600 sem uppercase, e a variante própria de `bia-dependencias.html`). Ao criar algo novo, use o uppercase (seção 3).
+- **Páginas públicas standalone** (`bia-dependencias.html`, `drp-componentes.html`, `pcn-levantamento.html`, `cadastrar-areas.html`, `login.html`, `pcn-viewer.html`) **não carregam `styles.css`** — têm CSS 100% próprio, incluindo uma classe `.btn-primary` com valores diferentes da do app principal. Elas concordam no essencial (cores de marca, verde/vermelho de sucesso/erro), mas os componentes (botões, cards, chips) são implementações paralelas. Não migrar isso "de graça" — é um projeto à parte.
+- **Badges/pills com padding/radius levemente diferentes entre telas** (ex. `padding:4px 10px` vs `4px 12px` para o mesmo tipo de badge de tier/status). Ao criar um badge novo, use o template da seção 4 (Badges/Pills).
+- **Perguntas e Config. de Respostas** ainda usam emoji (✏️/🗑️) em vez de SVG para editar/excluir — telas mais antigas, pré-datam a convenção de ícone SVG. Não é para ser copiado em telas novas.

@@ -4,19 +4,49 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BIA - Business Impact Analysis</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=3">
 </head>
 <body>
   <nav class="nav">
     <div class="nav-brand">📋 BIA<span>Business Impact Analysis</span></div>
     <div class="nav-links">
-      <a href="#processos" class="nav-link" data-page="processos">Processos</a>
-      <a href="#pcns" class="nav-link" data-page="pcns">PCNs</a>
-      <a href="#areas" class="nav-link" data-page="areas">Áreas</a>
-      <a href="#dependencias" class="nav-link" data-page="dependencias">Dependências</a>
-      <a href="#componentes" class="nav-link" data-page="componentes">Componentes</a>
-      <a href="#perguntas" class="nav-link" data-page="perguntas">Perguntas</a>
-      <a href="#admin" class="nav-link" data-page="admin">Painel</a>
+      <div class="nav-group" data-group="continuidade">
+        <button type="button" class="nav-group-label">Continuidade de Negócio <span class="caret">▾</span></button>
+        <div class="nav-dropdown">
+          <a href="#processos" class="nav-link" data-page="processos">Processos</a>
+          <a href="#pcns" class="nav-link" data-page="pcns">PCNs</a>
+          <a href="#areas" class="nav-link" data-page="areas">Áreas</a>
+        </div>
+      </div>
+      <div class="nav-group" data-group="riscos">
+        <button type="button" class="nav-group-label">Riscos <span class="caret">▾</span></button>
+        <div class="nav-dropdown">
+          <a href="#riscos" class="nav-link" data-page="riscos">Registro de Riscos</a>
+        </div>
+      </div>
+      <div class="nav-group" data-group="indicadores">
+        <button type="button" class="nav-group-label">Indicadores <span class="caret">▾</span></button>
+        <div class="nav-dropdown">
+          <a href="#indicadores-dashboard" class="nav-link" data-page="indicadores-dashboard">Dashboard</a>
+          <a href="#indicadores-cadastro" class="nav-link" data-page="indicadores-cadastro">Cadastro</a>
+          <a href="#indicadores-lancamento" class="nav-link" data-page="indicadores-lancamento">Lançamento Mensal</a>
+          <a href="#indicadores-matriz" class="nav-link" data-page="indicadores-matriz">Matriz</a>
+        </div>
+      </div>
+      <div class="nav-group" data-group="cadastros">
+        <button type="button" class="nav-group-label">Cadastros <span class="caret">▾</span></button>
+        <div class="nav-dropdown">
+          <a href="#dependencias" class="nav-link" data-page="dependencias">Dependências</a>
+          <a href="#componentes" class="nav-link" data-page="componentes">Componentes</a>
+          <a href="#perguntas" class="nav-link" data-page="perguntas">Perguntas</a>
+        </div>
+      </div>
+      <div class="nav-group" data-group="administracao">
+        <button type="button" class="nav-group-label">Administração <span class="caret">▾</span></button>
+        <div class="nav-dropdown">
+          <a href="#admin" class="nav-link" data-page="admin">Painel</a>
+        </div>
+      </div>
     </div>
     <div id="nav-user" style="display:flex;align-items:center;gap:12px;margin-left:auto;padding:0 8px;"></div>
   </nav>
@@ -29,7 +59,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
   <script src="api-legacy.js?v=6"></script>
-  <script src="api.js?v=6"></script>
+  <script src="api.js?v=14"></script>
   <script>
     if (!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     const auth = firebase.auth();
@@ -54,7 +84,25 @@
       // Aplicar restricoes de perfil
       if (window.USER_PERFIL !== 'admin') {
         document.querySelectorAll('.nav-link[data-page="areas"], .nav-link[data-page="perguntas"], .nav-link[data-page="dependencias"], .nav-link[data-page="componentes"]').forEach(el => el.style.display = 'none');
+        // Esconder grupos do menu que ficaram sem nenhum item visível (ex: Cadastros para gestor)
+        document.querySelectorAll('.nav-group').forEach(g => {
+          const temItemVisivel = Array.from(g.querySelectorAll('.nav-link')).some(a => a.style.display !== 'none');
+          if (!temItemVisivel) g.style.display = 'none';
+        });
       }
+      // Abrir/fechar submenu por clique (alem do hover), e fechar ao clicar fora
+      document.querySelectorAll('.nav-group-label').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const grupo = btn.closest('.nav-group');
+          const jaAberto = grupo.classList.contains('open');
+          document.querySelectorAll('.nav-group.open').forEach(g => g.classList.remove('open'));
+          if (!jaAberto) grupo.classList.add('open');
+        });
+      });
+      document.addEventListener('click', () => {
+        document.querySelectorAll('.nav-group.open').forEach(g => g.classList.remove('open'));
+      });
       // Mostrar usuario no nav
       document.getElementById('nav-user').innerHTML = `
         <img src="${user.photoURL || ''}" style="width:28px;height:28px;border-radius:50%;border:2px solid rgba(255,255,255,0.4);" onerror="this.style.display='none'">
@@ -70,6 +118,6 @@
       if (window._routePendente) route();
     });
   </script>
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=33"></script>
 </body>
 </html>

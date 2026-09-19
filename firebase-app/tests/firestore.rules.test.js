@@ -98,6 +98,43 @@ describe('Security Rules — catálogos (escrita só admin)', () => {
   test('gestor NÃO altera config_perfis', async () => {
     await assertFails(db(GESTOR).doc('config_perfis/novo@fortestecnologia.com.br').set({ perfil: 'admin' }));
   });
+
+  test('admin escreve risco', async () => {
+    await assertSucceeds(db(ADMIN).doc('riscos/r1').set({ area: 'TI', titulo: 'Risco X', status: 'Identificado' }));
+  });
+
+  test('gestor NÃO escreve risco', async () => {
+    await assertFails(db(GESTOR).doc('riscos/r2').set({ area: 'TI', titulo: 'Risco X', status: 'Identificado' }));
+  });
+
+  test('usuário do domínio lê riscos', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('riscos/r3').set({ area: 'TI', titulo: 'Risco X' });
+    });
+    await assertSucceeds(db(GESTOR).doc('riscos/r3').get());
+  });
+
+  test('usuário fora do domínio NÃO lê riscos', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('riscos/r4').set({ area: 'TI', titulo: 'Risco X' });
+    });
+    await assertFails(db(FORA).doc('riscos/r4').get());
+  });
+
+  test('admin escreve indicador de segurança', async () => {
+    await assertSucceeds(db(ADMIN).doc('indicadores_seguranca/i1').set({ nome: 'Patches no prazo', meta: 95 }));
+  });
+
+  test('gestor NÃO escreve indicador de segurança', async () => {
+    await assertFails(db(GESTOR).doc('indicadores_seguranca/i2').set({ nome: 'Patches no prazo', meta: 95 }));
+  });
+
+  test('usuário do domínio lê indicadores de segurança', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('indicadores_seguranca/i3').set({ nome: 'Patches no prazo' });
+    });
+    await assertSucceeds(db(GESTOR).doc('indicadores_seguranca/i3').get());
+  });
 });
 
 describe('Security Rules — processos e respostas', () => {

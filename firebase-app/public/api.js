@@ -31,6 +31,8 @@ const COLLECTION = {
   configPerfis: 'config_perfis',
   dependencias: 'dependencias',
   componentes: 'componentes',
+  riscos: 'riscos',
+  indicadoresSeguranca: 'indicadores_seguranca',
 };
 
 // ------------------------------------------------------------
@@ -194,6 +196,65 @@ async function _lerComponentes() {
   }));
 }
 
+async function _lerRiscos() {
+  const docs = await _getAll(COLLECTION.riscos);
+  return docs.map((d) => ({
+    id: d.id,
+    area: d.area || '',
+    processoId: d.processoId || null,
+    processo: d.processo || '',
+    fornecedor: d.fornecedor || null,
+    fornecedorNome: d.fornecedorNome || '',
+    indicadorId: d.indicadorId || null,
+    titulo: d.titulo || '',
+    descricao: d.descricao || '',
+    categoria: d.categoria || '',
+    responsavel: d.responsavel || '',
+    dataIdentificacao: d.dataIdentificacao || '',
+    status: d.status || 'Identificado',
+    origem: d.origem || 'Manual',
+    probabilidade: d.probabilidade || '',
+    impacto: d.impacto || '',
+    impactoFinanceiro: d.impactoFinanceiro ?? null,
+    impactoFinanceiroDescricao: d.impactoFinanceiroDescricao || '',
+    score: d.score ?? null,
+    prioridade: d.prioridade || '',
+    estrategiaTratamento: d.estrategiaTratamento || '',
+    estrategiaDescricao: d.estrategiaDescricao || '',
+    planoAcao: d.planoAcao || [],
+    impactoFinanceiroComponentes: d.impactoFinanceiroComponentes || [],
+    kris: d.kris || [],
+    dataUltimaReavaliacao: d.dataUltimaReavaliacao || null,
+    proximaReavaliacao: d.proximaReavaliacao || null,
+    historicoReavaliacao: d.historicoReavaliacao || '',
+    dataEncerramento: d.dataEncerramento || null,
+    justificativaEncerramento: d.justificativaEncerramento || '',
+    criadoEm: d.criadoEm || '',
+    atualizadoEm: d.atualizadoEm || '',
+    criadoPor: d.criadoPor || '',
+  }));
+}
+
+async function _lerIndicadoresSeguranca() {
+  const docs = await _getAll(COLLECTION.indicadoresSeguranca);
+  return docs.map((d) => ({
+    id: d.id,
+    nome: d.nome || '',
+    pilar: d.pilar || '',
+    tipo: d.tipo || '',
+    responsavel: d.responsavel || '',
+    metaMinima: d.metaMinima ?? null,
+    ativo: d.ativo !== false,
+    historico: d.historico || [],
+    ultimoDesempenho: d.ultimoDesempenho ?? null,
+    ultimoMes: d.ultimoMes || null,
+    foraDaMeta: !!d.foraDaMeta,
+    criadoEm: d.criadoEm || '',
+    atualizadoEm: d.atualizadoEm || '',
+    criadoPor: d.criadoPor || '',
+  }));
+}
+
 // Última resposta por area||processo -> score/tier/avaliado/respostas
 async function _lerRespostasIndexadas() {
   const docs = await _getAll(COLLECTION.respostas);
@@ -351,6 +412,64 @@ async function _salvarComponente(d) {
   return { success: true, id: ref.id };
 }
 
+const _CAMPOS_INDICADOR = [
+  'nome', 'pilar', 'tipo', 'responsavel', 'metaMinima', 'ativo',
+  'historico', 'ultimoDesempenho', 'ultimoMes', 'foraDaMeta',
+];
+
+async function _salvarIndicadorSeguranca(ind) {
+  const data = {};
+  _CAMPOS_INDICADOR.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(ind, campo) && ind[campo] !== undefined) {
+      data[campo] = ind[campo];
+    }
+  });
+  data.atualizadoEm = new Date().toISOString();
+
+  if (ind.id) {
+    await _db.collection(COLLECTION.indicadoresSeguranca).doc(String(ind.id)).set(data, { merge: true });
+    return { success: true, id: ind.id };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = (window.USER_EMAIL || '').toLowerCase();
+  data.historico = data.historico || [];
+  data.ativo = data.ativo !== false;
+  const ref = await _db.collection(COLLECTION.indicadoresSeguranca).add(data);
+  return { success: true, id: ref.id };
+}
+
+// Campos do registro de risco (arrays planoAcao/kris ficam nativos no Firestore,
+// sem necessidade de JSON.stringify — diferente de processos, que carrega essa
+// convenção da época em que o backend era uma planilha do Sheets).
+const _CAMPOS_RISCO = [
+  'area', 'processoId', 'processo', 'fornecedor', 'fornecedorNome', 'indicadorId', 'titulo', 'descricao', 'categoria', 'responsavel',
+  'dataIdentificacao', 'status', 'origem',
+  'probabilidade', 'impacto', 'impactoFinanceiro', 'impactoFinanceiroDescricao', 'score', 'prioridade',
+  'estrategiaTratamento', 'estrategiaDescricao', 'planoAcao', 'kris', 'impactoFinanceiroComponentes',
+  'dataUltimaReavaliacao', 'proximaReavaliacao', 'historicoReavaliacao',
+  'dataEncerramento', 'justificativaEncerramento',
+];
+
+// Merge: só grava os campos presentes no payload (mesma semântica de salvarProcesso).
+async function _salvarRisco(r) {
+  const data = {};
+  _CAMPOS_RISCO.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(r, campo) && r[campo] !== undefined) {
+      data[campo] = r[campo];
+    }
+  });
+  data.atualizadoEm = new Date().toISOString();
+
+  if (r.id) {
+    await _db.collection(COLLECTION.riscos).doc(String(r.id)).set(data, { merge: true });
+    return { success: true, id: r.id };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = (window.USER_EMAIL || '').toLowerCase();
+  const ref = await _db.collection(COLLECTION.riscos).add(data);
+  return { success: true, id: ref.id };
+}
+
 // Campos de processo que guardam JSON (mantidos como objeto/array nativo).
 const _CAMPOS_PROCESSO = [
   'area', 'processo', 'descricao', 'dependencia', 'rto', 'rpo', 'mtpd', 'biaHomologada', 'tier',
@@ -455,6 +574,10 @@ const _GET_FIRESTORE = {
   getDependencias: () => _lerDependencias(),
   getComponentes: () => _lerComponentes(),
   getPerfil: (params) => _lerPerfil(params.email),
+  getRiscos: () => _lerRiscos(),
+  getRiscosPorProcesso: (params) => _lerRiscos().then((rs) => (params.processoId ? rs.filter((r) => r.processoId === params.processoId) : rs)),
+  getRiscosPorArea: (params) => _lerRiscos().then((rs) => (params.area ? rs.filter((r) => r.area === params.area) : rs)),
+  getIndicadoresSeguranca: () => _lerIndicadoresSeguranca(),
 };
 
 // Ações de ESCRITA atendidas pelo Firestore
@@ -472,6 +595,10 @@ const _POST_FIRESTORE = {
   excluirDependencia: (b) => _db.collection(COLLECTION.dependencias).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarComponente: (b) => _salvarComponente(b),
   excluirComponente: (b) => _db.collection(COLLECTION.componentes).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarRisco: (b) => _salvarRisco(b),
+  excluirRisco: (b) => _db.collection(COLLECTION.riscos).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarIndicadorSeguranca: (b) => _salvarIndicadorSeguranca(b),
+  excluirIndicadorSeguranca: (b) => _db.collection(COLLECTION.indicadoresSeguranca).doc(String(b.id)).delete().then(() => ({ success: true })),
 };
 
 // ------------------------------------------------------------
@@ -506,7 +633,7 @@ const API = {
     if (_POST_FIRESTORE[action]) {
       const result = await _POST_FIRESTORE[action](body);
       // Invalida caches afetados de forma conservadora.
-      API.invalidate('getProcessos', 'getAreas', 'getPerguntas', 'getConfigRespostas', 'getDependencias', 'getComponentes', 'getProcessosPorArea');
+      API.invalidate('getProcessos', 'getAreas', 'getPerguntas', 'getConfigRespostas', 'getDependencias', 'getComponentes', 'getProcessosPorArea', 'getRiscos', 'getRiscosPorProcesso', 'getRiscosPorArea', 'getIndicadoresSeguranca');
       return result;
     }
     // PCN/Drive, e-mail, Gemini, tokens externos -> Apps Script.
@@ -537,6 +664,14 @@ const API = {
   getComponentes: () => API.get('getComponentes'),
   salvarComponente: (d) => API.post('salvarComponente', d),
   excluirComponente: (id) => API.post('excluirComponente', { id }),
+  getRiscos: () => API.get('getRiscos'),
+  getRiscosPorProcesso: (processoId) => API.get('getRiscosPorProcesso', { processoId }),
+  getRiscosPorArea: (area) => API.get('getRiscosPorArea', { area }),
+  salvarRisco: (r) => API.post('salvarRisco', r),
+  excluirRisco: (id) => API.post('excluirRisco', { id }),
+  getIndicadoresSeguranca: () => API.get('getIndicadoresSeguranca'),
+  salvarIndicadorSeguranca: (ind) => API.post('salvarIndicadorSeguranca', ind),
+  excluirIndicadorSeguranca: (id) => API.post('excluirIndicadorSeguranca', { id }),
 };
 
 window.API = API;

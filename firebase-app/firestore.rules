@@ -6,7 +6,8 @@ rules_version = '2';
 //   - Acesso exige usuário autenticado com e-mail @fortestecnologia.com.br.
 //   - Leitura de todas as coleções de dados: qualquer usuário do domínio.
 //   - Escrita em catálogos e configurações (perguntas, areas, dependencias,
-//     componentes, config_respostas, config_perfis): somente admin.
+//     componentes, riscos, indicadores_seguranca, config_respostas,
+//     config_perfis): somente admin.
 //   - Escrita em processos e respostas_bia: admin, ou gestor da própria área.
 //   - Perfil (admin/gestor) vem de config_perfis/{email}.
 //   - tokens de avaliação externa (sem login) são tratados na Task 8; por ora
@@ -65,6 +66,16 @@ service cloud.firestore {
     }
 
     match /componentes/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin();
+    }
+
+    match /riscos/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin();
+    }
+
+    match /indicadores_seguranca/{id} {
       allow read: if isCorpUser();
       allow write: if isAdmin();
     }
