@@ -3,7 +3,18 @@
 // ============================================================
 
 const app = document.getElementById('app');
-const pages = { processos, perguntas, areas, admin, dependencias, componentes, pcns };
+const pages = {
+  processos, perguntas, areas, admin, dependencias, componentes, pcns, riscos,
+  'indicadores-dashboard': indicadoresDashboard,
+  'indicadores-cadastro': indicadoresCadastro,
+  'indicadores-lancamento': indicadoresLancamento,
+  'indicadores-matriz': indicadoresMatriz,
+};
+
+// Paleta rotativa de 10 cores para tags de categoria dinâmicas (dependências/BIA).
+// Fonte única — ver .amazonq/rules/ui-referencias.md, seção "Paleta de categorias".
+// avaliar.html mantém sua própria cópia por ser uma página pública standalone.
+const CATEGORIA_CORES = ['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1b9a','#00695c','#1565c0','#4e342e','#558b2f'];
 
 // Roteamento
 window.addEventListener('hashchange', route);
@@ -21,6 +32,7 @@ function route() {
   const [page, queryStr] = hash.split('?');
   const params = new URLSearchParams(queryStr || '');
   document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page === page));
+  document.querySelectorAll('.nav-group').forEach(g => g.classList.toggle('has-active', !!g.querySelector('.nav-link.active')));
   const pageFunc = pages[page] || pages.processos;
   if (pageFunc) pageFunc();
   // Deep link: abrir processo na aba específica (aguarda dados carregarem)
@@ -266,7 +278,7 @@ window.renderAvaliacaoInline = () => {
     ]
   };
   
-  const CAT_CORES_PALETTE = ['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1b9a','#00695c','#1565c0','#4e342e','#558b2f'];
+  const CAT_CORES_PALETTE = CATEGORIA_CORES;
   const CAT_CORES = {};
   [...new Set(window.processosPerguntas.map(pg => pg.categoria))].forEach((c, i) => {
     CAT_CORES[c] = CAT_CORES_PALETTE[i % CAT_CORES_PALETTE.length];
@@ -964,11 +976,11 @@ async function processos() {
       </div>
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
         <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
-          <button id="tab-identificacao" onclick="trocarAbaProcesso('identificacao')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Identificação</button>
-          <button id="tab-avaliacao" onclick="trocarAbaProcesso('avaliacao')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Avaliação</button>
-          <button id="tab-bia" onclick="trocarAbaProcesso('bia')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BIA</button>
-          <button id="tab-bcp" onclick="trocarAbaProcesso('bcp')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BCP</button>
-          <button id="tab-drp" onclick="trocarAbaProcesso('drp')" style="flex:1;padding:12px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">DRP</button>
+          <button id="tab-identificacao" onclick="trocarAbaProcesso('identificacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Identificação</button>
+          <button id="tab-avaliacao" onclick="trocarAbaProcesso('avaliacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Avaliação</button>
+          <button id="tab-bia" onclick="trocarAbaProcesso('bia')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BIA</button>
+          <button id="tab-bcp" onclick="trocarAbaProcesso('bcp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BCP</button>
+          <button id="tab-drp" onclick="trocarAbaProcesso('drp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">DRP</button>
         </div>
         <div style="flex:1;overflow-y:auto;padding:20px 24px;">
           <input type="hidden" id="fId">
@@ -2212,7 +2224,7 @@ window.avaliarProcesso = (id) => {
       {valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}
     ]
   };
-  const CAT_CORES_PALETTE = ['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1b9a','#00695c','#1565c0','#4e342e','#558b2f'];
+  const CAT_CORES_PALETTE = CATEGORIA_CORES;
   const CAT_CORES_AVALIAR = {};
   [...new Set(window.processosPerguntas.map(p => p.categoria))].forEach((c, i) => {
     CAT_CORES_AVALIAR[c] = CAT_CORES_PALETTE[i % CAT_CORES_PALETTE.length];
@@ -2284,7 +2296,7 @@ window.imprimirAvaliacao = () => {
 
   // Coletar respostas selecionadas
   const pergs = window.processosPerguntas || window.questionarioPerguntas || [];
-  const CAT_CORES_PALETTE_PDF = ['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1b9a','#00695c','#1565c0','#4e342e','#558b2f'];
+  const CAT_CORES_PALETTE_PDF = CATEGORIA_CORES;
   const CAT_CORES = {};
   [...new Set(pergs.map(p => p.categoria))].forEach((c, i) => { CAT_CORES[c] = CAT_CORES_PALETTE_PDF[i % CAT_CORES_PALETTE_PDF.length]; });
   const OPCOES = window.configRespostas || {};
@@ -3425,6 +3437,2204 @@ window.salvarComp = async () => {
 };
 
 // ============================================================
+// PÁGINA: GESTÃO DE RISCOS
+// ============================================================
+let riscosData = [];
+let riscosOrdenacao = { coluna: 'titulo', direcao: 'asc' };
+let riscosAreasCache = [];
+let riscosProcessosCache = [];
+let riscosFornecedoresCache = [];
+const RISCO_STATUS = ['Identificado', 'Em Análise', 'Em Avaliação', 'Em Tratamento', 'Em Monitoramento', 'Aceito', 'Encerrado'];
+const RISCO_CATEGORIAS_PADRAO = ['Operacional', 'Tecnológico', 'Financeiro', 'Regulatório', 'Reputacional', 'Ambiental', 'Estratégico'];
+
+function _corStatusRisco(status) {
+  const cores = {
+    'Identificado': '#9e9e9e', 'Em Análise': '#1565c0', 'Em Avaliação': '#0277bd',
+    'Em Tratamento': '#f57c00', 'Em Monitoramento': '#6a1b9a', 'Aceito': '#2e7d32', 'Encerrado': '#455a64',
+  };
+  return cores[status] || '#9e9e9e';
+}
+function _badgeStatusRisco(status) {
+  const s = status || 'Identificado';
+  return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:white;background:${_corStatusRisco(s)};white-space:nowrap;">${s}</span>`;
+}
+function _corProbImpactoRisco(valor) {
+  const bg = { 'Alta': '#ffcdd2', 'Alto': '#fff3e0', 'Crítico': '#ffcdd2', 'Média': '#fff3e0', 'Moderado': '#e8f5e9', 'Baixa': '#e8f5e9', 'Baixo': '#f5f5f5' };
+  const texto = { 'Alta': '#c62828', 'Alto': '#e65100', 'Crítico': '#c62828', 'Média': '#e65100', 'Moderado': '#2e7d32', 'Baixa': '#2e7d32', 'Baixo': '#666' };
+  return { bg: bg[valor] || '#f5f5f5', texto: texto[valor] || '#666' };
+}
+function _badgeProbImpactoRisco(valor) {
+  if (!valor) return '<span style="color:#bbb;">-</span>';
+  const c = _corProbImpactoRisco(valor);
+  return `<span style="display:inline-block;padding:2px 8px;border-radius:8px;font-size:0.78em;font-weight:600;background:${c.bg};color:${c.texto};">${valor}</span>`;
+}
+
+async function riscos() {
+  const isAdmin = window.USER_PERFIL === 'admin';
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Gestão de Riscos</h2><p class="page-sub">Registro, análise, tratamento e monitoramento dos riscos identificados</p></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="abrirImportarRiscosPCN()" id="btnImportarRiscosPCN" style="color:#1a237e;border-color:#1a237e;display:none;">📥 Importar de um PCN</button>
+        <button class="btn btn-primary" onclick="abrirDrawerRisco()" id="btnNovoRisco" style="display:none;">+ Novo Risco</button>
+      </div>
+    </div>
+    <div style="margin-bottom:16px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Área:</label>
+        <select id="filtroRiscoArea" onchange="filtrarRiscos()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+          <option value="">Todas as áreas</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Status:</label>
+        <select id="filtroRiscoStatus" onchange="filtrarRiscos()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+          <option value="">Todos os status</option>
+          ${RISCO_STATUS.map(s => `<option value="${s}">${s}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Fornecedor:</label>
+        <select id="filtroRiscoFornecedor" onchange="filtrarRiscos()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+          <option value="">Todos (inclui sem fornecedor)</option>
+          <option value="_qualquer_">Somente riscos de fornecedores</option>
+        </select>
+      </div>
+      <div>
+        <input type="text" id="buscaRisco" placeholder="🔍 Buscar risco..." oninput="filtrarRiscos()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:250px;">
+      </div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div class="data-table" id="listaRiscos" style="display:none;">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="ordenarRiscos('area')" style="cursor:pointer;width:11%;">Área <span id="sort-risco-area"></span></th>
+            <th style="width:13%;">Processo / Fornecedor</th>
+            <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;width:17%;">Título <span id="sort-risco-titulo"></span></th>
+            <th style="width:10%;">Categoria</th>
+            <th style="width:11%;">Responsável</th>
+            <th style="width:9%;">Probab.</th>
+            <th style="width:9%;">Impacto</th>
+            <th style="width:12%;">Status</th>
+            <th style="width:6%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody id="riscoRows"></tbody>
+      </table>
+    </div>
+
+    ${_htmlDrawerRisco()}
+    ${_htmlModalImportarRiscosPCN()}
+  `;
+
+  document.getElementById('btnNovoRisco').style.display = isAdmin ? 'inline-block' : 'none';
+  document.getElementById('btnImportarRiscosPCN').style.display = isAdmin ? 'inline-block' : 'none';
+
+  try {
+    const [riscos_, areas_, deps_] = await Promise.all([API.getRiscos(), API.getAreas(), API.getDependencias()]);
+    riscosData = riscos_; riscosAreasCache = areas_;
+    riscosFornecedoresCache = deps_.filter(d => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
+  } catch (e) { riscosData = []; riscosAreasCache = []; riscosFornecedoresCache = []; }
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('listaRiscos').style.display = 'block';
+
+  document.getElementById('filtroRiscoArea').innerHTML = '<option value="">Todas as áreas</option>' +
+    riscosAreasCache.map(a => `<option value="${a.nome}">${a.nome}</option>`).join('');
+  document.getElementById('filtroRiscoFornecedor').innerHTML = '<option value="">Todos (inclui sem fornecedor)</option>' +
+    '<option value="_qualquer_">Somente riscos de fornecedores</option>' +
+    riscosFornecedoresCache.map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+
+  renderizarRiscos();
+}
+
+function renderizarRiscos() {
+  let data = [...riscosData];
+  const isAdmin = window.USER_PERFIL === 'admin';
+
+  const filtroArea = document.getElementById('filtroRiscoArea');
+  if (filtroArea && filtroArea.value) data = data.filter(r => r.area === filtroArea.value);
+
+  const filtroStatus = document.getElementById('filtroRiscoStatus');
+  if (filtroStatus && filtroStatus.value) data = data.filter(r => r.status === filtroStatus.value);
+
+  const filtroFornecedor = document.getElementById('filtroRiscoFornecedor');
+  if (filtroFornecedor && filtroFornecedor.value === '_qualquer_') data = data.filter(r => r.fornecedor);
+  else if (filtroFornecedor && filtroFornecedor.value) data = data.filter(r => r.fornecedor === filtroFornecedor.value);
+
+  const busca = (document.getElementById('buscaRisco') || {}).value || '';
+  if (busca.trim()) {
+    const termo = busca.toLowerCase();
+    data = data.filter(r =>
+      (r.titulo || '').toLowerCase().includes(termo) ||
+      (r.descricao || '').toLowerCase().includes(termo) ||
+      (r.responsavel || '').toLowerCase().includes(termo) ||
+      (r.categoria || '').toLowerCase().includes(termo) ||
+      (r.processo || '').toLowerCase().includes(termo) ||
+      (r.fornecedorNome || '').toLowerCase().includes(termo)
+    );
+  }
+
+  data.sort((a, b) => {
+    const valA = (a[riscosOrdenacao.coluna] || '').toString().toLowerCase();
+    const valB = (b[riscosOrdenacao.coluna] || '').toString().toLowerCase();
+    const cmp = valA.localeCompare(valB);
+    return riscosOrdenacao.direcao === 'asc' ? cmp : -cmp;
+  });
+
+  ['area', 'titulo'].forEach(col => {
+    const el = document.getElementById(`sort-risco-${col}`);
+    if (el) el.textContent = col === riscosOrdenacao.coluna ? (riscosOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
+  });
+
+  document.getElementById('riscoRows').innerHTML = data.length
+    ? data.map(r => `<tr>
+        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${r.area || '-'}</span></td>
+        <td style="font-size:0.85em;color:#555;">${r.processo || (r.fornecedorNome ? `🏢 ${r.fornecedorNome}` : '<span style="color:#bbb;">Corporativo</span>')}</td>
+        <td style="font-weight:600;color:#222;cursor:pointer;" ondblclick="editarRisco('${r.id}')" title="Duplo-clique para editar">${r.titulo}</td>
+        <td style="font-size:0.85em;color:#555;">${r.categoria || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${r.responsavel || '-'}</td>
+        <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
+        <td>${_badgeProbImpactoRisco(r.impacto)}</td>
+        <td>${_badgeStatusRisco(r.status)}</td>
+        <td style="text-align:center;white-space:nowrap;">
+          <button class="btn-icon" onclick="editarRisco('${r.id}')" title="${isAdmin ? 'Editar' : 'Visualizar'}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          ${isAdmin ? `<button class="btn-icon" onclick="excluirRisco('${r.id}')" title="Excluir">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>` : ''}
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="9" style="text-align:center;color:#999;padding:40px;">Nenhum risco cadastrado.</td></tr>';
+}
+
+window.filtrarRiscos = () => renderizarRiscos();
+window.ordenarRiscos = (coluna) => {
+  if (riscosOrdenacao.coluna === coluna) {
+    riscosOrdenacao.direcao = riscosOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
+  } else {
+    riscosOrdenacao.coluna = coluna;
+    riscosOrdenacao.direcao = 'asc';
+  }
+  renderizarRiscos();
+};
+
+// ------------------------------------------------------------
+// Drawer de edição do risco (5 abas cobrindo o ciclo de vida)
+// ------------------------------------------------------------
+function _htmlDrawerRisco() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  return `
+    <div class="drawer-overlay" id="drawerOverlayRisco" onclick="fecharDrawerRisco()"></div>
+    <div class="drawer" id="drawerRisco">
+      <div class="drawer-header">
+        <h3 id="riscoDrawerTitulo">Novo Risco</h3>
+        <button onclick="fecharDrawerRisco()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
+        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;flex-wrap:wrap;">
+          <button id="tab-risco-identificacao" onclick="trocarAbaRisco('identificacao')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Identificação</button>
+          <button id="tab-risco-analise" onclick="trocarAbaRisco('analise')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Análise &amp; Avaliação</button>
+          <button id="tab-risco-tratamento" onclick="trocarAbaRisco('tratamento')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Tratamento</button>
+          <button id="tab-risco-monitoramento" onclick="trocarAbaRisco('monitoramento')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Monitoramento</button>
+          <button id="tab-risco-encerramento" onclick="trocarAbaRisco('encerramento')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Reavaliação &amp; Encerramento</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
+          <input type="hidden" id="rId">
+
+          <!-- ABA: IDENTIFICAÇÃO / REGISTRO -->
+          <div id="painel-risco-identificacao">
+            <div style="margin-bottom:20px;">
+              <label style="${lbl}">Título / Evento</label>
+              <input type="text" id="rTitulo" placeholder="Ex: Falha de energia no data center" style="${inp}border:2px solid #1a237e;font-weight:600;">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="${lbl}">Área</label>
+                <select id="rArea" style="${inp}"></select>
+              </div>
+              <div>
+                <label style="${lbl}">Processo Relacionado (opcional)</label>
+                <select id="rProcesso" style="${inp}"><option value="">-- Nenhum (risco corporativo) --</option></select>
+              </div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Fornecedor Relacionado (opcional)</label>
+              <select id="rFornecedor" style="${inp}"><option value="">-- Nenhum --</option></select>
+              <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Use quando o risco foi reportado por (ou envolve) um fornecedor do catálogo de Dependências.</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="${lbl}">Categoria</label>
+                <input type="text" id="rCategoria" list="rCategoriaList" placeholder="Ex: Operacional" style="${inp}">
+                <datalist id="rCategoriaList"></datalist>
+              </div>
+              <div>
+                <label style="${lbl}">Responsável (Owner)</label>
+                <input type="text" id="rResponsavel" placeholder="Nome ou e-mail" style="${inp}">
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="${lbl}">Data de Identificação</label>
+                <input type="date" id="rDataIdentificacao" style="${inp}">
+              </div>
+              <div>
+                <label style="${lbl}">Status</label>
+                <select id="rStatus" style="${inp}">${RISCO_STATUS.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
+              </div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Descrição</label>
+              <textarea id="rDescricao" rows="3" placeholder="Descreva o risco e seu impacto potencial" style="${inp}resize:vertical;"></textarea>
+            </div>
+            <div id="rOrigemInfo" style="font-size:0.8em;color:#888;"></div>
+          </div>
+
+          <!-- ABA: ANÁLISE (IMPACTO FINANCEIRO) & AVALIAÇÃO -->
+          <div id="painel-risco-analise" style="display:none;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="${lbl}">Probabilidade</label>
+                <select id="rProbabilidade" style="${inp}" onchange="_calcularScoreRisco()">
+                  <option value="">Selecione...</option>
+                  <option value="Baixa">Baixa — Pouco provável que aconteça</option>
+                  <option value="Média">Média — Pode acontecer eventualmente</option>
+                  <option value="Alta">Alta — Muito provável que aconteça</option>
+                </select>
+              </div>
+              <div>
+                <label style="${lbl}">Impacto</label>
+                <select id="rImpacto" style="${inp}" onchange="_calcularScoreRisco()">
+                  <option value="">Selecione...</option>
+                  <option value="Baixo">Baixo — Pouco impacto na operação</option>
+                  <option value="Moderado">Moderado — Impacto perceptível, mas gerenciável</option>
+                  <option value="Alto">Alto — Impacto significativo na operação</option>
+                  <option value="Crítico">Crítico — Risco à continuidade do negócio</option>
+                </select>
+              </div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}margin-bottom:8px;">Componentes do Impacto Financeiro</label>
+              <div id="impactoFinanceiroTabela"></div>
+              <div style="display:grid;grid-template-columns:1.5fr 1.5fr 1fr auto;gap:8px;margin-top:10px;align-items:end;">
+                <div>
+                  <input type="text" id="ifCategoria" list="ifCategoriaList" placeholder="Categoria (ex: Perda de Receita)" style="${inp}">
+                  <datalist id="ifCategoriaList">
+                    <option value="Perda de Receita">
+                    <option value="Custo de Recuperação/Remediação">
+                    <option value="Multas e Penalidades Regulatórias">
+                    <option value="Custos Legais/Indenizações">
+                    <option value="Perda de Produtividade">
+                    <option value="Dano à Reputação/Imagem (estimado)">
+                  </datalist>
+                </div>
+                <div><input type="text" id="ifDescricao" placeholder="Descrição (opcional)" style="${inp}"></div>
+                <div><input type="number" id="ifValor" placeholder="Valor R$" style="${inp}"></div>
+                <button class="btn btn-ghost" onclick="adicionarImpactoFinanceiroItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+              </div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Impacto Financeiro Estimado (R$)</label>
+              <input type="number" id="rImpactoFinanceiro" readonly style="${inp}background:#f5f6fa;color:#1a237e;font-weight:700;">
+              <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Calculado automaticamente pela soma dos componentes acima.</span>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Observações Gerais do Impacto Financeiro</label>
+              <textarea id="rImpactoFinanceiroDescricao" rows="3" placeholder="Premissas, ressalvas ou contexto da estimativa" style="${inp}resize:vertical;"></textarea>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="${lbl}">Score (Priorização)</label>
+                <input type="number" id="rScore" readonly style="${inp}background:#f5f6fa;color:#1a237e;font-weight:700;">
+                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Calculado automaticamente: Probabilidade × Impacto.</span>
+              </div>
+              <div>
+                <label style="${lbl}">Prioridade</label>
+                <select id="rPrioridade" style="${inp}">
+                  <option value="">Selecione...</option>
+                  <option value="Baixa">Baixa</option>
+                  <option value="Média">Média</option>
+                  <option value="Alta">Alta</option>
+                  <option value="Crítica">Crítica</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- ABA: TRATAMENTO & PLANO DE AÇÃO -->
+          <div id="painel-risco-tratamento" style="display:none;">
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Estratégia de Tratamento</label>
+              <select id="rEstrategiaTratamento" style="${inp}">
+                <option value="">Selecione...</option>
+                <option value="Mitigar">Mitigar</option>
+                <option value="Transferir">Transferir</option>
+                <option value="Aceitar">Aceitar</option>
+                <option value="Evitar">Evitar</option>
+              </select>
+            </div>
+            <div style="margin-bottom:20px;">
+              <label style="${lbl}">Estratégia / Medidas de Mitigação</label>
+              <textarea id="rEstrategiaDescricao" rows="3" placeholder="Descreva a estratégia de tratamento" style="${inp}resize:vertical;"></textarea>
+            </div>
+            <div>
+              <label style="${lbl}margin-bottom:8px;">Plano de Ação</label>
+              <div id="planoAcaoTabela"></div>
+              <div style="display:grid;grid-template-columns:2fr 1.3fr 1fr 1.3fr auto;gap:8px;margin-top:10px;align-items:end;">
+                <div><input type="text" id="paAcao" placeholder="Ação" style="${inp}"></div>
+                <div><input type="text" id="paResponsavel" placeholder="Responsável" style="${inp}"></div>
+                <div><input type="date" id="paPrazo" style="${inp}"></div>
+                <div>
+                  <select id="paStatus" style="${inp}">
+                    <option value="Pendente">Pendente</option>
+                    <option value="Em andamento">Em andamento</option>
+                    <option value="Concluído">Concluído</option>
+                    <option value="Atrasado">Atrasado</option>
+                  </select>
+                </div>
+                <button class="btn btn-ghost" onclick="adicionarPlanoAcaoItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ABA: MONITORAMENTO (KRIs) -->
+          <div id="painel-risco-monitoramento" style="display:none;">
+            <label style="${lbl}margin-bottom:8px;">Indicadores-Chave de Risco (KRIs)</label>
+            <div id="krisTabela"></div>
+            <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr 1.2fr auto;gap:8px;margin-top:10px;align-items:end;">
+              <div><input type="text" id="kriIndicador" placeholder="Indicador" style="${inp}"></div>
+              <div><input type="text" id="kriMeta" placeholder="Meta" style="${inp}"></div>
+              <div><input type="text" id="kriValorAtual" placeholder="Valor atual" style="${inp}"></div>
+              <div>
+                <select id="kriFrequencia" style="${inp}">
+                  <option value="Diária">Diária</option>
+                  <option value="Semanal">Semanal</option>
+                  <option value="Mensal">Mensal</option>
+                  <option value="Trimestral">Trimestral</option>
+                </select>
+              </div>
+              <div>
+                <select id="kriStatus" style="${inp}">
+                  <option value="Dentro da meta">Dentro da meta</option>
+                  <option value="Atenção">Atenção</option>
+                  <option value="Fora da meta">Fora da meta</option>
+                </select>
+              </div>
+              <button class="btn btn-ghost" onclick="adicionarKriItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+            </div>
+          </div>
+
+          <!-- ABA: REAVALIAÇÃO & ENCERRAMENTO -->
+          <div id="painel-risco-encerramento" style="display:none;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="${lbl}">Data da Última Reavaliação</label>
+                <input type="date" id="rDataUltimaReavaliacao" style="${inp}">
+              </div>
+              <div>
+                <label style="${lbl}">Próxima Reavaliação</label>
+                <input type="date" id="rProximaReavaliacao" style="${inp}">
+              </div>
+            </div>
+            <div style="margin-bottom:20px;">
+              <label style="${lbl}">Histórico de Reavaliação</label>
+              <textarea id="rHistoricoReavaliacao" rows="3" placeholder="Registre observações de cada reavaliação" style="${inp}resize:vertical;"></textarea>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Data de Encerramento</label>
+              <input type="date" id="rDataEncerramento" style="${inp}">
+            </div>
+            <div>
+              <label style="${lbl}">Justificativa de Aceitação/Encerramento</label>
+              <textarea id="rJustificativaEncerramento" rows="3" placeholder="Motivo da aceitação do risco ou encerramento" style="${inp}resize:vertical;"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerRisco()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarRisco()" id="btnSalvarRisco">Salvar</button>
+      </div>
+    </div>`;
+}
+
+window.trocarAbaRisco = (aba) => {
+  ['identificacao', 'analise', 'tratamento', 'monitoramento', 'encerramento'].forEach(a => {
+    document.getElementById('painel-risco-' + a).style.display = a === aba ? 'block' : 'none';
+    const btn = document.getElementById('tab-risco-' + a);
+    btn.style.color = a === aba ? '#1a237e' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
+  });
+};
+
+window.abrirDrawerRisco = async (r) => {
+  const isAdmin = window.USER_PERFIL === 'admin';
+  document.getElementById('rId').value = r ? r.id : '';
+
+  if (!riscosProcessosCache.length) {
+    try { riscosProcessosCache = await API.getProcessos(); } catch (e) { riscosProcessosCache = []; }
+  }
+  document.getElementById('rArea').innerHTML = riscosAreasCache.map(a => `<option value="${a.nome}">${a.nome}</option>`).join('');
+  document.getElementById('rProcesso').innerHTML = '<option value="">-- Nenhum (risco corporativo) --</option>' +
+    riscosProcessosCache.map(p => `<option value="${p.id}" data-area="${p.area}">${p.area} — ${p.processo}</option>`).join('');
+  document.getElementById('rProcesso').onchange = () => {
+    const sel = document.getElementById('rProcesso');
+    const area = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].dataset.area : '';
+    if (area) document.getElementById('rArea').value = area;
+  };
+
+  if (!riscosFornecedoresCache.length) {
+    try {
+      const deps = await API.getDependencias();
+      riscosFornecedoresCache = deps.filter(d => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
+    } catch (e) { riscosFornecedoresCache = []; }
+  }
+  document.getElementById('rFornecedor').innerHTML = '<option value="">-- Nenhum --</option>' +
+    riscosFornecedoresCache.map(f => `<option value="${f.id}" data-nome="${f.nome}">${f.nome}${f.empresa ? ' — ' + f.empresa : ''}</option>`).join('');
+
+  const categorias = [...new Set([...RISCO_CATEGORIAS_PADRAO, ...riscosData.map(x => x.categoria).filter(Boolean)])].sort();
+  document.getElementById('rCategoriaList').innerHTML = categorias.map(c => `<option value="${c}">`).join('');
+
+  document.getElementById('rArea').value = r ? r.area : '';
+  document.getElementById('rProcesso').value = r && r.processoId ? r.processoId : '';
+  document.getElementById('rFornecedor').value = r && r.fornecedor ? r.fornecedor : '';
+  document.getElementById('rTitulo').value = r ? r.titulo : '';
+  document.getElementById('rCategoria').value = r ? (r.categoria || '') : '';
+  document.getElementById('rResponsavel').value = r ? (r.responsavel || '') : '';
+  document.getElementById('rDataIdentificacao').value = r ? (r.dataIdentificacao || '') : new Date().toISOString().slice(0, 10);
+  document.getElementById('rStatus').value = r ? (r.status || 'Identificado') : 'Identificado';
+  document.getElementById('rDescricao').value = r ? (r.descricao || '') : '';
+  document.getElementById('rOrigemInfo').textContent = r && r.origem === 'Importado de PCN' ? '📥 Origem: importado de um PCN'
+    : r && r.origem === 'Indicador de Segurança' ? '📊 Origem: gerado automaticamente por desvio de indicador de segurança'
+    : '';
+
+  document.getElementById('rProbabilidade').value = r ? (r.probabilidade || '') : '';
+  document.getElementById('rImpacto').value = r ? (r.impacto || '') : '';
+  window._riscoImpactoFinanceiro = r && r.impactoFinanceiroComponentes ? [...r.impactoFinanceiroComponentes] : [];
+  renderImpactoFinanceiroRisco();
+  document.getElementById('rImpactoFinanceiroDescricao').value = r ? (r.impactoFinanceiroDescricao || '') : '';
+  _calcularScoreRisco();
+  document.getElementById('rPrioridade').value = r ? (r.prioridade || '') : '';
+
+  document.getElementById('rEstrategiaTratamento').value = r ? (r.estrategiaTratamento || '') : '';
+  document.getElementById('rEstrategiaDescricao').value = r ? (r.estrategiaDescricao || '') : '';
+  window._riscoPlanoAcao = r && r.planoAcao ? [...r.planoAcao] : [];
+  renderPlanoAcaoRisco();
+
+  window._riscoKris = r && r.kris ? [...r.kris] : [];
+  renderKrisRisco();
+
+  document.getElementById('rDataUltimaReavaliacao').value = r ? (r.dataUltimaReavaliacao || '') : '';
+  document.getElementById('rProximaReavaliacao').value = r ? (r.proximaReavaliacao || '') : '';
+  document.getElementById('rHistoricoReavaliacao').value = r ? (r.historicoReavaliacao || '') : '';
+  document.getElementById('rDataEncerramento').value = r ? (r.dataEncerramento || '') : '';
+  document.getElementById('rJustificativaEncerramento').value = r ? (r.justificativaEncerramento || '') : '';
+
+  const titulo = r ? 'Editar Risco' : 'Novo Risco';
+  const subtitulo = r && r.titulo ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${r.titulo}</div>` : '';
+  document.getElementById('riscoDrawerTitulo').innerHTML = titulo + (r ? ` ${_badgeStatusRisco(r.status)}` : '') + subtitulo;
+
+  // Somente admin edita; demais perfis visualizam em modo leitura.
+  document.querySelectorAll('#drawerRisco input, #drawerRisco select, #drawerRisco textarea').forEach(el => { el.disabled = !isAdmin; });
+  document.querySelectorAll('#drawerRisco .btn-ghost[onclick*="Item("], #drawerRisco .btn-ghost[onclick^="adicionar"]').forEach(el => { el.style.display = isAdmin ? 'inline-block' : 'none'; });
+  document.getElementById('btnSalvarRisco').style.display = isAdmin ? 'inline-block' : 'none';
+
+  trocarAbaRisco('identificacao');
+  document.getElementById('drawerRisco').classList.add('open');
+  document.getElementById('drawerOverlayRisco').classList.add('open');
+};
+
+window.fecharDrawerRisco = () => {
+  document.getElementById('drawerRisco').classList.remove('open');
+  document.getElementById('drawerOverlayRisco').classList.remove('open');
+};
+
+window.editarRisco = (id) => abrirDrawerRisco(riscosData.find(r => r.id === id));
+
+window.excluirRisco = async (id) => {
+  if (!confirm('Excluir este risco?')) return;
+  try {
+    await API.excluirRisco(id);
+    riscosData = riscosData.filter(x => x.id !== id);
+    renderizarRiscos();
+    showToast('✅ Excluído!', '#2e7d32');
+    API.invalidate('getRiscos');
+  } catch (e) { showToast('Erro: ' + e.message, '#c62828'); }
+};
+
+window.salvarRisco = async () => {
+  const procSel = document.getElementById('rProcesso');
+  const procOpt = procSel.options[procSel.selectedIndex];
+  const fornSel = document.getElementById('rFornecedor');
+  const fornOpt = fornSel.options[fornSel.selectedIndex];
+  const r = {
+    id: document.getElementById('rId').value || null,
+    area: document.getElementById('rArea').value.trim(),
+    processoId: procSel.value || null,
+    processo: procSel.value && procOpt ? procOpt.textContent.split(' — ').slice(1).join(' — ') : null,
+    fornecedor: fornSel.value || null,
+    fornecedorNome: fornSel.value && fornOpt ? fornOpt.dataset.nome : null,
+    titulo: document.getElementById('rTitulo').value.trim(),
+    descricao: document.getElementById('rDescricao').value.trim(),
+    categoria: document.getElementById('rCategoria').value.trim(),
+    responsavel: document.getElementById('rResponsavel').value.trim(),
+    dataIdentificacao: document.getElementById('rDataIdentificacao').value,
+    status: document.getElementById('rStatus').value,
+    probabilidade: document.getElementById('rProbabilidade').value,
+    impacto: document.getElementById('rImpacto').value,
+    impactoFinanceiro: document.getElementById('rImpactoFinanceiro').value ? Number(document.getElementById('rImpactoFinanceiro').value) : null,
+    impactoFinanceiroComponentes: window._riscoImpactoFinanceiro || [],
+    impactoFinanceiroDescricao: document.getElementById('rImpactoFinanceiroDescricao').value.trim(),
+    score: document.getElementById('rScore').value ? Number(document.getElementById('rScore').value) : null,
+    prioridade: document.getElementById('rPrioridade').value,
+    estrategiaTratamento: document.getElementById('rEstrategiaTratamento').value,
+    estrategiaDescricao: document.getElementById('rEstrategiaDescricao').value.trim(),
+    planoAcao: window._riscoPlanoAcao || [],
+    kris: window._riscoKris || [],
+    dataUltimaReavaliacao: document.getElementById('rDataUltimaReavaliacao').value || null,
+    proximaReavaliacao: document.getElementById('rProximaReavaliacao').value || null,
+    historicoReavaliacao: document.getElementById('rHistoricoReavaliacao').value.trim(),
+    dataEncerramento: document.getElementById('rDataEncerramento').value || null,
+    justificativaEncerramento: document.getElementById('rJustificativaEncerramento').value.trim(),
+  };
+  if (!r.area) return showToast('Selecione a área.', '#e65100');
+  if (!r.titulo) return showToast('Informe o título do risco.', '#e65100');
+
+  const isNew = !r.id;
+  if (isNew) r.origem = 'Manual';
+
+  try {
+    const result = await API.salvarRisco(r);
+    if (isNew) r.id = result.id;
+    const idx = riscosData.findIndex(x => x.id === r.id);
+    if (idx !== -1) riscosData[idx] = { ...riscosData[idx], ...r };
+    else riscosData.push({ origem: 'Manual', ...r });
+    fecharDrawerRisco();
+    renderizarRiscos();
+    showToast('✅ Salvo!', '#2e7d32');
+    API.invalidate('getRiscos');
+  } catch (e) { showToast('❌ Erro: ' + e.message, '#c62828'); }
+};
+
+// Plano de Ação (sub-lista embutida no risco)
+// Score automático de risco: Probabilidade x Impacto (1-12).
+const RISCO_PESO_PROBABILIDADE = { 'Baixa': 1, 'Média': 2, 'Alta': 3 };
+const RISCO_PESO_IMPACTO = { 'Baixo': 1, 'Moderado': 2, 'Alto': 3, 'Crítico': 4 };
+window._calcularScoreRisco = () => {
+  const probabilidade = document.getElementById('rProbabilidade').value;
+  const impacto = document.getElementById('rImpacto').value;
+  const pesoP = RISCO_PESO_PROBABILIDADE[probabilidade];
+  const pesoI = RISCO_PESO_IMPACTO[impacto];
+  document.getElementById('rScore').value = (pesoP && pesoI) ? pesoP * pesoI : '';
+};
+
+// Componentes do Impacto Financeiro (sub-lista embutida no risco)
+window._riscoImpactoFinanceiro = [];
+function renderImpactoFinanceiroRisco() {
+  const container = document.getElementById('impactoFinanceiroTabela');
+  if (!container) return;
+  const itens = window._riscoImpactoFinanceiro || [];
+  const isAdmin = window.USER_PERFIL === 'admin';
+  const total = itens.reduce((soma, it) => soma + (Number(it.valor) || 0), 0);
+  document.getElementById('rImpactoFinanceiro').value = itens.length ? total : '';
+
+  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum componente adicionado.</p>'; return; }
+  container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
+    itens.map((it, i) => `<tr>
+        <td style="font-weight:600;color:#222;">${it.categoria}</td>
+        <td style="font-size:0.85em;color:#555;">${it.descricao || '-'}</td>
+        <td style="font-size:0.9em;font-weight:600;color:#333;">R$ ${(Number(it.valor) || 0).toLocaleString('pt-BR')}</td>
+        <td style="text-align:center;">${isAdmin ? `<button class="btn-icon" onclick="removerImpactoFinanceiroItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
+      </tr>`).join('') + `</tbody></table>`;
+}
+window.adicionarImpactoFinanceiroItem = () => {
+  const categoria = document.getElementById('ifCategoria').value.trim();
+  const valor = document.getElementById('ifValor').value;
+  if (!categoria) return showToast('Informe a categoria.', '#e65100');
+  if (valor === '' || isNaN(Number(valor))) return showToast('Informe um valor válido.', '#e65100');
+  window._riscoImpactoFinanceiro = window._riscoImpactoFinanceiro || [];
+  window._riscoImpactoFinanceiro.push({
+    categoria,
+    descricao: document.getElementById('ifDescricao').value.trim(),
+    valor: Number(valor),
+  });
+  document.getElementById('ifCategoria').value = '';
+  document.getElementById('ifDescricao').value = '';
+  document.getElementById('ifValor').value = '';
+  renderImpactoFinanceiroRisco();
+};
+window.removerImpactoFinanceiroItem = (idx) => {
+  window._riscoImpactoFinanceiro.splice(idx, 1);
+  renderImpactoFinanceiroRisco();
+};
+
+window._riscoPlanoAcao = [];
+function renderPlanoAcaoRisco() {
+  const container = document.getElementById('planoAcaoTabela');
+  if (!container) return;
+  const itens = window._riscoPlanoAcao || [];
+  const isAdmin = window.USER_PERFIL === 'admin';
+  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhuma ação cadastrada.</p>'; return; }
+  container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
+    itens.map((it, i) => `<tr>
+        <td style="font-weight:600;color:#222;">${it.acao}</td>
+        <td style="font-size:0.85em;color:#555;">${it.responsavel || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${it.prazo || '-'}</td>
+        <td>${it.status || '-'}</td>
+        <td style="text-align:center;">${isAdmin ? `<button class="btn-icon" onclick="removerPlanoAcaoItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
+      </tr>`).join('') + `</tbody></table>`;
+}
+window.adicionarPlanoAcaoItem = () => {
+  const acao = document.getElementById('paAcao').value.trim();
+  if (!acao) return showToast('Informe a ação.', '#e65100');
+  window._riscoPlanoAcao = window._riscoPlanoAcao || [];
+  window._riscoPlanoAcao.push({
+    acao,
+    responsavel: document.getElementById('paResponsavel').value.trim(),
+    prazo: document.getElementById('paPrazo').value,
+    status: document.getElementById('paStatus').value,
+    observacao: '',
+  });
+  document.getElementById('paAcao').value = '';
+  document.getElementById('paResponsavel').value = '';
+  document.getElementById('paPrazo').value = '';
+  renderPlanoAcaoRisco();
+};
+window.removerPlanoAcaoItem = (idx) => {
+  window._riscoPlanoAcao.splice(idx, 1);
+  renderPlanoAcaoRisco();
+};
+
+// KRIs (sub-lista embutida no risco)
+window._riscoKris = [];
+function renderKrisRisco() {
+  const container = document.getElementById('krisTabela');
+  if (!container) return;
+  const itens = window._riscoKris || [];
+  const isAdmin = window.USER_PERFIL === 'admin';
+  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum KRI cadastrado.</p>'; return; }
+  container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
+    itens.map((it, i) => `<tr>
+        <td style="font-weight:600;color:#222;">${it.indicador}</td>
+        <td style="font-size:0.85em;color:#555;">${it.meta || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${it.valorAtual || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${it.frequencia || '-'}</td>
+        <td>${it.status || '-'}</td>
+        <td style="text-align:center;">${isAdmin ? `<button class="btn-icon" onclick="removerKriItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
+      </tr>`).join('') + `</tbody></table>`;
+}
+window.adicionarKriItem = () => {
+  const indicador = document.getElementById('kriIndicador').value.trim();
+  if (!indicador) return showToast('Informe o indicador.', '#e65100');
+  window._riscoKris = window._riscoKris || [];
+  window._riscoKris.push({
+    indicador,
+    meta: document.getElementById('kriMeta').value.trim(),
+    valorAtual: document.getElementById('kriValorAtual').value.trim(),
+    frequencia: document.getElementById('kriFrequencia').value,
+    status: document.getElementById('kriStatus').value,
+    ultimaAtualizacao: new Date().toISOString().slice(0, 10),
+  });
+  document.getElementById('kriIndicador').value = '';
+  document.getElementById('kriMeta').value = '';
+  document.getElementById('kriValorAtual').value = '';
+  renderKrisRisco();
+};
+window.removerKriItem = (idx) => {
+  window._riscoKris.splice(idx, 1);
+  renderKrisRisco();
+};
+
+// ------------------------------------------------------------
+// Importação de riscos identificados em um PCN já gerado
+// ------------------------------------------------------------
+function _htmlModalImportarRiscosPCN() {
+  return `
+    <div class="modal-overlay" id="modalImportarRiscosPCN"><div class="modal" onclick="event.stopPropagation()" style="max-width:720px;">
+      <h3>Importar Riscos de um PCN</h3>
+      <label style="display:block;font-size:0.82em;font-weight:600;color:#555;margin:14px 0 5px;">Processo</label>
+      <select id="importPcnProcesso" onchange="onProcessoImportRiscoChange()" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;">
+        <option value="">Selecione um processo com PCN gerado...</option>
+      </select>
+      <div id="importPcnVersaoWrap" style="display:none;">
+        <label style="display:block;font-size:0.82em;font-weight:600;color:#555;margin:14px 0 5px;">Versão do PCN</label>
+        <select id="importPcnVersao" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;"></select>
+      </div>
+      <div style="margin-top:14px;">
+        <button class="btn btn-ghost" onclick="carregarRiscosPCNImport()" id="btnCarregarRiscosPCN" style="display:none;">Carregar riscos deste PCN</button>
+      </div>
+      <div id="importPcnResultado" style="margin-top:16px;max-height:320px;overflow-y:auto;"></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharImportarRiscosPCN()">Cancelar</button>
+        <button class="btn btn-primary" onclick="confirmarImportarRiscosPCN()" id="btnConfirmarImportarRiscos" style="display:none;">Importar selecionados</button>
+      </div>
+    </div></div>`;
+}
+
+window.abrirImportarRiscosPCN = async () => {
+  document.getElementById('importPcnResultado').innerHTML = '';
+  document.getElementById('importPcnVersaoWrap').style.display = 'none';
+  document.getElementById('btnCarregarRiscosPCN').style.display = 'none';
+  document.getElementById('btnConfirmarImportarRiscos').style.display = 'none';
+  window._riscoImportExtraidos = [];
+
+  try {
+    if (!riscosProcessosCache.length) riscosProcessosCache = await API.getProcessos();
+  } catch (e) { riscosProcessosCache = []; }
+  const comPCN = riscosProcessosCache.filter(p => p.pcnSalvo);
+  document.getElementById('importPcnProcesso').innerHTML = '<option value="">Selecione um processo com PCN gerado...</option>' +
+    comPCN.map(p => `<option value="${p.id}">${p.area} — ${p.processo}</option>`).join('');
+
+  document.getElementById('modalImportarRiscosPCN').classList.add('open');
+};
+
+window.fecharImportarRiscosPCN = () => {
+  document.getElementById('modalImportarRiscosPCN').classList.remove('open');
+};
+
+window.onProcessoImportRiscoChange = () => {
+  const id = document.getElementById('importPcnProcesso').value;
+  document.getElementById('importPcnResultado').innerHTML = '';
+  document.getElementById('btnConfirmarImportarRiscos').style.display = 'none';
+  if (!id) {
+    document.getElementById('importPcnVersaoWrap').style.display = 'none';
+    document.getElementById('btnCarregarRiscosPCN').style.display = 'none';
+    return;
+  }
+  const p = riscosProcessosCache.find(x => x.id === id);
+  const versoes = p && p.pcnSalvo ? _parsePCNVersoes(p.pcnSalvo) : [];
+  const versaoWrap = document.getElementById('importPcnVersaoWrap');
+  if (versoes.length > 1) {
+    document.getElementById('importPcnVersao').innerHTML = versoes.map((v, i) =>
+      `<option value="${i}" ${i === versoes.length - 1 ? 'selected' : ''}>Versão ${v.versao || i + 1} — ${v.data ? new Date(v.data).toLocaleDateString('pt-BR') : ''}</option>`
+    ).join('');
+    versaoWrap.style.display = 'block';
+  } else {
+    versaoWrap.style.display = 'none';
+  }
+  document.getElementById('btnCarregarRiscosPCN').style.display = 'inline-block';
+};
+
+window.carregarRiscosPCNImport = () => {
+  const id = document.getElementById('importPcnProcesso').value;
+  const p = riscosProcessosCache.find(x => x.id === id);
+  if (!p || !p.pcnSalvo) return;
+  const versoes = _parsePCNVersoes(p.pcnSalvo);
+  const versaoWrap = document.getElementById('importPcnVersaoWrap');
+  const versao = versaoWrap.style.display === 'block'
+    ? versoes[Number(document.getElementById('importPcnVersao').value)]
+    : versoes[versoes.length - 1];
+  if (!versao) return showToast('Nenhuma versão de PCN encontrada.', '#e65100');
+
+  const extraidos = _extrairRiscosDoPCN(versao.html || '');
+  window._riscoImportExtraidos = extraidos.map(r => ({ ...r, selecionado: true }));
+
+  const resultado = document.getElementById('importPcnResultado');
+  if (!extraidos.length) {
+    resultado.innerHTML = '<p style="color:#e65100;font-size:0.9em;">Nenhuma tabela de riscos encontrada neste PCN.</p>';
+    document.getElementById('btnConfirmarImportarRiscos').style.display = 'none';
+    return;
+  }
+
+  resultado.innerHTML = `
+    <label style="display:flex;align-items:center;gap:6px;font-size:0.85em;color:#555;margin-bottom:8px;cursor:pointer;">
+      <input type="checkbox" checked onchange="toggleTodosImportRiscos(this.checked)"> Selecionar todos (${extraidos.length})
+    </label>
+    <table class="data-table" style="box-shadow:none;"><tbody>` +
+    extraidos.map((r, i) => `<tr>
+        <td style="width:5%;"><input type="checkbox" checked onchange="window._riscoImportExtraidos[${i}].selecionado = this.checked"></td>
+        <td style="font-weight:600;color:#222;">${r.evento}</td>
+        <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
+        <td>${_badgeProbImpactoRisco(r.impacto)}</td>
+        <td style="font-size:0.82em;color:#555;">${r.mitigacao || '-'}</td>
+      </tr>`).join('') + `</tbody></table>`;
+
+  document.getElementById('btnConfirmarImportarRiscos').style.display = 'inline-block';
+};
+
+window.toggleTodosImportRiscos = (checked) => {
+  (window._riscoImportExtraidos || []).forEach(r => r.selecionado = checked);
+  document.querySelectorAll('#importPcnResultado tbody input[type="checkbox"]').forEach(cb => cb.checked = checked);
+};
+
+window.confirmarImportarRiscosPCN = async () => {
+  const id = document.getElementById('importPcnProcesso').value;
+  const p = riscosProcessosCache.find(x => x.id === id);
+  const selecionados = (window._riscoImportExtraidos || []).filter(r => r.selecionado);
+  if (!p || !selecionados.length) return showToast('Selecione ao menos um risco.', '#e65100');
+
+  try {
+    for (const row of selecionados) {
+      await API.salvarRisco({
+        area: p.area,
+        processoId: p.id,
+        processo: p.processo,
+        titulo: row.evento,
+        descricao: row.evento,
+        categoria: '',
+        responsavel: '',
+        dataIdentificacao: new Date().toISOString().slice(0, 10),
+        status: 'Identificado',
+        origem: 'Importado de PCN',
+        probabilidade: row.probabilidade || '',
+        impacto: row.impacto || '',
+        estrategiaTratamento: '',
+        estrategiaDescricao: row.mitigacao || '',
+        planoAcao: [],
+        kris: [],
+      });
+    }
+    fecharImportarRiscosPCN();
+    showToast(`✅ ${selecionados.length} risco(s) importado(s)!`, '#2e7d32');
+    API.invalidate('getRiscos');
+    riscosData = await API.getRiscos();
+    renderizarRiscos();
+  } catch (e) { showToast('❌ Erro ao importar: ' + e.message, '#c62828'); }
+};
+
+// Extrai a tabela "Avaliação de Riscos" de um PCN gerado (mesma heurística do
+// realce ao vivo em pcn-live.js, estendida para cobrir headings h2/h3 e <li>).
+function _extrairRiscosDoPCN(html) {
+  if (!html) return [];
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  let table = null;
+
+  const headings = doc.querySelectorAll('h1, h2, h3');
+  let heading = null;
+  headings.forEach(h => {
+    const t = h.textContent.toLowerCase();
+    if (!heading && t.includes('risco') && (t.includes('avaliação') || t.includes('análise'))) heading = h;
+  });
+  if (heading) {
+    let next = heading.nextElementSibling;
+    while (next && next.tagName !== 'TABLE' && next.tagName !== 'H2' && next.tagName !== 'H3') next = next.nextElementSibling;
+    if (next && next.tagName === 'TABLE') table = next;
+  }
+
+  if (!table) {
+    doc.querySelectorAll('li').forEach(li => {
+      if (table) return;
+      const t = (li.textContent || '').toLowerCase();
+      if (t.includes('risco') && (t.includes('avaliação') || t.includes('análise'))) {
+        const tb = li.querySelector('table');
+        if (tb) table = tb;
+      }
+    });
+  }
+  if (!table) return [];
+
+  let headerCells = table.querySelectorAll('thead th');
+  if (!headerCells.length) {
+    const primeiraLinha = table.querySelector('tr');
+    if (primeiraLinha) headerCells = primeiraLinha.querySelectorAll('th, td');
+  }
+  let idxEvento = -1, idxProb = -1, idxImpacto = -1, idxMitigacao = -1;
+  headerCells.forEach((th, i) => {
+    const t = th.textContent.toLowerCase();
+    if (t.includes('evento') || t.includes('ameaça')) idxEvento = i;
+    else if (t.includes('probabilidade')) idxProb = i;
+    else if (t.includes('impacto')) idxImpacto = i;
+    else if (t.includes('mitiga') || t.includes('estratégia')) idxMitigacao = i;
+  });
+
+  const lerCelula = (td) => {
+    if (!td) return '';
+    const select = td.querySelector('select');
+    if (select) {
+      const opt = select.querySelector('option[selected]');
+      return (opt ? opt.value : select.value) || '';
+    }
+    return (td.textContent || '').trim();
+  };
+
+  let linhas = table.querySelectorAll('tbody tr');
+  if (!linhas.length) linhas = Array.from(table.querySelectorAll('tr')).slice(1);
+
+  const riscos = [];
+  linhas.forEach(row => {
+    const cells = row.querySelectorAll('td');
+    if (!cells.length) return;
+    const evento = idxEvento >= 0 ? lerCelula(cells[idxEvento]) : lerCelula(cells[0]);
+    if (!evento) return;
+    riscos.push({
+      evento,
+      probabilidade: idxProb >= 0 ? lerCelula(cells[idxProb]) : '',
+      impacto: idxImpacto >= 0 ? lerCelula(cells[idxImpacto]) : '',
+      mitigacao: idxMitigacao >= 0 ? lerCelula(cells[idxMitigacao]) : '',
+    });
+  });
+  return riscos;
+}
+
+// ============================================================
+// INDICADORES DE SEGURANÇA — estado e helpers compartilhados
+// pelas 4 telas (Dashboard, Cadastro, Lançamento Mensal, Matriz)
+// ============================================================
+let indicadoresData = [];
+let indicadoresOrdenacao = { coluna: 'nome', direcao: 'asc' };
+let indicadoresPaginaAtual = 1;
+const INDICADORES_POR_PAGINA = 20;
+let indicadoresFiltrosCadastro = { pilar: '', responsavel: '', busca: '' };
+let indicadoresFiltrosMatriz = { pilar: '', responsavel: '', busca: '' };
+let indicadoresSelecionados = new Set();
+let indicadoresPaginaIds = [];
+let indicadoresDashboardFiltro = { modo: 'foraDaMeta', pilar: null };
+let indicadoresDashboardPaginaAtual = 1;
+let indicadoresDashboardMes = '';
+const INDICADOR_PILARES = ['Crise e Continuidade', 'GRC', 'Operações e Infra', 'Produto e Aplicações'];
+const INDICADOR_TIPOS = ['CR', 'Estratégico', 'Operacional'];
+
+function _indicadorForaDaMeta(indicador, desempenho) {
+  if (desempenho == null || isNaN(Number(desempenho)) || indicador.metaMinima == null || indicador.metaMinima === '') return false;
+  return Number(desempenho) < Number(indicador.metaMinima);
+}
+function _badgeDesvioIndicador(foraDaMeta) {
+  return foraDaMeta
+    ? '<span class="badge" style="background:#ffebee;color:#c62828;">⚠ Fora da meta</span>'
+    : '<span class="badge badge-green">Dentro da meta</span>';
+}
+function _formatMes(mes) {
+  if (!mes) return '-';
+  const [ano, m] = String(mes).split('-');
+  const nomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  const idx = Number(m) - 1;
+  return nomes[idx] ? `${nomes[idx]}/${ano}` : mes;
+}
+
+// União de todos os meses (AAAA-MM) presentes no histórico de qualquer indicador, desc.
+function _mesesDisponiveis() {
+  const set = new Set();
+  indicadoresData.forEach(d => (d.historico || []).forEach(h => { if (h.mes) set.add(h.mes); }));
+  return [...set].sort().reverse();
+}
+
+// Resolve {mes, desempenho} de um indicador para um mês de referência
+// específico (busca no histórico) ou, sem mês informado, para o último mês
+// com dado do próprio indicador — usado pelo filtro de mês do Dashboard.
+function _pegarDesempenhoNoMes(indicador, mes) {
+  if (!mes) return { mes: indicador.ultimoMes, desempenho: indicador.ultimoDesempenho };
+  const entrada = (indicador.historico || []).find(h => h.mes === mes);
+  return entrada ? { mes: entrada.mes, desempenho: entrada.desempenho } : { mes, desempenho: null };
+}
+
+// Valores distintos de Responsável já cadastrados, para popular o filtro.
+function _responsaveisDisponiveis() {
+  return [...new Set(indicadoresData.map(d => d.responsavel).filter(Boolean))].sort();
+}
+
+// Filtros comuns a Cadastro e Matriz (Pilar, Responsável, busca por nome).
+function _filtrarIndicadores(lista, filtros) {
+  let data = lista;
+  if (filtros.pilar) data = data.filter(d => d.pilar === filtros.pilar);
+  if (filtros.responsavel) data = data.filter(d => d.responsavel === filtros.responsavel);
+  if (filtros.busca && filtros.busca.trim()) {
+    const termo = filtros.busca.trim().toLowerCase();
+    data = data.filter(d => (d.nome || '').toLowerCase().includes(termo));
+  }
+  return data;
+}
+
+async function _carregarIndicadoresData() {
+  try { indicadoresData = await API.getIndicadoresSeguranca(); } catch (e) { indicadoresData = []; }
+}
+
+// Re-renderiza a tela de Indicadores atualmente aberta, qualquer que seja
+// (usado por ações que podem ser disparadas de mais de uma tela, como editar
+// ou lançar resultado a partir do Dashboard).
+function _atualizarTelaIndicadorAtual() {
+  if (document.getElementById('indicadoresConteudoCadastro')) renderizarIndicadoresCadastro();
+  if (document.getElementById('indicadoresConteudoMatriz')) renderizarIndicadoresMatriz();
+  if (document.getElementById('indicadoresConteudoDashboard')) renderizarIndicadoresDashboard();
+  if (document.getElementById('indicadoresGradeLancamentos')) { _renderFiltrosLancamento(); renderizarGradeLancamentos(); }
+}
+
+// Mesmo padrão de filtro usado em Processos/Dependências/Componentes/Riscos
+// (ver .amazonq/rules/ui-referencias.md, seção "Barra de filtros").
+const _estiloFiltroLabel = 'font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;';
+const _estiloFiltroInput = 'padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:190px;';
+
+// Grava o(s) resultado(s) mensal(is) de um indicador (upsert por mês no
+// histórico) e dispara a conversão automática em risco se sair da meta.
+// Usada tanto pelo lançamento manual (1 entrada) quanto pela importação CSV
+// (várias entradas de uma vez, uma por mês do arquivo).
+async function _lancarResultadosIndicador(indicador, novasEntradas, arquivoOrigem, riscosCache) {
+  const historicoPorMes = new Map((indicador.historico || []).map(h => [h.mes, h]));
+  const agora = new Date().toISOString();
+  novasEntradas.forEach(e => historicoPorMes.set(e.mes, { mes: e.mes, desempenho: e.desempenho, importadoEm: agora, arquivo: arquivoOrigem || '' }));
+  const historico = [...historicoPorMes.values()].sort((a, b) => String(a.mes).localeCompare(String(b.mes)));
+  // "Último" para fins de status = mês mais recente que já tem desempenho
+  // preenchido (meses sem dado não geram falso "fora da meta").
+  const ultimoComDado = [...historico].reverse().find(h => h.desempenho != null);
+  const foraDaMetaAgora = ultimoComDado ? _indicadorForaDaMeta(indicador, ultimoComDado.desempenho) : false;
+
+  await API.salvarIndicadorSeguranca({
+    id: indicador.id,
+    historico,
+    ultimoDesempenho: ultimoComDado ? ultimoComDado.desempenho : null,
+    ultimoMes: ultimoComDado ? ultimoComDado.mes : null,
+    foraDaMeta: foraDaMetaAgora,
+  });
+  indicador.historico = historico;
+  indicador.ultimoDesempenho = ultimoComDado ? ultimoComDado.desempenho : null;
+  indicador.ultimoMes = ultimoComDado ? ultimoComDado.mes : null;
+  indicador.foraDaMeta = foraDaMetaAgora;
+  API.invalidate('getIndicadoresSeguranca');
+
+  // Conversão automática: só abre um risco novo se não já existir um risco
+  // automático em aberto para este indicador (evita duplicar a cada lançamento).
+  let riscoGerado = false;
+  if (foraDaMetaAgora) {
+    const riscosAtuais = riscosCache || await API.getRiscos();
+    const jaExiste = riscosAtuais.some(r => r.indicadorId === indicador.id && r.origem === 'Indicador de Segurança' && !['Aceito', 'Encerrado'].includes(r.status));
+    if (!jaExiste) {
+      await API.salvarRisco({
+        area: '',
+        titulo: `Desvio no indicador "${indicador.nome}"`,
+        descricao: `O indicador "${indicador.nome}" (${indicador.pilar || 'sem pilar'}) atingiu ${ultimoComDado.desempenho}% de desempenho em ${_formatMes(ultimoComDado.mes)}, abaixo da meta mínima de ${indicador.metaMinima}%.`,
+        categoria: indicador.pilar || 'Tecnológico',
+        responsavel: indicador.responsavel || '',
+        dataIdentificacao: new Date().toISOString().slice(0, 10),
+        status: 'Identificado',
+        origem: 'Indicador de Segurança',
+        indicadorId: indicador.id,
+        planoAcao: [],
+        kris: [],
+      });
+      riscoGerado = true;
+      API.invalidate('getRiscos');
+    }
+  }
+  return { riscoGerado };
+}
+
+// ============================================================
+// PÁGINA: INDICADORES — DASHBOARD
+// ============================================================
+async function indicadoresDashboard() {
+  indicadoresDashboardFiltro = { modo: 'foraDaMeta', pilar: null };
+  indicadoresDashboardPaginaAtual = 1;
+  indicadoresDashboardMes = '';
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Dashboard de Indicadores</h2><p class="page-sub">Visão geral dos indicadores de segurança e desvios de meta — clique num card para filtrar a lista</p></div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="indicadoresConteudoDashboard" style="display:none;"></div>
+    ${_htmlModalIndicador()}
+  `;
+  await _carregarIndicadoresData();
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('indicadoresConteudoDashboard').style.display = 'block';
+  renderizarIndicadoresDashboard();
+}
+
+// Cards de resumo funcionam como filtro da lista abaixo. Clicar no card já
+// ativo limpa o filtro (volta pra "Todos").
+window.filtrarDashboardIndicadores = (modo, pilar) => {
+  const atual = indicadoresDashboardFiltro;
+  const mesmoFiltro = atual.modo === modo && (modo !== 'pilar' || atual.pilar === pilar);
+  indicadoresDashboardFiltro = mesmoFiltro ? { modo: 'todos', pilar: null } : { modo, pilar: pilar || null };
+  indicadoresDashboardPaginaAtual = 1;
+  renderizarIndicadoresDashboard();
+};
+
+window.irParaPaginaDashboard = (delta) => {
+  indicadoresDashboardPaginaAtual += delta;
+  renderizarIndicadoresDashboard();
+};
+
+window.atualizarMesDashboard = (mes) => {
+  indicadoresDashboardMes = mes;
+  indicadoresDashboardPaginaAtual = 1;
+  renderizarIndicadoresDashboard();
+};
+
+function renderizarIndicadoresDashboard() {
+  const conteudo = document.getElementById('indicadoresConteudoDashboard');
+  if (!conteudo) return;
+  const isAdmin = window.USER_PERFIL === 'admin';
+  const f = indicadoresDashboardFiltro;
+
+  const mesRef = indicadoresDashboardMes;
+  const total = indicadoresData.length;
+  // "Fora da meta" é sempre calculado ao vivo (metaMinima atual x desempenho
+  // do mês de referência), nunca a partir do flag persistido — que só é
+  // recalculado quando um resultado é lançado, e fica desatualizado se a
+  // Meta Mínima mudar depois disso.
+  const foraDaMeta = indicadoresData.filter(d => {
+    const { desempenho } = _pegarDesempenhoNoMes(d, mesRef);
+    return desempenho != null && _indicadorForaDaMeta(d, desempenho);
+  });
+  const semMeta = indicadoresData.filter(d => d.metaMinima == null || d.metaMinima === '');
+  const porPilar = {};
+  indicadoresData.forEach(d => { const p = d.pilar || 'Sem Pilar'; porPilar[p] = (porPilar[p] || 0) + 1; });
+
+  const cardBase = 'background:white;border-radius:10px;padding:14px 20px;min-width:140px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);cursor:pointer;';
+  const anelAtivo = 'outline:2.5px solid #1a237e;outline-offset:2px;';
+
+  const cardsPilar = Object.entries(porPilar).sort((a, b) => a[0].localeCompare(b[0])).map(([p, n]) => {
+    const ativo = f.modo === 'pilar' && f.pilar === p;
+    return `<div style="${cardBase}border-top:3px solid #1a237e;${ativo ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('pilar','${p}')" title="Clique para filtrar por este pilar">
+      <div style="font-size:1.4em;font-weight:700;color:#1a237e;">${n}</div>
+      <div style="font-size:0.75em;color:#666;">${p}</div>
+    </div>`;
+  }).join('');
+
+  // Lista filtrada de acordo com o card ativo.
+  let lista, titulo;
+  if (f.modo === 'todos') { lista = [...indicadoresData]; titulo = 'Todos os Indicadores'; }
+  else if (f.modo === 'semMeta') { lista = semMeta; titulo = 'Indicadores Sem Meta Definida'; }
+  else if (f.modo === 'pilar') { lista = indicadoresData.filter(d => (d.pilar || 'Sem Pilar') === f.pilar); titulo = `Indicadores — Pilar: ${f.pilar}`; }
+  else { lista = foraDaMeta; titulo = 'Indicadores Fora da Meta'; }
+
+  lista = f.modo === 'foraDaMeta'
+    ? [...lista].sort((a, b) => {
+        const desvioA = Number(a.metaMinima) - Number(_pegarDesempenhoNoMes(a, mesRef).desempenho);
+        const desvioB = Number(b.metaMinima) - Number(_pegarDesempenhoNoMes(b, mesRef).desempenho);
+        return desvioB - desvioA;
+      })
+    : [...lista].sort((a, b) => (a.nome || '').localeCompare(b.nome || ''));
+
+  const totalLista = lista.length;
+  const totalPaginas = Math.max(1, Math.ceil(totalLista / INDICADORES_POR_PAGINA));
+  if (indicadoresDashboardPaginaAtual > totalPaginas) indicadoresDashboardPaginaAtual = totalPaginas;
+  if (indicadoresDashboardPaginaAtual < 1) indicadoresDashboardPaginaAtual = 1;
+  const inicio = (indicadoresDashboardPaginaAtual - 1) * INDICADORES_POR_PAGINA;
+  const pagina = lista.slice(inicio, inicio + INDICADORES_POR_PAGINA);
+
+  conteudo.innerHTML = `
+    <div style="margin-bottom:16px;">
+      <label style="${_estiloFiltroLabel}">Mês de referência</label>
+      <select onchange="atualizarMesDashboard(this.value)" style="${_estiloFiltroInput}">
+        <option value="">Mais recente</option>
+        ${_mesesDisponiveis().map(m => `<option value="${m}" ${m === mesRef ? 'selected' : ''}>${_formatMes(m)}</option>`).join('')}
+      </select>
+    </div>
+    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px;">
+      <div style="${cardBase}border-top:3px solid #1a237e;${f.modo === 'todos' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('todos')" title="Clique para ver todos os indicadores">
+        <div style="font-size:1.6em;font-weight:700;color:#1a237e;">${total}</div>
+        <div style="font-size:0.75em;color:#666;">Total de Indicadores</div>
+      </div>
+      <div style="${cardBase}border-top:3px solid #c62828;${f.modo === 'foraDaMeta' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('foraDaMeta')" title="Clique para filtrar os fora da meta">
+        <div style="font-size:1.6em;font-weight:700;color:#c62828;">${foraDaMeta.length}</div>
+        <div style="font-size:0.75em;color:#666;">Fora da Meta</div>
+      </div>
+      <div style="${cardBase}border-top:3px solid #757575;${f.modo === 'semMeta' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('semMeta')" title="Clique para filtrar os sem meta definida">
+        <div style="font-size:1.6em;font-weight:700;color:#757575;">${semMeta.length}</div>
+        <div style="font-size:0.75em;color:#666;">Sem Meta Definida</div>
+      </div>
+      ${cardsPilar}
+    </div>
+    <h3 style="font-size:1em;color:#1a237e;margin-bottom:12px;">${titulo}</h3>
+    <div class="data-table">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:12%;">Pilar</th>
+            <th style="width:26%;">Indicador</th>
+            <th style="width:16%;">Responsável</th>
+            <th style="width:10%;">Mês</th>
+            <th style="width:12%;">Desempenho</th>
+            <th style="width:12%;">Meta Mínima</th>
+            ${isAdmin ? '<th style="width:8%;text-align:center;">Ações</th>' : ''}
+          </tr>
+        </thead>
+        <tbody>
+          ${pagina.length ? pagina.map(d => {
+            const { mes, desempenho } = _pegarDesempenhoNoMes(d, mesRef);
+            const foraMeta = desempenho != null && _indicadorForaDaMeta(d, desempenho);
+            return `<tr>
+              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${d.pilar || '-'}</span></td>
+              <td style="font-weight:600;color:#222;">${d.nome}</td>
+              <td style="font-size:0.85em;color:#555;">${d.responsavel || '-'}</td>
+              <td style="font-size:0.85em;color:#555;">${mes ? _formatMes(mes) : '-'}</td>
+              <td style="font-size:0.9em;font-weight:600;color:${foraMeta ? '#c62828' : '#333'};">${desempenho != null ? desempenho + '%' : '-'}</td>
+              <td style="font-size:0.85em;color:#555;">${d.metaMinima != null && d.metaMinima !== '' ? d.metaMinima + '%' : '-'}</td>
+              ${isAdmin ? `<td style="text-align:center;"><button class="btn-icon" onclick="editarIndicador('${d.id}')" title="Editar">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              </button></td>` : ''}
+            </tr>`;
+          }).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" style="text-align:center;color:#999;padding:40px;">${f.modo === 'foraDaMeta' ? 'Nenhum indicador fora da meta 🎉' : 'Nenhum indicador encontrado.'}</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:0.85em;color:#666;">
+      <span>${totalLista ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${totalLista} indicador(es)` : ''}</span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="irParaPaginaDashboard(-1)" ${indicadoresDashboardPaginaAtual <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
+        <span style="padding:6px 4px;">Página ${indicadoresDashboardPaginaAtual} de ${totalPaginas}</span>
+        <button class="btn btn-ghost" onclick="irParaPaginaDashboard(1)" ${indicadoresDashboardPaginaAtual >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
+      </div>
+    </div>`;
+}
+
+// ============================================================
+// PÁGINA: INDICADORES — CADASTRO
+// ============================================================
+async function indicadoresCadastro() {
+  const isAdmin = window.USER_PERFIL === 'admin';
+  indicadoresPaginaAtual = 1;
+  indicadoresFiltrosCadastro = { pilar: '', responsavel: '', busca: '' };
+  indicadoresSelecionados = new Set();
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Cadastro de Indicadores</h2><p class="page-sub">Pilar, tipo, responsável e meta mínima de cada indicador de segurança</p></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="excluirIndicadoresSelecionados()" id="btnExcluirIndicadoresSelecionados" style="color:#c62828;border-color:#c62828;display:none;">🗑️ Excluir selecionados</button>
+        <button class="btn btn-primary" onclick="abrirModalIndicador()" id="btnNovoIndicador" style="display:none;">+ Novo Indicador</button>
+      </div>
+    </div>
+    <div id="indicadoresFiltrosCadastro" style="margin-bottom:16px;"></div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="indicadoresConteudoCadastro" style="display:none;"></div>
+    ${_htmlModalIndicador()}
+  `;
+
+  document.getElementById('btnNovoIndicador').style.display = isAdmin ? 'inline-block' : 'none';
+
+  await _carregarIndicadoresData();
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('indicadoresConteudoCadastro').style.display = 'block';
+
+  _renderFiltrosIndicadoresCadastro();
+  renderizarIndicadoresCadastro();
+}
+
+function _renderFiltrosIndicadoresCadastro() {
+  const el = document.getElementById('indicadoresFiltrosCadastro');
+  if (!el) return;
+  const responsaveis = _responsaveisDisponiveis();
+  const f = indicadoresFiltrosCadastro;
+  el.innerHTML = `
+    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+      <div>
+        <label style="${_estiloFiltroLabel}">Pilar</label>
+        <select onchange="atualizarFiltroCadastro('pilar',this.value)" style="${_estiloFiltroInput}">
+          <option value="">Todos os pilares</option>
+          ${INDICADOR_PILARES.map(p => `<option value="${p}" ${f.pilar === p ? 'selected' : ''}>${p}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="${_estiloFiltroLabel}">Responsável</label>
+        <select onchange="atualizarFiltroCadastro('responsavel',this.value)" style="${_estiloFiltroInput}">
+          <option value="">Todos</option>
+          ${responsaveis.map(r => `<option value="${r}" ${f.responsavel === r ? 'selected' : ''}>${r}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="${_estiloFiltroLabel}">Indicador</label>
+        <input type="text" value="${f.busca}" oninput="atualizarFiltroCadastro('busca',this.value)" placeholder="🔍 Buscar indicador..." style="${_estiloFiltroInput}">
+      </div>
+    </div>`;
+}
+
+window.atualizarFiltroCadastro = (campo, valor) => {
+  indicadoresFiltrosCadastro[campo] = valor;
+  indicadoresPaginaAtual = 1;
+  renderizarIndicadoresCadastro();
+};
+
+window.irParaPaginaIndicadores = (delta) => {
+  indicadoresPaginaAtual += delta;
+  renderizarIndicadoresCadastro();
+};
+
+// Célula de Meta Mínima do Cadastro em modo exibição: texto com sinalização
+// visual (sublinhado tracejado + ✎) em vez de input sempre visível — mesmo
+// padrão adotado na grade de Lançamentos (clique pra editar, Salvar/Cancelar
+// explícitos, nada salva sozinho ao perder o foco).
+function _htmlCelulaMetaMinima(id, metaMinima, isAdmin) {
+  const texto = metaMinima != null && metaMinima !== '' ? metaMinima + '%' : '<span style="color:#bbb;">definir</span>';
+  if (!isAdmin) return texto;
+  return `<span onclick="iniciarEdicaoMetaMinima(this,'${id}')" style="cursor:pointer;border-bottom:1px dashed #999;padding-bottom:1px;" title="Clique para editar">${texto} <span style="font-size:0.85em;color:#bbb;">✎</span></span>`;
+}
+
+window.iniciarEdicaoMetaMinima = (spanEl, id) => {
+  const indicador = indicadoresData.find(x => x.id === id);
+  const valorAtual = indicador && indicador.metaMinima != null ? indicador.metaMinima : '';
+  const td = spanEl.closest('td');
+  td.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;">
+      <input type="number" step="any" min="0" max="100" value="${valorAtual}" style="width:60px;padding:4px 6px;border:1.5px solid #1a237e;border-radius:5px;font-size:0.88em;">%
+      <button class="btn-icon" title="Salvar (Enter)" style="color:#2e7d32;" onclick="salvarEdicaoMetaMinima(this,'${id}')">✔</button>
+      <button class="btn-icon" title="Cancelar (Esc)" style="color:#c62828;" onclick="cancelarEdicaoMetaMinima(this,'${id}')">✕</button>
+    </span>`;
+  const input = td.querySelector('input');
+  input.focus();
+  input.select();
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') salvarEdicaoMetaMinima(input, id);
+    if (ev.key === 'Escape') cancelarEdicaoMetaMinima(input, id);
+  });
+};
+
+window.cancelarEdicaoMetaMinima = (el, id) => {
+  const td = el.closest('td');
+  const indicador = indicadoresData.find(x => x.id === id);
+  td.innerHTML = _htmlCelulaMetaMinima(id, indicador ? indicador.metaMinima : null, true);
+};
+
+window.salvarEdicaoMetaMinima = async (el, id) => {
+  const td = el.closest('td');
+  const input = td.querySelector('input');
+  const valorTexto = input.value;
+  if (valorTexto !== '' && isNaN(Number(valorTexto))) return showToast('Informe uma meta válida.', '#e65100');
+  const indicador = indicadoresData.find(x => x.id === id);
+  if (!indicador) return;
+  const metaMinima = valorTexto !== '' ? Number(valorTexto) : null;
+  const foraDaMeta = _indicadorForaDaMeta({ metaMinima }, indicador.ultimoDesempenho);
+  input.disabled = true;
+  try {
+    await API.salvarIndicadorSeguranca({ id, metaMinima, foraDaMeta });
+    indicador.metaMinima = metaMinima;
+    indicador.foraDaMeta = foraDaMeta;
+    API.invalidate('getIndicadoresSeguranca');
+    showToast('✅ Meta atualizada!', '#2e7d32');
+    _atualizarTelaIndicadorAtual();
+  } catch (e) {
+    showToast('Erro: ' + e.message, '#c62828');
+    input.disabled = false;
+  }
+};
+
+function renderizarIndicadoresCadastro() {
+  const conteudo = document.getElementById('indicadoresConteudoCadastro');
+  if (!conteudo) return;
+  let data = _filtrarIndicadores(indicadoresData, indicadoresFiltrosCadastro);
+  const isAdmin = window.USER_PERFIL === 'admin';
+
+  data.sort((a, b) => {
+    const valA = (a[indicadoresOrdenacao.coluna] || '').toString().toLowerCase();
+    const valB = (b[indicadoresOrdenacao.coluna] || '').toString().toLowerCase();
+    const cmp = valA.localeCompare(valB);
+    return indicadoresOrdenacao.direcao === 'asc' ? cmp : -cmp;
+  });
+
+  const total = data.length;
+  const totalPaginas = Math.max(1, Math.ceil(total / INDICADORES_POR_PAGINA));
+  if (indicadoresPaginaAtual > totalPaginas) indicadoresPaginaAtual = totalPaginas;
+  if (indicadoresPaginaAtual < 1) indicadoresPaginaAtual = 1;
+  const inicio = (indicadoresPaginaAtual - 1) * INDICADORES_POR_PAGINA;
+  const pagina = data.slice(inicio, inicio + INDICADORES_POR_PAGINA);
+  indicadoresPaginaIds = pagina.map(d => d.id);
+  const todosPaginaSelecionados = pagina.length > 0 && pagina.every(d => indicadoresSelecionados.has(d.id));
+
+  conteudo.innerHTML = `
+    <div class="data-table">
+      <table>
+        <thead>
+          <tr>
+            ${isAdmin ? `<th style="width:4%;text-align:center;"><input type="checkbox" ${todosPaginaSelecionados ? 'checked' : ''} onchange="toggleTodosIndicadores(this.checked)" title="Selecionar todos desta página"></th>` : ''}
+            <th style="width:14%;">Pilar</th>
+            <th style="width:16%;">Responsável</th>
+            <th onclick="ordenarIndicadores('nome')" style="cursor:pointer;width:28%;">Indicador <span id="sort-ind-nome">${indicadoresOrdenacao.coluna === 'nome' ? (indicadoresOrdenacao.direcao === 'asc' ? '▲' : '▼') : ''}</span></th>
+            <th style="width:12%;">Tipo</th>
+            <th style="width:14%;">Meta Mínima</th>
+            <th style="width:12%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${pagina.length ? pagina.map(d => `<tr>
+              ${isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="chk-indicador" ${indicadoresSelecionados.has(d.id) ? 'checked' : ''} onchange="toggleIndicadorSelecionado('${d.id}', this.checked)"></td>` : ''}
+              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${d.pilar || '-'}</span></td>
+              <td style="font-size:0.85em;color:#555;">${d.responsavel || '-'}</td>
+              <td style="font-weight:600;color:#222;">${d.nome}</td>
+              <td style="font-size:0.85em;color:#555;">${d.tipo || '-'}</td>
+              <td>${_htmlCelulaMetaMinima(d.id, d.metaMinima, isAdmin)}</td>
+              <td style="text-align:center;white-space:nowrap;">
+                ${isAdmin ? `<button class="btn-icon" onclick="editarIndicador('${d.id}')" title="Editar">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
+                <button class="btn-icon" onclick="excluirIndicador('${d.id}')" title="Excluir">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                </button>` : ''}
+              </td>
+            </tr>`).join('') : `<tr><td colspan="${isAdmin ? 6 : 5}" style="text-align:center;color:#999;padding:40px;">Nenhum indicador encontrado.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:0.85em;color:#666;">
+      <span>${total ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${total} indicador(es)` : ''}</span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="irParaPaginaIndicadores(-1)" ${indicadoresPaginaAtual <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
+        <span style="padding:6px 4px;">Página ${indicadoresPaginaAtual} de ${totalPaginas}</span>
+        <button class="btn btn-ghost" onclick="irParaPaginaIndicadores(1)" ${indicadoresPaginaAtual >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
+      </div>
+    </div>`;
+
+  _atualizarBotaoExcluirSelecionados();
+}
+
+function _atualizarBotaoExcluirSelecionados() {
+  const btn = document.getElementById('btnExcluirIndicadoresSelecionados');
+  if (!btn) return;
+  const isAdmin = window.USER_PERFIL === 'admin';
+  const n = indicadoresSelecionados.size;
+  btn.style.display = isAdmin && n > 0 ? 'inline-block' : 'none';
+  btn.textContent = `🗑️ Excluir selecionados (${n})`;
+}
+
+window.toggleIndicadorSelecionado = (id, checked) => {
+  if (checked) indicadoresSelecionados.add(id);
+  else indicadoresSelecionados.delete(id);
+  _atualizarBotaoExcluirSelecionados();
+  // Atualiza só o checkbox "selecionar todos" do cabeçalho, sem redesenhar a tabela toda.
+  const todosMarcados = indicadoresPaginaIds.length > 0 && indicadoresPaginaIds.every(pid => indicadoresSelecionados.has(pid));
+  const checkTodos = document.querySelector('#indicadoresConteudoCadastro thead input[type="checkbox"]');
+  if (checkTodos) checkTodos.checked = todosMarcados;
+};
+
+window.toggleTodosIndicadores = (checked) => {
+  indicadoresPaginaIds.forEach(id => { checked ? indicadoresSelecionados.add(id) : indicadoresSelecionados.delete(id); });
+  renderizarIndicadoresCadastro();
+};
+
+window.excluirIndicadoresSelecionados = async () => {
+  const ids = [...indicadoresSelecionados];
+  if (!ids.length) return;
+  if (!confirm(`Excluir ${ids.length} indicador(es) selecionado(s)? O histórico de desempenho deles será perdido. Esta ação não pode ser desfeita.`)) return;
+  try {
+    for (const id of ids) {
+      await API.excluirIndicadorSeguranca(id);
+    }
+    indicadoresData = indicadoresData.filter(x => !indicadoresSelecionados.has(x.id));
+    indicadoresSelecionados = new Set();
+    API.invalidate('getIndicadoresSeguranca');
+    showToast(`✅ ${ids.length} indicador(es) excluído(s)!`, '#2e7d32');
+    renderizarIndicadoresCadastro();
+  } catch (e) { showToast('❌ Erro ao excluir: ' + e.message, '#c62828'); }
+};
+
+window.ordenarIndicadores = (coluna) => {
+  if (indicadoresOrdenacao.coluna === coluna) {
+    indicadoresOrdenacao.direcao = indicadoresOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
+  } else {
+    indicadoresOrdenacao.coluna = coluna;
+    indicadoresOrdenacao.direcao = 'asc';
+  }
+  renderizarIndicadoresCadastro();
+};
+
+// ============================================================
+// PÁGINA: INDICADORES — LANÇAMENTO MENSAL
+// ============================================================
+let indicadoresFiltrosLancamento = { pilar: '', responsavel: '', mes: '', busca: '' };
+let indicadoresLancamentoPaginaAtual = 1;
+
+async function indicadoresLancamento() {
+  const isAdmin = window.USER_PERFIL === 'admin';
+  indicadoresFiltrosLancamento = { pilar: '', responsavel: '', mes: '', busca: '' };
+  indicadoresLancamentoPaginaAtual = 1;
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Lançamento Mensal</h2><p class="page-sub">Registre o resultado do mês de um indicador, manualmente ou por importação em lote</p></div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="indicadoresLancamentoArea" style="display:none;">
+      <div class="group-card" style="padding:20px;margin-bottom:20px;">
+        <h3 style="font-size:1em;color:#1a237e;margin-bottom:14px;">Lançamento manual</h3>
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:12px;align-items:end;">
+          <div>
+            <label style="${_estiloFiltroLabel}">Indicador</label>
+            <select id="lancIndicador" style="${_estiloFiltroInput}width:100%;"></select>
+          </div>
+          <div>
+            <label style="${_estiloFiltroLabel}">Mês</label>
+            <input type="month" id="lancMes" style="${_estiloFiltroInput}width:100%;">
+          </div>
+          <div>
+            <label style="${_estiloFiltroLabel}">Desempenho (%)</label>
+            <input type="number" id="lancDesempenho" step="any" min="0" max="100" placeholder="Ex: 92" style="${_estiloFiltroInput}width:100%;">
+          </div>
+          <button class="btn btn-primary" onclick="lancarResultadoManual()" id="btnLancarResultado" style="display:none;">Lançar</button>
+        </div>
+      </div>
+      <div class="group-card" style="padding:20px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+        <div>
+          <h3 style="font-size:1em;color:#1a237e;margin-bottom:4px;">Importação em lote (CSV)</h3>
+          <p style="font-size:0.85em;color:#888;">Para lançar vários indicadores e meses de uma vez, a partir de uma planilha.</p>
+        </div>
+        <button class="btn btn-ghost" onclick="abrirImportarIndicadoresCSV()" id="btnImportarIndicadores" style="color:#1a237e;border-color:#1a237e;display:none;">📥 Importar CSV</button>
+      </div>
+      <h3 style="font-size:1em;color:#1a237e;margin-bottom:10px;">Lançamentos</h3>
+      <div id="indicadoresFiltrosLancamento" style="margin-bottom:16px;"></div>
+      <div id="indicadoresGradeLancamentos"></div>
+    </div>
+    ${_htmlModalImportarIndicadoresCSV()}
+  `;
+
+  document.getElementById('btnLancarResultado').style.display = isAdmin ? 'inline-block' : 'none';
+  document.getElementById('btnImportarIndicadores').style.display = isAdmin ? 'inline-block' : 'none';
+
+  await _carregarIndicadoresData();
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('indicadoresLancamentoArea').style.display = 'block';
+
+  _popularSelectIndicadorLancamento();
+  document.getElementById('lancMes').value = new Date().toISOString().slice(0, 7);
+
+  _renderFiltrosLancamento();
+  renderizarGradeLancamentos();
+}
+
+function _popularSelectIndicadorLancamento() {
+  const ativos = indicadoresData.filter(d => d.ativo !== false).sort((a, b) => (a.nome || '').localeCompare(b.nome || ''));
+  document.getElementById('lancIndicador').innerHTML = ativos.length
+    ? ativos.map(d => `<option value="${d.id}">${d.pilar ? d.pilar + ' — ' : ''}${d.nome}</option>`).join('')
+    : '<option value="">Nenhum indicador ativo cadastrado</option>';
+}
+
+// Achata o historico[] de todos os indicadores em uma linha por (indicador, mês).
+function _todosLancamentos() {
+  const linhas = [];
+  indicadoresData.forEach(d => (d.historico || []).forEach(h => linhas.push({
+    indicadorId: d.id,
+    indicadorNome: d.nome,
+    pilar: d.pilar,
+    responsavel: d.responsavel,
+    mes: h.mes,
+    desempenho: h.desempenho,
+    importadoEm: h.importadoEm,
+    arquivo: h.arquivo,
+  })));
+  return linhas;
+}
+
+function _filtrarLancamentos(linhas, filtros) {
+  let data = linhas;
+  if (filtros.pilar) data = data.filter(l => l.pilar === filtros.pilar);
+  if (filtros.responsavel) data = data.filter(l => l.responsavel === filtros.responsavel);
+  if (filtros.mes) data = data.filter(l => l.mes === filtros.mes);
+  if (filtros.busca && filtros.busca.trim()) {
+    const termo = filtros.busca.trim().toLowerCase();
+    data = data.filter(l => (l.indicadorNome || '').toLowerCase().includes(termo));
+  }
+  return data;
+}
+
+function _renderFiltrosLancamento() {
+  const el = document.getElementById('indicadoresFiltrosLancamento');
+  if (!el) return;
+  const meses = _mesesDisponiveis();
+  const responsaveis = _responsaveisDisponiveis();
+  const f = indicadoresFiltrosLancamento;
+  el.innerHTML = `
+    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+      <div>
+        <label style="${_estiloFiltroLabel}">Mês</label>
+        <select onchange="atualizarFiltroLancamento('mes',this.value)" style="${_estiloFiltroInput}">
+          <option value="">Todos os meses</option>
+          ${meses.map(m => `<option value="${m}" ${f.mes === m ? 'selected' : ''}>${_formatMes(m)}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="${_estiloFiltroLabel}">Pilar</label>
+        <select onchange="atualizarFiltroLancamento('pilar',this.value)" style="${_estiloFiltroInput}">
+          <option value="">Todos os pilares</option>
+          ${INDICADOR_PILARES.map(p => `<option value="${p}" ${f.pilar === p ? 'selected' : ''}>${p}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="${_estiloFiltroLabel}">Responsável</label>
+        <select onchange="atualizarFiltroLancamento('responsavel',this.value)" style="${_estiloFiltroInput}">
+          <option value="">Todos</option>
+          ${responsaveis.map(r => `<option value="${r}" ${f.responsavel === r ? 'selected' : ''}>${r}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="${_estiloFiltroLabel}">Indicador</label>
+        <input type="text" value="${f.busca}" oninput="atualizarFiltroLancamento('busca',this.value)" placeholder="🔍 Buscar indicador..." style="${_estiloFiltroInput}">
+      </div>
+    </div>`;
+}
+
+window.atualizarFiltroLancamento = (campo, valor) => {
+  indicadoresFiltrosLancamento[campo] = valor;
+  indicadoresLancamentoPaginaAtual = 1;
+  renderizarGradeLancamentos();
+};
+
+window.irParaPaginaLancamentos = (delta) => {
+  indicadoresLancamentoPaginaAtual += delta;
+  renderizarGradeLancamentos();
+};
+
+function renderizarGradeLancamentos() {
+  const el = document.getElementById('indicadoresGradeLancamentos');
+  if (!el) return;
+  const isAdmin = window.USER_PERFIL === 'admin';
+
+  let data = _filtrarLancamentos(_todosLancamentos(), indicadoresFiltrosLancamento);
+  // Sempre decrescente por mês, independente do filtro aplicado.
+  data.sort((a, b) => String(b.mes).localeCompare(String(a.mes)) || (a.indicadorNome || '').localeCompare(b.indicadorNome || ''));
+
+  const total = data.length;
+  const totalPaginas = Math.max(1, Math.ceil(total / INDICADORES_POR_PAGINA));
+  if (indicadoresLancamentoPaginaAtual > totalPaginas) indicadoresLancamentoPaginaAtual = totalPaginas;
+  if (indicadoresLancamentoPaginaAtual < 1) indicadoresLancamentoPaginaAtual = 1;
+  const inicio = (indicadoresLancamentoPaginaAtual - 1) * INDICADORES_POR_PAGINA;
+  const pagina = data.slice(inicio, inicio + INDICADORES_POR_PAGINA);
+
+  el.innerHTML = `
+    <div class="data-table">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:12%;">Pilar</th>
+            <th style="width:26%;">Indicador</th>
+            <th style="width:14%;">Responsável</th>
+            <th style="width:10%;">Mês</th>
+            <th style="width:12%;">Desempenho</th>
+            <th style="width:18%;">Lançado em</th>
+            ${isAdmin ? '<th style="width:8%;text-align:center;">Ações</th>' : ''}
+          </tr>
+        </thead>
+        <tbody>
+          ${pagina.length ? pagina.map(r => `<tr>
+              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${r.pilar || '-'}</span></td>
+              <td style="font-weight:600;color:#222;">${r.indicadorNome}</td>
+              <td style="font-size:0.85em;color:#555;">${r.responsavel || '-'}</td>
+              <td style="font-size:0.85em;color:#555;">${_formatMes(r.mes)}</td>
+              <td>${_htmlCelulaDesempenho(r.indicadorId, r.mes, r.desempenho, isAdmin)}</td>
+              <td style="font-size:0.8em;color:#888;">${r.importadoEm ? new Date(r.importadoEm).toLocaleString('pt-BR') : '-'}${r.arquivo ? ' · ' + r.arquivo : ''}</td>
+              ${isAdmin ? `<td style="text-align:center;"><button class="btn-icon" onclick="excluirLancamento('${r.indicadorId}','${r.mes}')" title="Excluir lançamento">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+              </button></td>` : ''}
+            </tr>`).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" style="text-align:center;color:#999;padding:30px;">Nenhum lançamento encontrado.</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:0.85em;color:#666;">
+      <span>${total ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${total} lançamento(s)` : ''}</span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="irParaPaginaLancamentos(-1)" ${indicadoresLancamentoPaginaAtual <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
+        <span style="padding:6px 4px;">Página ${indicadoresLancamentoPaginaAtual} de ${totalPaginas}</span>
+        <button class="btn btn-ghost" onclick="irParaPaginaLancamentos(1)" ${indicadoresLancamentoPaginaAtual >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
+      </div>
+    </div>`;
+}
+
+// Célula de Desempenho em modo exibição: texto com sinalização visual de que
+// é clicável (sublinhado tracejado + ✎), em vez de um input sempre visível.
+function _htmlCelulaDesempenho(indicadorId, mes, desempenho, isAdmin) {
+  const texto = desempenho != null ? desempenho + '%' : '<span style="color:#999;">sem dado</span>';
+  if (!isAdmin) return texto;
+  return `<span onclick="iniciarEdicaoDesempenho(this,'${indicadorId}','${mes}')" style="cursor:pointer;border-bottom:1px dashed #999;padding-bottom:1px;" title="Clique para editar">${texto} <span style="font-size:0.85em;color:#bbb;">✎</span></span>`;
+}
+
+// Troca a célula pra modo edição (input + Salvar/Cancelar) só quando o admin
+// clica — nada salva sozinho ao perder o foco, precisa confirmar explicitamente.
+window.iniciarEdicaoDesempenho = (spanEl, indicadorId, mes) => {
+  const indicador = indicadoresData.find(d => d.id === indicadorId);
+  const entrada = indicador && (indicador.historico || []).find(h => h.mes === mes);
+  const valorAtual = entrada && entrada.desempenho != null ? entrada.desempenho : '';
+  const td = spanEl.closest('td');
+  td.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;">
+      <input type="number" step="any" min="0" max="100" value="${valorAtual}" style="width:60px;padding:4px 6px;border:1.5px solid #1a237e;border-radius:5px;font-size:0.88em;">%
+      <button class="btn-icon" title="Salvar (Enter)" style="color:#2e7d32;" onclick="salvarEdicaoDesempenho(this,'${indicadorId}','${mes}')">✔</button>
+      <button class="btn-icon" title="Cancelar (Esc)" style="color:#c62828;" onclick="cancelarEdicaoDesempenho(this,'${indicadorId}','${mes}')">✕</button>
+    </span>`;
+  const input = td.querySelector('input');
+  input.focus();
+  input.select();
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') salvarEdicaoDesempenho(input, indicadorId, mes);
+    if (ev.key === 'Escape') cancelarEdicaoDesempenho(input, indicadorId, mes);
+  });
+};
+
+window.cancelarEdicaoDesempenho = (el, indicadorId, mes) => {
+  const td = el.closest('td');
+  const indicador = indicadoresData.find(d => d.id === indicadorId);
+  const entrada = indicador && (indicador.historico || []).find(h => h.mes === mes);
+  td.innerHTML = _htmlCelulaDesempenho(indicadorId, mes, entrada ? entrada.desempenho : null, true);
+};
+
+// Reaproveita o mesmo "lançar" de sempre (upsert por mês, sem duplicar,
+// dispara risco automático se sair da meta) — só é chamado com confirmação explícita.
+window.salvarEdicaoDesempenho = async (el, indicadorId, mes) => {
+  const td = el.closest('td');
+  const input = td.querySelector('input');
+  const valorTexto = input.value;
+  if (valorTexto === '' || isNaN(Number(valorTexto))) return showToast('Informe um desempenho válido.', '#e65100');
+  const indicador = indicadoresData.find(d => d.id === indicadorId);
+  if (!indicador) return;
+  input.disabled = true;
+  try {
+    const { riscoGerado } = await _lancarResultadosIndicador(indicador, [{ mes, desempenho: Number(valorTexto) }], '');
+    showToast(`✅ Desempenho atualizado!${riscoGerado ? ' Risco gerado automaticamente por desvio de meta.' : ''}`, '#2e7d32');
+    renderizarGradeLancamentos();
+  } catch (e) {
+    showToast('❌ Erro ao atualizar: ' + e.message, '#c62828');
+    input.disabled = false;
+  }
+};
+
+// Remove só a entrada daquele mês do histórico do indicador (não o indicador
+// inteiro), recalculando ultimoMes/ultimoDesempenho/foraDaMeta a partir do que sobrar.
+async function _removerLancamentoIndicador(indicador, mes) {
+  const historico = (indicador.historico || []).filter(h => h.mes !== mes);
+  const ultimoComDado = [...historico].reverse().find(h => h.desempenho != null);
+  const foraDaMetaAgora = ultimoComDado ? _indicadorForaDaMeta(indicador, ultimoComDado.desempenho) : false;
+  await API.salvarIndicadorSeguranca({
+    id: indicador.id,
+    historico,
+    ultimoDesempenho: ultimoComDado ? ultimoComDado.desempenho : null,
+    ultimoMes: ultimoComDado ? ultimoComDado.mes : null,
+    foraDaMeta: foraDaMetaAgora,
+  });
+  indicador.historico = historico;
+  indicador.ultimoDesempenho = ultimoComDado ? ultimoComDado.desempenho : null;
+  indicador.ultimoMes = ultimoComDado ? ultimoComDado.mes : null;
+  indicador.foraDaMeta = foraDaMetaAgora;
+  API.invalidate('getIndicadoresSeguranca');
+}
+
+window.excluirLancamento = async (indicadorId, mes) => {
+  const indicador = indicadoresData.find(d => d.id === indicadorId);
+  if (!indicador) return;
+  if (!confirm(`Excluir o lançamento de ${_formatMes(mes)} de "${indicador.nome}"? Esta ação não pode ser desfeita.`)) return;
+  try {
+    await _removerLancamentoIndicador(indicador, mes);
+    showToast('✅ Lançamento excluído!', '#2e7d32');
+    renderizarGradeLancamentos();
+  } catch (e) { showToast('❌ Erro ao excluir: ' + e.message, '#c62828'); }
+};
+
+window.lancarResultadoManual = async () => {
+  const indicadorId = document.getElementById('lancIndicador').value;
+  const mes = document.getElementById('lancMes').value;
+  const desempenhoTexto = document.getElementById('lancDesempenho').value;
+  if (!indicadorId) return showToast('Selecione um indicador.', '#e65100');
+  if (!mes) return showToast('Selecione o mês.', '#e65100');
+  if (desempenhoTexto === '' || isNaN(Number(desempenhoTexto))) return showToast('Informe um desempenho válido.', '#e65100');
+  const indicador = indicadoresData.find(d => d.id === indicadorId);
+  if (!indicador) return showToast('Indicador não encontrado.', '#c62828');
+
+  try {
+    const { riscoGerado } = await _lancarResultadosIndicador(indicador, [{ mes, desempenho: Number(desempenhoTexto) }], '');
+    document.getElementById('lancDesempenho').value = '';
+    showToast(`✅ Resultado lançado!${riscoGerado ? ' Risco gerado automaticamente por desvio de meta.' : ''}`, '#2e7d32');
+    _renderFiltrosLancamento();
+    renderizarGradeLancamentos();
+  } catch (e) { showToast('❌ Erro ao lançar: ' + e.message, '#c62828'); }
+};
+
+// ============================================================
+// PÁGINA: INDICADORES — MATRIZ
+// ============================================================
+async function indicadoresMatriz() {
+  indicadoresFiltrosMatriz = { pilar: '', responsavel: '', busca: '' };
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Matriz de Indicadores</h2><p class="page-sub">Histórico completo de desempenho, mês a mês, agrupado por pilar</p></div>
+    </div>
+    <div id="indicadoresFiltrosMatriz" style="margin-bottom:16px;"></div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="indicadoresConteudoMatriz" style="display:none;"></div>
+    ${_htmlModalIndicador()}
+  `;
+
+  await _carregarIndicadoresData();
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('indicadoresConteudoMatriz').style.display = 'block';
+
+  _renderFiltrosIndicadoresMatriz();
+  renderizarIndicadoresMatriz();
+}
+
+function _renderFiltrosIndicadoresMatriz() {
+  const el = document.getElementById('indicadoresFiltrosMatriz');
+  if (!el) return;
+  const responsaveis = _responsaveisDisponiveis();
+  const f = indicadoresFiltrosMatriz;
+  el.innerHTML = `
+    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+      <div>
+        <label style="${_estiloFiltroLabel}">Pilar</label>
+        <select onchange="atualizarFiltroMatriz('pilar',this.value)" style="${_estiloFiltroInput}">
+          <option value="">Todos os pilares</option>
+          ${INDICADOR_PILARES.map(p => `<option value="${p}" ${f.pilar === p ? 'selected' : ''}>${p}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="${_estiloFiltroLabel}">Responsável</label>
+        <select onchange="atualizarFiltroMatriz('responsavel',this.value)" style="${_estiloFiltroInput}">
+          <option value="">Todos</option>
+          ${responsaveis.map(r => `<option value="${r}" ${f.responsavel === r ? 'selected' : ''}>${r}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="${_estiloFiltroLabel}">Indicador</label>
+        <input type="text" value="${f.busca}" oninput="atualizarFiltroMatriz('busca',this.value)" placeholder="🔍 Buscar indicador..." style="${_estiloFiltroInput}">
+      </div>
+    </div>`;
+}
+
+window.atualizarFiltroMatriz = (campo, valor) => {
+  indicadoresFiltrosMatriz[campo] = valor;
+  renderizarIndicadoresMatriz();
+};
+
+function renderizarIndicadoresMatriz() {
+  const conteudo = document.getElementById('indicadoresConteudoMatriz');
+  if (!conteudo) return;
+  const dadosFiltrados = _filtrarIndicadores(indicadoresData, indicadoresFiltrosMatriz);
+  const meses = _mesesDisponiveis().slice().sort();
+
+  if (!dadosFiltrados.length) {
+    conteudo.innerHTML = '<p style="text-align:center;color:#999;padding:40px;">Nenhum indicador encontrado.</p>';
+    return;
+  }
+
+  const porPilar = {};
+  [...dadosFiltrados].sort((a, b) => (a.nome || '').localeCompare(b.nome || '')).forEach(d => {
+    const p = d.pilar || 'Sem Pilar';
+    if (!porPilar[p]) porPilar[p] = [];
+    porPilar[p].push(d);
+  });
+
+  const minWidth = 520 + meses.length * 85;
+  let html = '';
+  Object.entries(porPilar).sort((a, b) => a[0].localeCompare(b[0])).forEach(([pilar, itens]) => {
+    html += `<div style="margin-bottom:20px;">
+      <div style="background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:10px 18px;border-radius:8px 8px 0 0;font-weight:700;font-size:0.92em;">📁 ${pilar}</div>
+      <div class="data-table" style="border-radius:0 0 8px 8px;overflow-x:auto;">
+        <table style="table-layout:auto;min-width:${minWidth}px;">
+          <thead>
+            <tr>
+              <th style="min-width:220px;">Indicador</th>
+              <th style="min-width:90px;">Tipo</th>
+              <th style="min-width:130px;">Responsável</th>
+              <th style="min-width:90px;">Meta Mín.</th>
+              ${meses.map(m => `<th style="min-width:78px;text-align:center;">${_formatMes(m)}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${itens.map(d => `<tr>
+                <td style="font-weight:600;color:#222;">${d.nome}</td>
+                <td style="font-size:0.85em;color:#555;">${d.tipo || '-'}</td>
+                <td style="font-size:0.85em;color:#555;">${d.responsavel || '-'}</td>
+                <td style="font-size:0.85em;color:#555;">${d.metaMinima != null && d.metaMinima !== '' ? d.metaMinima + '%' : '<span style="color:#bbb;">-</span>'}</td>
+                ${meses.map(m => {
+                  const entrada = (d.historico || []).find(h => h.mes === m);
+                  const valor = entrada ? entrada.desempenho : null;
+                  if (valor == null) return '<td style="text-align:center;color:#ccc;">-</td>';
+                  const foraMeta = _indicadorForaDaMeta(d, valor);
+                  const semMeta = d.metaMinima == null || d.metaMinima === '';
+                  const cor = semMeta ? '#555' : (foraMeta ? '#c62828' : '#2e7d32');
+                  const bg = semMeta ? 'transparent' : (foraMeta ? '#ffebee' : '#e8f5e9');
+                  return `<td style="text-align:center;font-weight:600;color:${cor};background:${bg};">${valor}%</td>`;
+                }).join('')}
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+  });
+
+  conteudo.innerHTML = html;
+}
+
+// ============================================================
+// Modal de cadastro de indicador (compartilhado pelas 4 telas)
+// ============================================================
+function _htmlModalIndicador() {
+  return `
+    <div class="modal-overlay" id="modalIndicador"><div class="modal" onclick="event.stopPropagation()" style="max-width:560px;">
+      <h3 id="modalIndicadorTitulo">Novo Indicador</h3>
+      <input type="hidden" id="indId">
+      <label>Indicador</label>
+      <input type="text" id="indNome" placeholder="Ex: % de patches aplicados no prazo">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <div>
+          <label>Pilar</label>
+          <select id="indPilar">${INDICADOR_PILARES.map(p => `<option value="${p}">${p}</option>`).join('')}</select>
+        </div>
+        <div>
+          <label>Tipo</label>
+          <select id="indTipo">${INDICADOR_TIPOS.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
+        </div>
+      </div>
+      <label>Responsável</label>
+      <input type="text" id="indResponsavel" placeholder="Nome da pessoa responsável">
+      <label>Meta Mínima de Desempenho (%)</label>
+      <input type="number" id="indMetaMinima" step="any" min="0" max="100" placeholder="Ex: 90">
+      <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Quando o desempenho do mês ficar abaixo desse percentual, um risco é criado automaticamente.</span>
+      <label style="display:flex;align-items:center;gap:6px;margin-top:14px;cursor:pointer;">
+        <input type="checkbox" id="indAtivo" checked style="width:auto;"> Indicador ativo
+      </label>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalIndicador()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarIndicador()">Salvar</button>
+      </div>
+    </div></div>`;
+}
+
+window.abrirModalIndicador = (d) => {
+  document.getElementById('indId').value = d ? d.id : '';
+  document.getElementById('indNome').value = d ? d.nome : '';
+  document.getElementById('indPilar').value = d ? (d.pilar || INDICADOR_PILARES[0]) : INDICADOR_PILARES[0];
+  document.getElementById('indTipo').value = d ? (d.tipo || INDICADOR_TIPOS[0]) : INDICADOR_TIPOS[0];
+  document.getElementById('indResponsavel').value = d ? (d.responsavel || '') : '';
+  document.getElementById('indMetaMinima').value = d && d.metaMinima != null ? d.metaMinima : '';
+  document.getElementById('indAtivo').checked = d ? d.ativo !== false : true;
+  document.getElementById('modalIndicadorTitulo').textContent = d ? 'Editar Indicador' : 'Novo Indicador';
+  document.getElementById('modalIndicador').classList.add('open');
+};
+
+window.fecharModalIndicador = () => document.getElementById('modalIndicador').classList.remove('open');
+window.editarIndicador = (id) => { const d = indicadoresData.find(x => x.id === id); if (d) abrirModalIndicador(d); };
+
+window.excluirIndicador = async (id) => {
+  if (!confirm('Excluir este indicador? O histórico de desempenho será perdido.')) return;
+  try {
+    await API.excluirIndicadorSeguranca(id);
+    indicadoresData = indicadoresData.filter(x => x.id !== id);
+    _atualizarTelaIndicadorAtual();
+    showToast('✅ Excluído!', '#2e7d32');
+    API.invalidate('getIndicadoresSeguranca');
+  } catch (e) { showToast('Erro: ' + e.message, '#c62828'); }
+};
+
+window.salvarIndicador = async () => {
+  const d = {
+    id: document.getElementById('indId').value || null,
+    pilar: document.getElementById('indPilar').value.trim(),
+    tipo: document.getElementById('indTipo').value,
+    nome: document.getElementById('indNome').value.trim(),
+    responsavel: document.getElementById('indResponsavel').value.trim(),
+    metaMinima: document.getElementById('indMetaMinima').value !== '' ? Number(document.getElementById('indMetaMinima').value) : null,
+    ativo: document.getElementById('indAtivo').checked,
+  };
+  if (!d.nome) return showToast('Informe o nome do indicador.', '#e65100');
+  if (d.id) {
+    const atual = indicadoresData.find(x => x.id === d.id);
+    d.foraDaMeta = _indicadorForaDaMeta({ metaMinima: d.metaMinima }, atual ? atual.ultimoDesempenho : null);
+  }
+  try {
+    const result = await API.salvarIndicadorSeguranca(d);
+    fecharModalIndicador();
+    showToast('✅ Salvo!', '#2e7d32');
+    if (d.id) {
+      const idx = indicadoresData.findIndex(x => x.id === d.id);
+      if (idx !== -1) indicadoresData[idx] = { ...indicadoresData[idx], ...d };
+    } else {
+      d.id = result.id;
+      d.historico = [];
+      d.ultimoDesempenho = null;
+      d.ultimoMes = null;
+      d.foraDaMeta = false;
+      indicadoresData.push(d);
+    }
+    _atualizarTelaIndicadorAtual();
+    API.invalidate('getIndicadoresSeguranca');
+  } catch (e) { showToast('Erro: ' + e.message, '#c62828'); }
+};
+
+// ------------------------------------------------------------
+// Importação de desempenho por CSV + conversão automática de
+// desvio de meta em risco (Registro de Riscos)
+// ------------------------------------------------------------
+function _htmlModalImportarIndicadoresCSV() {
+  return `
+    <div class="modal-overlay" id="modalImportarIndicadores"><div class="modal" onclick="event.stopPropagation()" style="max-width:960px;">
+      <h3>Importar Desempenho de Indicadores (CSV)</h3>
+      <p style="font-size:0.82em;color:#666;margin:10px 0;">O arquivo precisa ter cabeçalho com as colunas <strong>Indicador</strong>, <strong>Mês</strong> e <strong>Desempenho</strong>, em qualquer ordem (acentos não importam). O mês aceita os formatos AAAA-MM ou uma data como 15/01/2026. Se o indicador ainda não existir, ele é <strong>criado automaticamente</strong> — usando as colunas Pilar, Tipo e Responsável do arquivo, se existirem — mas sem Meta Mínima definida (você define depois na tela, editando o indicador).</p>
+      <input type="file" id="importIndicadoresArquivo" accept=".csv,text/csv" onchange="processarArquivoIndicadoresCSV(this.files[0])">
+      <div id="importIndicadoresResultado" style="margin-top:16px;max-height:360px;overflow:auto;"></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharImportarIndicadoresCSV()">Cancelar</button>
+        <button class="btn btn-primary" onclick="confirmarImportarIndicadoresCSV()" id="btnConfirmarImportarIndicadores" style="display:none;">Confirmar Importação</button>
+      </div>
+    </div></div>`;
+}
+
+window.abrirImportarIndicadoresCSV = () => {
+  document.getElementById('importIndicadoresArquivo').value = '';
+  document.getElementById('importIndicadoresResultado').innerHTML = '';
+  document.getElementById('btnConfirmarImportarIndicadores').style.display = 'none';
+  window._importIndicadoresLinhas = [];
+  document.getElementById('modalImportarIndicadores').classList.add('open');
+};
+
+window.fecharImportarIndicadoresCSV = () => document.getElementById('modalImportarIndicadores').classList.remove('open');
+
+function _parseCSVLine(line) {
+  const result = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQuotes = !inQuotes; continue; }
+    if (c === ',' && !inQuotes) { result.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  result.push(cur);
+  return result.map(s => s.trim());
+}
+
+// Casa o Pilar vindo do arquivo com uma das 4 opções fixas, tolerando
+// diferenças de acento/grafia (ex: "Crise e Continidade" -> "Crise e Continuidade").
+// Se não bater com nenhuma, mantém o texto literal do arquivo.
+function _casarPilar(valorArquivo) {
+  const v = String(valorArquivo || '').trim();
+  if (!v) return '';
+  const alvo = _normalizarHeader(v);
+  const opcao = INDICADOR_PILARES.find(p => _normalizarHeader(p) === alvo);
+  return opcao || v;
+}
+
+// Remove acentos p/ comparar cabeçalhos (ex: "Mês" -> "mes").
+function _normalizarHeader(h) {
+  return String(h || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+// Aceita "AAAA-MM", "AAAA-MM-DD" ou datas "DD/MM/AA(AA)" (ex: planilhas que usam
+// o dia 15 de cada mês como referência) e normaliza para "AAAA-MM".
+function _normalizarMes(valor) {
+  const v = String(valor || '').trim();
+  if (/^\d{4}-\d{2}$/.test(v)) return v;
+  const iso = v.match(/^(\d{4})-(\d{1,2})-\d{1,2}$/);
+  if (iso) return `${iso[1]}-${iso[2].padStart(2, '0')}`;
+  const br = v.match(/^\d{1,2}\/(\d{1,2})\/(\d{2,4})$/);
+  if (br) {
+    const mes = br[1].padStart(2, '0');
+    let ano = br[2];
+    if (ano.length === 2) ano = (Number(ano) < 70 ? '20' : '19') + ano;
+    return `${ano}-${mes}`;
+  }
+  return v;
+}
+
+window.processarArquivoIndicadoresCSV = (file) => {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const linhas = String(e.target.result).split(/\r\n|\n|\r/).filter(l => l.trim());
+    if (!linhas.length) { showToast('Arquivo vazio.', '#e65100'); return; }
+    const header = _parseCSVLine(linhas[0]).map(_normalizarHeader);
+    const idxIndicador = header.indexOf('indicador');
+    const idxMes = header.indexOf('mes');
+    const idxDesempenho = header.indexOf('desempenho');
+    const idxPilar = header.indexOf('pilar');
+    const idxTipo = header.indexOf('tipo');
+    const idxResponsavel = header.indexOf('responsavel');
+    const resultado = document.getElementById('importIndicadoresResultado');
+    if (idxIndicador === -1 || idxMes === -1 || idxDesempenho === -1) {
+      resultado.innerHTML = '<p style="color:#c62828;font-size:0.9em;">Cabeçalho inválido. O arquivo precisa das colunas: indicador, mês, desempenho.</p>';
+      document.getElementById('btnConfirmarImportarIndicadores').style.display = 'none';
+      return;
+    }
+
+    window._importIndicadoresLinhas = linhas.slice(1).map(linha => {
+      const campos = _parseCSVLine(linha);
+      const nomeIndicador = (campos[idxIndicador] || '').trim();
+      const mes = _normalizarMes(campos[idxMes]);
+      const desempenhoRaw = (campos[idxDesempenho] || '').trim();
+      // Célula vazia = sem dado naquele mês (não é erro); só é inválido se
+      // vier algo preenchido que não dá pra interpretar como número.
+      const desempenho = desempenhoRaw === '' ? null : parseFloat(desempenhoRaw.replace('%', '').replace(',', '.'));
+      const desempenhoInvalido = desempenhoRaw !== '' && isNaN(desempenho);
+      const pilar = idxPilar >= 0 ? (campos[idxPilar] || '').trim() : '';
+      const tipo = idxTipo >= 0 ? (campos[idxTipo] || '').trim() : '';
+      const responsavel = idxResponsavel >= 0 ? (campos[idxResponsavel] || '').trim() : '';
+      const indicador = indicadoresData.find(i => i.nome.trim().toLowerCase() === nomeIndicador.toLowerCase());
+      const entradaExistente = indicador ? (indicador.historico || []).find(h => h.mes === mes) : null;
+      const motivo = !nomeIndicador ? 'Sem nome de indicador'
+        : desempenhoInvalido ? `Desempenho inválido ("${desempenhoRaw}")`
+        : !mes ? 'Mês ausente' : '';
+      return {
+        nomeIndicador, mes, desempenho, pilar, tipo, responsavel,
+        indicadorId: indicador ? indicador.id : null,
+        novoIndicador: !indicador,
+        atualizaExistente: !!entradaExistente,
+        valorAnterior: entradaExistente ? entradaExistente.desempenho : null,
+        valido: !motivo,
+        motivo,
+      };
+    });
+
+    renderPreviewImportIndicadores();
+  };
+  reader.readAsText(file, 'UTF-8');
+};
+
+function renderPreviewImportIndicadores() {
+  const linhas = window._importIndicadoresLinhas || [];
+  const validas = linhas.filter(l => l.valido);
+  const novos = [...new Set(validas.filter(l => l.novoIndicador).map(l => l.nomeIndicador))];
+  const resultado = document.getElementById('importIndicadoresResultado');
+  resultado.innerHTML = `<p style="font-size:0.85em;color:#555;margin-bottom:8px;">${validas.length} de ${linhas.length} linha(s) válida(s).${novos.length ? ' ' + novos.length + ' indicador(es) novo(s) será(ão) criado(s): ' + novos.join(', ') + '.' : ''}</p>` +
+    `<table class="data-table" style="box-shadow:none;"><thead><tr><th>Indicador</th><th>Pilar</th><th>Tipo</th><th>Responsável</th><th>Mês</th><th>Desempenho</th><th>Situação</th></tr></thead><tbody>` +
+    linhas.map(l => `<tr>
+        <td style="font-weight:600;">${l.nomeIndicador}</td>
+        <td style="font-size:0.85em;color:#555;">${l.pilar || (l.novoIndicador ? '<span style="color:#e65100;">vazio</span>' : '<span style="color:#bbb;">-</span>')}</td>
+        <td style="font-size:0.85em;color:#555;">${l.tipo || (l.novoIndicador ? '<span style="color:#e65100;">vazio</span>' : '<span style="color:#bbb;">-</span>')}</td>
+        <td style="font-size:0.85em;color:#555;">${l.responsavel || '<span style="color:#bbb;">-</span>'}</td>
+        <td>${l.mes}</td>
+        <td>${l.desempenho == null ? '<span style="color:#999;">sem dado</span>' : l.desempenho + '%'}</td>
+        <td>${!l.valido ? `<span style="color:#c62828;">✘ ${l.motivo}</span>`
+          : l.novoIndicador ? '<span style="color:#1565c0;">🆕 Novo indicador</span>'
+          : l.desempenho == null ? '<span style="color:#999;">⚪ Sem desempenho neste mês</span>'
+          : l.atualizaExistente ? `<span style="color:#e65100;">🔄 Substitui ${l.valorAnterior != null ? l.valorAnterior + '%' : 'sem dado'}</span>`
+          : '<span style="color:#2e7d32;">✔ OK</span>'}</td>
+      </tr>`).join('') + `</tbody></table>`;
+  document.getElementById('btnConfirmarImportarIndicadores').style.display = validas.length ? 'inline-block' : 'none';
+}
+
+window.confirmarImportarIndicadoresCSV = async () => {
+  const linhas = (window._importIndicadoresLinhas || []).filter(l => l.valido);
+  if (!linhas.length) return;
+  const nomeArquivo = (document.getElementById('importIndicadoresArquivo').files[0] || {}).name || '';
+
+  // Agrupa por nome (não por id) porque indicadores novos ainda não têm id.
+  const porIndicador = {};
+  linhas.forEach(l => {
+    const chave = l.nomeIndicador.trim().toLowerCase();
+    if (!porIndicador[chave]) porIndicador[chave] = [];
+    porIndicador[chave].push(l);
+  });
+
+  let riscosGerados = 0;
+  let indicadoresCriados = 0;
+  try {
+    const riscosAtuais = await API.getRiscos();
+    for (const [chave, novasLinhas] of Object.entries(porIndicador)) {
+      let indicador = indicadoresData.find(i => i.nome.trim().toLowerCase() === chave);
+
+      // Indicador ainda não cadastrado: cria usando Pilar/Tipo/Responsável da
+      // primeira linha do arquivo (sem Meta Mínima — definida depois na tela).
+      if (!indicador) {
+        const primeira = novasLinhas[0];
+        const novo = {
+          nome: primeira.nomeIndicador,
+          pilar: _casarPilar(primeira.pilar) || INDICADOR_PILARES[0],
+          tipo: primeira.tipo || INDICADOR_TIPOS[0],
+          responsavel: primeira.responsavel || '',
+          metaMinima: null,
+          ativo: true,
+        };
+        const result = await API.salvarIndicadorSeguranca(novo);
+        indicador = { ...novo, id: result.id, historico: [] };
+        indicadoresData.push(indicador);
+        indicadoresCriados++;
+      }
+
+      const entradas = novasLinhas.map(l => ({ mes: l.mes, desempenho: l.desempenho }));
+      const { riscoGerado } = await _lancarResultadosIndicador(indicador, entradas, nomeArquivo, riscosAtuais);
+      if (riscoGerado) riscosGerados++;
+    }
+    fecharImportarIndicadoresCSV();
+    showToast(`✅ Importação concluída!${indicadoresCriados ? ' ' + indicadoresCriados + ' indicador(es) criado(s).' : ''}${riscosGerados ? ' ' + riscosGerados + ' risco(s) gerado(s) automaticamente.' : ''}`, '#2e7d32');
+    indicadoresData = await API.getIndicadoresSeguranca();
+    _atualizarTelaIndicadorAtual();
+  } catch (e) { showToast('❌ Erro ao importar: ' + e.message, '#c62828'); }
+};
+
+// ============================================================
 // DRP - Componentes do Serviço (inline no drawer - modelo tags por tipo)
 // ============================================================
 window._drpComponentes = [];
@@ -4303,23 +6513,23 @@ async function pcns() {
     document.getElementById('pcns-resumo').style.display = 'flex';
     document.getElementById('pcns-resumo').innerHTML = `
       <div style="display:flex;gap:12px;flex-wrap:wrap;">
-        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #1a237e;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #1a237e;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
           <div style="font-size:1.6em;font-weight:700;color:#1a237e;">${comPCN.length}</div>
           <div style="font-size:0.75em;color:#666;">Total PCNs</div>
         </div>
-        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #c62828;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #c62828;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
           <div style="font-size:1.6em;font-weight:700;color:#c62828;">${tier1}</div>
           <div style="font-size:0.75em;color:#666;">Tier 1</div>
         </div>
-        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #f57c00;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #f57c00;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
           <div style="font-size:1.6em;font-weight:700;color:#f57c00;">${tier2}</div>
           <div style="font-size:0.75em;color:#666;">Tier 2</div>
         </div>
-        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #1565c0;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #1565c0;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
           <div style="font-size:1.6em;font-weight:700;color:#1565c0;">${tier3}</div>
           <div style="font-size:0.75em;color:#666;">Tier 3</div>
         </div>
-        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #2e7d32;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.06);">
+        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #2e7d32;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
           <div style="font-size:1.6em;font-weight:700;color:#2e7d32;">${Object.keys(_agruparPorArea(comPCN)).length}</div>
           <div style="font-size:0.75em;color:#666;">Áreas</div>
         </div>
