@@ -4425,17 +4425,23 @@ function _responsaveisDisponiveis() {
   return [...new Set(indicadoresData.map(d => d.responsavel).filter(Boolean))].sort();
 }
 
-// Filtros comuns a Cadastro e Matriz (Pilar, Responsável, busca por nome).
-function _filtrarIndicadores(lista, filtros) {
+// Núcleo comum de Pilar/Responsável/Mês/Busca, usado por Cadastro, Matriz e
+// Lançamento Mensal — só muda o campo onde o texto buscado é procurado
+// (indicadores usam `nome`, linhas de lançamento usam `indicadorNome`).
+function _aplicarFiltrosIndicadores(lista, filtros, campoBusca) {
   let data = lista;
   if (filtros.pilar) data = data.filter(d => d.pilar === filtros.pilar);
   if (filtros.responsavel) data = data.filter(d => d.responsavel === filtros.responsavel);
+  if (filtros.mes) data = data.filter(d => d.mes === filtros.mes);
   if (filtros.busca && filtros.busca.trim()) {
     const termo = filtros.busca.trim().toLowerCase();
-    data = data.filter(d => (d.nome || '').toLowerCase().includes(termo));
+    data = data.filter(d => (d[campoBusca] || '').toLowerCase().includes(termo));
   }
   return data;
 }
+
+// Filtros comuns a Cadastro e Matriz (Pilar, Responsável, busca por nome).
+function _filtrarIndicadores(lista, filtros) { return _aplicarFiltrosIndicadores(lista, filtros, 'nome'); }
 
 async function _carregarIndicadoresData() {
   try { indicadoresData = await API.getIndicadoresSeguranca(); } catch (e) { indicadoresData = []; }
@@ -4455,6 +4461,44 @@ function _atualizarTelaIndicadorAtual() {
 // (ver .amazonq/rules/ui-referencias.md, seção "Barra de filtros").
 const _estiloFiltroLabel = 'font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;';
 const _estiloFiltroInput = 'padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:190px;';
+
+// Barra de filtros compartilhada por Cadastro, Matriz e Lançamento Mensal.
+// `handler` é o nome da função global (window.atualizarFiltro...) chamada no
+// onchange/oninput de cada campo; `comMes` liga o campo Mês (só Lançamento).
+function _renderBarraFiltrosIndicadores(containerId, filtros, handler, { comMes = false } = {}) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const responsaveis = _responsaveisDisponiveis();
+  el.innerHTML = `
+    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
+      ${comMes ? `
+      <div>
+        <label style="${_estiloFiltroLabel}">Mês</label>
+        <select onchange="${handler}('mes',this.value)" style="${_estiloFiltroInput}">
+          <option value="">Todos os meses</option>
+          ${_mesesDisponiveis().map(m => `<option value="${m}" ${filtros.mes === m ? 'selected' : ''}>${_formatMes(m)}</option>`).join('')}
+        </select>
+      </div>` : ''}
+      <div>
+        <label style="${_estiloFiltroLabel}">Pilar</label>
+        <select onchange="${handler}('pilar',this.value)" style="${_estiloFiltroInput}">
+          <option value="">Todos os pilares</option>
+          ${INDICADOR_PILARES.map(p => `<option value="${p}" ${filtros.pilar === p ? 'selected' : ''}>${p}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="${_estiloFiltroLabel}">Responsável</label>
+        <select onchange="${handler}('responsavel',this.value)" style="${_estiloFiltroInput}">
+          <option value="">Todos</option>
+          ${responsaveis.map(r => `<option value="${r}" ${filtros.responsavel === r ? 'selected' : ''}>${r}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label style="${_estiloFiltroLabel}">Indicador</label>
+        <input type="text" value="${filtros.busca}" oninput="${handler}('busca',this.value)" placeholder="🔍 Buscar indicador..." style="${_estiloFiltroInput}">
+      </div>
+    </div>`;
+}
 
 // Grava o(s) resultado(s) mensal(is) de um indicador (upsert por mês no
 // histórico) e dispara a conversão automática em risco se sair da meta.
@@ -4704,31 +4748,7 @@ async function indicadoresCadastro() {
 }
 
 function _renderFiltrosIndicadoresCadastro() {
-  const el = document.getElementById('indicadoresFiltrosCadastro');
-  if (!el) return;
-  const responsaveis = _responsaveisDisponiveis();
-  const f = indicadoresFiltrosCadastro;
-  el.innerHTML = `
-    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
-      <div>
-        <label style="${_estiloFiltroLabel}">Pilar</label>
-        <select onchange="atualizarFiltroCadastro('pilar',this.value)" style="${_estiloFiltroInput}">
-          <option value="">Todos os pilares</option>
-          ${INDICADOR_PILARES.map(p => `<option value="${p}" ${f.pilar === p ? 'selected' : ''}>${p}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label style="${_estiloFiltroLabel}">Responsável</label>
-        <select onchange="atualizarFiltroCadastro('responsavel',this.value)" style="${_estiloFiltroInput}">
-          <option value="">Todos</option>
-          ${responsaveis.map(r => `<option value="${r}" ${f.responsavel === r ? 'selected' : ''}>${r}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label style="${_estiloFiltroLabel}">Indicador</label>
-        <input type="text" value="${f.busca}" oninput="atualizarFiltroCadastro('busca',this.value)" placeholder="🔍 Buscar indicador..." style="${_estiloFiltroInput}">
-      </div>
-    </div>`;
+  _renderBarraFiltrosIndicadores('indicadoresFiltrosCadastro', indicadoresFiltrosCadastro, 'atualizarFiltroCadastro');
 }
 
 window.atualizarFiltroCadastro = (campo, valor) => {
@@ -5002,52 +5022,10 @@ function _todosLancamentos() {
   return linhas;
 }
 
-function _filtrarLancamentos(linhas, filtros) {
-  let data = linhas;
-  if (filtros.pilar) data = data.filter(l => l.pilar === filtros.pilar);
-  if (filtros.responsavel) data = data.filter(l => l.responsavel === filtros.responsavel);
-  if (filtros.mes) data = data.filter(l => l.mes === filtros.mes);
-  if (filtros.busca && filtros.busca.trim()) {
-    const termo = filtros.busca.trim().toLowerCase();
-    data = data.filter(l => (l.indicadorNome || '').toLowerCase().includes(termo));
-  }
-  return data;
-}
+function _filtrarLancamentos(linhas, filtros) { return _aplicarFiltrosIndicadores(linhas, filtros, 'indicadorNome'); }
 
 function _renderFiltrosLancamento() {
-  const el = document.getElementById('indicadoresFiltrosLancamento');
-  if (!el) return;
-  const meses = _mesesDisponiveis();
-  const responsaveis = _responsaveisDisponiveis();
-  const f = indicadoresFiltrosLancamento;
-  el.innerHTML = `
-    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
-      <div>
-        <label style="${_estiloFiltroLabel}">Mês</label>
-        <select onchange="atualizarFiltroLancamento('mes',this.value)" style="${_estiloFiltroInput}">
-          <option value="">Todos os meses</option>
-          ${meses.map(m => `<option value="${m}" ${f.mes === m ? 'selected' : ''}>${_formatMes(m)}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label style="${_estiloFiltroLabel}">Pilar</label>
-        <select onchange="atualizarFiltroLancamento('pilar',this.value)" style="${_estiloFiltroInput}">
-          <option value="">Todos os pilares</option>
-          ${INDICADOR_PILARES.map(p => `<option value="${p}" ${f.pilar === p ? 'selected' : ''}>${p}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label style="${_estiloFiltroLabel}">Responsável</label>
-        <select onchange="atualizarFiltroLancamento('responsavel',this.value)" style="${_estiloFiltroInput}">
-          <option value="">Todos</option>
-          ${responsaveis.map(r => `<option value="${r}" ${f.responsavel === r ? 'selected' : ''}>${r}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label style="${_estiloFiltroLabel}">Indicador</label>
-        <input type="text" value="${f.busca}" oninput="atualizarFiltroLancamento('busca',this.value)" placeholder="🔍 Buscar indicador..." style="${_estiloFiltroInput}">
-      </div>
-    </div>`;
+  _renderBarraFiltrosIndicadores('indicadoresFiltrosLancamento', indicadoresFiltrosLancamento, 'atualizarFiltroLancamento', { comMes: true });
 }
 
 window.atualizarFiltroLancamento = (campo, valor) => {
@@ -5246,31 +5224,7 @@ async function indicadoresMatriz() {
 }
 
 function _renderFiltrosIndicadoresMatriz() {
-  const el = document.getElementById('indicadoresFiltrosMatriz');
-  if (!el) return;
-  const responsaveis = _responsaveisDisponiveis();
-  const f = indicadoresFiltrosMatriz;
-  el.innerHTML = `
-    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
-      <div>
-        <label style="${_estiloFiltroLabel}">Pilar</label>
-        <select onchange="atualizarFiltroMatriz('pilar',this.value)" style="${_estiloFiltroInput}">
-          <option value="">Todos os pilares</option>
-          ${INDICADOR_PILARES.map(p => `<option value="${p}" ${f.pilar === p ? 'selected' : ''}>${p}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label style="${_estiloFiltroLabel}">Responsável</label>
-        <select onchange="atualizarFiltroMatriz('responsavel',this.value)" style="${_estiloFiltroInput}">
-          <option value="">Todos</option>
-          ${responsaveis.map(r => `<option value="${r}" ${f.responsavel === r ? 'selected' : ''}>${r}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label style="${_estiloFiltroLabel}">Indicador</label>
-        <input type="text" value="${f.busca}" oninput="atualizarFiltroMatriz('busca',this.value)" placeholder="🔍 Buscar indicador..." style="${_estiloFiltroInput}">
-      </div>
-    </div>`;
+  _renderBarraFiltrosIndicadores('indicadoresFiltrosMatriz', indicadoresFiltrosMatriz, 'atualizarFiltroMatriz');
 }
 
 window.atualizarFiltroMatriz = (campo, valor) => {
