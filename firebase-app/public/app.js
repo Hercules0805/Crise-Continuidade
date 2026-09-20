@@ -6157,7 +6157,7 @@ window.gerarPCNProcesso = async () => {
       }
     } catch(saveErr) { console.warn('Auto-save PCN falhou:', saveErr); }
 
-    const pcnHtml = _buildPCNPage(pcnContent, result, id);
+    const pcnHtml = _buildPCNPage(pcnContent, result, id, null, await _tokenParaPCN());
     win.document.open();
     win.document.write(pcnHtml);
     win.document.close();
@@ -6172,14 +6172,20 @@ window.gerarPCNProcesso = async () => {
 // ============================================================
 // ABRIR PCN SALVO
 // ============================================================
-window.abrirPCNSalvo = () => {
+window.abrirPCNSalvo = async () => {
   const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p || !p.pcnSalvo) return showToast('Nenhum PCN salvo.', '#e65100');
   const tier = Criticidade.tierDoProcesso(p);
   const versoes = _parsePCNVersoes(p.pcnSalvo);
+  if (!versoes.length) return showToast('Nenhuma versão de PCN encontrada.', '#e65100');
   const ultimaVersao = versoes[versoes.length - 1];
-  const pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes);
+  let pcnHtml;
+  try {
+    pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes, await _tokenParaPCN());
+  } catch (e) {
+    return showToast('❌ ' + e.message, '#c62828');
+  }
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado.', '#e65100');
   win.document.open();
@@ -6206,7 +6212,15 @@ function _parsePCNVersoes(pcnSalvo) {
 // ============================================================
 // TEMPLATE HTML DO PCN (compartilhado)
 // ============================================================
-function _buildPCNPage(pcnContent, info, processId, versoes) {
+// Token de login para embutir na pagina do PCN, que roda fora do app e nao tem
+// o SDK do Firebase para pedir um por conta propria.
+async function _tokenParaPCN() {
+  const user = firebase.auth().currentUser;
+  if (!user) throw new Error('Sessão expirada. Entre novamente.');
+  return user.getIdToken();
+}
+
+function _buildPCNPage(pcnContent, info, processId, versoes, idToken) {
   // O conteudo vem do Gemini a partir de campos que gestores preenchem, e era
   // inserido cru com document.write — executando na sessao de quem abrisse o
   // PCN. Limpa antes de qualquer coisa. Ver sanitizar-pcn.js.
@@ -6294,7 +6308,11 @@ ${seletorVersoes}
 </div>
 <script>
 var PROCESS_ID = '${escScript(processId)}';
-var PCN_API_URL = '` + API_URL + `';
+var PCN_API_URL = '` + APP_API_URL + `';
+// Token de login embutido na abertura da pagina. A pagina do PCN nao carrega o
+// SDK do Firebase, entao nao tem como pedir um novo: vale cerca de uma hora.
+// Passado isso, salvar devolve 401 e a pagina manda reabrir o PCN.
+var PCN_TOKEN = '` + (idToken || '') + `';
 var PCN_AREA = '${escScript(info.area || '')}';
 var PCN_PROCESSO = '${escScript(info.processo || '')}';
 var PCN_VERSOES = JSON.parse('${versoesJson}');
@@ -6347,13 +6365,13 @@ async function salvarVersaoPCN(){
   var btn=document.querySelector('button[onclick="salvarVersaoPCN()"]');
   if(btn){btn.disabled=true;btn.textContent='⏳ Salvando...';}
   try{
-    var payload = JSON.stringify({action:'salvarPCN',id:String(PROCESS_ID),area:PCN_AREA,processo:PCN_PROCESSO,pcnHtml:conteudo});
+    var payload = JSON.stringify({action:'salvarPCN',area:PCN_AREA,processo:PCN_PROCESSO,html:conteudo});
     var res = await fetch(PCN_API_URL, {
       method:'POST',
-      headers:{'Content-Type':'text/plain;charset=UTF-8'},
-      body: payload,
-      redirect:'follow'
+      headers:{'Content-Type':'text/plain;charset=UTF-8','Authorization':'Bearer '+PCN_TOKEN},
+      body: payload
     });
+    if(res.status===401){throw new Error('A sessão desta aba expirou. Feche esta aba, volte ao sistema e abra o PCN de novo — o conteúdo editado não foi salvo.');}
     var text = await res.text();
     var data = JSON.parse(text);
     if(data.error) throw new Error(data.error);
@@ -6362,7 +6380,7 @@ async function salvarVersaoPCN(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
-<script src="https://bia-forte-2025.web.app/pcn-live.js"></script>
+<script src="https://bia-forte-2025.web.app/pcn-live.js?v=2"></script>
 </body>
 </html>`;
 }
@@ -6371,13 +6389,19 @@ async function salvarVersaoPCN(){
 // ============================================================
 // ABRIR PCN DIRETO DA TABELA DE PROCESSOS
 // ============================================================
-window.abrirPCNDireto = (id) => {
+window.abrirPCNDireto = async (id) => {
   const p = window.processosData.find(proc => proc.id === id);
   if (!p || !p.pcnSalvo) return showToast('Nenhum PCN salvo para este processo.', '#e65100');
   const tier = Criticidade.tierDoProcesso(p);
   const versoes = _parsePCNVersoes(p.pcnSalvo);
+  if (!versoes.length) return showToast('Nenhuma versão de PCN encontrada.', '#e65100');
   const ultimaVersao = versoes[versoes.length - 1];
-  const pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes);
+  let pcnHtml;
+  try {
+    pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes, await _tokenParaPCN());
+  } catch (e) {
+    return showToast('❌ ' + e.message, '#c62828');
+  }
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado.', '#e65100');
   win.document.open();

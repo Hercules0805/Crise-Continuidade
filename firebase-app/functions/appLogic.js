@@ -350,19 +350,79 @@ ${compsDetalhados.length ? compsDetalhados.map((c) => `- **${c.tipo}:** ${c.nome
   return { success: true, pcn: pcnHtml, processo: p.processo, area: p.area, tier, score };
 }
 
+
+/**
+ * Dados que a pagina do PCN usa para a edicao inline (pcn-live.js).
+ *
+ * Substitui tres chamadas que iam ao Apps Script: getProcessos, getDependencias
+ * e getComponentes. Devolve so o processo pedido, e nao a colecao inteira —
+ * a pagina do PCN nao precisa do resto e nao deve receber.
+ */
+async function dadosPCN(db, data) {
+  const area = exigir(data.area, 'area');
+  const processo = exigir(data.processo, 'processo');
+
+  const snap = await db.collection(COLLECTION.processos).doc(processoKey(area, processo)).get();
+  if (!snap.exists) throw new AppError('Processo não encontrado.');
+  const p = { id: snap.id, ...(snap.data() || {}) };
+
+  const [depsSnap, compsSnap] = await Promise.all([
+    db.collection('dependencias').get(),
+    db.collection('componentes').get(),
+  ]);
+  const dependencias = depsSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const componentes = compsSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+
+  return { success: true, processo: p, dependencias, componentes };
+}
+
+/**
+ * Grava os campos que a edicao inline do PCN altera.
+ *
+ * Allowlist proposital: a pagina do PCN so pode mexer nestes campos. Sem isso,
+ * um `salvarProcesso` generico aberto a partir dali deixaria a pagina reescrever
+ * area, tier, RTO e qualquer outra coisa do processo.
+ */
+const CAMPOS_EDITAVEIS_PCN = ['bcpContatos', 'bcpPapeisCrise'];
+
+async function salvarCamposPCN(db, data, ctx) {
+  const area = exigir(data.area, 'area');
+  const processo = exigir(data.processo, 'processo');
+  const ref = db.collection(COLLECTION.processos).doc(processoKey(area, processo));
+  const snap = await ref.get();
+  if (!snap.exists) throw new AppError('Processo não encontrado.');
+
+  const patch = {};
+  CAMPOS_EDITAVEIS_PCN.forEach((campo) => {
+    if (data[campo] !== undefined) patch[campo] = data[campo];
+  });
+  const recusados = Object.keys(data).filter(
+    (k) => !['action', 'area', 'processo', ...CAMPOS_EDITAVEIS_PCN].includes(k)
+  );
+  if (!Object.keys(patch).length) throw new AppError('Nenhum campo editável informado.');
+
+  patch.atualizadoEm = new Date().toISOString();
+  patch.atualizadoPor = ctx.email;
+  await ref.set(patch, { merge: true });
+  return { success: true, gravados: Object.keys(patch), recusados };
+}
+
 const READ_ACTIONS = {
   getLevantamentoPCN,
+  dadosPCN,
 };
 
 const WRITE_ACTIONS = {
   gerarLink,
   salvarPCN,
   excluirPCN,
+  salvarCamposPCN,
   gerarPCN,
 };
 
 module.exports = {
   AppError,
+  CAMPOS_EDITAVEIS_PCN,
   READ_ACTIONS,
   WRITE_ACTIONS,
   PREFIXO,

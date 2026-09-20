@@ -209,3 +209,67 @@ test('gerarPCN resolve dependencias e contatos do catalogo no prompt', async () 
 test('processoKey e igual a de tokenLogic e api.js', () => {
   assert.strictEqual(processoKey('Financeiro', 'Faturamento > Emissão de NFs'), 'financeiro__faturamento-emissao-de-nfs');
 });
+
+// --- Regressao: a pagina do PCN salvava direto no Apps Script, que foi
+// fechado em 19/09. O erro que aparecia ao salvar era "Failed to fetch".
+// Estas acoes substituem aquelas chamadas.
+const { CAMPOS_EDITAVEIS_PCN } = require('./appLogic');
+
+test('dadosPCN devolve o processo pedido com dependencias e componentes', async () => {
+  const s = seed();
+  s.dependencias = { d1: { nome: 'Fulano', categoria: 'Pessoa' } };
+  s.componentes = { c1: { nome: 'SRV-01', tipo: 'Servidor' } };
+  const db = makeDb(s);
+  db.collection = ((orig) => (col) => {
+    const api = orig(col);
+    api.get = async () => ({
+      docs: Object.entries(db._store[col] || {}).map(([id, data]) => ({ id, data: () => data })),
+    });
+    return api;
+  })(db.collection);
+
+  const r = await READ_ACTIONS.dadosPCN(db, { area: 'TI', processo: 'Backup' });
+  assert.strictEqual(r.processo.processo, 'Backup');
+  assert.strictEqual(r.dependencias.length, 1);
+  assert.strictEqual(r.componentes.length, 1);
+});
+
+test('salvarCamposPCN grava os campos da edicao inline', async () => {
+  const db = makeDb(seed());
+  const r = await WRITE_ACTIONS.salvarCamposPCN(db, {
+    area: 'TI', processo: 'Backup',
+    bcpContatos: '["d1"]', bcpPapeisCrise: '{"Fulano":"Coordenador"}',
+  }, ctx());
+  assert.strictEqual(r.success, true);
+  const p = db._store.processos.ti__backup;
+  assert.strictEqual(p.bcpPapeisCrise, '{"Fulano":"Coordenador"}');
+  assert.strictEqual(p.atualizadoPor, 'analista@fortestecnologia.com.br');
+});
+
+// A pagina do PCN e um documento montado a partir de conteudo de LLM. Se ela
+// pudesse gravar qualquer campo, poderia reescrever area, tier e RTO.
+test('salvarCamposPCN recusa campos fora da allowlist', async () => {
+  const db = makeDb(seed());
+  const r = await WRITE_ACTIONS.salvarCamposPCN(db, {
+    area: 'TI', processo: 'Backup',
+    bcpContatos: '["d1"]',
+    tier: 'Tier 1 (Crítico)', rto: '< 4 horas', area_: 'RH',
+  }, ctx());
+  const p = db._store.processos.ti__backup;
+  assert.strictEqual(p.tier, undefined, 'tier nao pode ser gravado daqui');
+  assert.strictEqual(p.rto, undefined, 'rto nao pode ser gravado daqui');
+  assert.ok(r.recusados.includes('tier'));
+  assert.ok(r.recusados.includes('rto'));
+});
+
+test('salvarCamposPCN recusa chamada sem nenhum campo editavel', async () => {
+  const db = makeDb(seed());
+  await assert.rejects(
+    () => WRITE_ACTIONS.salvarCamposPCN(db, { area: 'TI', processo: 'Backup' }, ctx()),
+    AppError
+  );
+});
+
+test('a allowlist da edicao inline cobre so contatos e papeis', () => {
+  assert.deepStrictEqual(CAMPOS_EDITAVEIS_PCN, ['bcpContatos', 'bcpPapeisCrise']);
+});

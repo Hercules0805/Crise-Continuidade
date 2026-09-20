@@ -5,26 +5,21 @@ var PCN_LIVE_DATA = null;
 
 async function initPCNLive() {
   try {
+    // Antes eram tres chamadas ao Apps Script, que baixavam as colecoes
+    // inteiras. Agora e uma so ao appApi, que devolve apenas este processo e
+    // exige identidade (PCN_TOKEN, embutido quando a pagina foi aberta).
     var url = new URL(PCN_API_URL);
-    url.searchParams.append('action', 'getProcessos');
-    var res = await fetch(url, { redirect: 'follow' });
+    url.searchParams.append('action', 'dadosPCN');
+    url.searchParams.append('area', PCN_AREA);
+    url.searchParams.append('processo', PCN_PROCESSO);
+    var res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PCN_TOKEN } });
+    if (res.status === 401) { console.warn('PCN Live: sessão desta aba expirou; edição inline indisponível.'); return; }
     var text = await res.text();
     if (text.startsWith('<')) return;
-    var processos = JSON.parse(text);
-    var p = processos.find(function(proc) { return proc.area === PCN_AREA && proc.processo === PCN_PROCESSO; });
-    if (!p) return;
+    var dados = JSON.parse(text);
+    if (dados.error || !dados.processo) return;
 
-    var url2 = new URL(PCN_API_URL);
-    url2.searchParams.append('action', 'getDependencias');
-    var res2 = await fetch(url2, { redirect: 'follow' });
-    var deps = JSON.parse(await res2.text());
-
-    var url3 = new URL(PCN_API_URL);
-    url3.searchParams.append('action', 'getComponentes');
-    var res3 = await fetch(url3, { redirect: 'follow' });
-    var comps = JSON.parse(await res3.text());
-
-    PCN_LIVE_DATA = { processo: p, dependencias: deps, componentes: comps };
+    PCN_LIVE_DATA = { processo: dados.processo, dependencias: dados.dependencias, componentes: dados.componentes };
     injectEditButtons();
   } catch(e) { console.warn('PCN Live init error:', e); }
 }
@@ -173,16 +168,19 @@ async function saveLiveContatos() {
     var nome = input.dataset.nome;
     if (nome && input.value.trim()) papeis[nome] = input.value.trim();
   });
+  // salvarCamposPCN, e nao salvarProcesso: o servidor so aceita os dois campos
+  // que esta tela edita. A pagina do PCN e montada a partir de conteudo de LLM
+  // e nao deve poder reescrever area, tier ou RTO do processo.
   var payload = {
-    action: 'salvarProcesso',
-    id: String(PCN_LIVE_DATA.processo.id),
+    action: 'salvarCamposPCN',
     area: PCN_LIVE_DATA.processo.area,
     processo: PCN_LIVE_DATA.processo.processo,
     bcpContatos: JSON.stringify(PCN_LIVE_DATA.processo.bcpContatos),
     bcpPapeisCrise: JSON.stringify(papeis)
   };
   try {
-    var res = await fetch(PCN_API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8' }, body: JSON.stringify(payload), redirect: 'follow' });
+    var res = await fetch(PCN_API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8', 'Authorization': 'Bearer ' + PCN_TOKEN }, body: JSON.stringify(payload) });
+    if (res.status === 401) throw new Error('A sessão desta aba expirou. Feche, volte ao sistema e abra o PCN de novo.');
     var text = await res.text();
     var data = JSON.parse(text);
     if (data.error) throw new Error(data.error);
