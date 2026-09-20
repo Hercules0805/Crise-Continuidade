@@ -10,7 +10,8 @@
     "import": "ts-node src/import-firestore.ts",
     "verify": "ts-node src/verify.ts",
     "migrar": "ts-node src/migrar.ts",
-    "test": "ts-node src/__test-transform.ts && ts-node src/__test-tier.ts"
+    "test": "ts-node src/__test-transform.ts && ts-node src/__test-tier.ts",
+    "conferir-respostas": "ts-node src/conferir-respostas.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
