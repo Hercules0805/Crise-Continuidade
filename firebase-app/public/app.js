@@ -3470,7 +3470,8 @@ window.salvarComp = async () => {
 // PÁGINA: GESTÃO DE RISCOS
 // ============================================================
 let riscosData = [];
-let riscosOrdenacao = { coluna: 'titulo', direcao: 'asc' };
+// Abre pelo maior risco: e a pergunta que a tela responde.
+let riscosOrdenacao = { coluna: 'score', direcao: 'desc' };
 let riscosAreasCache = [];
 let riscosProcessosCache = [];
 let riscosFornecedoresCache = [];
@@ -3484,6 +3485,42 @@ function _corStatusRisco(status) {
   };
   return cores[status] || '#9e9e9e';
 }
+/**
+ * Score do risco, recalculado a partir de probabilidade e impacto.
+ *
+ * Nao usa o campo `score` gravado: ele vinha do navegador e podia divergir da
+ * escala. O servidor faz o mesmo recalculo ao registrar a medicao — aqui e a
+ * versao de exibicao, com os mesmos pesos.
+ */
+const _PESO_PROB_RISCO = { 'Baixa': 1, 'Média': 2, 'Alta': 3 };
+const _PESO_IMP_RISCO = { 'Baixo': 1, 'Moderado': 2, 'Alto': 3, 'Crítico': 4 };
+
+function _scoreDoRisco(r) {
+  const p = _PESO_PROB_RISCO[String((r && r.probabilidade) || '').trim()];
+  const i = _PESO_IMP_RISCO[String((r && r.impacto) || '').trim()];
+  if (!p || !i) return null;
+  return p * i;
+}
+
+/** Faixas do score, de 1 a 12. */
+function _faixaScoreRisco(n) {
+  if (n >= 9) return { rotulo: 'Crítico', cor: '#c62828', fundo: '#ffebee' };
+  if (n >= 6) return { rotulo: 'Alto', cor: '#e65100', fundo: '#fff3e0' };
+  if (n >= 3) return { rotulo: 'Moderado', cor: '#f57c00', fundo: '#fff8e1' };
+  return { rotulo: 'Baixo', cor: '#2e7d32', fundo: '#e8f5e9' };
+}
+
+function _badgeScoreRisco(r) {
+  const n = _scoreDoRisco(r);
+  if (n === null) {
+    // Escala nao reconhecida (risco importado de PCN) ou ainda sem avaliar.
+    // Cinza e "-" em vez de zero: ausencia nao e risco baixo.
+    return `<span title="Probabilidade ou impacto fora da escala — reavalie este risco" style="color:#999;font-weight:600;">-</span>`;
+  }
+  const f = _faixaScoreRisco(n);
+  return `<span title="${f.rotulo} (${n} de 12)" style="display:inline-block;min-width:26px;padding:3px 8px;border-radius:10px;font-size:0.82em;font-weight:700;background:${f.fundo};color:${f.cor};">${n}</span>`;
+}
+
 function _badgeStatusRisco(status) {
   const s = status || 'Identificado';
   return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:white;background:${_corStatusRisco(s)};white-space:nowrap;">${s}</span>`;
@@ -3544,9 +3581,10 @@ async function riscos() {
             <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;width:17%;">Título <span id="sort-risco-titulo"></span></th>
             <th style="width:10%;">Categoria</th>
             <th style="width:11%;">Responsável</th>
-            <th style="width:9%;">Probab.</th>
-            <th style="width:9%;">Impacto</th>
-            <th style="width:12%;">Status</th>
+            <th style="width:8%;">Probab.</th>
+            <th style="width:8%;">Impacto</th>
+            <th onclick="ordenarRiscos('score')" style="cursor:pointer;width:7%;text-align:center;" title="Probabilidade x Impacto, de 1 a 12">Score <span id="sort-risco-score"></span></th>
+            <th style="width:11%;">Status</th>
             <th style="width:6%;text-align:center;">Ações</th>
           </tr>
         </thead>
@@ -3562,8 +3600,12 @@ async function riscos() {
   document.getElementById('btnImportarRiscosPCN').style.display = isAdmin ? 'inline-block' : 'none';
 
   try {
-    const [riscos_, areas_, deps_] = await Promise.all([API.getRiscos(), API.getAreas(), API.getDependencias()]);
-    riscosData = riscos_; riscosAreasCache = areas_;
+    // Indicadores entram aqui para que a sugestao de probabilidade funcione ao
+    // abrir um risco gerado por desvio de indicador.
+    const [riscos_, areas_, deps_, inds_] = await Promise.all([
+      API.getRiscos(), API.getAreas(), API.getDependencias(), API.getIndicadoresSeguranca(),
+    ]);
+    riscosData = riscos_; riscosAreasCache = areas_; indicadoresData = inds_;
     riscosFornecedoresCache = deps_.filter(d => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
   } catch (e) {
     // Antes este catch zerava a lista em silencio, e a tela dizia "Nenhum risco
@@ -3622,13 +3664,24 @@ function renderizarRiscos() {
   }
 
   data.sort((a, b) => {
+    // Score ordena por numero, nao por texto: "10" vem depois de "9".
+    if (riscosOrdenacao.coluna === 'score') {
+      const nA = _scoreDoRisco(a);
+      const nB = _scoreDoRisco(b);
+      // Sem score vai sempre para o fim, independente da direcao: e ausencia
+      // de avaliacao, nao risco baixo.
+      if (nA === null && nB === null) return 0;
+      if (nA === null) return 1;
+      if (nB === null) return -1;
+      return riscosOrdenacao.direcao === 'asc' ? nA - nB : nB - nA;
+    }
     const valA = (a[riscosOrdenacao.coluna] || '').toString().toLowerCase();
     const valB = (b[riscosOrdenacao.coluna] || '').toString().toLowerCase();
     const cmp = valA.localeCompare(valB);
     return riscosOrdenacao.direcao === 'asc' ? cmp : -cmp;
   });
 
-  ['area', 'titulo'].forEach(col => {
+  ['area', 'titulo', 'score'].forEach(col => {
     const el = document.getElementById(`sort-risco-${col}`);
     if (el) el.textContent = col === riscosOrdenacao.coluna ? (riscosOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
   });
@@ -3642,6 +3695,7 @@ function renderizarRiscos() {
         <td style="font-size:0.85em;color:#555;">${esc(r.responsavel || '-')}</td>
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
+        <td style="text-align:center;">${_badgeScoreRisco(r)}</td>
         <td>${_badgeStatusRisco(r.status)}</td>
         <td style="text-align:center;white-space:nowrap;">
           <button class="btn-icon" onclick="editarRisco('${r.id}')" title="${isAdmin ? 'Editar' : 'Visualizar'}">
@@ -3652,7 +3706,7 @@ function renderizarRiscos() {
           </button>` : ''}
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="9" style="text-align:center;color:#999;padding:40px;">Nenhum risco cadastrado.</td></tr>';
+    : '<tr><td colspan="10" style="text-align:center;color:#999;padding:40px;">Nenhum risco cadastrado.</td></tr>';
 }
 
 window.filtrarRiscos = () => renderizarRiscos();
@@ -3925,11 +3979,16 @@ window.abrirDrawerRisco = async (r) => {
   }
   document.getElementById('rArea').innerHTML = riscosAreasCache.map(a => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
   document.getElementById('rProcesso').innerHTML = '<option value="">-- Nenhum (risco corporativo) --</option>' +
-    riscosProcessosCache.map(p => `<option value="${p.id}" data-area="${esc(p.area)}">${esc(p.area)} — ${esc(p.processo)}</option>`).join('');
+    riscosProcessosCache.map(p => `<option value="${p.id}" data-area="${esc(p.area)}" data-tier="${esc(Criticidade.tierDoProcesso(p))}">${esc(p.area)} — ${esc(p.processo)}</option>`).join('');
   document.getElementById('rProcesso').onchange = () => {
     const sel = document.getElementById('rProcesso');
-    const area = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].dataset.area : '';
+    const op = sel.options[sel.selectedIndex];
+    const area = op ? op.dataset.area : '';
     if (area) document.getElementById('rArea').value = area;
+    // O BIA ja mediu o quanto dói se este processo parar. Usar isso como ponto
+    // de partida do impacto e o que liga os dois modulos — antes o analista
+    // digitava do zero, ignorando um numero que o sistema ja tinha.
+    _sugerirImpactoPeloTier(op ? op.dataset.tier : '');
   };
 
   if (!riscosFornecedoresCache.length) {
@@ -3944,6 +4003,7 @@ window.abrirDrawerRisco = async (r) => {
   const categorias = [...new Set([...RISCO_CATEGORIAS_PADRAO, ...riscosData.map(x => x.categoria).filter(Boolean)])].sort();
   document.getElementById('rCategoriaList').innerHTML = categorias.map(c => `<option value="${c}">`).join('');
 
+  _limparSugestoes();
   document.getElementById('rArea').value = r ? r.area : '';
   document.getElementById('rProcesso').value = r && r.processoId ? r.processoId : '';
   document.getElementById('rFornecedor').value = r && r.fornecedor ? r.fornecedor : '';
@@ -3984,6 +4044,12 @@ window.abrirDrawerRisco = async (r) => {
   document.getElementById('riscoDrawerTitulo').innerHTML = titulo + (r ? ` ${_badgeStatusRisco(r.status)}` : '') + subtitulo;
 
   // Somente admin edita; demais perfis visualizam em modo leitura.
+  // Setas da Fase 3: o BIA sugere o impacto, o indicador sugere a probabilidade.
+  // Ambas so preenchem campo vazio — um risco ja avaliado nao e tocado.
+  const opProc = document.getElementById('rProcesso').selectedOptions[0];
+  if (opProc) _sugerirImpactoPeloTier(opProc.dataset.tier || '');
+  if (r && r.indicadorId) _sugerirProbabilidadePeloIndicador(r.indicadorId);
+
   document.querySelectorAll('#drawerRisco input, #drawerRisco select, #drawerRisco textarea').forEach(el => { el.disabled = !isAdmin; });
   document.querySelectorAll('#drawerRisco .btn-ghost[onclick*="Item("], #drawerRisco .btn-ghost[onclick^="adicionar"]').forEach(el => { el.style.display = isAdmin ? 'inline-block' : 'none'; });
   document.getElementById('btnSalvarRisco').style.display = isAdmin ? 'inline-block' : 'none';
@@ -4064,6 +4130,69 @@ window.salvarRisco = async () => {
     API.invalidate('getRiscos');
   } catch (e) { showToast('❌ Erro: ' + e.message, '#c62828'); }
 };
+
+/**
+ * Sugestoes vindas dos outros modulos — as "setas" da Fase 3.
+ *
+ * Sao SUGESTOES: preenchem o campo quando ele esta vazio e avisam o que fizeram.
+ * Nunca sobrescrevem uma escolha do analista. E a mesma regra do RTO: o numero
+ * que uma pessoa decidiu nao e apagado por um calculo.
+ */
+const _IMPACTO_POR_TIER = {
+  [Criticidade.TIER.T1]: 'Crítico',
+  [Criticidade.TIER.T2]: 'Alto',
+  [Criticidade.TIER.T3]: 'Moderado',
+};
+
+function _sugerirImpactoPeloTier(tier) {
+  const campo = document.getElementById('rImpacto');
+  if (!campo || campo.value) return;            // ja escolhido: nao encosta
+  const sugerido = _IMPACTO_POR_TIER[tier];
+  if (!sugerido) return;                         // processo Pendente: nada a sugerir
+  campo.value = sugerido;
+  _calcularScoreRisco();
+  _marcarSugestao('rImpacto', `Sugerido a partir do BIA: o processo é ${tier}.`);
+}
+
+/**
+ * O desempenho do indicador sugere a probabilidade.
+ *
+ * Indicador fora da meta significa que o controle que deveria evitar o evento
+ * nao esta funcionando — isso e probabilidade, nao impacto.
+ */
+function _sugerirProbabilidadePeloIndicador(indicadorId) {
+  const campo = document.getElementById('rProbabilidade');
+  if (!campo || campo.value) return;
+  const ind = (indicadoresData || []).find(i => i.id === indicadorId);
+  if (!ind || ind.ultimoDesempenho == null) return;
+  const fora = _indicadorForaDaMeta(ind, ind.ultimoDesempenho);
+  campo.value = fora ? 'Alta' : 'Média';
+  _calcularScoreRisco();
+  _marcarSugestao('rProbabilidade', fora
+    ? `Sugerido: o indicador "${ind.nome}" está fora da meta.`
+    : `Sugerido: o indicador "${ind.nome}" está dentro da meta.`);
+}
+
+/** Aviso discreto sob o campo, para a sugestao nao passar por decisao humana. */
+function _marcarSugestao(idCampo, texto) {
+  const campo = document.getElementById(idCampo);
+  if (!campo) return;
+  let aviso = document.getElementById(idCampo + '-sugestao');
+  if (!aviso) {
+    aviso = document.createElement('span');
+    aviso.id = idCampo + '-sugestao';
+    aviso.style.cssText = 'display:block;font-size:0.72em;color:#1565c0;margin-top:3px;';
+    campo.parentElement.appendChild(aviso);
+  }
+  aviso.textContent = '↳ ' + texto + ' Ajuste se discordar.';
+}
+
+function _limparSugestoes() {
+  ['rImpacto', 'rProbabilidade'].forEach(id => {
+    const a = document.getElementById(id + '-sugestao');
+    if (a) a.remove();
+  });
+}
 
 // Plano de Ação (sub-lista embutida no risco)
 // Score automático de risco: Probabilidade x Impacto (1-12).
@@ -4598,6 +4727,31 @@ async function _lancarResultadosIndicador(indicador, novasEntradas, arquivoOrige
   indicador.ultimoMes = ultimoComDado ? ultimoComDado.mes : null;
   indicador.foraDaMeta = foraDaMetaAgora;
   API.invalidate('getIndicadoresSeguranca');
+
+  // Indicador voltou para dentro da meta: encerra o risco automatico que estava
+  // aberto. Antes isso nunca acontecia — o indicador ficava verde no painel e
+  // vermelho no registro de riscos ao mesmo tempo, e quem levava o registro ao
+  // comite reportava numero inflado.
+  if (!foraDaMetaAgora) {
+    try {
+      const riscosAtuais = riscosCache || await API.getRiscos();
+      const abertos = riscosAtuais.filter(r =>
+        r.indicadorId === indicador.id &&
+        r.origem === 'Indicador de Segurança' &&
+        r.status !== 'Encerrado');
+      for (const r of abertos) {
+        await API.salvarRisco({
+          id: r.id,
+          status: 'Encerrado',
+          dataEncerramento: new Date().toISOString().slice(0, 10),
+          justificativaEncerramento: `Encerrado automaticamente: o indicador "${indicador.nome}" voltou para dentro da meta em ${_formatMes(ultimoComDado ? ultimoComDado.mes : '')}.`,
+        });
+      }
+      if (abertos.length) API.invalidate('getRiscos');
+    } catch (e) {
+      console.error('Não foi possível encerrar o risco automático do indicador', e);
+    }
+  }
 
   // Conversão automática: só abre um risco novo se não já existir um risco
   // automático em aberto para este indicador (evita duplicar a cada lançamento).
