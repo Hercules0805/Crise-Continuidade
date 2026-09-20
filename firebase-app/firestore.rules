@@ -108,14 +108,17 @@ service cloud.firestore {
     }
 
     // ---- Tokens ----
-    // Leitura p/ domínio (o app admin lista/gera). Escrita p/ admin.
-    // As páginas públicas (sem login) NÃO acessam tokens diretamente: elas
-    // chamam a Cloud Function tokenApi, que usa o Admin SDK (ignora as rules)
-    // para validar o token e gravar os dados. Assim, escrita anônima permanece
-    // negada aqui.
+    // FECHADO PARA TODO MUNDO, de propósito (20/09/2026).
+    //
+    // Nenhuma tela lê esta coleção pelo SDK — verificado em todo o public/.
+    // Quem cria e valida token são as Cloud Functions (appApi e tokenApi), que
+    // usam o Admin SDK e não passam por estas regras.
+    //
+    // A leitura antes liberada para o domínio permitia a qualquer funcionário
+    // baixar todos os links de avaliação ainda não usados, com área, processo e
+    // destinatário — e responder no lugar do gestor legítimo.
     match /tokens/{token} {
-      allow read: if isCorpUser();
-      allow write: if isAdmin();
+      allow read, write: if false;
     }
 
     // Nega tudo que não casou acima.

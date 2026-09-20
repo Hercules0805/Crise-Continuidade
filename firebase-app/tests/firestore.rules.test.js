@@ -158,3 +158,25 @@ describe('Security Rules — processos e respostas', () => {
     await assertFails(db(GESTOR).collection('respostas_bia').add({ area: 'RH', processo: 'Proc', score: 8 }));
   });
 });
+
+// --- Regressao: a colecao de tokens ficava legivel para todo o dominio ---
+// Combinado com a falha ja corrigida do token de area (tokenLogic.js), isso
+// deixava um funcionario comum baixar os links de avaliacao nao usados e
+// reescrever o tier de qualquer processo da empresa.
+describe('Security Rules — tokens fechados', () => {
+  test('gestor NÃO lê tokens', async () => {
+    await assertFails(db(GESTOR).doc('tokens/tk1').get());
+  });
+
+  test('admin também NÃO lê tokens — só as Cloud Functions acessam', async () => {
+    await assertFails(db(ADMIN).doc('tokens/tk1').get());
+  });
+
+  test('admin NÃO escreve tokens', async () => {
+    await assertFails(db(ADMIN).doc('tokens/tk2').set({ area: 'TI', usado: false }));
+  });
+
+  test('não autenticado NÃO lê tokens', async () => {
+    await assertFails(testEnv.unauthenticatedContext().firestore().doc('tokens/tk1').get());
+  });
+});
