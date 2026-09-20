@@ -12,7 +12,8 @@
     "migrar": "ts-node src/migrar.ts",
     "test": "ts-node src/__test-transform.ts && ts-node src/__test-tier.ts",
     "conferir-respostas": "ts-node src/conferir-respostas.ts",
-    "migrar-rto": "ts-node src/migrar-rto.ts"
+    "migrar-rto": "ts-node src/migrar-rto.ts",
+    "preencher-medicoes": "ts-node src/preencher-medicoes.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

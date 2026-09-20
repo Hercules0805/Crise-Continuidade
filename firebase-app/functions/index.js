@@ -13,9 +13,11 @@
 const crypto = require('node:crypto');
 const admin = require('firebase-admin');
 const { onRequest } = require('firebase-functions/v2/https');
+const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { READ_ACTIONS, WRITE_ACTIONS, TokenError } = require('./tokenLogic');
+const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia } = require('./medicoes');
 const {
   READ_ACTIONS: APP_READ,
   WRITE_ACTIONS: APP_WRITE,
@@ -203,3 +205,44 @@ exports.appApi = onRequest({ region: 'us-central1', cors: false, secrets: [GEMIN
     res.status(200).json({ error: 'Erro ao processar a solicitação.' });
   }
 });
+
+// ============================================================
+// Livro de medicoes — alimentacao automatica
+//
+// Toda resposta de BIA gravada vira um ponto na curva de risco, venha ela do
+// app (api.js) ou do link externo sem login (tokenLogic.js).
+//
+// POR QUE UM GATILHO, e nao uma chamada no codigo que grava: duas vezes nesta
+// migracao um caminho de escrita escondido passou despercebido porque a busca
+// foi feita na camada errada. Um gatilho no banco nao tem como ser esquecido —
+// qualquer caminho que crie a resposta gera a medicao.
+//
+// O id da medicao e derivado do id da resposta. Cloud Functions nao garante
+// execucao unica: se o gatilho rodar duas vezes, a segunda sobrescreve a
+// primeira em vez de criar um ponto duplicado na curva.
+// ============================================================
+exports.medicaoDeBia = onDocumentCreated(
+  { region: 'us-central1', document: 'respostas_bia/{id}' },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const medicao = medicaoDeRespostaBia(event.params.id, snap.data());
+    if (!medicao) {
+      // Resposta sem data, sem score ou sem processo: nao da para posicionar na
+      // curva. Registrar um ponto invalido e pior do que nao registrar.
+      logger.warn('medicaoDeBia: resposta sem o minimo para virar medicao', { id: event.params.id });
+      return;
+    }
+
+    try {
+      await db.collection(COLECAO_MEDICOES)
+        .doc(idDaMedicao(FONTE.BIA, event.params.id))
+        .set(medicao, { merge: true });
+    } catch (err) {
+      // Nao relanca: falhar aqui nao pode derrubar a gravacao da resposta, que
+      // ja aconteceu. O reprocessamento cobre o que faltar.
+      logger.error('medicaoDeBia: falha ao gravar medicao', { id: event.params.id, erro: err.message });
+    }
+  }
+);

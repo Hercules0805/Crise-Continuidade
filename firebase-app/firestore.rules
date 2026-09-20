@@ -126,6 +126,22 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ---- Livro de medicoes ----
+    // Base do monitor de risco no tempo. Uma linha por medicao, nunca apagada.
+    //
+    // Escrita: SO pelo servidor. Quem grava e o gatilho medicaoDeBia (e, adiante,
+    // os outros insumos), com Admin SDK, que ignora estas regras. Nenhum cliente
+    // escreve aqui — um ponto da curva forjado pelo navegador destruiria a
+    // credibilidade do monitor inteiro.
+    //
+    // Leitura: mesmo recorte dos riscos — admin ve tudo, gestor ve a propria
+    // area. Vale a mesma armadilha: com regra por documento, consulta sem
+    // filtro de area falha inteira para o gestor.
+    match /medicoes/{id} {
+      allow read: if isAdmin() || isGestorDaArea(resource.data.area);
+      allow write: if false;
+    }
+
     // ---- Tokens ----
     // FECHADO PARA TODO MUNDO, de propósito (20/09/2026).
     //

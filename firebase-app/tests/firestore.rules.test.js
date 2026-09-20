@@ -220,3 +220,44 @@ describe('Security Rules — riscos recortados por area', () => {
     await assertFails(db(GESTOR).collection('riscos').where('area', '==', 'RH').get());
   });
 });
+
+// --- Livro de medicoes (Fase 2) ---
+// E a base do monitor. Um ponto forjado pelo navegador destruiria a
+// credibilidade da curva inteira, entao ninguem escreve daqui.
+describe('Security Rules — livro de medições', () => {
+  test('gestor lê medição da própria área', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('medicoes/m-ti').set({ area: 'TI', valor: 14, fonte: 'bia' });
+    });
+    await assertSucceeds(db(GESTOR).doc('medicoes/m-ti').get());
+  });
+
+  test('gestor NÃO lê medição de outra área', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('medicoes/m-rh').set({ area: 'RH', valor: 9, fonte: 'bia' });
+    });
+    await assertFails(db(GESTOR).doc('medicoes/m-rh').get());
+  });
+
+  test('admin lê medição de qualquer área', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('medicoes/m-rh2').set({ area: 'RH', valor: 9, fonte: 'bia' });
+    });
+    await assertSucceeds(db(ADMIN).doc('medicoes/m-rh2').get());
+  });
+
+  test('NEM admin escreve medição — só o servidor grava', async () => {
+    await assertFails(db(ADMIN).doc('medicoes/m-forjada').set({ area: 'TI', valor: 1, fonte: 'bia' }));
+  });
+
+  test('gestor NÃO escreve medição', async () => {
+    await assertFails(db(GESTOR).doc('medicoes/m-forjada2').set({ area: 'TI', valor: 1, fonte: 'bia' }));
+  });
+
+  test('ninguém apaga medição — o livro não perde linha', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('medicoes/m-apagar').set({ area: 'TI', valor: 1, fonte: 'bia' });
+    });
+    await assertFails(db(ADMIN).doc('medicoes/m-apagar').delete());
+  });
+});
