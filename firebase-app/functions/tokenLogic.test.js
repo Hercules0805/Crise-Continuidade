@@ -226,3 +226,56 @@ test('salvarRespostasArea grava na area do token e ignora a area enviada', async
   assert.strictEqual(db._store.processos.ti__backup.tier, 'Tier 2 (Essencial)'); // 4 + 4 = 8
   assert.strictEqual(db._store.tokens['tok-area'].usado, true);
 });
+
+// --- Regressao: a avaliacao apagava o RTO escolhido pelo gestor ---
+// 11 processos tinham RTO que o calculo nunca produziria. Cada nova avaliacao
+// sobrescrevia essa escolha pelo valor derivado do tier.
+test('avaliacao por link NAO sobrescreve RTO ja definido pelo gestor', async () => {
+  const seed = baseSeed();
+  seed.processos.ti__backup.rto = '< 1 hora'; // escolha manual, fora da escala derivada
+  seed.tokens.tk9 = { area: 'TI', processo: 'Backup', usado: false };
+  const db = makeDb(seed);
+
+  await WRITE_ACTIONS.salvarRespostasToken(db, { token: 'tk9', scores: JSON.stringify({ 'Q1?': 4, 'Q2?': 4 }) });
+
+  assert.strictEqual(db._store.processos.ti__backup.rto, '< 1 hora', 'a escolha do gestor foi apagada');
+  assert.strictEqual(db._store.processos.ti__backup.tier, 'Tier 2 (Essencial)', 'o tier deve ser recalculado normalmente');
+});
+
+test('avaliacao por link preenche o RTO quando ele esta vazio', async () => {
+  const seed = baseSeed();
+  seed.tokens.tk10 = { area: 'TI', processo: 'Backup', usado: false };
+  const db = makeDb(seed);
+
+  await WRITE_ACTIONS.salvarRespostasToken(db, { token: 'tk10', scores: JSON.stringify({ 'Q1?': 4, 'Q2?': 4 }) });
+
+  const p = db._store.processos.ti__backup;
+  assert.strictEqual(p.rto, '8h a 24h');
+  assert.strictEqual(p.rtoOrigem, 'sugerido', 'fica marcado que veio do sistema, nao do gestor');
+});
+
+// --- Versao da regua de pesos (Fase 1) ---
+// Sem o carimbo, mudar os pesos reescreve o significado de todo o historico:
+// a curva do risco sobe porque a regua mudou, nao porque o risco mudou.
+test('resposta por link carimba a versão da régua vigente', async () => {
+  const seed = baseSeed();
+  seed.config_regua = { atual: { versao: 7 } };
+  seed.tokens.tkR = { area: 'TI', processo: 'Backup', usado: false };
+  const db = makeDb(seed);
+
+  await WRITE_ACTIONS.salvarRespostasToken(db, { token: 'tkR', scores: JSON.stringify({ 'Q1?': 4 }) });
+
+  const gravadas = Object.values(db._store.respostas_bia);
+  assert.strictEqual(gravadas.length, 1);
+  assert.strictEqual(gravadas[0].reguaVersao, 7);
+});
+
+test('sem régua registrada, a resposta fica na versão 1 em vez de falhar', async () => {
+  const seed = baseSeed();
+  seed.tokens.tkR2 = { area: 'TI', processo: 'Backup', usado: false };
+  const db = makeDb(seed);
+
+  await WRITE_ACTIONS.salvarRespostasToken(db, { token: 'tkR2', scores: JSON.stringify({ 'Q1?': 2 }) });
+
+  assert.strictEqual(Object.values(db._store.respostas_bia)[0].reguaVersao, 1);
+});

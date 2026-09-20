@@ -67,3 +67,26 @@ test('limiares continuam 12 e 6 (copias do servidor dependem disso)', () => {
   assert.strictEqual(C.LIMIAR_TIER_1, 12);
   assert.strictEqual(C.LIMIAR_TIER_2, 6);
 });
+
+// --- RTO: decisao de 20/09/2026 ---
+// As opcoes do campo RTO no formulario (app.js, select #fRTO). Se alguem mudar
+// as faixas la, este teste quebra aqui — que e o lugar certo para descobrir.
+const OPCOES_RTO_DO_FORMULARIO = ['< 1 hora', '< 4 horas', '4h a 8h', '8h a 24h', '> 24 horas'];
+
+test('todo RTO sugerido existe entre as opcoes do formulario', () => {
+  // O bug: Tier 2 devolvia "4h a 24 horas", que nao existe no select. O campo
+  // voltava em branco ao reabrir, e 14 processos ficaram assim.
+  for (const tier of [TIER.T1, TIER.T2, TIER.T3]) {
+    const rto = C.rtoSugerido(tier);
+    assert.ok(
+      OPCOES_RTO_DO_FORMULARIO.includes(rto),
+      `"${rto}" (${tier}) nao existe no formulario — o campo vai aparecer vazio`
+    );
+  }
+});
+
+test('Tier 2 sugere a faixa mais larga, nao a mais apertada', () => {
+  // De proposito: a faixa antiga ia de 4h a 24h. Escolher "4h a 8h" criaria um
+  // compromisso de recuperacao que ninguem assumiu.
+  assert.strictEqual(C.rtoSugerido(TIER.T2), '8h a 24h');
+});

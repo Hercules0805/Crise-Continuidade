@@ -180,3 +180,43 @@ describe('Security Rules — tokens fechados', () => {
     await assertFails(testEnv.unauthenticatedContext().firestore().doc('tokens/tk1').get());
   });
 });
+
+// --- Riscos por area (decisao de 19/09/2026) ---
+// Antes qualquer conta do dominio lia o registro inteiro, com impacto
+// financeiro, plano de acao e KRIs. GESTOR aqui e da area 'TI'.
+describe('Security Rules — riscos recortados por area', () => {
+  test('gestor lê risco da própria área', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('riscos/r-ti').set({ area: 'TI', titulo: 'Queda de link' });
+    });
+    await assertSucceeds(db(GESTOR).doc('riscos/r-ti').get());
+  });
+
+  test('gestor NÃO lê risco de outra área', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('riscos/r-rh').set({ area: 'RH', titulo: 'Folha atrasada' });
+    });
+    await assertFails(db(GESTOR).doc('riscos/r-rh').get());
+  });
+
+  test('admin lê risco de qualquer área', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('riscos/r-rh2').set({ area: 'RH', titulo: 'X' });
+    });
+    await assertSucceeds(db(ADMIN).doc('riscos/r-rh2').get());
+  });
+
+  // O ponto que quebra a tela se o cliente nao acompanhar: com regra por
+  // documento, a consulta sem filtro falha INTEIRA — nao devolve menos.
+  test('consulta do gestor SEM filtro de área falha inteira', async () => {
+    await assertFails(db(GESTOR).collection('riscos').get());
+  });
+
+  test('consulta do gestor COM filtro da própria área passa', async () => {
+    await assertSucceeds(db(GESTOR).collection('riscos').where('area', '==', 'TI').get());
+  });
+
+  test('consulta do gestor filtrando OUTRA área falha', async () => {
+    await assertFails(db(GESTOR).collection('riscos').where('area', '==', 'RH').get());
+  });
+});

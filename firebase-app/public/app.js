@@ -2050,6 +2050,16 @@ window.avaliarProcessoFromBia = () => {
 };
 
 window.salvarProcesso = async () => {
+  // Contingencia e SLA por fornecedor, lidos da tabela da aba BCP. Essa tabela
+  // so existe no DOM quando a aba foi aberta nesta edicao: se nao foi, os dois
+  // campos ficam FORA do payload, em vez de irem vazios e apagarem o que ja
+  // estava gravado.
+  const camposFornecedoresBcp = {};
+  const _planoB = _coletarMapaBcp('.planoB-contingencia');
+  const _slas = _coletarMapaBcp('.sla-valor');
+  if (_planoB !== null) camposFornecedoresBcp.bcpPlanoBProvedores = JSON.stringify(_planoB);
+  if (_slas !== null) camposFornecedoresBcp.bcpSlas = JSON.stringify(_slas);
+
   const p = {
     id: document.getElementById('fId').value || null,
     area: document.getElementById('fArea').value.trim(),
@@ -2066,6 +2076,7 @@ window.salvarProcesso = async () => {
     bcpContatos: window._bcpContatos || [],
     drpStatus: document.getElementById('fDrpStatus').value.trim(),
     drpComponentes: window._drpComponentes || [],
+    ...camposFornecedoresBcp,
   };
 
   if (!p.area) return showToast('Selecione a área.', '#e65100');
@@ -3554,7 +3565,23 @@ async function riscos() {
     const [riscos_, areas_, deps_] = await Promise.all([API.getRiscos(), API.getAreas(), API.getDependencias()]);
     riscosData = riscos_; riscosAreasCache = areas_;
     riscosFornecedoresCache = deps_.filter(d => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
-  } catch (e) { riscosData = []; riscosAreasCache = []; riscosFornecedoresCache = []; }
+  } catch (e) {
+    // Antes este catch zerava a lista em silencio, e a tela dizia "Nenhum risco
+    // cadastrado" — indistinguivel de registro vazio. Quem visse isso podia
+    // concluir que nao havia riscos e recadastrar o que ja existia.
+    console.error('Riscos: falha ao carregar', e);
+    riscosData = []; riscosAreasCache = []; riscosFornecedoresCache = [];
+    const corpo = document.getElementById('riscoRows');
+    if (corpo) {
+      corpo.innerHTML = `<tr><td colspan="10" style="padding:24px;text-align:center;color:#c62828;">
+        Não foi possível carregar os riscos.<br>
+        <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+        <button class="btn btn-ghost" onclick="riscos()" style="margin-top:12px;">Tentar de novo</button>
+      </td></tr>`;
+    }
+    showToast('❌ Não foi possível carregar os riscos.', '#c62828');
+    return;
+  }
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaRiscos').style.display = 'block';
 
@@ -6413,11 +6440,46 @@ window.abrirPCNDireto = async (id) => {
 // ============================================================
 // BCP - TABELA DE FORNECEDORES (com Plano B e SLA)
 // ============================================================
+/**
+ * Coleta {nomeDoFornecedor: valor} dos campos da tabela da aba BCP.
+ *
+ * Devolve null quando a tabela nao esta no DOM — ou seja, quando a aba BCP nao
+ * foi aberta nesta edicao. Isso e o que impede o salvamento de apagar o que ja
+ * estava gravado: sem a tabela desenhada, o campo nem entra no payload.
+ */
+function _coletarMapaBcp(seletor) {
+  const campos = document.querySelectorAll('#bcpFornecedoresTabela ' + seletor);
+  if (!campos.length) return null;
+  const mapa = {};
+  campos.forEach((el) => {
+    const nome = el.dataset.dep;
+    const valor = (el.value || '').trim();
+    if (nome && valor) mapa[nome] = valor;
+  });
+  return mapa;
+}
+
+/** Le um campo do processo que guarda um mapa JSON {nome: valor}. */
+function _mapaDoProcesso(campo) {
+  const id = document.getElementById('fId').value || '';
+  const p = id ? (window.processosData || []).find(proc => proc.id === id) : null;
+  if (!p || !p[campo]) return {};
+  try {
+    const m = typeof p[campo] === 'string' ? JSON.parse(p[campo]) : p[campo];
+    return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {};
+  } catch { return {}; }
+}
+
 function renderFornecedoresBcp() {
   const container = document.getElementById('bcpFornecedoresTabela');
   if (!container) return;
   const catalogo = window.dependenciasCatalogo || [];
   const selecionadas = window._dependenciaSelecionadas || [];
+  // Ate 20/09/2026 estes dois campos eram desenhados sempre vazios e ninguem os
+  // lia de volta: o usuario digitava contingencia e SLA, salvava, e o conteudo
+  // sumia — inclusive so de trocar de aba, porque a tabela e refeita do zero.
+  const planoBSalvo = _mapaDoProcesso('bcpPlanoBProvedores');
+  const slasSalvo = _mapaDoProcesso('bcpSlas');
   
   // Filtrar fornecedores do processo
   const fornecedores = selecionadas.filter(nome => {
@@ -6450,8 +6512,8 @@ function renderFornecedoresBcp() {
       <td style="padding:10px 14px;color:#555;">${esc(dep.empresa || '-')}</td>
       <td style="padding:10px 14px;color:#555;">${esc(dep.detalhes || '-')}</td>
       <td style="padding:10px 14px;color:#555;">${esc(dep.telefone || '-')}</td>
-      <td style="padding:6px 8px;"><input type="text" class="planoB-contingencia" data-dep="${nome}" placeholder="Ex: Provedor alternativo..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
-      <td style="padding:6px 8px;"><input type="text" class="sla-valor" data-dep="${nome}" placeholder="Ex: Suporte 24x7, 15min..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
+      <td style="padding:6px 8px;"><input type="text" class="planoB-contingencia" data-dep="${esc(nome)}" value="${esc(planoBSalvo[nome] || '')}" placeholder="Ex: Provedor alternativo..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
+      <td style="padding:6px 8px;"><input type="text" class="sla-valor" data-dep="${esc(nome)}" value="${esc(slasSalvo[nome] || '')}" placeholder="Ex: Suporte 24x7, 15min..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
     </tr>`;
   });
   

@@ -70,8 +70,18 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // DECISAO 19/09/2026: admin le tudo, gestor le so a propria area.
+    //
+    // Antes a leitura era liberada para qualquer conta do dominio — nao para os
+    // 16 perfis cadastrados, mas para a empresa inteira — e o registro traz
+    // impacto financeiro estimado, plano de acao e KRIs.
+    //
+    // ATENCAO ao mexer: com regra por documento, uma consulta SEM filtro de
+    // area falha INTEIRA para o gestor, e nao devolve menos. O cliente tem de
+    // consultar com where('area','==',<area do gestor>) — ver _lerRiscos em
+    // api.js. Mudar um lado sem o outro quebra a tela de riscos.
     match /riscos/{id} {
-      allow read: if isCorpUser();
+      allow read: if isAdmin() || isGestorDaArea(resource.data.area);
       allow write: if isAdmin();
     }
 
@@ -81,6 +91,15 @@ service cloud.firestore {
     }
 
     match /config_respostas/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin();
+    }
+
+    // Versao da regua de pesos. Sobe a cada edicao de config_respostas e fica
+    // carimbada em cada avaliacao, para que mudar os pesos nao reescreva o
+    // significado do historico em silencio. Leitura ampla porque todo calculo
+    // precisa saber a versao corrente; escrita so de admin, como a regua.
+    match /config_regua/{id} {
       allow read: if isCorpUser();
       allow write: if isAdmin();
     }

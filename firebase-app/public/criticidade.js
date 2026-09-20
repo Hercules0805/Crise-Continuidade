@@ -83,19 +83,23 @@
   }
 
   /**
-   * RTO sugerido a partir do tier.
+   * RTO SUGERIDO a partir do tier. Sugestao, nao imposicao.
    *
-   * ATENCAO - defeito conhecido, ainda nao corrigido de proposito: o valor de
-   * Tier 2 ("4h a 24 horas") NAO existe entre as opcoes do campo RTO do
-   * formulario (app.js: "< 1 hora", "< 4 horas", "4h a 8h", "8h a 24h",
-   * "> 24 horas"). Por isso, todo processo Tier 2 volta com o campo RTO em
-   * branco ao ser reaberto. Corrigir exige decidir o valor certo e migrar os
-   * registros ja gravados; ate la o comportamento fica igual ao de antes, para
-   * nao mudar dado em silencio.
+   * DECISAO 20/09/2026: o RTO pertence ao gestor. O sistema so preenche quando
+   * o campo esta vazio, e nunca substitui um valor ja escolhido. Antes, cada
+   * avaliacao salva sobrescrevia a escolha do gestor pelo valor derivado — 11
+   * processos tinham RTO que o calculo nunca produziria (alguem escolheu a
+   * mao), e vinham sendo apagados.
+   *
+   * Os tres valores abaixo existem entre as opcoes do formulario. Tier 2 era
+   * "4h a 24 horas", que NAO existia: 14 processos ficavam com o campo em
+   * branco ao reabrir. Virou "8h a 24h" e nao "4h a 8h" de proposito — a faixa
+   * original ia de 4h a 24h, e escolher a mais apertada criaria um compromisso
+   * de recuperacao que ninguem assumiu.
    */
   function rtoSugerido(tier) {
     if (tier === TIER.T1) return '< 4 horas';
-    if (tier === TIER.T2) return '4h a 24 horas';
+    if (tier === TIER.T2) return '8h a 24h';
     return '> 24 horas';
   }
 

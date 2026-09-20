@@ -46,7 +46,7 @@ function calcularTier(score) {
 }
 function calcularRTO(tier) {
   if (tier === 'Tier 1 (Crítico)') return '< 4 horas';
-  if (tier === 'Tier 2 (Essencial)') return '4h a 24 horas';
+  if (tier === 'Tier 2 (Essencial)') return '8h a 24h';
   return '> 24 horas';
 }
 
@@ -208,9 +208,15 @@ async function getConfigRespostas(db) {
 // ------------------------------------------------------------
 async function _atualizarTierProcesso(db, area, processo, tier, rto) {
   const procId = await _acharProcessoId(db, area, processo);
-  if (procId) {
-    await db.collection(COLLECTION.processos).doc(procId).set({ tier, rto }, { merge: true });
-  }
+  if (!procId) return;
+  const ref = db.collection(COLLECTION.processos).doc(procId);
+  // O RTO pertence ao gestor: so preenche quando esta vazio, nunca sobrescreve.
+  // Mesma regra do api.js — ver criticidade.js, rtoSugerido.
+  const snap = await ref.get();
+  const rtoAtual = snap.exists ? (snap.data() || {}).rto : '';
+  const patch = { tier };
+  if (!rtoAtual) { patch.rto = rto; patch.rtoOrigem = 'sugerido'; }
+  await ref.set(patch, { merge: true });
 }
 
 async function _gravarResposta(db, { area, processo, scores, respondente, cargo }) {
@@ -224,6 +230,12 @@ async function _gravarResposta(db, { area, processo, scores, respondente, cargo 
   });
   const tier = calcularTier(score);
   const rto = calcularRTO(tier);
+  // Versao da regua que pontuou esta resposta — mesma razao do api.js.
+  let reguaVersao = 1;
+  try {
+    const rs = await db.collection('config_regua').doc('atual').get();
+    if (rs.exists) reguaVersao = Number((rs.data() || {}).versao) || 1;
+  } catch { /* sem regua registrada: versao 1 */ }
   await db.collection(COLLECTION.respostas).add({
     timestamp: new Date().toISOString(),
     respondente: respondente || '',
@@ -233,6 +245,7 @@ async function _gravarResposta(db, { area, processo, scores, respondente, cargo 
     scores: scoreMap,
     score,
     tier,
+    reguaVersao,
   });
   await _atualizarTierProcesso(db, area, processo, tier, rto);
   return { score, tier };

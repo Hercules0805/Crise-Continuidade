@@ -28,6 +28,7 @@ const COLLECTION = {
   respostas: 'respostas_bia',
   tokens: 'tokens',
   configRespostas: 'config_respostas',
+  regua: 'config_regua',
   configPerfis: 'config_perfis',
   dependencias: 'dependencias',
   componentes: 'componentes',
@@ -67,6 +68,12 @@ function _slug(s) {
 }
 function _processoKey(area, processo) {
   return `${_slug(area)}__${_slug(processo)}`;
+}
+
+/** Consulta filtrada por um campo. Necessaria quando a regra e por documento. */
+async function _getPorCampo(collection, campo, valor) {
+  const snap = await _db.collection(collection).where(campo, '==', valor).get();
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 async function _getAll(collection) {
@@ -191,8 +198,28 @@ async function _lerComponentes() {
   }));
 }
 
+/**
+ * Le os riscos respeitando o recorte por area.
+ *
+ * As Security Rules passaram a permitir ao gestor ler apenas os riscos da
+ * propria area. Com regra por documento, uma consulta SEM filtro falha INTEIRA
+ * — nao devolve menos. Por isso o filtro precisa ir na consulta, e nao depois,
+ * no navegador, como era antes.
+ *
+ * Admin continua lendo tudo. Gestor sem area definida no perfil nao consegue
+ * ler nada: em vez de devolver lista vazia (que a tela mostraria como "nenhum
+ * risco cadastrado"), lanca — quem chama avisa que o acesso nao esta
+ * configurado.
+ */
 async function _lerRiscos() {
-  const docs = await _getAll(COLLECTION.riscos);
+  const ehAdmin = window.USER_PERFIL === 'admin';
+  const area = window.USER_AREA;
+  if (!ehAdmin && !area) {
+    throw new Error('Seu acesso ainda não está vinculado a uma área. Procure a Segurança da Informação.');
+  }
+  const docs = ehAdmin
+    ? await _getAll(COLLECTION.riscos)
+    : await _getPorCampo(COLLECTION.riscos, 'area', area);
   return docs.map((d) => ({
     id: d.id,
     area: d.area || '',
@@ -352,6 +379,36 @@ async function _salvarArea(a) {
   return { success: true, id: ref.id };
 }
 
+
+// ------------------------------------------------------------
+// Versao da regua de pesos
+//
+// A regua (config_respostas) define quanto vale cada resposta. Se ela mudar,
+// todo o historico muda de significado sem aviso: a curva do risco sobe porque
+// a regua mudou, nao porque o risco mudou. Por isso cada avaliacao registra a
+// versao da regua que a pontuou, e a versao sobe sozinha a cada edicao.
+// ------------------------------------------------------------
+async function _versaoReguaAtual() {
+  try {
+    const snap = await _db.collection(COLLECTION.regua).doc('atual').get();
+    return snap.exists ? Number((snap.data() || {}).versao) || 1 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+async function _subirVersaoRegua() {
+  const ref = _db.collection(COLLECTION.regua).doc('atual');
+  const snap = await ref.get();
+  const versao = (snap.exists ? Number((snap.data() || {}).versao) || 1 : 1) + 1;
+  await ref.set({
+    versao,
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  }, { merge: true });
+  return versao;
+}
+
 async function _salvarConfigResposta(d) {
   const data = {
     categoria: d.categoria || '',
@@ -364,10 +421,12 @@ async function _salvarConfigResposta(d) {
   const docId = d.rowIndex || d.id;
   if (docId) {
     await _db.collection(COLLECTION.configRespostas).doc(String(docId)).set(data, { merge: true });
-    return { success: true, id: docId };
+    const versao = await _subirVersaoRegua();
+    return { success: true, id: docId, reguaVersao: versao };
   }
   const ref = await _db.collection(COLLECTION.configRespostas).add({ ...data, ordem: Date.now() });
-  return { success: true, id: ref.id };
+  const versao = await _subirVersaoRegua();
+  return { success: true, id: ref.id, reguaVersao: versao };
 }
 
 async function _salvarDependencia(d) {
@@ -466,11 +525,29 @@ async function _salvarRisco(r) {
 }
 
 // Campos de processo que guardam JSON (mantidos como objeto/array nativo).
+/**
+ * Registra quem fixou o tier a mao e quando.
+ *
+ * tierManual sobrepoe o calculo para processos ainda nao avaliados. E legitimo,
+ * mas antes nao ficava registro de quem decidiu nem quando — numa lista que vai
+ * para a diretoria, uma criticidade fixada a mao sem autor nao se sustenta.
+ */
+function _marcarTierManual(dados, anterior) {
+  const novo = dados.tierManual || '';
+  const velho = (anterior && anterior.tierManual) || '';
+  if (novo === velho) return dados;
+  return {
+    ...dados,
+    tierManualPor: novo ? (window.USER_EMAIL || '').toLowerCase() : '',
+    tierManualEm: novo ? new Date().toISOString() : '',
+  };
+}
+
 const _CAMPOS_PROCESSO = [
   'area', 'processo', 'descricao', 'dependencia', 'rto', 'rpo', 'mtpd', 'biaHomologada', 'tier',
   'bcpStatus', 'descricaoFuncional', 'impactoIndisponibilidade', 'bcpObjetivo', 'bcpEscopo', 'bcpContatos', 'bcpRiscos', 'bcpPreventivas',
   'drpStatus', 'drpObjetivo', 'drpEscopo', 'drpProcedimentos', 'drpCriterios', 'drpComponentes',
-  'mtd', 'workaround', 'impactoJanela', 'bcpPlanoBProvedores', 'bcpSlas', 'bcpGatilhos', 'bcpReconstituicao', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual',
+  'mtd', 'workaround', 'impactoJanela', 'bcpPlanoBProvedores', 'bcpSlas', 'bcpGatilhos', 'bcpReconstituicao', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual', 'tierManualPor', 'tierManualEm',
 ];
 
 // Localiza o docId de um processo por id explícito ou por área+processo.
@@ -506,7 +583,17 @@ async function _salvarProcesso(p) {
   if (!docId) {
     docId = _processoKey(p.area, p.processo);
   }
-  await _db.collection(COLLECTION.processos).doc(docId).set(data, { merge: true });
+  const ref = _db.collection(COLLECTION.processos).doc(docId);
+
+  // Se o tier foi fixado a mao, registra quem e quando. So le o documento
+  // atual quando o campo veio no payload — nao vale um ida e volta a toa.
+  let paraGravar = data;
+  if (Object.prototype.hasOwnProperty.call(data, 'tierManual')) {
+    const atual = await ref.get();
+    paraGravar = _marcarTierManual(data, atual.exists ? atual.data() : null);
+  }
+
+  await ref.set(paraGravar, { merge: true });
   return { success: true, id: docId };
 }
 
@@ -523,6 +610,7 @@ async function _salvarRespostas(payload) {
   const perguntas = (await _lerPerguntas()).filter((p) => p.ativa);
   const respostas = payload.respostas || [payload];
   const timestampIso = new Date().toISOString();
+  const reguaVersao = await _versaoReguaAtual();
 
   for (const resp of respostas) {
     const scores = {};
@@ -544,12 +632,21 @@ async function _salvarRespostas(payload) {
       scores,
       score,
       tier,
+      // Qual regua pontuou esta resposta. Sem isso, mudar os pesos reescreve o
+      // significado de todo o historico em silencio.
+      reguaVersao,
     });
 
-    // Atualizar tier/rto no processo correspondente
+    // Atualizar tier no processo. O RTO so e preenchido quando esta vazio:
+    // ele pertence ao gestor, e a avaliacao nao apaga a escolha dele.
     const docId = await _acharProcessoId({ area: resp.area, processo: resp.processo });
     if (docId) {
-      await _db.collection(COLLECTION.processos).doc(docId).set({ tier, rto }, { merge: true });
+      const ref = _db.collection(COLLECTION.processos).doc(docId);
+      const atual = await ref.get();
+      const rtoAtual = atual.exists ? (atual.data() || {}).rto : '';
+      const patch = { tier };
+      if (!rtoAtual) { patch.rto = rto; patch.rtoOrigem = 'sugerido'; }
+      await ref.set(patch, { merge: true });
     }
   }
 
@@ -585,7 +682,8 @@ const _POST_FIRESTORE = {
   excluirProcesso: (b) => _excluirProcesso(b),
   salvarRespostas: (b) => _salvarRespostas(b),
   salvarConfigResposta: (b) => _salvarConfigResposta(b),
-  excluirConfigResposta: (b) => _db.collection(COLLECTION.configRespostas).doc(String(b.rowIndex || b.id)).delete().then(() => ({ success: true })),
+  excluirConfigResposta: (b) => _db.collection(COLLECTION.configRespostas).doc(String(b.rowIndex || b.id)).delete()
+    .then(() => _subirVersaoRegua()).then((versao) => ({ success: true, reguaVersao: versao })),
   salvarDependencia: (b) => _salvarDependencia(b),
   excluirDependencia: (b) => _db.collection(COLLECTION.dependencias).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarComponente: (b) => _salvarComponente(b),
