@@ -597,6 +597,60 @@ const _POST_FIRESTORE = {
 };
 
 // ------------------------------------------------------------
+// Cliente do appApi — ações que exigem usuário logado.
+//
+// Estas rodavam no Apps Script e pararam quando o acesso anônimo dele foi
+// fechado. Agora vão para uma Cloud Function que exige o token de login do
+// Firebase. O envio por e-mail NÃO veio junto: depende de uma decisão de
+// infraestrutura (API do Gmail com delegação, ou serviço externo). Até lá só
+// existe o modo "link", e quem convida cola o link no próprio e-mail.
+// ------------------------------------------------------------
+async function _appApi(metodo, acao, dados) {
+  const user = firebase.auth().currentUser;
+  if (!user) throw new Error('Sessão expirada. Entre novamente.');
+  const idToken = await user.getIdToken();
+
+  const opcoes = {
+    method: metodo,
+    headers: { Authorization: 'Bearer ' + idToken },
+  };
+  let url = APP_API_URL;
+
+  if (metodo === 'GET') {
+    const qs = new URLSearchParams({ action: acao, ...(dados || {}) });
+    url += '?' + qs.toString();
+  } else {
+    // text/plain evita o preflight extra; o servidor faz o parse do JSON.
+    opcoes.headers['Content-Type'] = 'text/plain';
+    opcoes.body = JSON.stringify({ action: acao, ...(dados || {}) });
+  }
+
+  const res = await fetch(url, opcoes);
+  const texto = await res.text();
+  if (res.status === 401) throw new Error(_extrairErro(texto) || 'Sessão inválida. Entre novamente.');
+  if (!texto || texto.startsWith('<!') || texto.startsWith('<html')) {
+    throw new Error('O servidor não retornou confirmação (HTTP ' + res.status + '). Recarregue e confira antes de repetir.');
+  }
+  let json;
+  try { json = JSON.parse(texto); } catch { throw new Error('Resposta inesperada do servidor.'); }
+  if (json && json.error) throw new Error(json.error);
+  return json;
+}
+
+function _extrairErro(texto) {
+  try { return (JSON.parse(texto) || {}).error; } catch { return ''; }
+}
+
+// Os nomes antigos (gerarTokenBIA etc.) viram um só: gerarLink com o tipo.
+const _TIPO_LINK = {
+  gerarToken: 'avaliacao',
+  gerarTokenArea: 'area',
+  gerarTokenBIA: 'bia',
+  gerarTokenDRP: 'drp',
+  gerarTokenLevantamento: 'levantamento',
+};
+
+// ------------------------------------------------------------
 // API pública (mesma interface do cliente antigo)
 // ------------------------------------------------------------
 const API = {
@@ -610,7 +664,12 @@ const API = {
       return data;
     }
 
-    // Ações de leitura residuais (ex.: getLevantamentoPCN) vão ao Apps Script.
+    if (action === 'getLevantamentoPCN') {
+      const r = await _appApi('GET', 'getLevantamentoPCN', { area: params.area, processo: params.processo });
+      _cache[cacheKey] = r;
+      return r;
+    }
+    // Leituras residuais restantes vão ao Apps Script.
     const data = await LegacyAPI.get(action, params);
     _cache[cacheKey] = data;
     return data;
@@ -631,7 +690,20 @@ const API = {
       API.invalidate('getProcessos', 'getAreas', 'getPerguntas', 'getConfigRespostas', 'getDependencias', 'getComponentes', 'getProcessosPorArea', 'getRiscos', 'getRiscosPorProcesso', 'getRiscosPorArea', 'getIndicadoresSeguranca');
       return result;
     }
-    // PCN/Drive, e-mail, Gemini, tokens externos -> Apps Script.
+    // Ações que exigem login -> Cloud Function appApi.
+    if (_TIPO_LINK[action]) {
+      return _appApi('POST', 'gerarLink', { tipo: _TIPO_LINK[action], area: body.area, processo: body.processo, email: body.email });
+    }
+    if (action === 'salvarPCN') {
+      return _appApi('POST', 'salvarPCN', { area: body.area, processo: body.processo, html: body.pcnHtml });
+    }
+    if (action === 'excluirPCN') {
+      return _appApi('POST', 'excluirPCN', { area: body.area, processo: body.processo });
+    }
+    if (action === 'gerarPCN') {
+      return _appApi('POST', 'gerarPCN', { id: body.id });
+    }
+    // Só o envio por e-mail ainda depende do Apps Script.
     return LegacyAPI.post(action, body, options);
   },
 

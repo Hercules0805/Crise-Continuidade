@@ -11,6 +11,13 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbz7NAIYV3DYGnaJI9ILs4hd
 const TOKEN_API_URL = 'https://us-central1-bia-forte-2025.cloudfunctions.net/tokenApi';
 
 // ============================================================
+// CONFIGURAÇÃO - Cloud Function das ações que exigem login
+// Substitui o Apps Script em: gerar link de avaliação, salvar/excluir PCN e
+// ler o levantamento. Exige o token de login do Firebase no cabeçalho.
+// ============================================================
+const APP_API_URL = 'https://us-central1-bia-forte-2025.cloudfunctions.net/appApi';
+
+// ============================================================
 // CONFIGURAÇÃO - Firebase
 // ============================================================
 const FIREBASE_CONFIG = {
