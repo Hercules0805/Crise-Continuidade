@@ -19,6 +19,10 @@
  *
  * Uso:  cd migracao && npx ts-node src/conferir-respostas.ts
  */
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
 import { getFirestore } from './firestore';
 
 type Resposta = {
