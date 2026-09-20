@@ -161,7 +161,79 @@ function medicaoDeLancamento(origemId, lanc) {
   };
 }
 
+/**
+ * Pesos do score de risco. Copia CANONICA no servidor.
+ *
+ * Ate agora o score era calculado so no navegador (app.js) e gravado como
+ * viesse — diferente do BIA, que recalcula no servidor. Um ponto da curva de
+ * risco nao pode depender do que o cliente mandou: aqui ele e recalculado.
+ */
+const PESO_PROBABILIDADE = { Baixa: 1, 'Média': 2, Alta: 3 };
+const PESO_IMPACTO = { Baixo: 1, Moderado: 2, Alto: 3, 'Crítico': 4 };
+
+/** Score do risco, ou null quando a escala nao e reconhecida. */
+function scoreDeRisco(probabilidade, impacto) {
+  const p = PESO_PROBABILIDADE[String(probabilidade || '').trim()];
+  const i = PESO_IMPACTO[String(impacto || '').trim()];
+  if (!p || !i) return null;
+  return p * i;
+}
+
+/**
+ * Converte um risco em medicao, quando algo que afeta o numero mudou.
+ *
+ * O risco nao guardava historico: probabilidade, impacto e score eram
+ * sobrescritos, e as reavaliacoes iam para um campo de texto livre, sem data,
+ * autor nem os valores do momento. Nao dava para responder "como este risco
+ * evoluiu no ano" nem demonstrar a trilha numa auditoria.
+ *
+ * Devolve null quando nada relevante mudou (para nao poluir a curva com pontos
+ * iguais) ou quando a escala nao e reconhecida — risco importado de PCN usa
+ * outra escala, e registrar um numero errado e pior que nao registrar.
+ */
+function medicaoDeRisco(origemId, risco, anterior) {
+  if (!risco) return null;
+
+  const score = scoreDeRisco(risco.probabilidade, risco.impacto);
+  if (score === null) return null;
+
+  if (anterior) {
+    const scoreAntes = scoreDeRisco(anterior.probabilidade, anterior.impacto);
+    const mudou = scoreAntes !== score || (anterior.status || '') !== (risco.status || '');
+    if (!mudou) return null;
+  }
+
+  const coletadoEm = risco.dataUltimaReavaliacao || risco.atualizadoEm || new Date().toISOString();
+  if (isNaN(new Date(coletadoEm).getTime())) return null;
+
+  return {
+    sujeitoTipo: 'risco',
+    sujeitoId: origemId,
+    sujeitoRotulo: String(risco.titulo || origemId),
+    area: String(risco.area || '').trim(),
+    processoId: risco.processoId || null,
+    fonte: FONTE.RISCO,
+    metrica: 'risco',
+    escala: ESCALA.SCORE_RISCO,
+    valor: score,
+    classificacao: String(risco.status || ''),
+    probabilidade: String(risco.probabilidade || ''),
+    impacto: String(risco.impacto || ''),
+    coletadoEm,
+    registradoEm: new Date().toISOString(),
+    registradoPor: String(risco.atualizadoPor || risco.criadoPor || '').trim(),
+    reguaVersao: 1,
+    validoAte: _somarDias(coletadoEm, VALIDADE_DIAS[FONTE.RISCO]),
+    origemColecao: 'riscos',
+    origemId,
+  };
+}
+
 module.exports = {
+  PESO_PROBABILIDADE,
+  PESO_IMPACTO,
+  scoreDeRisco,
+  medicaoDeRisco,
   medicaoDeLancamento,
   COLECAO,
   ESCALA,

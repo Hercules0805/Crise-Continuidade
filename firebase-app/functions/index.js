@@ -13,11 +13,11 @@
 const crypto = require('node:crypto');
 const admin = require('firebase-admin');
 const { onRequest } = require('firebase-functions/v2/https');
-const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
 const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { READ_ACTIONS, WRITE_ACTIONS, TokenError } = require('./tokenLogic');
-const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia, medicaoDeLancamento } = require('./medicoes');
+const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia, medicaoDeLancamento, medicaoDeRisco, scoreDeRisco } = require('./medicoes');
 const {
   READ_ACTIONS: APP_READ,
   WRITE_ACTIONS: APP_WRITE,
@@ -267,6 +267,48 @@ exports.medicaoDeIndicador = onDocumentCreated(
         .set(medicao, { merge: true });
     } catch (err) {
       logger.error('medicaoDeIndicador: falha ao gravar medicao', { id: event.params.id, erro: err.message });
+    }
+  }
+);
+
+// Risco -> medicao. Diferente dos outros dois, aqui o gatilho e em QUALQUER
+// escrita, nao so na criacao: o que interessa e a reavaliacao, que e um update.
+//
+// O score e RECALCULADO aqui a partir de probabilidade e impacto. Ate agora ele
+// era calculado so no navegador e gravado como viesse; um ponto da curva de
+// risco nao pode depender do que o cliente mandou.
+exports.medicaoDeRisco = onDocumentWritten(
+  { region: 'us-central1', document: 'riscos/{id}' },
+  async (event) => {
+    const depois = event.data && event.data.after && event.data.after.exists
+      ? event.data.after.data() : null;
+    if (!depois) return; // risco excluido: a curva mantem os pontos antigos
+
+    const antes = event.data.before && event.data.before.exists
+      ? event.data.before.data() : null;
+
+    const medicao = medicaoDeRisco(event.params.id, depois, antes);
+    if (!medicao) return; // nada relevante mudou, ou escala nao reconhecida
+
+    // Divergencia entre o score gravado pelo cliente e o recalculado aqui: nao
+    // corrige o documento (isso e decisao de produto), mas registra, porque e
+    // sinal de escala fora do padrao ou de gravacao direta no banco.
+    const scoreDoCliente = Number(depois.score);
+    if (Number.isFinite(scoreDoCliente) && scoreDoCliente !== medicao.valor) {
+      logger.warn('medicaoDeRisco: score do cliente difere do recalculado', {
+        id: event.params.id, cliente: scoreDoCliente, servidor: medicao.valor,
+      });
+    }
+
+    try {
+      // Um ponto por reavaliacao: o id inclui o instante, senao a segunda
+      // reavaliacao sobrescreveria a primeira e o historico nao existiria.
+      const idPonto = `${event.params.id}__${medicao.coletadoEm}`;
+      await db.collection(COLECAO_MEDICOES)
+        .doc(idDaMedicao(FONTE.RISCO, idPonto))
+        .set(medicao, { merge: true });
+    } catch (err) {
+      logger.error('medicaoDeRisco: falha ao gravar medicao', { id: event.params.id, erro: err.message });
     }
   }
 );

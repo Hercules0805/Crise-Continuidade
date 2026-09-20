@@ -300,6 +300,7 @@ async function _lerIndicadoresSeguranca() {
     tipo: d.tipo || '',
     responsavel: d.responsavel || '',
     metaMinima: d.metaMinima ?? null,
+    sentidoMeta: d.sentidoMeta || 'maiorMelhor',
     ativo: d.ativo !== false,
     historico: lancamentos.get(d.id) || [],
     ultimoDesempenho: d.ultimoDesempenho ?? null,
@@ -501,7 +502,7 @@ async function _salvarComponente(d) {
 }
 
 const _CAMPOS_INDICADOR = [
-  'nome', 'pilar', 'tipo', 'responsavel', 'metaMinima', 'ativo',
+  'nome', 'pilar', 'tipo', 'responsavel', 'metaMinima', 'sentidoMeta', 'ativo',
   // 'historico' saiu de proposito: o historico mensal mora em
   // lancamentos_indicadores, um documento por mes. Os tres abaixo continuam
   // aqui, mas sao CACHE de exibicao derivado daquela colecao.

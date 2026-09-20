@@ -131,3 +131,66 @@ test('ausência de valor não vira medição de zero', () => {
   assert.strictEqual(medicaoDeLancamento('x', { ...lancOk(), desempenho: 0 }).valor, 0);
   assert.strictEqual(medicaoDeRespostaBia('x', { ...respostaOk(), score: 0 }).valor, 0);
 });
+
+// --- Risco -> medicao ---
+const { medicaoDeRisco, scoreDeRisco } = require('./medicoes');
+
+const riscoOk = () => ({
+  titulo: 'Queda de link',
+  area: 'TI',
+  probabilidade: 'Média',
+  impacto: 'Alto',
+  status: 'Identificado',
+  atualizadoEm: '2026-09-20T12:00:00.000Z',
+  atualizadoPor: 'analista@fortestecnologia.com.br',
+});
+
+test('score do risco é recalculado no servidor, não aceito do cliente', () => {
+  // O cliente mandou 99; o que entra na curva é 2 x 3 = 6.
+  const m = medicaoDeRisco('r1', { ...riscoOk(), score: 99 }, null);
+  assert.strictEqual(m.valor, 6);
+});
+
+test('escala do PCN não é reconhecida e não vira medição', () => {
+  // A tabela de riscos do PCN usa Baixo/Médio/Alto para probabilidade; o
+  // registro usa Baixa/Média/Alta. Registrar número errado é pior que não
+  // registrar — o log avisa e alguém corrige a origem.
+  assert.strictEqual(scoreDeRisco('Médio', 'Alto'), null);
+  assert.strictEqual(medicaoDeRisco('r', { ...riscoOk(), probabilidade: 'Médio' }, null), null);
+  assert.strictEqual(medicaoDeRisco('r', { ...riscoOk(), impacto: 'Médio' }, null), null);
+});
+
+test('reavaliação que muda o score vira ponto novo', () => {
+  const antes = riscoOk();
+  const depois = { ...riscoOk(), impacto: 'Crítico' };  // 2 x 4 = 8
+  const m = medicaoDeRisco('r1', depois, antes);
+  assert.ok(m);
+  assert.strictEqual(m.valor, 8);
+});
+
+test('mudança de status também vira ponto', () => {
+  const m = medicaoDeRisco('r1', { ...riscoOk(), status: 'Tratado' }, riscoOk());
+  assert.ok(m);
+  assert.strictEqual(m.classificacao, 'Tratado');
+});
+
+// Sem isso, cada salvamento de uma vírgula na descrição viraria um ponto.
+test('salvar sem mexer no risco NÃO gera ponto', () => {
+  assert.strictEqual(medicaoDeRisco('r1', { ...riscoOk(), descricao: 'texto novo' }, riscoOk()), null);
+});
+
+test('a medição guarda probabilidade e impacto do momento', () => {
+  const m = medicaoDeRisco('r1', riscoOk(), null);
+  assert.strictEqual(m.probabilidade, 'Média');
+  assert.strictEqual(m.impacto, 'Alto');
+  assert.strictEqual(m.area, 'TI');
+});
+
+test('todas as combinações da escala dão score entre 1 e 12', () => {
+  for (const p of ['Baixa', 'Média', 'Alta']) {
+    for (const i of ['Baixo', 'Moderado', 'Alto', 'Crítico']) {
+      const s = scoreDeRisco(p, i);
+      assert.ok(s >= 1 && s <= 12, `${p} x ${i} = ${s}`);
+    }
+  }
+});

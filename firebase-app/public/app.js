@@ -4433,9 +4433,30 @@ let indicadoresDashboardMes = '';
 const INDICADOR_PILARES = ['Crise e Continuidade', 'GRC', 'Operações e Infra', 'Produto e Aplicações'];
 const INDICADOR_TIPOS = ['CR', 'Estratégico', 'Operacional'];
 
+/**
+ * Sentido da meta. Ate 20/09/2026 so existia um: "quanto maior melhor".
+ *
+ * Indicadores em que MENOR e melhor — vulnerabilidades criticas em aberto,
+ * tempo de resposta a incidente, cliques em phishing, indisponibilidade —
+ * apareciam como dentro da meta exatamente quando estavam piorando. Para um hub
+ * de riscos isso inverte o sinal numa classe inteira de indicadores: justamente
+ * os que deveriam empurrar o risco para cima eram lidos ao contrario.
+ *
+ * O padrao continua "maior e melhor", para nao mudar a leitura de nenhum
+ * indicador existente sem alguem decidir. Cada indicador e marcado a mao.
+ */
+const SENTIDO_META = { MAIOR_MELHOR: 'maiorMelhor', MENOR_MELHOR: 'menorMelhor' };
+
 function _indicadorForaDaMeta(indicador, desempenho) {
   if (desempenho == null || isNaN(Number(desempenho)) || indicador.metaMinima == null || indicador.metaMinima === '') return false;
-  return Number(desempenho) < Number(indicador.metaMinima);
+  const d = Number(desempenho);
+  const meta = Number(indicador.metaMinima);
+  return indicador.sentidoMeta === SENTIDO_META.MENOR_MELHOR ? d > meta : d < meta;
+}
+
+/** Rotulo do campo de meta, que muda com o sentido. */
+function _rotuloMeta(indicador) {
+  return (indicador && indicador.sentidoMeta === SENTIDO_META.MENOR_MELHOR) ? 'Meta máxima' : 'Meta mínima';
 }
 function _badgeDesvioIndicador(foraDaMeta) {
   return foraDaMeta
@@ -4588,7 +4609,7 @@ async function _lancarResultadosIndicador(indicador, novasEntradas, arquivoOrige
       await API.salvarRisco({
         area: '',
         titulo: `Desvio no indicador "${esc(indicador.nome)}"`,
-        descricao: `O indicador "${esc(indicador.nome)}" (${esc(indicador.pilar || 'sem pilar')}) atingiu ${ultimoComDado.desempenho}% de desempenho em ${_formatMes(ultimoComDado.mes)}, abaixo da meta mínima de ${indicador.metaMinima}%.`,
+        descricao: `O indicador "${esc(indicador.nome)}" (${esc(indicador.pilar || 'sem pilar')}) atingiu ${ultimoComDado.desempenho}% de desempenho em ${_formatMes(ultimoComDado.mes)}, ${indicador.sentidoMeta === SENTIDO_META.MENOR_MELHOR ? 'acima da meta máxima' : 'abaixo da meta mínima'} de ${indicador.metaMinima}%.`,
         categoria: indicador.pilar || 'Tecnológico',
         responsavel: indicador.responsavel || '',
         dataIdentificacao: new Date().toISOString().slice(0, 10),
@@ -5365,7 +5386,13 @@ function _htmlModalIndicador() {
       </div>
       <label>Responsável</label>
       <input type="text" id="indResponsavel" placeholder="Nome da pessoa responsável">
-      <label>Meta Mínima de Desempenho (%)</label>
+      <label>Sentido da meta</label>
+      <select id="indSentidoMeta">
+        <option value="maiorMelhor">Quanto maior, melhor — ex: % de backups com sucesso</option>
+        <option value="menorMelhor">Quanto menor, melhor — ex: vulnerabilidades críticas em aberto</option>
+      </select>
+      <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Define de que lado da meta o indicador está em desvio.</span>
+      <label id="indMetaLabel" style="margin-top:14px;">Meta de Desempenho (%)</label>
       <input type="number" id="indMetaMinima" step="any" min="0" max="100" placeholder="Ex: 90">
       <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Quando o desempenho do mês ficar abaixo desse percentual, um risco é criado automaticamente.</span>
       <label style="display:flex;align-items:center;gap:6px;margin-top:14px;cursor:pointer;">
@@ -5385,6 +5412,14 @@ window.abrirModalIndicador = (d) => {
   document.getElementById('indTipo').value = d ? (d.tipo || INDICADOR_TIPOS[0]) : INDICADOR_TIPOS[0];
   document.getElementById('indResponsavel').value = d ? (d.responsavel || '') : '';
   document.getElementById('indMetaMinima').value = d && d.metaMinima != null ? d.metaMinima : '';
+  const sel = document.getElementById('indSentidoMeta');
+  sel.value = (d && d.sentidoMeta) || SENTIDO_META.MAIOR_MELHOR;
+  const ajustarRotulo = () => {
+    document.getElementById('indMetaLabel').textContent =
+      (sel.value === SENTIDO_META.MENOR_MELHOR ? 'Meta máxima' : 'Meta mínima') + ' de Desempenho (%)';
+  };
+  sel.onchange = ajustarRotulo;
+  ajustarRotulo();
   document.getElementById('indAtivo').checked = d ? d.ativo !== false : true;
   document.getElementById('modalIndicadorTitulo').textContent = d ? 'Editar Indicador' : 'Novo Indicador';
   document.getElementById('modalIndicador').classList.add('open');
@@ -5412,6 +5447,7 @@ window.salvarIndicador = async () => {
     nome: document.getElementById('indNome').value.trim(),
     responsavel: document.getElementById('indResponsavel').value.trim(),
     metaMinima: document.getElementById('indMetaMinima').value !== '' ? Number(document.getElementById('indMetaMinima').value) : null,
+    sentidoMeta: document.getElementById('indSentidoMeta').value || SENTIDO_META.MAIOR_MELHOR,
     ativo: document.getElementById('indAtivo').checked,
   };
   if (!d.nome) return showToast('Informe o nome do indicador.', '#e65100');
