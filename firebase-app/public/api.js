@@ -43,17 +43,12 @@ const _cache = {};
 // ------------------------------------------------------------
 // Helpers de domínio (espelham bia-app/Code.gs)
 // ------------------------------------------------------------
-function _calcularTier(score) {
-  if (score >= 12) return 'Tier 1 (Crítico)';
-  if (score >= 6) return 'Tier 2 (Essencial)';
-  return 'Tier 3 (Suporte)';
-}
-
-function _calcularRTO(tier) {
-  if (tier === 'Tier 1 (Crítico)') return '< 4 horas';
-  if (tier === 'Tier 2 (Essencial)') return '4h a 24 horas';
-  return '> 24 horas';
-}
+// A regra de criticidade mora em criticidade.js (carregado antes deste arquivo
+// em index.html). Nao reescreva os limiares aqui: era exatamente essa copia,
+// multiplicada por ~20, que fazia telas diferentes rotularem o mesmo processo
+// de tres jeitos.
+const _calcularTier = (score) => Criticidade.tierPorScore(score);
+const _calcularRTO = (tier) => Criticidade.rtoSugerido(tier);
 
 function _norm(str) {
   return String(str || '').trim().toLowerCase().replace(/\s+/g, ' ');

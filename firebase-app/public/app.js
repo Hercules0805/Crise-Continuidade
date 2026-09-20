@@ -113,7 +113,7 @@ async function perguntas() {
       <div class="list-row ${p.ativa ? '' : 'inativa'}">
         <div class="list-row-main">
           <div class="list-row-title">${p.pergunta}</div>
-          <div class="list-row-sub">${p.descricao || ''}</div>
+          <div class="list-row-sub">${esc(p.descricao || '')}</div>
         </div>
         <div class="list-row-actions">
           ${p.ativa ? '<span class="badge badge-green">Ativa</span>' : '<span class="badge badge-gray">Inativa</span>'}
@@ -242,8 +242,8 @@ window.renderAvaliacaoInline = () => {
   
   // Mostrar score/tier se já avaliado
   if (resumoContainer && p && p.score > 0) {
-    const cor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : '#1565c0';
-    const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : 'Tier 3 (Suporte)';
+    const tier = Criticidade.tierDoProcesso(p);
+    const cor = Criticidade.corDoTier(tier);
     resumoContainer.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;">
       <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
         <div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div>
@@ -292,6 +292,10 @@ window.renderAvaliacaoInline = () => {
   const vistosCats = {};
   pergsOrdenadas.forEach(pg => { if (!vistosCats[pg.categoria]) { vistosCats[pg.categoria] = true; gruposCats.push(pg.categoria); } });
   
+  // Marca de qual processo sao estes radios. salvarProcesso so aceita as
+  // respostas quando esta marca casa com o processo aberto — sem isso, os
+  // radios do processo anterior sobrevivem no DOM e vao para o processo atual.
+  container.dataset.processoId = id;
   container.innerHTML = gruposCats.map(cat => {
     const cor = CAT_CORES[cat] || '#555';
     const itensCat = pergsOrdenadas.filter(pg => pg.categoria === cat);
@@ -302,7 +306,7 @@ window.renderAvaliacaoInline = () => {
           const i = window.processosPerguntas.indexOf(perg);
           return `<div style="padding:20px 24px;background:#fafafa;border-bottom:1px solid #f0f0f0;">
             <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${perg.pergunta}</div>
-            <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
+            <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${esc(perg.descricao || '')}</div>
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
               ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default']).slice().sort((a,b) => Number(b.valor) - Number(a.valor)).map(op => {
                 const opCor = (op.cor && op.cor !== 'undefined') ? op.cor : ({'4':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'}[String(op.valor)] || '#555');
@@ -324,7 +328,7 @@ window.renderAvaliacaoInline = () => {
     window.processosPerguntas.forEach((perg, i) => {
       const val = p.respostas[perg.pergunta];
       if (val !== undefined) {
-        const radio = document.querySelector(`input[name="avalInline${i}"][value="${val}"]`);
+        const radio = container.querySelector(`input[name="avalInline${i}"][value="${val}"]`);
         if (radio) {
           radio.checked = true;
           atualizarEstiloOpcoes(radio);
@@ -336,17 +340,20 @@ window.renderAvaliacaoInline = () => {
 };
 
 window.calcularScoreInline = () => {
+  // Le sempre dentro da aba Avaliacao, nunca do documento inteiro: um radio
+  // orfao de outro processo nao pode entrar na conta.
+  const escopoAval = document.getElementById('avaliacaoPerguntas') || document;
   let total = 0;
   const pergs = window.processosPerguntas || [];
   pergs.forEach((pg, i) => {
-    const sel = document.querySelector(`input[name="avalInline${i}"]:checked`);
+    const sel = escopoAval.querySelector(`input[name="avalInline${i}"]:checked`);
     if (sel) total += Number(sel.value);
   });
   // Atualizar resumo de score
   const resumoContainer = document.getElementById('avaliacaoScoreResumo');
   if (resumoContainer && total > 0) {
-    const cor = total >= 12 ? '#c62828' : total >= 6 ? '#f57c00' : '#1565c0';
-    const tier = total >= 12 ? 'Tier 1 (Crítico)' : total >= 6 ? 'Tier 2 (Essencial)' : 'Tier 3 (Suporte)';
+    const tier = Criticidade.tierPorScore(total);
+    const cor = Criticidade.corDoTier(tier);
     resumoContainer.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;">
       <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
         <div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div>
@@ -361,7 +368,7 @@ window.calcularScoreInline = () => {
   // Salvar respostas para incluir no salvarProcesso
   window._avaliacaoRespostas = {};
   pergs.forEach((pg, i) => {
-    const sel = document.querySelector(`input[name="avalInline${i}"]:checked`);
+    const sel = escopoAval.querySelector(`input[name="avalInline${i}"]:checked`);
     if (sel) window._avaliacaoRespostas[pg.pergunta] = Number(sel.value);
   });
   window._avaliacaoScore = total;
@@ -380,7 +387,7 @@ function popularSelectContatosBcp() {
   const selecionados = window._bcpContatos || [];
   const disponiveis = catalogo.filter(d => !selecionados.includes(d.id));
   select.innerHTML = '<option value=""></option>' +
-    disponiveis.map(d => `<option value="${d.id}">${d.nome} (${d.categoria})</option>`).join('');
+    disponiveis.map(d => `<option value="${d.id}">${esc(d.nome)} (${esc(d.categoria)})</option>`).join('');
 }
 
 window.mostrarDropdownContatoBcp = () => {
@@ -421,7 +428,7 @@ window.mostrarDropdownContatoBcp = () => {
     itens.forEach(d => {
       const info = [d.setor, d.empresa].filter(Boolean).join(' • ');
       html += `<div class="bcp-contato-option" onmousedown="adicionarContatoBcpById('${d.id}')" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
-        <div style="font-weight:600;color:#222;">${d.nome}</div>
+        <div style="font-weight:600;color:#222;">${esc(d.nome)}</div>
         ${info ? `<div style="font-size:0.82em;color:#888;margin-top:2px;">${info}</div>` : ''}
       </div>`;
     });
@@ -482,12 +489,12 @@ function renderContatosBcp() {
   let rows = '';
   if (contatos.length) {
     rows = contatos.map(d => `<tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:12px 14px;font-weight:600;color:#222;">${d.nome || '-'}</td>
-          <td style="padding:12px 14px;color:#555;">${d.empresa || '-'}</td>
-          <td style="padding:12px 14px;color:#555;">${d.setor || '-'}</td>
-          <td style="padding:6px 8px;"><input type="text" class="papel-crise-input" data-id="${d.id}" value="${(d.detalhes || '').replace(/"/g, '&quot;')}" placeholder="Papel neste processo..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.88em;box-sizing:border-box;"></td>
-          <td style="padding:12px 14px;color:#555;">${d.telefone || '-'}</td>
-          <td style="padding:12px 14px;color:#555;">${d.email || '-'}</td>
+          <td style="padding:12px 14px;font-weight:600;color:#222;">${esc(d.nome || '-')}</td>
+          <td style="padding:12px 14px;color:#555;">${esc(d.empresa || '-')}</td>
+          <td style="padding:12px 14px;color:#555;">${esc(d.setor || '-')}</td>
+          <td style="padding:6px 8px;"><input type="text" class="papel-crise-input" data-id="${d.id}" value="${esc(d.detalhes || '')}" placeholder="Papel neste processo..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.88em;box-sizing:border-box;"></td>
+          <td style="padding:12px 14px;color:#555;">${esc(d.telefone || '-')}</td>
+          <td style="padding:12px 14px;color:#555;">${esc(d.email || '-')}</td>
           <td style="padding:12px 6px;text-align:center;">
             <button onclick="removerContatoBcp('${d.id}')" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
           </td>
@@ -552,8 +559,8 @@ function renderizarConfigRespostas(config) {
               <span style="font-weight:600;color:#333;">${op.label}</span>
             </div>
             <div class="list-row-actions">
-              <button class="btn-icon" onclick="editarConfigResposta('${cat}', ${idx})" title="Editar">✏️</button>
-              <button class="btn-icon" onclick="excluirConfigResposta('${cat}', ${idx})" title="Excluir">🗑️</button>
+              <button class="btn-icon" onclick="editarConfigResposta('${escJs(cat)}', ${idx})" title="Editar">✏️</button>
+              <button class="btn-icon" onclick="excluirConfigResposta('${escJs(cat)}', ${idx})" title="Excluir">🗑️</button>
             </div>
           </div>`).join('')}
       </div>`;
@@ -771,10 +778,10 @@ function renderizarAreas() {
   
   document.getElementById('rows').innerHTML = data.length
     ? data.map(a => `<tr>
-        <td>${a.nome}</td>
-        <td>${a.responsavel || ''}</td>
-        <td>${a.email || ''}</td>
-        <td>${a.solucao || ''}</td>
+        <td>${esc(a.nome)}</td>
+        <td>${esc(a.responsavel || '')}</td>
+        <td>${esc(a.email || '')}</td>
+        <td>${esc(a.solucao || '')}</td>
         <td style="text-align:center;">
           <button class="btn-icon" onclick="editarArea('${a.id}')" title="Editar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
@@ -1333,7 +1340,7 @@ function renderizarProcessos() {
   // Filtrar por tier
   if (processosFiltroTier) {
     data = data.filter(p => {
-      const tier = p.score >= 12 ? 'Tier 1' : p.score >= 6 ? 'Tier 2' : (p.avaliado || p.score > 0) ? 'Tier 3' : (p.tierManual ? p.tierManual.split(' ')[0] + ' ' + p.tierManual.split(' ')[1] : 'Pendente');
+      const tier = Criticidade.tierCurto(p);
       return tier === processosFiltroTier;
     });
   }
@@ -1380,11 +1387,11 @@ function renderizarProcessos() {
   
   document.getElementById('rows').innerHTML = data.length
     ? data.map(p => {
-        const status = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.avaliado ? 'Tier 3 (Suporte)' : (p.tierManual || 'Pendente');
-        const statusColor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : p.avaliado ? '#1565c0' : (p.tierManual === 'Tier 1 (Crítico)' ? '#c62828' : p.tierManual === 'Tier 2 (Essencial)' ? '#f57c00' : p.tierManual === 'Tier 3 (Suporte)' ? '#1565c0' : '#999');
+        const status = Criticidade.tierDoProcesso(p);
+        const statusColor = Criticidade.corDoTier(status);
         return `<tr style="cursor:pointer;" onclick="editarProcesso('${p.id}')">
-        <td>${p.area}</td>
-        <td><strong>${p.processo}</strong></td>
+        <td>${esc(p.area)}</td>
+        <td><strong>${esc(p.processo)}</strong></td>
         <td>${p.responsavelArea || p.responsavel || ''}</td>
         <td><span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.8em;font-weight:600;color:white;background:${statusColor};">${status}</span></td>
         <td style="text-align:center;font-weight:700;color:${p.avaliado || p.score > 0 ? statusColor : '#bbb'};font-size:0.95em;">${p.avaliado || p.score > 0 ? p.score : '-'}</td>
@@ -1449,7 +1456,7 @@ window.enviarRelatorioArea = async () => {
   if (!area) return;
   const areaObj = window.areasDisponiveis.find(a => a.nome === area);
   if (!areaObj || !areaObj.email) return showToast('E-mail do responsável não cadastrado para esta área.', '#e65100');
-  if (!confirm(`Enviar relatório de "${area}" para ${areaObj.responsavel} (${areaObj.email})?`)) return;
+  if (!confirm(`Enviar relatório de "${area}" para ${esc(areaObj.responsavel)} (${esc(areaObj.email)})?`)) return;
   try {
     showToast('⏳ Gerando relatório...', '#1565c0');
     const result = await API.post('gerarRelatorioArea', { area, email: areaObj.email });
@@ -1465,7 +1472,7 @@ window.enviarParaArea = async () => {
   if (!area) return;
   const areaObj = window.areasDisponiveis.find(a => a.nome === area);
   if (!areaObj || !areaObj.email) return showToast('E-mail do responsável não cadastrado para esta área.', '#e65100');
-  if (!confirm(`Enviar questionário para ${areaObj.responsavel} (${areaObj.email})?`)) return;
+  if (!confirm(`Enviar questionário para ${esc(areaObj.responsavel)} (${esc(areaObj.email)})?`)) return;
   try {
     const result = await API.post('gerarTokenArea', { area, email: areaObj.email, nomeResponsavel: areaObj.responsavel || '' });
     if (result.error) throw new Error(result.error);
@@ -1593,7 +1600,7 @@ function renderDependenciaTabela() {
       const globalIdx = selecionadas.indexOf(nome);
       const dep = catalogo.find(d => d.nome === nome);
       const tooltip = dep ? [dep.empresa, dep.detalhes, dep.telefone].filter(Boolean).join(' • ') : '';
-      return `<span class="dep-tag-item" style="display:inline-flex;align-items:center;gap:3px;background:#1a237e;color:white;padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;cursor:default;" title="${tooltip ? tooltip.replace(/"/g, '&quot;') : nome}">${nome}<button onclick="removerDependenciaTag(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.7);line-height:1;padding:0 3px;" onmouseenter="this.style.color='white'" onmouseleave="this.style.color='rgba(255,255,255,0.7)'" title="Remover">&times;</button></span>`;
+      return `<span class="dep-tag-item" style="display:inline-flex;align-items:center;gap:3px;background:#1a237e;color:white;padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;cursor:default;" title="${esc(tooltip || nome)}">${nome}<button onclick="removerDependenciaTag(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.7);line-height:1;padding:0 3px;" onmouseenter="this.style.color='white'" onmouseleave="this.style.color='rgba(255,255,255,0.7)'" title="Remover">&times;</button></span>`;
     }).join(' ');
     
     const emptyMsg = !count ? `<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum recurso mapeado</span>` : '';
@@ -1602,7 +1609,7 @@ function renderDependenciaTabela() {
     const disponiveisNaCat = catalogo.filter(d => d.categoria === cat && !selecionadas.includes(d.nome));
     const chips = disponiveisNaCat.map(d => {
       const label = d.empresa ? d.empresa + ' - ' + d.nome : d.nome;
-      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="selecionarDependenciaCategoria('${d.nome.replace(/'/g, "\\'")}')" title="${[d.detalhes, d.telefone].filter(Boolean).join(' • ') || d.nome}">${label}</span>`;
+      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="selecionarDependenciaCategoria('${escJs(d.nome)}')" title="${[d.detalhes, d.telefone].filter(Boolean).join(' • ') || d.nome}">${label}</span>`;
     }).join(' ');
 
     html += `
@@ -1616,7 +1623,7 @@ function renderDependenciaTabela() {
             ${tags}
             ${emptyMsg}
             <div style="position:relative;flex:1;min-width:180px;display:flex;align-items:center;gap:4px;">
-              <input type="text" class="dep-cat-input" data-categoria="${cat}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #e8eaf6;outline:none;font-size:0.88em;padding:5px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#1a237e';mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" oninput="mostrarDropdownCategoria(this,'${cat.replace(/'/g, "\\'")}')" onblur="this.style.borderColor='#e8eaf6';setTimeout(()=>{const dd=this.parentElement.querySelector('.dep-cat-dropdown');if(dd)dd.style.display='none';},300)">
+              <input type="text" class="dep-cat-input" data-categoria="${cat}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #e8eaf6;outline:none;font-size:0.88em;padding:5px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#1a237e';mostrarDropdownCategoria(this,'${escJs(cat)}')" oninput="mostrarDropdownCategoria(this,'${escJs(cat)}')" onblur="this.style.borderColor='#e8eaf6';setTimeout(()=>{const dd=this.parentElement.querySelector('.dep-cat-dropdown');if(dd)dd.style.display='none';},300)">
               <div class="dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:200px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
             </div>
           </div>
@@ -1697,7 +1704,7 @@ window.mostrarDropdownCategoria = (input, categoria) => {
     const info = [d.empresa, d.detalhes].filter(Boolean).join(' • ');
     const encodedNome = encodeURIComponent(d.nome);
     html += `<div class="dep-option" onmousedown="selecionarDependenciaCategoria(decodeURIComponent('${encodedNome}'))" style="padding:8px 12px;cursor:pointer;transition:background 0.1s;border-bottom:1px solid #f8f8f8;">
-      <div style="font-size:0.9em;font-weight:500;color:#222;">${d.nome}</div>
+      <div style="font-size:0.9em;font-weight:500;color:#222;">${esc(d.nome)}</div>
       ${info ? `<div style="font-size:0.75em;color:#888;margin-top:2px;">${info}</div>` : ''}
     </div>`;
   });
@@ -1707,7 +1714,7 @@ window.mostrarDropdownCategoria = (input, categoria) => {
     const existeNoCatalogo = catalogo.some(d => d.nome.toLowerCase() === val);
     const existeNosProcessos = isProcessos && (window.processosData || []).some(p => p.processo.toLowerCase() === val);
     if (!existeNoCatalogo && !existeNosProcessos) {
-      html += `<div class="dep-option" onmousedown="adicionarDependenciaCategoria('${input.value.trim().replace(/'/g, "\\'")}','${categoria.replace(/'/g, "\\'")}')" style="padding:9px 12px;cursor:pointer;color:#1a237e;font-weight:600;border-top:1.5px solid #e8eaf6;background:#f8f9ff;">+ Criar "${input.value.trim()}"</div>`;
+      html += `<div class="dep-option" onmousedown="adicionarDependenciaCategoria('${escJs(input.value.trim())}','${escJs(categoria)}')" style="padding:9px 12px;cursor:pointer;color:#1a237e;font-weight:600;border-top:1.5px solid #e8eaf6;background:#f8f9ff;">+ Criar "${input.value.trim()}"</div>`;
     }
   }
   
@@ -1849,7 +1856,7 @@ function renderRiscosBcp() {
       </thead>
       <tbody>
         ${window._bcpRiscos.map((r, idx) => `<tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:6px 10px;"><input type="text" value="${(r.evento || '').replace(/"/g, '&quot;')}" onchange="atualizarRiscoBcp(${idx},'evento',this.value)" placeholder="Descreva o evento" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
+          <td style="padding:6px 10px;"><input type="text" value="${esc(r.evento || '')}" onchange="atualizarRiscoBcp(${idx},'evento',this.value)" placeholder="Descreva o evento" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
           <td style="padding:6px 6px;text-align:center;"><select onchange="atualizarRiscoBcp(${idx},'probabilidade',this.value)" style="padding:5px 8px;border-radius:12px;border:none;font-size:0.88em;font-weight:600;cursor:pointer;background:${corProb[r.probabilidade] || '#f5f5f5'};color:${corProbText[r.probabilidade] || '#555'};">
             <option value="" ${!r.probabilidade ? 'selected' : ''}>-</option>
             <option value="Baixo" ${r.probabilidade === 'Baixo' ? 'selected' : ''}>Baixo</option>
@@ -1862,7 +1869,7 @@ function renderRiscosBcp() {
             <option value="Médio" ${r.impacto === 'Médio' ? 'selected' : ''}>Médio</option>
             <option value="Alto" ${r.impacto === 'Alto' ? 'selected' : ''}>Alto</option>
           </select></td>
-          <td style="padding:6px 10px;"><input type="text" value="${(r.mitigacao || '').replace(/"/g, '&quot;')}" onchange="atualizarRiscoBcp(${idx},'mitigacao',this.value)" placeholder="Ação de mitigação" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
+          <td style="padding:6px 10px;"><input type="text" value="${esc(r.mitigacao || '')}" onchange="atualizarRiscoBcp(${idx},'mitigacao',this.value)" placeholder="Ação de mitigação" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
           <td style="padding:6px 6px;text-align:center;">
             <button onclick="removerRiscoBcp(${idx})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
           </td>
@@ -1912,8 +1919,8 @@ function renderPreventivasBcp() {
       </thead>
       <tbody>
         ${window._bcpPreventivas.map((r, idx) => `<tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:6px 10px;"><input type="text" value="${(r.controle || '').replace(/"/g, '&quot;')}" onchange="atualizarPreventivaBcp(${idx},'controle',this.value)" placeholder="Ex: Energia" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
-          <td style="padding:6px 10px;"><input type="text" value="${(r.descricao || '').replace(/"/g, '&quot;')}" onchange="atualizarPreventivaBcp(${idx},'descricao',this.value)" placeholder="Descreva a medida preventiva" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
+          <td style="padding:6px 10px;"><input type="text" value="${esc(r.controle || '')}" onchange="atualizarPreventivaBcp(${idx},'controle',this.value)" placeholder="Ex: Energia" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
+          <td style="padding:6px 10px;"><input type="text" value="${esc(r.descricao || '')}" onchange="atualizarPreventivaBcp(${idx},'descricao',this.value)" placeholder="Descreva a medida preventiva" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
           <td style="padding:6px 6px;text-align:center;">
             <button onclick="removerPreventivaBcp(${idx})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
           </td>
@@ -1946,7 +1953,7 @@ window.abrirModalProcesso = (p) => {
   // Preencher dropdown de áreas
   const selectArea = document.getElementById('fArea');
   selectArea.innerHTML = '<option value="">Selecione...</option>' + 
-    window.areasDisponiveis.map(a => `<option value="${a.nome}">${a.nome}</option>`).join('');
+    window.areasDisponiveis.map(a => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
   
   document.getElementById('fId').value = p ? p.id : '';
   document.getElementById('fArea').value = p ? p.area : '';
@@ -1981,20 +1988,26 @@ window.abrirModalProcesso = (p) => {
   
   const titulo = p ? 'Editar Processo' : 'Novo Processo';
   const scoreHtml = p && p.score > 0 ? (() => {
-    const status = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : 'Tier 3 (Suporte)';
-    const cor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : '#1565c0';
+    const status = Criticidade.tierDoProcesso(p);
+    const cor = Criticidade.corDoTier(status);
     return `<span style="margin-left:12px;font-size:0.82em;font-weight:600;padding:3px 10px;border-radius:10px;background:${cor};color:white;vertical-align:middle;">${status} &bull; Score ${p.score}</span>`;
   })() : '';
-  document.getElementById('modalTitulo').innerHTML = titulo + scoreHtml + (p ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${p.processo}</div>` : '');
+  document.getElementById('modalTitulo').innerHTML = titulo + scoreHtml + (p ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(p.processo)}</div>` : '');
   document.getElementById('drawerProcesso').classList.add('open');
   document.getElementById('drawerOverlayProcesso').classList.add('open');
   // Resetar botão salvar
   const btnSalvar = document.querySelector('#drawerProcesso .drawer-footer .btn-primary');
   if (btnSalvar) { btnSalvar.disabled = false; btnSalvar.innerHTML = 'Salvar'; btnSalvar.style.opacity = '1'; btnSalvar.style.cursor = 'pointer'; }
   trocarAbaProcesso('identificacao');
-  // Reset avaliação inline
+  // Reset avaliação inline. Limpar o HTML é essencial, nao so as variaveis: a
+  // aba Avaliacao so e redesenhada por trocarAbaProcesso('avaliacao'), entao
+  // sem isso os radios marcados do processo anterior sobrevivem no DOM.
   window._avaliacaoRespostas = {};
   window._avaliacaoScore = 0;
+  const contAval = document.getElementById('avaliacaoPerguntas');
+  if (contAval) { contAval.innerHTML = ''; delete contAval.dataset.processoId; }
+  const resumoAval = document.getElementById('avaliacaoScoreResumo');
+  if (resumoAval) resumoAval.innerHTML = '';
   // Mostrar/ocultar botão Abrir PCN
   const btnPcnSalvo = document.getElementById('btnPcnSalvo');
   if (btnPcnSalvo) btnPcnSalvo.style.display = (p && p.pcnSalvo) ? 'inline-block' : 'none';
@@ -2016,8 +2029,8 @@ window.abrirModalProcesso = (p) => {
   // Score/Tier cards na BIA
   const scoreInfo = document.getElementById('fBiaScoreInfo');
   if (scoreInfo && p && p.score > 0) {
-    const cor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : '#1565c0';
-    const tierLabel = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : 'Tier 3 (Suporte)';
+    const tierLabel = Criticidade.tierDoProcesso(p);
+    const cor = Criticidade.corDoTier(tierLabel);
     scoreInfo.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;"><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div><div style="font-size:1.8em;font-weight:700;color:${cor};">${p.score}</div></div><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div><div style="font-size:0.95em;font-weight:700;"><span style="background:${cor};color:white;padding:4px 12px;border-radius:12px;">${tierLabel}</span></div></div></div>`;
   } else if (scoreInfo) { scoreInfo.innerHTML = ''; }
   // Preencher RTO/RPO/MTD
@@ -2079,8 +2092,17 @@ window.salvarProcesso = async () => {
   const avalScores = {};
   let avalTotal = 0;
   let temResposta = false;
-  pergs.forEach((pg, i) => {
-    const sel = document.querySelector(`input[name="avalInline${i}"]:checked`);
+  // Só considera as respostas da aba Avaliacao se ela estiver desenhada para
+  // ESTE processo. Guarda contra o vazamento: abrir o processo A, ver a aba,
+  // fechar, abrir B e salvar gravava as respostas de A em B, com o tier
+  // recalculado em cima delas e sem nenhum aviso.
+  const contAvaliacao = document.getElementById('avaliacaoPerguntas');
+  const idAberto = document.getElementById('fId').value || '';
+  const avaliacaoEDesteProcesso = !!contAvaliacao
+    && contAvaliacao.dataset.processoId !== undefined
+    && contAvaliacao.dataset.processoId === idAberto;
+  (avaliacaoEDesteProcesso ? pergs : []).forEach((pg, i) => {
+    const sel = contAvaliacao.querySelector(`input[name="avalInline${i}"]:checked`);
     if (sel) {
       avalScores[pg.pergunta] = parseInt(sel.value);
       avalTotal += parseInt(sel.value);
@@ -2149,7 +2171,7 @@ window.salvarProcesso = async () => {
 window.excluirProcesso = async (id) => {
   const p = window.processosData.find(proc => proc.id === id);
   if (!p) return;
-  if (!confirm(`Excluir o processo "${p.processo}"? Esta ação não pode ser desfeita.`)) return;
+  if (!confirm(`Excluir o processo "${esc(p.processo)}"? Esta ação não pode ser desfeita.`)) return;
   try {
     await API.post('excluirProcesso', { id: String(id), area: p.area, processo: p.processo });
     showToast('🗑️ Excluído.', '#555');
@@ -2165,17 +2187,17 @@ window.verDetalhesProcesso = (id) => {
   const p = window.processosData.find(proc => proc.id === id);
   if (!p) return;
   
-  const status = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.score > 0 ? 'Tier 3 (Suporte)' : 'Pendente';
-  const statusColor = p.score >= 12 ? '#c62828' : p.score >= 6 ? '#f57c00' : p.score > 0 ? '#1565c0' : '#999';
+  const status = Criticidade.tierDoProcesso(p);
+  const statusColor = Criticidade.corDoTier(status);
   
   document.getElementById('modalDetalhesTitulo').textContent = p.processo;
   document.getElementById('modalDetalhesConteudo').innerHTML = `
     <div style="display:grid;gap:16px;">
-      <div><strong>Área:</strong> ${p.area}</div>
+      <div><strong>Área:</strong> ${esc(p.area)}</div>
       <div><strong>Responsável:</strong> ${p.responsavelArea || p.responsavel || '-'}</div>
-      <div><strong>Solução:</strong> ${p.solucao || '-'}</div>
+      <div><strong>Solução:</strong> ${esc(p.solucao || '-')}</div>
       <div><strong>Status:</strong> <span style="display:inline-block;padding:4px 12px;border-radius:12px;font-size:0.9em;font-weight:600;color:white;background:${statusColor};">${status}${p.score > 0 ? ' (Score: ' + p.score + ')' : ''}</span></div>
-      <div><strong>Descrição do Impacto:</strong><br>${p.descricao || '-'}</div>
+      <div><strong>Descrição do Impacto:</strong><br>${esc(p.descricao || '-')}</div>
       <div><strong>Dependência Crítica:</strong> ${p.dependencia || '-'}</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
         <div style="background:#f5f5f5;padding:12px;border-radius:6px;text-align:center;">
@@ -2246,7 +2268,7 @@ window.avaliarProcesso = (id) => {
           const i = window.processosPerguntas.indexOf(perg);
           return `<div style="padding:20px 24px;background:#fafafa;border-bottom:1px solid #f0f0f0;">
             <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${perg.pergunta}</div>
-            <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${perg.descricao || ''}</div>
+            <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${esc(perg.descricao || '')}</div>
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
               ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default'] || [{valor:'3',label:'Crítico',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Alto',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Moderado',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'Baixo',cor:'#757575',background:'#f5f5f5'}]).slice().sort((a,b) => Number(b.valor) - Number(a.valor)).map(op => {
                 const opCor = (op.cor && op.cor !== 'undefined') ? op.cor : ({'4':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'}[String(op.valor)] || '#555');
@@ -2364,7 +2386,7 @@ window.abrirModalEnviar = (id) => {
   const p = window.processosData.find(proc => proc.id === id);
   if (!p) return;
   document.getElementById('enviarProcessoId').value = id;
-  document.getElementById('enviarProcessoNome').textContent = `${p.area} › ${p.processo}`;
+  document.getElementById('enviarProcessoNome').textContent = `${esc(p.area)} › ${esc(p.processo)}`;
   document.getElementById('enviarEmail').value = '';
   document.getElementById('modalEnviar').classList.add('open');
 };
@@ -2527,14 +2549,14 @@ function renderizarDependencias() {
 
   document.getElementById('depRows').innerHTML = data.length
     ? data.map(d => `<tr>
-        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${d.categoria}</span></td>
-        <td style="font-size:0.85em;color:#555;">${d.empresa || '-'}</td>
-        <td style="font-weight:600;color:#222;">${d.nome}</td>
-        <td style="font-size:0.85em;color:#555;">${d.detalhes || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${d.setor || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${d.telefone || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${d.email || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${d.endereco || '-'}</td>
+        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(d.categoria)}</span></td>
+        <td style="font-size:0.85em;color:#555;">${esc(d.empresa || '-')}</td>
+        <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(d.detalhes || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(d.setor || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(d.telefone || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(d.email || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(d.endereco || '-')}</td>
         <td style="text-align:center;white-space:nowrap;">
           <button class="btn-icon" onclick="editarDep('${d.id}')" title="Editar">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -2698,17 +2720,17 @@ async function admin() {
   const total = processosVisiveis.length;
   const avaliados = processosVisiveis.filter(p => p.avaliado || p.score > 0).length;
   const pendentes = total - avaliados;
-  const tier1 = processosVisiveis.filter(p => p.score >= 12 || (!p.score && p.tierManual === 'Tier 1 (Crítico)')).length;
-  const tier2 = processosVisiveis.filter(p => (p.score >= 6 && p.score < 12) || (!p.score && p.tierManual === 'Tier 2 (Essencial)')).length;
-  const tier3 = processosVisiveis.filter(p => ((p.avaliado || p.score > 0) && p.score < 6) || (!p.score && p.tierManual === 'Tier 3 (Suporte)')).length;
+  const tier1 = processosVisiveis.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T1)).length;
+  const tier2 = processosVisiveis.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T2)).length;
+  const tier3 = processosVisiveis.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T3)).length;
   const pct = total > 0 ? Math.round((avaliados / total) * 100) : 0;
 
   // Resumo por área
   const porArea = areasVisiveis.map(a => {
     const procs = processosVisiveis.filter(p => p.area === a.nome);
     const aval = procs.filter(p => p.avaliado || p.score > 0).length;
-    const t1 = procs.filter(p => p.score >= 12).length;
-    const t2 = procs.filter(p => p.score >= 6 && p.score < 12).length;
+    const t1 = procs.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T1)).length;
+    const t2 = procs.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T2)).length;
     const t3 = procs.filter(p => (p.avaliado || p.score > 0) && p.score < 6).length;
     return { nome: a.nome, total: procs.length, avaliados: aval, t1, t2, t3 };
   }).filter(a => a.total > 0);
@@ -2804,11 +2826,11 @@ async function admin() {
             ${[...processosVisiveis].sort((a,b) => (b.score||0) - (a.score||0)).map(p => {
               const s = p.score || 0;
               const pct = Math.min(Math.round(s / 24 * 100), 100);
-              const bg = s >= 12 ? '#c62828' : s >= 6 ? '#f57c00' : s > 0 ? '#1565c0' : '#e0e0e0';
-              const label = s >= 12 ? 'Tier 1' : s >= 6 ? 'Tier 2' : s > 0 ? 'Tier 3' : 'Pendente';
+              const label = s > 0 ? Criticidade.tierCurto(Criticidade.tierPorScore(s)) : Criticidade.TIER.PENDENTE;
+              const bg = s > 0 ? Criticidade.corDoTier(Criticidade.tierPorScore(s)) : '#e0e0e0';
               return `<tr style="border-top:1px solid #f0f0f0;">
-                <td style="padding:10px 12px;font-size:0.85em;color:#555;">${p.area}</td>
-                <td style="padding:10px 12px;font-size:0.88em;font-weight:500;">${p.processo}</td>
+                <td style="padding:10px 12px;font-size:0.85em;color:#555;">${esc(p.area)}</td>
+                <td style="padding:10px 12px;font-size:0.88em;font-weight:500;">${esc(p.processo)}</td>
                 <td style="padding:10px 12px;text-align:center;font-weight:700;color:${s > 0 ? bg : '#bbb'};">${s > 0 ? s : '-'}</td>
                 <td style="padding:10px 16px;">
                   <div style="display:flex;align-items:center;gap:10px;">
@@ -2843,7 +2865,7 @@ async function admin() {
           ${porArea.map(a => {
             const pctA = a.total > 0 ? Math.round(a.avaliados / a.total * 100) : 0;
             return `<tr style="border-top:1px solid #f0f0f0;">
-              <td style="padding:12px;font-weight:500;">${a.nome}</td>
+              <td style="padding:12px;font-weight:500;">${esc(a.nome)}</td>
               <td style="padding:12px;text-align:center;color:#666;">${a.total}</td>
               <td style="padding:12px;text-align:center;color:#2e7d32;font-weight:600;">${a.avaliados}</td>
               <td style="padding:12px;text-align:center;color:#c62828;font-weight:600;">${a.t1 || '-'}</td>
@@ -2868,7 +2890,7 @@ async function admin() {
   const coberturaEl = document.getElementById('painelTier1Cobertura');
   if (coberturaEl) {
     if (tier1 > 0) {
-      const t1Procs = processosVisiveis.filter(p => p.score >= 12);
+      const t1Procs = processosVisiveis.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T1));
       const t1Bia = t1Procs.filter(p => p.biaHomologada === 'BIA Realizado').length;
       const t1Bcp = t1Procs.filter(p => p.bcpStatus === 'BCP Realizado').length;
       const t1Drp = t1Procs.filter(p => p.drpStatus === 'DRP Realizado').length;
@@ -3013,11 +3035,11 @@ window.filtrarProcessosQuestionario = (area) => {
       ${processosDaArea.map(p => `
         <div class="list-row">
           <div class="list-row-main">
-            <div class="list-row-title">${p.processo}</div>
-            <div class="list-row-sub">${p.descricao || 'Sem descrição'}</div>
+            <div class="list-row-title">${esc(p.processo)}</div>
+            <div class="list-row-sub">${esc(p.descricao || 'Sem descrição')}</div>
           </div>
           <div class="list-row-actions">
-            <button class="btn btn-primary" onclick="abrirModalAvaliacaoProcesso(${p.id}, '${p.area.replace(/'/g, "\\'")}'  , '${p.processo.replace(/'/g, "\\'")}')" style="font-size:0.85em;padding:8px 16px;">Avaliar</button>
+            <button class="btn btn-primary" onclick="abrirModalAvaliacaoProcesso(${p.id}, '${escJs(p.area)}'  , '${escJs(p.processo)}')" style="font-size:0.85em;padding:8px 16px;">Avaliar</button>
           </div>
         </div>
       `).join('')}
@@ -3036,7 +3058,7 @@ window.abrirModalAvaliacaoProcesso = (processoId, area, processo) => {
   container.innerHTML = window.questionarioPerguntas.map((p, i) => `
     <div style="margin-bottom:32px;padding:20px;background:#f8f9fa;border-radius:8px;border-left:4px solid #1a237e;">
       <div style="font-weight:600;color:#1a237e;margin-bottom:6px;font-size:0.95em;">${p.pergunta}</div>
-      <div style="font-size:0.85em;color:#666;margin-bottom:16px;line-height:1.5;">${p.descricao || ''}</div>
+      <div style="font-size:0.85em;color:#666;margin-bottom:16px;line-height:1.5;">${esc(p.descricao || '')}</div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
         <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='#c62828'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
           <input type="radio" name="pergunta${i}" value="4" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#c62828';this.parentElement.style.background='#ffebee';" style="margin-right:8px;width:18px;height:18px;">
@@ -3146,18 +3168,15 @@ window.calcularScore = () => {
   document.getElementById('scoreTotal').style.color = 'white';
   
   // Calcular tier
-  let tier = '';
-  let tierColor = '';
-  if (total >= 12) {
-    tier = 'Tier 1 (Crítico)';
-    tierColor = '#ffcdd2';
-  } else if (total >= 6) {
-    tier = 'Tier 2 (Essencial)';
-    tierColor = '#ffe0b2';
-  } else {
-    tier = 'Tier 3 (Suporte)';
-    tierColor = '#bbdefb';
-  }
+  // O tier vem da regra unica; as cores aqui sao tons pastel proprios desta
+  // tela (fundo de destaque), diferentes das cores de badge de Criticidade.
+  const tier = Criticidade.tierPorScore(total);
+  const FUNDO_TIER = {
+    [Criticidade.TIER.T1]: '#ffcdd2',
+    [Criticidade.TIER.T2]: '#ffe0b2',
+    [Criticidade.TIER.T3]: '#bbdefb',
+  };
+  const tierColor = FUNDO_TIER[tier];
   
   const tierEl = document.getElementById('scoreTier');
   tierEl.textContent = tier;
@@ -3350,13 +3369,13 @@ function renderizarComponentes() {
 
   document.getElementById('compRows').innerHTML = data.length
     ? data.map(d => `<tr>
-        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${d.tipo}</span></td>
-        <td style="font-weight:600;color:#222;">${d.nome}</td>
-        <td style="font-size:0.85em;color:#555;">${d.descricao || '-'}</td>
+        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(d.tipo)}</span></td>
+        <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(d.descricao || '-')}</td>
         <td style="font-size:0.85em;color:#555;">${d.rto || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${d.rpo || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${d.estrategia || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${d.responsavel || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(d.estrategia || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(d.responsavel || '-')}</td>
         <td style="text-align:center;white-space:nowrap;">
           <button class="btn-icon" onclick="editarComp('${d.id}')" title="Editar">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -3540,10 +3559,10 @@ async function riscos() {
   document.getElementById('listaRiscos').style.display = 'block';
 
   document.getElementById('filtroRiscoArea').innerHTML = '<option value="">Todas as áreas</option>' +
-    riscosAreasCache.map(a => `<option value="${a.nome}">${a.nome}</option>`).join('');
+    riscosAreasCache.map(a => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
   document.getElementById('filtroRiscoFornecedor').innerHTML = '<option value="">Todos (inclui sem fornecedor)</option>' +
     '<option value="_qualquer_">Somente riscos de fornecedores</option>' +
-    riscosFornecedoresCache.map(f => `<option value="${f.id}">${f.nome}</option>`).join('');
+    riscosFornecedoresCache.map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('');
 
   renderizarRiscos();
 }
@@ -3589,11 +3608,11 @@ function renderizarRiscos() {
 
   document.getElementById('riscoRows').innerHTML = data.length
     ? data.map(r => `<tr>
-        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${r.area || '-'}</span></td>
-        <td style="font-size:0.85em;color:#555;">${r.processo || (r.fornecedorNome ? `🏢 ${r.fornecedorNome}` : '<span style="color:#bbb;">Corporativo</span>')}</td>
-        <td style="font-weight:600;color:#222;cursor:pointer;" ondblclick="editarRisco('${r.id}')" title="Duplo-clique para editar">${r.titulo}</td>
-        <td style="font-size:0.85em;color:#555;">${r.categoria || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${r.responsavel || '-'}</td>
+        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(r.area || '-')}</span></td>
+        <td style="font-size:0.85em;color:#555;">${r.processo || (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span style="color:#bbb;">Corporativo</span>')}</td>
+        <td style="font-weight:600;color:#222;cursor:pointer;" ondblclick="editarRisco('${r.id}')" title="Duplo-clique para editar">${esc(r.titulo)}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(r.categoria || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(r.responsavel || '-')}</td>
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
         <td>${_badgeStatusRisco(r.status)}</td>
@@ -3877,9 +3896,9 @@ window.abrirDrawerRisco = async (r) => {
   if (!riscosProcessosCache.length) {
     try { riscosProcessosCache = await API.getProcessos(); } catch (e) { riscosProcessosCache = []; }
   }
-  document.getElementById('rArea').innerHTML = riscosAreasCache.map(a => `<option value="${a.nome}">${a.nome}</option>`).join('');
+  document.getElementById('rArea').innerHTML = riscosAreasCache.map(a => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
   document.getElementById('rProcesso').innerHTML = '<option value="">-- Nenhum (risco corporativo) --</option>' +
-    riscosProcessosCache.map(p => `<option value="${p.id}" data-area="${p.area}">${p.area} — ${p.processo}</option>`).join('');
+    riscosProcessosCache.map(p => `<option value="${p.id}" data-area="${esc(p.area)}">${esc(p.area)} — ${esc(p.processo)}</option>`).join('');
   document.getElementById('rProcesso').onchange = () => {
     const sel = document.getElementById('rProcesso');
     const area = sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].dataset.area : '';
@@ -3893,7 +3912,7 @@ window.abrirDrawerRisco = async (r) => {
     } catch (e) { riscosFornecedoresCache = []; }
   }
   document.getElementById('rFornecedor').innerHTML = '<option value="">-- Nenhum --</option>' +
-    riscosFornecedoresCache.map(f => `<option value="${f.id}" data-nome="${f.nome}">${f.nome}${f.empresa ? ' — ' + f.empresa : ''}</option>`).join('');
+    riscosFornecedoresCache.map(f => `<option value="${f.id}" data-nome="${esc(f.nome)}">${esc(f.nome)}${f.empresa ? ' — ' + f.empresa : ''}</option>`).join('');
 
   const categorias = [...new Set([...RISCO_CATEGORIAS_PADRAO, ...riscosData.map(x => x.categoria).filter(Boolean)])].sort();
   document.getElementById('rCategoriaList').innerHTML = categorias.map(c => `<option value="${c}">`).join('');
@@ -3934,7 +3953,7 @@ window.abrirDrawerRisco = async (r) => {
   document.getElementById('rJustificativaEncerramento').value = r ? (r.justificativaEncerramento || '') : '';
 
   const titulo = r ? 'Editar Risco' : 'Novo Risco';
-  const subtitulo = r && r.titulo ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${r.titulo}</div>` : '';
+  const subtitulo = r && r.titulo ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(r.titulo)}</div>` : '';
   document.getElementById('riscoDrawerTitulo').innerHTML = titulo + (r ? ` ${_badgeStatusRisco(r.status)}` : '') + subtitulo;
 
   // Somente admin edita; demais perfis visualizam em modo leitura.
@@ -4044,8 +4063,8 @@ function renderImpactoFinanceiroRisco() {
   if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum componente adicionado.</p>'; return; }
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((it, i) => `<tr>
-        <td style="font-weight:600;color:#222;">${it.categoria}</td>
-        <td style="font-size:0.85em;color:#555;">${it.descricao || '-'}</td>
+        <td style="font-weight:600;color:#222;">${esc(it.categoria)}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(it.descricao || '-')}</td>
         <td style="font-size:0.9em;font-weight:600;color:#333;">R$ ${(Number(it.valor) || 0).toLocaleString('pt-BR')}</td>
         <td style="text-align:center;">${isAdmin ? `<button class="btn-icon" onclick="removerImpactoFinanceiroItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
       </tr>`).join('') + `</tbody></table>`;
@@ -4080,8 +4099,8 @@ function renderPlanoAcaoRisco() {
   if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhuma ação cadastrada.</p>'; return; }
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((it, i) => `<tr>
-        <td style="font-weight:600;color:#222;">${it.acao}</td>
-        <td style="font-size:0.85em;color:#555;">${it.responsavel || '-'}</td>
+        <td style="font-weight:600;color:#222;">${esc(it.acao)}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(it.responsavel || '-')}</td>
         <td style="font-size:0.85em;color:#555;">${it.prazo || '-'}</td>
         <td>${it.status || '-'}</td>
         <td style="text-align:center;">${isAdmin ? `<button class="btn-icon" onclick="removerPlanoAcaoItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
@@ -4118,7 +4137,7 @@ function renderKrisRisco() {
   if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum KRI cadastrado.</p>'; return; }
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((it, i) => `<tr>
-        <td style="font-weight:600;color:#222;">${it.indicador}</td>
+        <td style="font-weight:600;color:#222;">${esc(it.indicador)}</td>
         <td style="font-size:0.85em;color:#555;">${it.meta || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${it.valorAtual || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${it.frequencia || '-'}</td>
@@ -4186,7 +4205,7 @@ window.abrirImportarRiscosPCN = async () => {
   } catch (e) { riscosProcessosCache = []; }
   const comPCN = riscosProcessosCache.filter(p => p.pcnSalvo);
   document.getElementById('importPcnProcesso').innerHTML = '<option value="">Selecione um processo com PCN gerado...</option>' +
-    comPCN.map(p => `<option value="${p.id}">${p.area} — ${p.processo}</option>`).join('');
+    comPCN.map(p => `<option value="${p.id}">${esc(p.area)} — ${esc(p.processo)}</option>`).join('');
 
   document.getElementById('modalImportarRiscosPCN').classList.add('open');
 };
@@ -4246,10 +4265,10 @@ window.carregarRiscosPCNImport = () => {
     <table class="data-table" style="box-shadow:none;"><tbody>` +
     extraidos.map((r, i) => `<tr>
         <td style="width:5%;"><input type="checkbox" checked onchange="window._riscoImportExtraidos[${i}].selecionado = this.checked"></td>
-        <td style="font-weight:600;color:#222;">${r.evento}</td>
+        <td style="font-weight:600;color:#222;">${esc(r.evento)}</td>
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
-        <td style="font-size:0.82em;color:#555;">${r.mitigacao || '-'}</td>
+        <td style="font-size:0.82em;color:#555;">${esc(r.mitigacao || '-')}</td>
       </tr>`).join('') + `</tbody></table>`;
 
   document.getElementById('btnConfirmarImportarRiscos').style.display = 'inline-block';
@@ -4536,8 +4555,8 @@ async function _lancarResultadosIndicador(indicador, novasEntradas, arquivoOrige
     if (!jaExiste) {
       await API.salvarRisco({
         area: '',
-        titulo: `Desvio no indicador "${indicador.nome}"`,
-        descricao: `O indicador "${indicador.nome}" (${indicador.pilar || 'sem pilar'}) atingiu ${ultimoComDado.desempenho}% de desempenho em ${_formatMes(ultimoComDado.mes)}, abaixo da meta mínima de ${indicador.metaMinima}%.`,
+        titulo: `Desvio no indicador "${esc(indicador.nome)}"`,
+        descricao: `O indicador "${esc(indicador.nome)}" (${esc(indicador.pilar || 'sem pilar')}) atingiu ${ultimoComDado.desempenho}% de desempenho em ${_formatMes(ultimoComDado.mes)}, abaixo da meta mínima de ${indicador.metaMinima}%.`,
         categoria: indicador.pilar || 'Tecnológico',
         responsavel: indicador.responsavel || '',
         dataIdentificacao: new Date().toISOString().slice(0, 10),
@@ -4631,7 +4650,7 @@ function renderizarIndicadoresDashboard() {
   let lista, titulo;
   if (f.modo === 'todos') { lista = [...indicadoresData]; titulo = 'Todos os Indicadores'; }
   else if (f.modo === 'semMeta') { lista = semMeta; titulo = 'Indicadores Sem Meta Definida'; }
-  else if (f.modo === 'pilar') { lista = indicadoresData.filter(d => (d.pilar || 'Sem Pilar') === f.pilar); titulo = `Indicadores — Pilar: ${f.pilar}`; }
+  else if (f.modo === 'pilar') { lista = indicadoresData.filter(d => (d.pilar || 'Sem Pilar') === f.pilar); titulo = `Indicadores — Pilar: ${esc(f.pilar)}`; }
   else { lista = foraDaMeta; titulo = 'Indicadores Fora da Meta'; }
 
   lista = f.modo === 'foraDaMeta'
@@ -4691,9 +4710,9 @@ function renderizarIndicadoresDashboard() {
             const { mes, desempenho } = _pegarDesempenhoNoMes(d, mesRef);
             const foraMeta = desempenho != null && _indicadorForaDaMeta(d, desempenho);
             return `<tr>
-              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${d.pilar || '-'}</span></td>
-              <td style="font-weight:600;color:#222;">${d.nome}</td>
-              <td style="font-size:0.85em;color:#555;">${d.responsavel || '-'}</td>
+              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(d.pilar || '-')}</span></td>
+              <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
+              <td style="font-size:0.85em;color:#555;">${esc(d.responsavel || '-')}</td>
               <td style="font-size:0.85em;color:#555;">${mes ? _formatMes(mes) : '-'}</td>
               <td style="font-size:0.9em;font-weight:600;color:${foraMeta ? '#c62828' : '#333'};">${desempenho != null ? desempenho + '%' : '-'}</td>
               <td style="font-size:0.85em;color:#555;">${d.metaMinima != null && d.metaMinima !== '' ? d.metaMinima + '%' : '-'}</td>
@@ -4858,10 +4877,10 @@ function renderizarIndicadoresCadastro() {
         <tbody>
           ${pagina.length ? pagina.map(d => `<tr>
               ${isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="chk-indicador" ${indicadoresSelecionados.has(d.id) ? 'checked' : ''} onchange="toggleIndicadorSelecionado('${d.id}', this.checked)"></td>` : ''}
-              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${d.pilar || '-'}</span></td>
-              <td style="font-size:0.85em;color:#555;">${d.responsavel || '-'}</td>
-              <td style="font-weight:600;color:#222;">${d.nome}</td>
-              <td style="font-size:0.85em;color:#555;">${d.tipo || '-'}</td>
+              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(d.pilar || '-')}</span></td>
+              <td style="font-size:0.85em;color:#555;">${esc(d.responsavel || '-')}</td>
+              <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
+              <td style="font-size:0.85em;color:#555;">${esc(d.tipo || '-')}</td>
               <td>${_htmlCelulaMetaMinima(d.id, d.metaMinima, isAdmin)}</td>
               <td style="text-align:center;white-space:nowrap;">
                 ${isAdmin ? `<button class="btn-icon" onclick="editarIndicador('${d.id}')" title="Editar">
@@ -5002,7 +5021,7 @@ async function indicadoresLancamento() {
 function _popularSelectIndicadorLancamento() {
   const ativos = indicadoresData.filter(d => d.ativo !== false).sort((a, b) => (a.nome || '').localeCompare(b.nome || ''));
   document.getElementById('lancIndicador').innerHTML = ativos.length
-    ? ativos.map(d => `<option value="${d.id}">${d.pilar ? d.pilar + ' — ' : ''}${d.nome}</option>`).join('')
+    ? ativos.map(d => `<option value="${d.id}">${d.pilar ? d.pilar + ' — ' : ''}${esc(d.nome)}</option>`).join('')
     : '<option value="">Nenhum indicador ativo cadastrado</option>';
 }
 
@@ -5071,9 +5090,9 @@ function renderizarGradeLancamentos() {
         </thead>
         <tbody>
           ${pagina.length ? pagina.map(r => `<tr>
-              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${r.pilar || '-'}</span></td>
-              <td style="font-weight:600;color:#222;">${r.indicadorNome}</td>
-              <td style="font-size:0.85em;color:#555;">${r.responsavel || '-'}</td>
+              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(r.pilar || '-')}</span></td>
+              <td style="font-weight:600;color:#222;">${esc(r.indicadorNome)}</td>
+              <td style="font-size:0.85em;color:#555;">${esc(r.responsavel || '-')}</td>
               <td style="font-size:0.85em;color:#555;">${_formatMes(r.mes)}</td>
               <td>${_htmlCelulaDesempenho(r.indicadorId, r.mes, r.desempenho, isAdmin)}</td>
               <td style="font-size:0.8em;color:#888;">${r.importadoEm ? new Date(r.importadoEm).toLocaleString('pt-BR') : '-'}${r.arquivo ? ' · ' + r.arquivo : ''}</td>
@@ -5173,7 +5192,7 @@ async function _removerLancamentoIndicador(indicador, mes) {
 window.excluirLancamento = async (indicadorId, mes) => {
   const indicador = indicadoresData.find(d => d.id === indicadorId);
   if (!indicador) return;
-  if (!confirm(`Excluir o lançamento de ${_formatMes(mes)} de "${indicador.nome}"? Esta ação não pode ser desfeita.`)) return;
+  if (!confirm(`Excluir o lançamento de ${_formatMes(mes)} de "${esc(indicador.nome)}"? Esta ação não pode ser desfeita.`)) return;
   try {
     await _removerLancamentoIndicador(indicador, mes);
     showToast('✅ Lançamento excluído!', '#2e7d32');
@@ -5268,9 +5287,9 @@ function renderizarIndicadoresMatriz() {
           </thead>
           <tbody>
             ${itens.map(d => `<tr>
-                <td style="font-weight:600;color:#222;">${d.nome}</td>
-                <td style="font-size:0.85em;color:#555;">${d.tipo || '-'}</td>
-                <td style="font-size:0.85em;color:#555;">${d.responsavel || '-'}</td>
+                <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
+                <td style="font-size:0.85em;color:#555;">${esc(d.tipo || '-')}</td>
+                <td style="font-size:0.85em;color:#555;">${esc(d.responsavel || '-')}</td>
                 <td style="font-size:0.85em;color:#555;">${d.metaMinima != null && d.metaMinima !== '' ? d.metaMinima + '%' : '<span style="color:#bbb;">-</span>'}</td>
                 ${meses.map(m => {
                   const entrada = (d.historico || []).find(h => h.mes === m);
@@ -5524,10 +5543,10 @@ function renderPreviewImportIndicadores() {
   resultado.innerHTML = `<p style="font-size:0.85em;color:#555;margin-bottom:8px;">${validas.length} de ${linhas.length} linha(s) válida(s).${novos.length ? ' ' + novos.length + ' indicador(es) novo(s) será(ão) criado(s): ' + novos.join(', ') + '.' : ''}</p>` +
     `<table class="data-table" style="box-shadow:none;"><thead><tr><th>Indicador</th><th>Pilar</th><th>Tipo</th><th>Responsável</th><th>Mês</th><th>Desempenho</th><th>Situação</th></tr></thead><tbody>` +
     linhas.map(l => `<tr>
-        <td style="font-weight:600;">${l.nomeIndicador}</td>
+        <td style="font-weight:600;">${esc(l.nomeIndicador)}</td>
         <td style="font-size:0.85em;color:#555;">${l.pilar || (l.novoIndicador ? '<span style="color:#e65100;">vazio</span>' : '<span style="color:#bbb;">-</span>')}</td>
         <td style="font-size:0.85em;color:#555;">${l.tipo || (l.novoIndicador ? '<span style="color:#e65100;">vazio</span>' : '<span style="color:#bbb;">-</span>')}</td>
-        <td style="font-size:0.85em;color:#555;">${l.responsavel || '<span style="color:#bbb;">-</span>'}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(l.responsavel || '<span style="color:#bbb;">-</span>')}</td>
         <td>${l.mes}</td>
         <td>${l.desempenho == null ? '<span style="color:#999;">sem dado</span>' : l.desempenho + '%'}</td>
         <td>${!l.valido ? `<span style="color:#c62828;">✘ ${l.motivo}</span>`
@@ -5671,11 +5690,11 @@ function renderComponentesDrp() {
 
     const tags = itens.map(c => {
       const tooltip = [c.estrategia, c.responsavel, c.rto ? 'RTO:'+c.rto : ''].filter(Boolean).join(' • ');
-      return `<span style="display:inline-flex;align-items:center;gap:3px;background:#1a237e;color:white;padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;cursor:default;" title="${tooltip.replace(/"/g,'&quot;')}">${c.nome}<button onclick="removerComponenteDrp('${c.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.7);line-height:1;padding:0 3px;" onmouseenter="this.style.color='white'" onmouseleave="this.style.color='rgba(255,255,255,0.7)'" title="Remover">&times;</button></span>`;
+      return `<span style="display:inline-flex;align-items:center;gap:3px;background:#1a237e;color:white;padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;cursor:default;" title="${esc(tooltip)}">${esc(c.nome)}<button onclick="removerComponenteDrp('${c.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.7);line-height:1;padding:0 3px;" onmouseenter="this.style.color='white'" onmouseleave="this.style.color='rgba(255,255,255,0.7)'" title="Remover">&times;</button></span>`;
     }).join(' ');
 
     const chips = disponiveisNoTipo.map(d => {
-      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="adicionarComponenteDrpById('${d.id}')" title="${d.descricao || d.nome}">${d.nome}</span>`;
+      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="adicionarComponenteDrpById('${d.id}')" title="${d.descricao || d.nome}">${esc(d.nome)}</span>`;
     }).join(' ');
 
     const emptyMsg = !count ? `<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum selecionado</span>` : '';
@@ -5691,7 +5710,7 @@ function renderComponentesDrp() {
             ${tags}
             ${emptyMsg}
             <div style="position:relative;flex:1;min-width:150px;">
-              <input type="text" class="drp-type-input" data-tipo="${tipo.replace(/"/g,'&quot;')}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #e8eaf6;outline:none;font-size:0.85em;padding:4px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#1a237e';mostrarDropdownCompDrp(this,'${tipo.replace(/'/g, "\\'")}')" oninput="mostrarDropdownCompDrp(this,'${tipo.replace(/'/g, "\\'")}')" onblur="this.style.borderColor='#e8eaf6';setTimeout(()=>{const dd=this.parentElement.querySelector('.drp-type-dropdown');if(dd)dd.style.display='none';},200)">
+              <input type="text" class="drp-type-input" data-tipo="${esc(tipo)}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #e8eaf6;outline:none;font-size:0.85em;padding:4px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#1a237e';mostrarDropdownCompDrp(this,'${escJs(tipo)}')" oninput="mostrarDropdownCompDrp(this,'${escJs(tipo)}')" onblur="this.style.borderColor='#e8eaf6';setTimeout(()=>{const dd=this.parentElement.querySelector('.drp-type-dropdown');if(dd)dd.style.display='none';},200)">
               <div class="drp-type-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:180px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.12);"></div>
             </div>
           </div>
@@ -5770,8 +5789,8 @@ window.mostrarDropdownCompDrp = (input, tipo) => {
   let html = '';
   disponiveis.forEach(d => {
     html += `<div class="drp-dd-option" onmousedown="adicionarComponenteDrpById('${d.id}')" style="padding:7px 12px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
-      <div style="font-weight:500;color:#222;">${d.nome}</div>
-      ${d.descricao ? `<div style="font-size:0.75em;color:#888;margin-top:1px;">${d.descricao}</div>` : ''}
+      <div style="font-weight:500;color:#222;">${esc(d.nome)}</div>
+      ${d.descricao ? `<div style="font-size:0.75em;color:#888;margin-top:1px;">${esc(d.descricao)}</div>` : ''}
     </div>`;
   });
 
@@ -5811,8 +5830,8 @@ window.mostrarDropdownComponenteDrp = () => {
     html += `<div style="padding:6px 12px 3px;font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;background:#fafafa;">${tipo}</div>`;
     itens.forEach(d => {
       html += `<div class="drp-comp-option" onmousedown="adicionarComponenteDrpById('${d.id}')" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
-        <div style="font-weight:600;color:#222;">${d.nome}</div>
-        ${d.descricao ? `<div style="font-size:0.82em;color:#888;margin-top:2px;">${d.descricao}</div>` : ''}
+        <div style="font-weight:600;color:#222;">${esc(d.nome)}</div>
+        ${d.descricao ? `<div style="font-size:0.82em;color:#888;margin-top:2px;">${esc(d.descricao)}</div>` : ''}
       </div>`;
     });
   });
@@ -5986,10 +6005,10 @@ window.abrirLevantamento = () => {
 function _buildLevantamentoView(lev, p) {
   const field = (label, val) => val ? '<tr><td style="padding:8px 12px;font-weight:600;color:#444;width:35%;border-bottom:1px solid #f0f0f0;">' + label + '</td><td style="padding:8px 12px;border-bottom:1px solid #f0f0f0;">' + val + '</td></tr>' : '';
   const list = (val) => { try { return JSON.parse(val).join(', '); } catch(e) { return val; } };
-  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Levantamento PCN - ${p.processo}</title>
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Levantamento PCN - ${esc(p.processo)}</title>
   <style>body{font-family:Segoe UI,Arial;max-width:800px;margin:0 auto;padding:40px 20px;color:#333;} h1{color:#1a237e;font-size:1.4em;} h2{color:#1a237e;font-size:1.1em;margin-top:28px;padding:8px 12px;background:#e8eaf6;border-left:4px solid #1a237e;border-radius:0 6px 6px 0;} table{width:100%;border-collapse:collapse;margin:12px 0;} @media print{h2{page-break-after:avoid;}}</style></head><body>
-  <h1>📋 Levantamento PCN: ${p.processo}</h1>
-  <p style="color:#666;">Área: ${p.area} • Preenchido em: ${lev.data ? new Date(lev.data).toLocaleDateString('pt-BR') : '-'}</p>
+  <h1>📋 Levantamento PCN: ${esc(p.processo)}</h1>
+  <p style="color:#666;">Área: ${esc(p.area)} • Preenchido em: ${lev.data ? new Date(lev.data).toLocaleDateString('pt-BR') : '-'}</p>
   <h2>1. Identificação</h2><table>${field('Gestor',lev.gestor)}${field('Substituto',lev.substituto)}</table>
   <h2>2. Escopo</h2><table>${field('Funcionamento',lev.escopo)}${field('Entrega Principal',lev.entrega)}</table>
   <h2>3. Ativação da Continuidade</h2><table>${field('Situações',list(lev.ativacao))}${field('Outro',lev.ativacaoOutro)}</table>
@@ -6072,7 +6091,7 @@ window.gerarDossieProcesso = () => {
   const area = window.areasDisponiveis ? window.areasDisponiveis.find(a => a.nome === p.area) : null;
   const responsavel = area ? area.responsavel : '';
   const score = p.score || 0;
-  const tier = score >= 12 ? 'Tier 1 (Crítico)' : score >= 6 ? 'Tier 2 (Essencial)' : score > 0 ? 'Tier 3 (Suporte)' : 'Não avaliado';
+  const tier = Criticidade.tierDoProcesso(p);
   const deps = (p.dependencia || '').split(',').map(s => s.trim()).filter(Boolean);
   const depGrupos = {};
   deps.forEach(nome => { const dep = catalogo.find(d => d.nome === nome); const cat = dep ? dep.categoria : 'Outros'; if (!depGrupos[cat]) depGrupos[cat] = []; depGrupos[cat].push(nome); });
@@ -6082,7 +6101,7 @@ window.gerarDossieProcesso = () => {
   const respostas = p.respostas || {};
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado.', '#e65100');
-  win.document.write('<html><head><title>Dossiê - ' + p.processo + '</title><style>body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6}h1{color:#1a237e}h2{color:#1a237e;border-bottom:2px solid #e8eaf6;padding-bottom:6px;margin-top:24px}table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt}th{background:#1a237e;color:white;padding:8px 10px;text-align:left}td{padding:7px 10px;border:1px solid #e0e0e0}.badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:9pt;font-weight:700;color:white;background:' + (score >= 12 ? '#c62828' : score >= 6 ? '#f57c00' : '#1565c0') + '}</style></head><body>');
+  win.document.write('<html><head><title>Dossiê - ' + p.processo + '</title><style>body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6}h1{color:#1a237e}h2{color:#1a237e;border-bottom:2px solid #e8eaf6;padding-bottom:6px;margin-top:24px}table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt}th{background:#1a237e;color:white;padding:8px 10px;text-align:left}td{padding:7px 10px;border:1px solid #e0e0e0}.badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:9pt;font-weight:700;color:white;background:' + Criticidade.corDoTier(tier) + '}</style></head><body>');
   win.document.write('<h1>' + p.processo + '</h1><p>' + p.area + ' — ' + responsavel + '</p><span class="badge">' + tier + ' • Score ' + score + '</span>');
   win.document.write('<h2>Identificação</h2><p><b>Descrição:</b> ' + (p.descricaoFuncional || '-') + '</p>');
   win.document.write('<h2>BIA</h2><p><b>Status:</b> ' + (p.biaHomologada || '-') + '</p><p><b>Impacto:</b> ' + (p.descricao || '-') + '</p><p><b>RTO:</b> ' + (p.rto || '-') + ' | <b>RPO:</b> ' + (p.rpo || '-') + ' | <b>MTD:</b> ' + (p.mtd || '-') + '</p>');
@@ -6157,7 +6176,7 @@ window.abrirPCNSalvo = () => {
   const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p || !p.pcnSalvo) return showToast('Nenhum PCN salvo.', '#e65100');
-  const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.score > 0 ? 'Tier 3 (Suporte)' : 'Não avaliado';
+  const tier = Criticidade.tierDoProcesso(p);
   const versoes = _parsePCNVersoes(p.pcnSalvo);
   const ultimaVersao = versoes[versoes.length - 1];
   const pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes);
@@ -6203,7 +6222,7 @@ function _buildPCNPage(pcnContent, info, processId, versoes) {
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<title>PCN - ${info.processo || ''}</title>
+<title>PCN - ${esc(info.processo || '')}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',Arial,sans-serif;color:#333;font-size:10.5pt;line-height:1.6;margin:0}
@@ -6251,8 +6270,8 @@ ${seletorVersoes}
   <div class="cover">
     <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:16px;" alt="Fortes" onerror="this.style.display='none'">
     <h1>Plano de Continuidade de Negócios</h1>
-    <p style="font-size:13pt;">${info.processo || ''}</p>
-    <p>Área: ${info.area || ''}</p>
+    <p style="font-size:13pt;">${esc(info.processo || '')}</p>
+    <p>Área: ${esc(info.area || '')}</p>
     <span class="badge">${info.tier || ''} • Score ${info.score || 0}</span>
     <p style="margin-top:16px;font-size:9pt;opacity:0.7;">Versão ${versaoAtual} • ${new Date().toLocaleDateString('pt-BR')} • Classificação: Uso Interno</p>
   </div>
@@ -6265,10 +6284,10 @@ ${seletorVersoes}
   </div>
 </div>
 <script>
-var PROCESS_ID = '${String(processId).replace(/'/g, "\\'")}';
+var PROCESS_ID = '${escScript(processId)}';
 var PCN_API_URL = '` + API_URL + `';
-var PCN_AREA = '${(info.area || '').replace(/'/g, "\\'")}';
-var PCN_PROCESSO = '${(info.processo || '').replace(/'/g, "\\'")}';
+var PCN_AREA = '${escScript(info.area || '')}';
+var PCN_PROCESSO = '${escScript(info.processo || '')}';
 var PCN_VERSOES = JSON.parse('${versoesJson}');
 function buildNav(){
   var el = document.getElementById('pcn-editavel');
@@ -6346,7 +6365,7 @@ async function salvarVersaoPCN(){
 window.abrirPCNDireto = (id) => {
   const p = window.processosData.find(proc => proc.id === id);
   if (!p || !p.pcnSalvo) return showToast('Nenhum PCN salvo para este processo.', '#e65100');
-  const tier = p.score >= 12 ? 'Tier 1 (Crítico)' : p.score >= 6 ? 'Tier 2 (Essencial)' : p.score > 0 ? 'Tier 3 (Suporte)' : 'Não avaliado';
+  const tier = Criticidade.tierDoProcesso(p);
   const versoes = _parsePCNVersoes(p.pcnSalvo);
   const ultimaVersao = versoes[versoes.length - 1];
   const pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes);
@@ -6395,9 +6414,9 @@ function renderFornecedoresBcp() {
     const dep = catalogo.find(d => d.nome === nome) || {};
     html += `<tr style="border-bottom:1px solid #f0f0f0;">
       <td style="padding:10px 14px;font-weight:600;color:#222;">${nome}</td>
-      <td style="padding:10px 14px;color:#555;">${dep.empresa || '-'}</td>
-      <td style="padding:10px 14px;color:#555;">${dep.detalhes || '-'}</td>
-      <td style="padding:10px 14px;color:#555;">${dep.telefone || '-'}</td>
+      <td style="padding:10px 14px;color:#555;">${esc(dep.empresa || '-')}</td>
+      <td style="padding:10px 14px;color:#555;">${esc(dep.detalhes || '-')}</td>
+      <td style="padding:10px 14px;color:#555;">${esc(dep.telefone || '-')}</td>
       <td style="padding:6px 8px;"><input type="text" class="planoB-contingencia" data-dep="${nome}" placeholder="Ex: Provedor alternativo..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
       <td style="padding:6px 8px;"><input type="text" class="sla-valor" data-dep="${nome}" placeholder="Ex: Suporte 24x7, 15min..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
     </tr>`;
@@ -6461,8 +6480,8 @@ async function pcns() {
     }
 
     // Cards de resumo
-    const tier1 = comPCN.filter(p => p.score >= 12).length;
-    const tier2 = comPCN.filter(p => p.score >= 6 && p.score < 12).length;
+    const tier1 = comPCN.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T1)).length;
+    const tier2 = comPCN.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T2)).length;
     const tier3 = comPCN.filter(p => p.score > 0 && p.score < 6).length;
     document.getElementById('pcns-resumo').style.display = 'flex';
     document.getElementById('pcns-resumo').innerHTML = `
@@ -6520,8 +6539,8 @@ window.toggleAreaPCN = (areaId) => {
 
 function renderPCNLista(comPCN) {
   const porArea = _agruparPorArea(comPCN);
-  const tierColor = (score) => score >= 12 ? '#c62828' : score >= 6 ? '#f57c00' : score > 0 ? '#1565c0' : '#999';
-  const tierLabel = (score) => score >= 12 ? 'Tier 1' : score >= 6 ? 'Tier 2' : score > 0 ? 'Tier 3' : '-';
+  const tierColor = (p) => Criticidade.corDoTier(p);
+  const tierLabel = (p) => Criticidade.tierCurto(p);
 
   let html = '';
   Object.entries(porArea).sort((a, b) => a[0].localeCompare(b[0])).forEach(([area, procs]) => {
@@ -6541,13 +6560,13 @@ function renderPCNLista(comPCN) {
       html += `<div style="display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid #f0f0f0;transition:background 0.15s;" 
                     onmouseenter="this.style.background='#f8f9ff'" onmouseleave="this.style.background='white'">
         <div style="flex:1;cursor:pointer;" onclick="abrirPCNDireto('${p.id}')">
-          <div style="font-weight:600;color:#222;font-size:0.92em;">${p.processo}</div>
+          <div style="font-weight:600;color:#222;font-size:0.92em;">${esc(p.processo)}</div>
           <div style="font-size:0.78em;color:#999;margin-top:2px;">Atualizado: ${dataVersao}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <span style="background:${tierColor(p.score)};color:white;padding:2px 8px;border-radius:8px;font-size:0.72em;font-weight:700;">${tierLabel(p.score)} • ${p.score || 0}</span>
+          <span style="background:${tierColor(p)};color:white;padding:2px 8px;border-radius:8px;font-size:0.72em;font-weight:700;">${tierLabel(p)} • ${p.score || 0}</span>
           <button onclick="abrirPCNDireto('${p.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Abrir PCN">📄</button>
-          <button onclick="event.stopPropagation();excluirPCN('${p.id}','${p.area.replace(/'/g,"\\'")}','${p.processo.replace(/'/g,"\\'")}')" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#bbb'" title="Excluir PCN">🗑️</button>
+          <button onclick="event.stopPropagation();excluirPCN('${p.id}','${escJs(p.area)}','${escJs(p.processo)}')" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#bbb'" title="Excluir PCN">🗑️</button>
         </div>
       </div>`;
     });
