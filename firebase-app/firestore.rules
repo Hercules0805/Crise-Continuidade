@@ -90,6 +90,16 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // Lancamentos mensais dos indicadores: um documento por (indicador, mes).
+    // Antes viviam numa lista dentro do documento do indicador, regravada
+    // inteira a cada lancamento — dois administradores lancando ao mesmo tempo
+    // apagavam o trabalho um do outro, em silencio. Um documento por mes acaba
+    // com isso e ainda permite consultar "quem ficou fora da meta em marco".
+    match /lancamentos_indicadores/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin();
+    }
+
     match /config_respostas/{id} {
       allow read: if isCorpUser();
       allow write: if isAdmin();

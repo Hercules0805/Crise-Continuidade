@@ -61,6 +61,20 @@ function _somarDias(iso, dias) {
   return new Date(d.getTime() + dias * 86400000).toISOString();
 }
 
+/**
+ * Numero medido, ou null quando nao houve medicao.
+ *
+ * ATENCAO: Number(null) e Number('') valem ZERO em JavaScript. Sem esta guarda,
+ * um mes sem dado virava uma medicao de 0% — que na curva e MUITO pior que a
+ * ausencia, porque 0% parece desempenho pessimo em vez de "nao medido". E o
+ * mesmo engano que fazia uma celula vazia da planilha apagar o valor do mes.
+ */
+function _numeroMedido(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Chave estavel: a mesma resposta nunca gera duas medicoes. */
 function idDaMedicao(fonte, origemId) {
   return `${fonte}__${origemId}`;
@@ -74,8 +88,8 @@ function idDaMedicao(fonte, origemId) {
  */
 function medicaoDeRespostaBia(origemId, resp) {
   if (!resp) return null;
-  const valor = Number(resp.score);
-  if (!Number.isFinite(valor)) return null;
+  const valor = _numeroMedido(resp.score);
+  if (valor === null) return null;
 
   const coletadoEm = resp.timestamp || null;
   if (!coletadoEm || isNaN(new Date(coletadoEm).getTime())) return null;
@@ -106,7 +120,49 @@ function medicaoDeRespostaBia(origemId, resp) {
   };
 }
 
+/**
+ * Converte um lancamento mensal de indicador em medicao.
+ *
+ * O mes (AAAA-MM) vira a data da medicao: dia 1 do mes, em UTC. A medicao e
+ * sobre o MES de referencia, nao sobre o instante em que alguem digitou.
+ */
+function medicaoDeLancamento(origemId, lanc) {
+  if (!lanc) return null;
+  const valor = _numeroMedido(lanc.desempenho);
+  if (valor === null) return null;
+
+  const mes = String(lanc.mes || '').trim();
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(mes)) return null;
+
+  const indicadorId = String(lanc.indicadorId || '').trim();
+  if (!indicadorId) return null;
+
+  const coletadoEm = `${mes}-01T00:00:00.000Z`;
+
+  return {
+    sujeitoTipo: 'indicador',
+    sujeitoId: indicadorId,
+    sujeitoRotulo: String(lanc.indicadorNome || indicadorId),
+    // Indicador nao pertence a uma area: fica sem, e so admin le a medicao.
+    area: '',
+    fonte: FONTE.INDICADOR,
+    metrica: 'desempenho',
+    escala: ESCALA.PERCENTUAL,
+    valor,
+    classificacao: '',
+    periodo: mes,
+    coletadoEm,
+    registradoEm: new Date().toISOString(),
+    registradoPor: String(lanc.lancadoPor || '').trim(),
+    reguaVersao: 1,
+    validoAte: _somarDias(coletadoEm, VALIDADE_DIAS[FONTE.INDICADOR]),
+    origemColecao: 'lancamentos_indicadores',
+    origemId,
+  };
+}
+
 module.exports = {
+  medicaoDeLancamento,
   COLECAO,
   ESCALA,
   FONTE,

@@ -4551,8 +4551,12 @@ function _renderBarraFiltrosIndicadores(containerId, filtros, handler, { comMes 
 // Usada tanto pelo lançamento manual (1 entrada) quanto pela importação CSV
 // (várias entradas de uma vez, uma por mês do arquivo).
 async function _lancarResultadosIndicador(indicador, novasEntradas, arquivoOrigem, riscosCache) {
-  const historicoPorMes = new Map((indicador.historico || []).map(h => [h.mes, h]));
+  // Cada mes vira um documento proprio. Antes a lista inteira era regravada a
+  // partir da copia em memoria: dois lancamentos simultaneos se apagavam.
+  await API.lancarResultados(indicador.id, novasEntradas, arquivoOrigem || '');
+
   const agora = new Date().toISOString();
+  const historicoPorMes = new Map((indicador.historico || []).map(h => [h.mes, h]));
   novasEntradas.forEach(e => historicoPorMes.set(e.mes, { mes: e.mes, desempenho: e.desempenho, importadoEm: agora, arquivo: arquivoOrigem || '' }));
   const historico = [...historicoPorMes.values()].sort((a, b) => String(a.mes).localeCompare(String(b.mes)));
   // "Último" para fins de status = mês mais recente que já tem desempenho
@@ -4560,9 +4564,10 @@ async function _lancarResultadosIndicador(indicador, novasEntradas, arquivoOrige
   const ultimoComDado = [...historico].reverse().find(h => h.desempenho != null);
   const foraDaMetaAgora = ultimoComDado ? _indicadorForaDaMeta(indicador, ultimoComDado.desempenho) : false;
 
+  // Estes tres continuam no documento do indicador, mas agora como CACHE de
+  // exibicao — a verdade e a colecao de lancamentos.
   await API.salvarIndicadorSeguranca({
     id: indicador.id,
-    historico,
     ultimoDesempenho: ultimoComDado ? ultimoComDado.desempenho : null,
     ultimoMes: ultimoComDado ? ultimoComDado.mes : null,
     foraDaMeta: foraDaMetaAgora,
@@ -5199,12 +5204,12 @@ window.salvarEdicaoDesempenho = async (el, indicadorId, mes) => {
 // Remove só a entrada daquele mês do histórico do indicador (não o indicador
 // inteiro), recalculando ultimoMes/ultimoDesempenho/foraDaMeta a partir do que sobrar.
 async function _removerLancamentoIndicador(indicador, mes) {
+  await API.removerLancamento(indicador.id, mes);
   const historico = (indicador.historico || []).filter(h => h.mes !== mes);
   const ultimoComDado = [...historico].reverse().find(h => h.desempenho != null);
   const foraDaMetaAgora = ultimoComDado ? _indicadorForaDaMeta(indicador, ultimoComDado.desempenho) : false;
   await API.salvarIndicadorSeguranca({
     id: indicador.id,
-    historico,
     ultimoDesempenho: ultimoComDado ? ultimoComDado.desempenho : null,
     ultimoMes: ultimoComDado ? ultimoComDado.mes : null,
     foraDaMeta: foraDaMetaAgora,

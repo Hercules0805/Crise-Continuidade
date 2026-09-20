@@ -17,7 +17,7 @@ const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { READ_ACTIONS, WRITE_ACTIONS, TokenError } = require('./tokenLogic');
-const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia } = require('./medicoes');
+const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia, medicaoDeLancamento } = require('./medicoes');
 const {
   READ_ACTIONS: APP_READ,
   WRITE_ACTIONS: APP_WRITE,
@@ -243,6 +243,30 @@ exports.medicaoDeBia = onDocumentCreated(
       // Nao relanca: falhar aqui nao pode derrubar a gravacao da resposta, que
       // ja aconteceu. O reprocessamento cobre o que faltar.
       logger.error('medicaoDeBia: falha ao gravar medicao', { id: event.params.id, erro: err.message });
+    }
+  }
+);
+
+// Lancamento mensal de indicador -> medicao. Mesmo padrao do BIA: gatilho no
+// banco, id derivado da origem (reprocessar sobrescreve, nao duplica).
+exports.medicaoDeIndicador = onDocumentCreated(
+  { region: 'us-central1', document: 'lancamentos_indicadores/{id}' },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const medicao = medicaoDeLancamento(event.params.id, snap.data());
+    if (!medicao) {
+      logger.warn('medicaoDeIndicador: lancamento sem o minimo para virar medicao', { id: event.params.id });
+      return;
+    }
+
+    try {
+      await db.collection(COLECAO_MEDICOES)
+        .doc(idDaMedicao(FONTE.INDICADOR, event.params.id))
+        .set(medicao, { merge: true });
+    } catch (err) {
+      logger.error('medicaoDeIndicador: falha ao gravar medicao', { id: event.params.id, erro: err.message });
     }
   }
 );

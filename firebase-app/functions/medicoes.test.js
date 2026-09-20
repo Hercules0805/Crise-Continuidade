@@ -68,3 +68,66 @@ test('a mesma resposta sempre gera o mesmo id de medição', () => {
   assert.notStrictEqual(idDaMedicao(FONTE.BIA, 'resp-1'), idDaMedicao(FONTE.BIA, 'resp-2'));
   assert.notStrictEqual(idDaMedicao(FONTE.BIA, 'x'), idDaMedicao(FONTE.INDICADOR, 'x'));
 });
+
+// --- Lancamento mensal de indicador ---
+const { medicaoDeLancamento } = require('./medicoes');
+
+const lancOk = () => ({
+  indicadorId: 'ind-1',
+  indicadorNome: '% de patches no prazo',
+  mes: '2026-03',
+  desempenho: 92,
+  lancadoPor: 'analista@fortestecnologia.com.br',
+});
+
+test('lançamento vira medição posicionada no mês de referência', () => {
+  const m = medicaoDeLancamento('ind-1__2026-03', lancOk());
+  assert.strictEqual(m.sujeitoTipo, 'indicador');
+  assert.strictEqual(m.valor, 92);
+  assert.strictEqual(m.periodo, '2026-03');
+  // A medição é sobre o mês, não sobre o instante em que alguém digitou.
+  assert.strictEqual(m.coletadoEm, '2026-03-01T00:00:00.000Z');
+});
+
+test('indicador não pertence a área, então só admin lê a medição', () => {
+  assert.strictEqual(medicaoDeLancamento('x', lancOk()).area, '');
+});
+
+// O mes em formato livre era aceito e virava chave do historico, corrompendo
+// o "ultimo mes". Na medicao, formato invalido nao entra na curva.
+test('mês em formato livre não vira medição', () => {
+  for (const mes of ['março/2026', 'jan-26', '2026', '2026-13', '2026-00', '']) {
+    assert.strictEqual(medicaoDeLancamento('x', { ...lancOk(), mes }), null, `aceitou "${mes}"`);
+  }
+  assert.ok(medicaoDeLancamento('x', { ...lancOk(), mes: '2026-12' }));
+});
+
+test('lançamento sem desempenho não vira medição', () => {
+  assert.strictEqual(medicaoDeLancamento('x', { ...lancOk(), desempenho: null }), null);
+  assert.strictEqual(medicaoDeLancamento('x', { ...lancOk(), desempenho: 'abc' }), null);
+  assert.ok(medicaoDeLancamento('x', { ...lancOk(), desempenho: 0 }), 'zero é valor medido');
+});
+
+test('validade do indicador é de 45 dias', () => {
+  const m = medicaoDeLancamento('x', lancOk());
+  const dias = Math.round((new Date(m.validoAte) - new Date(m.coletadoEm)) / 86400000);
+  assert.strictEqual(dias, 45);
+});
+
+test('quem lançou fica registrado na medição', () => {
+  assert.strictEqual(medicaoDeLancamento('x', lancOk()).registradoPor, 'analista@fortestecnologia.com.br');
+});
+
+// Number(null) e Number('') valem ZERO em JavaScript. Sem guarda, um mes sem
+// dado virava medicao de 0% — pior que a ausencia, porque 0% parece desempenho
+// pessimo em vez de "nao medido".
+test('ausência de valor não vira medição de zero', () => {
+  assert.strictEqual(medicaoDeLancamento('x', { ...lancOk(), desempenho: null }), null);
+  assert.strictEqual(medicaoDeLancamento('x', { ...lancOk(), desempenho: '' }), null);
+  assert.strictEqual(medicaoDeLancamento('x', { ...lancOk(), desempenho: undefined }), null);
+  assert.strictEqual(medicaoDeRespostaBia('x', { ...respostaOk(), score: null }), null);
+  assert.strictEqual(medicaoDeRespostaBia('x', { ...respostaOk(), score: '' }), null);
+  // E zero de verdade continua sendo medição.
+  assert.strictEqual(medicaoDeLancamento('x', { ...lancOk(), desempenho: 0 }).valor, 0);
+  assert.strictEqual(medicaoDeRespostaBia('x', { ...respostaOk(), score: 0 }).valor, 0);
+});

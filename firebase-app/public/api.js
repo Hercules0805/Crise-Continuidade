@@ -34,6 +34,7 @@ const COLLECTION = {
   componentes: 'componentes',
   riscos: 'riscos',
   indicadoresSeguranca: 'indicadores_seguranca',
+  lancamentos: 'lancamentos_indicadores',
 };
 
 // ------------------------------------------------------------
@@ -257,8 +258,41 @@ async function _lerRiscos() {
   }));
 }
 
+/**
+ * Ate 20/09/2026 o historico mensal vivia numa lista DENTRO do documento do
+ * indicador, e cada lancamento regravava a lista inteira a partir da copia em
+ * memoria do navegador. Dois administradores lancando ao mesmo tempo — ou um
+ * com a tela aberta ha uma hora — faziam os lancamentos do outro sumir, em
+ * silencio, com os dois vendo "Resultado lancado".
+ *
+ * Agora cada mes e um documento proprio em lancamentos_indicadores. Esta funcao
+ * monta o array `historico` no MESMO formato que as telas ja esperam, para que
+ * o painel, a matriz e a grade continuem funcionando sem mudanca.
+ */
+async function _lerLancamentosPorIndicador() {
+  const snap = await _db.collection(COLLECTION.lancamentos).get();
+  const porIndicador = new Map();
+  snap.docs.forEach((d) => {
+    const l = d.data() || {};
+    if (!l.indicadorId || !l.mes) return;
+    if (!porIndicador.has(l.indicadorId)) porIndicador.set(l.indicadorId, []);
+    porIndicador.get(l.indicadorId).push({
+      mes: l.mes,
+      desempenho: l.desempenho ?? null,
+      importadoEm: l.lancadoEm || '',
+      arquivo: l.arquivo || '',
+      lancadoPor: l.lancadoPor || '',
+    });
+  });
+  porIndicador.forEach((lista) => lista.sort((a, b) => String(a.mes).localeCompare(String(b.mes))));
+  return porIndicador;
+}
+
 async function _lerIndicadoresSeguranca() {
-  const docs = await _getAll(COLLECTION.indicadoresSeguranca);
+  const [docs, lancamentos] = await Promise.all([
+    _getAll(COLLECTION.indicadoresSeguranca),
+    _lerLancamentosPorIndicador(),
+  ]);
   return docs.map((d) => ({
     id: d.id,
     nome: d.nome || '',
@@ -267,7 +301,7 @@ async function _lerIndicadoresSeguranca() {
     responsavel: d.responsavel || '',
     metaMinima: d.metaMinima ?? null,
     ativo: d.ativo !== false,
-    historico: d.historico || [],
+    historico: lancamentos.get(d.id) || [],
     ultimoDesempenho: d.ultimoDesempenho ?? null,
     ultimoMes: d.ultimoMes || null,
     foraDaMeta: !!d.foraDaMeta,
@@ -468,8 +502,49 @@ async function _salvarComponente(d) {
 
 const _CAMPOS_INDICADOR = [
   'nome', 'pilar', 'tipo', 'responsavel', 'metaMinima', 'ativo',
-  'historico', 'ultimoDesempenho', 'ultimoMes', 'foraDaMeta',
+  // 'historico' saiu de proposito: o historico mensal mora em
+  // lancamentos_indicadores, um documento por mes. Os tres abaixo continuam
+  // aqui, mas sao CACHE de exibicao derivado daquela colecao.
+  'ultimoDesempenho', 'ultimoMes', 'foraDaMeta',
 ];
+
+/** Id estavel: um documento por (indicador, mes). */
+function _idLancamento(indicadorId, mes) {
+  return `${indicadorId}__${mes}`;
+}
+
+/**
+ * Grava lancamentos mensais, um documento por mes.
+ *
+ * E isto que acaba com a perda silenciosa: dois administradores lancando meses
+ * diferentes nao se tocam, e lancando o MESMO mes so aquele mes e afetado — nao
+ * o historico inteiro, como acontecia quando a lista era regravada por completo.
+ */
+async function _lancarResultados(indicadorId, entradas, arquivo) {
+  if (!indicadorId) throw new Error('Indicador sem id.');
+  const agora = new Date().toISOString();
+  const quem = (window.USER_EMAIL || '').toLowerCase();
+  const lote = _db.batch();
+  (entradas || []).forEach((e) => {
+    if (!e || !e.mes) return;
+    const ref = _db.collection(COLLECTION.lancamentos).doc(_idLancamento(indicadorId, e.mes));
+    lote.set(ref, {
+      indicadorId,
+      mes: e.mes,
+      desempenho: e.desempenho ?? null,
+      arquivo: arquivo || '',
+      lancadoEm: agora,
+      lancadoPor: quem,
+    }, { merge: true });
+  });
+  await lote.commit();
+  return { success: true, total: (entradas || []).length };
+}
+
+async function _removerLancamento(indicadorId, mes) {
+  await _db.collection(COLLECTION.lancamentos).doc(_idLancamento(indicadorId, mes)).delete();
+  return { success: true };
+}
 
 async function _salvarIndicadorSeguranca(ind) {
   const data = {};
@@ -836,6 +911,10 @@ const API = {
   excluirRisco: (id) => API.post('excluirRisco', { id }),
   getIndicadoresSeguranca: () => API.get('getIndicadoresSeguranca'),
   salvarIndicadorSeguranca: (ind) => API.post('salvarIndicadorSeguranca', ind),
+  lancarResultados: (indicadorId, entradas, arquivo) => _lancarResultados(indicadorId, entradas, arquivo)
+    .then((r) => { API.invalidate('getIndicadoresSeguranca'); return r; }),
+  removerLancamento: (indicadorId, mes) => _removerLancamento(indicadorId, mes)
+    .then((r) => { API.invalidate('getIndicadoresSeguranca'); return r; }),
   excluirIndicadorSeguranca: (id) => API.post('excluirIndicadorSeguranca', { id }),
 };
 
