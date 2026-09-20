@@ -6207,6 +6207,15 @@ function _parsePCNVersoes(pcnSalvo) {
 // TEMPLATE HTML DO PCN (compartilhado)
 // ============================================================
 function _buildPCNPage(pcnContent, info, processId, versoes) {
+  // O conteudo vem do Gemini a partir de campos que gestores preenchem, e era
+  // inserido cru com document.write — executando na sessao de quem abrisse o
+  // PCN. Limpa antes de qualquer coisa. Ver sanitizar-pcn.js.
+  const _limpo = sanitizarPCN(pcnContent);
+  if (_limpo.usouFallback) {
+    console.warn('PCN: DOMPurify indisponível, usando limpeza básica.');
+    showToast('Aviso: o PCN foi exibido com limpeza reduzida (biblioteca indisponível).', '#e65100');
+  }
+  pcnContent = _limpo.html;
   const versoesJson = versoes ? JSON.stringify(versoes).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t').replace(/</g, '\\x3c') : '[]';
   const versaoAtual = versoes ? versoes.length : 1;
   const seletorVersoes = versoes && versoes.length > 1 ? `
