@@ -253,19 +253,44 @@ async function salvarRespostasToken(db, data) {
 }
 
 async function salvarRespostasArea(db, data) {
-  const { ref } = await _carregarToken(db, data.token, '_AREA_');
+  const { ref, data: t } = await _carregarToken(db, data.token, '_AREA_');
   const respostas = parseMaybeJson(data.respostas, []);
+
+  // A area vem SEMPRE do token, nunca do corpo da requisicao. Sem isso, um link
+  // legitimo de uma area consegue gravar respostas -- e, por tabela, reescrever
+  // o tier e o RTO -- de processos de qualquer outra area da empresa.
+  const area = t.area;
+
+  // O processo tambem e conferido: so e aceito se pertencer a area do token,
+  // que e exatamente o conjunto que validarTokenArea entregou para a pagina.
+  const procSnap = await db.collection(COLLECTION.processos).where('area', '==', area).get();
+  const processosDaArea = new Set(procSnap.docs.map((d) => slug(d.data().processo)));
+
+  let total = 0;
+  const ignorados = [];
   for (const resp of respostas) {
+    const processo = String((resp && resp.processo) || '').trim();
+    if (!processo || !processosDaArea.has(slug(processo))) {
+      ignorados.push(processo);
+      continue;
+    }
     await _gravarResposta(db, {
-      area: resp.area,
-      processo: resp.processo,
-      scores: resp.scores || {},
+      area,
+      processo,
+      scores: (resp && resp.scores) || {},
       respondente: data.nome || '',
       cargo: data.cargo || '',
     });
+    total += 1;
   }
-  await ref.set({ usado: true }, { merge: true });
-  return { success: true, total: respostas.length };
+
+  if (ignorados.length) {
+    console.warn('salvarRespostasArea: processos fora da area do token, ignorados', { area, ignorados });
+  }
+  // So queima o token se alguma resposta foi de fato gravada, para que um envio
+  // integralmente recusado possa ser refeito pelo gestor.
+  if (total > 0) await ref.set({ usado: true }, { merge: true });
+  return { success: true, total, ignorados: ignorados.length };
 }
 
 async function salvarDependenciasBIA(db, data) {

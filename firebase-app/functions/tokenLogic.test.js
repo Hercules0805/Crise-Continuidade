@@ -180,3 +180,49 @@ test('salvarComponentesDRP grava drpComponentes no processo', async () => {
 test('processoKey estável', () => {
   assert.strictEqual(processoKey('TI', 'Backup'), 'ti__backup');
 });
+
+// --- Regressao: o token de area nao pode gravar fora da propria area ---
+// Um link _AREA_ da area TI recebia `area` e `processo` do corpo da requisicao
+// e gravava onde mandassem, reescrevendo o tier de qualquer processo da empresa.
+test('salvarRespostasArea ignora processo de outra area', async () => {
+  const seed = baseSeed();
+  seed.processos.rh__folha = { area: 'RH', processo: 'Folha' };
+  seed.tokens['tok-area'] = { area: 'TI', processo: '_AREA_', usado: false };
+  const db = makeDb(seed);
+
+  const res = await WRITE_ACTIONS.salvarRespostasArea(db, {
+    token: 'tok-area',
+    nome: 'Fulano',
+    respostas: [{ area: 'RH', processo: 'Folha', scores: { 'Q1?': 4, 'Q2?': 4 } }],
+  });
+
+  assert.strictEqual(res.total, 0);
+  assert.strictEqual(res.ignorados, 1);
+  assert.strictEqual(Object.keys(db._store.respostas_bia).length, 0);
+  // O processo de RH nao pode ter recebido tier nenhum.
+  assert.strictEqual(db._store.processos.rh__folha.tier, undefined);
+  // Envio integralmente recusado nao queima o token.
+  assert.strictEqual(db._store.tokens['tok-area'].usado, false);
+});
+
+test('salvarRespostasArea grava na area do token e ignora a area enviada', async () => {
+  const seed = baseSeed();
+  seed.processos.rh__folha = { area: 'RH', processo: 'Folha' };
+  seed.tokens['tok-area'] = { area: 'TI', processo: '_AREA_', usado: false };
+  const db = makeDb(seed);
+
+  // O corpo mente a area, mas nomeia um processo que existe em TI.
+  const res = await WRITE_ACTIONS.salvarRespostasArea(db, {
+    token: 'tok-area',
+    nome: 'Fulano',
+    respostas: [{ area: 'RH', processo: 'Backup', scores: { 'Q1?': 4, 'Q2?': 4 } }],
+  });
+
+  assert.strictEqual(res.total, 1);
+  const gravadas = Object.values(db._store.respostas_bia);
+  assert.strictEqual(gravadas.length, 1);
+  assert.strictEqual(gravadas[0].area, 'TI');
+  assert.strictEqual(gravadas[0].processo, 'Backup');
+  assert.strictEqual(db._store.processos.ti__backup.tier, 'Tier 2 (Essencial)'); // 4 + 4 = 8
+  assert.strictEqual(db._store.tokens['tok-area'].usado, true);
+});
