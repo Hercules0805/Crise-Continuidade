@@ -11,6 +11,7 @@ const pages = {
   'indicadores-matriz': indicadoresMatriz,
   fornecedores,
   'fornecedores-criterios': fornecedoresCriterios,
+  'fornecedores-cadastro': fornecedoresCadastro,
   perfis,
 };
 
@@ -31,12 +32,21 @@ function route() {
     window._routePendente = true;
     return;
   }
-  const hash = window.location.hash.slice(1) || 'processos';
+  const hash = window.location.hash.slice(1) || _paginaInicialDoPerfil();
   const [page, queryStr] = hash.split('?');
   const params = new URLSearchParams(queryStr || '');
   document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page === page));
   document.querySelectorAll('.nav-group').forEach(g => g.classList.toggle('has-active', !!g.querySelector('.nav-link.active')));
-  const pageFunc = pages[page] || pages.processos;
+
+  // Menu escondido nao e permissao. Sem esta guarda, digitar #processos na barra
+  // de endereco abria a tela para quem nao deveria ve-la — as regras do banco
+  // protegiam os dados, mas a tela abria e parecia um sistema quebrado.
+  if (!Perfis.podeVerTela(window.USER_PERFIL, page)) {
+    _telaSemAcesso(page);
+    return;
+  }
+
+  const pageFunc = pages[page] || pages[_paginaInicialDoPerfil()];
   if (pageFunc) pageFunc();
   // Deep link: abrir processo na aba específica (aguarda dados carregarem)
   if (params.get('editar')) {
@@ -54,6 +64,27 @@ function route() {
     }
     setTimeout(tryOpenProcess, 800);
   }
+}
+
+/** Primeira tela que este perfil ve — e onde ele cai quando nao pede nada. */
+function _paginaInicialDoPerfil() {
+  const telas = Perfis.telasDoPerfil(window.USER_PERFIL);
+  if (telas === '*') return 'processos';
+  return telas[0] || 'processos';
+}
+
+function _telaSemAcesso(pagina) {
+  const inicial = _paginaInicialDoPerfil();
+  app.innerHTML = `
+    <div style="max-width:520px;margin:60px auto;text-align:center;">
+      <div style="font-size:2.4em;margin-bottom:10px;">🔒</div>
+      <h2 style="color:#1a237e;margin-bottom:8px;">Esta tela não é do seu perfil</h2>
+      <p style="color:#666;font-size:0.95em;line-height:1.6;">
+        O seu acesso é <strong>${esc(Perfis.rotulo(window.USER_PERFIL))}</strong>, que não inclui esta tela.
+        Se você precisa dela, peça ao administrador do sistema.
+      </p>
+      <a href="#${esc(inicial)}" class="btn btn-primary" style="margin-top:16px;display:inline-block;">Voltar para o início</a>
+    </div>`;
 }
 
 // Utilitários
@@ -1749,12 +1780,27 @@ window.adicionarDependenciaCategoria = (nome, categoria) => {
   // Verificar se existe no catálogo COM esta categoria específica
   const existeNaCategoria = (window.dependenciasCatalogo || []).some(d => d.nome.toLowerCase() === nome.toLowerCase() && d.categoria === categoria);
   if (!existeNaCategoria) {
-    // Adicionar ao catálogo local e salvar no backend
+    // QUARTO caminho que cria dependencia — e o mais silencioso deles: digitar
+    // um nome novo aqui gravava no catalogo sem aviso nenhum, e a promessa nao
+    // tinha tratamento de erro. Se a gravacao falhasse, a tag aparecia na tela,
+    // o processo era salvo apontando para ela, e a dependencia nao existia no
+    // banco. Agora avisa, e avisa tambem quando falha.
     const novaDep = { id: null, categoria, nome };
     window.dependenciasCatalogo.push(novaDep);
     API.invalidate('getDependencias');
     API.salvarDependencia({ categoria, nome }).then(r => {
       novaDep.id = r.id;
+      if (Perfis.categoriaDeFornecedor(categoria)) {
+        showToast(`✅ Fornecedor "${nome}" criado. Ele aparece em Fornecedores como "Não avaliado".`, '#2e7d32');
+      }
+    }).catch(err => {
+      console.error('Falha ao criar a dependência no catálogo', err);
+      const i = (window.dependenciasCatalogo || []).indexOf(novaDep);
+      if (i !== -1) window.dependenciasCatalogo.splice(i, 1);
+      const j = (window._dependenciaSelecionadas || []).indexOf(nome);
+      if (j !== -1) window._dependenciaSelecionadas.splice(j, 1);
+      renderDependenciaTabela();
+      showToast(`❌ Não foi possível criar "${nome}" no catálogo. Ela não foi vinculada ao processo.`, '#c62828');
     });
   }
   renderDependenciaTabela();
@@ -1808,10 +1854,20 @@ window.salvarDepBcp = async () => {
   };
   if (!d.categoria) return showToast('Informe a categoria.', '#e65100');
   if (!d.nome) return showToast('Informe o nome.', '#e65100');
+
+  // Este e um TERCEIRO caminho que cria fornecedor: o cadastro rapido de
+  // dependencia de dentro do processo. Nao foi bloqueado de proposito — obrigar
+  // a sair do PCN no meio do preenchimento para cadastrar o fornecedor em outra
+  // tela e pior. Mas fornecedor criado por aqui nasce SEM avaliacao, e ficaria
+  // invisivel: o aviso abaixo existe para isso nao passar em silencio.
+  const ehFornecedor = Perfis.categoriaDeFornecedor(d.categoria);
+
   try {
     const result = await API.salvarDependencia(d);
     fecharModalDepBcp();
-    showToast('✅ Dependência salva!', '#2e7d32');
+    showToast(ehFornecedor && !d.id
+      ? '✅ Fornecedor criado! Ele aparece em Fornecedores como "Não avaliado" — avalie para ele entrar na conta de risco.'
+      : '✅ Dependência salva!', '#2e7d32');
     // Atualizar catálogo local
     if (d.id) {
       const idx = (window.dependenciasCatalogo || []).findIndex(x => x.id === d.id);
@@ -2435,6 +2491,12 @@ async function dependencias() {
       <div><h2>Catálogo de Dependências</h2><p class="page-sub">Gerencie as dependências críticas reutilizáveis nos processos</p></div>
       <button class="btn btn-primary" onclick="abrirModalDependencia()">+ Nova Dependência</button>
     </div>
+    <div style="border:1px solid #e0e0e0;background:#f8f9ff;border-radius:9px;padding:11px 14px;margin-bottom:16px;font-size:0.86em;color:#555;">
+      Os <strong>fornecedores</strong> saíram desta tela e são gerenciados em
+      <a href="#fornecedores-cadastro" style="color:#1a237e;font-weight:700;">Fornecedores → Cadastro</a>,
+      onde também são avaliados. Eles continuam no mesmo catálogo e continuam aparecendo para os processos
+      declararem de quem dependem — só a edição mudou de lugar.
+    </div>
     <div style="margin-bottom:16px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
       <div>
         <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Categoria:</label>
@@ -2516,7 +2578,11 @@ async function dependencias() {
     </div></div>`;
 
   try {
-    dependenciasData = await API.getDependencias();
+    // Fornecedor nao entra: a gestao dele migrou para o modulo de Fornecedores.
+    // O filtro e aqui, e nao no banco, para que o catalogo continue inteiro —
+    // e o mesmo de que os processos dependem.
+    const todas = await API.getDependencias();
+    dependenciasData = todas.filter(d => !Perfis.categoriaDeFornecedor(d.categoria));
   } catch(e) { dependenciasData = []; }
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaDeps').style.display = 'block';
@@ -2654,6 +2720,12 @@ window.salvarDep = async () => {
   };
   if (!d.categoria) return showToast('Informe a categoria.', '#e65100');
   if (!d.nome) return showToast('Informe o nome.', '#e65100');
+  // Sem esta guarda, digitar "Fornecedores" no campo de categoria criaria um
+  // fornecedor que esta tela nao mostra mais: sumiria da vista de quem acabou
+  // de cadastrar.
+  if (Perfis.categoriaDeFornecedor(d.categoria)) {
+    return showToast('Fornecedor é cadastrado em Fornecedores → Cadastro.', '#e65100');
+  }
 
   // Optimistic: fechar modal e atualizar UI imediatamente
   fecharModalDependencia();
@@ -7454,7 +7526,7 @@ function renderizarFornecedores() {
   if (!fornecedoresData.length) {
     lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
       Nenhum fornecedor no catálogo de Dependências.<br>
-      <span style="font-size:0.9em;">Os fornecedores são cadastrados em Cadastros → Dependências, com a categoria Fornecedores.</span></div>`;
+      <span style="font-size:0.9em;">Cadastre em <a href="#fornecedores-cadastro" style="color:#1a237e;font-weight:700;">Fornecedores → Cadastro</a>.</span></div>`;
     return;
   }
 
@@ -7851,5 +7923,209 @@ window.excluirPerfilAcesso = async (email) => {
     showToast('✅ Acesso removido.', '#2e7d32');
   } catch (e) {
     showToast('❌ ' + (e.message || 'Não foi possível remover.'), '#c62828');
+  }
+};
+
+// ============================================================
+// PÁGINA: FORNECEDORES — CADASTRO
+//
+// O fornecedor e uma linha de /dependencias com categoria Fornecedores. Esta
+// tela existe para que o perfil de fornecedores cadastre, edite e apague
+// fornecedor SEM ver (nem poder apagar) as outras categorias do catalogo, que
+// sao do BIA: Infraestrutura, Pessoas, Sistemas e Processos Internos.
+// ============================================================
+
+const CATEGORIA_FORNECEDOR_PADRAO = 'Fornecedores';
+
+async function fornecedoresCadastro() {
+  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Cadastro de Fornecedores</h2><p class="page-sub">Os fornecedores do catálogo de dependências da empresa</p></div>
+      <button class="btn btn-primary" onclick="abrirModalFornecedor()" id="btnNovoFornecedor" style="display:none;">+ Novo Fornecedor</button>
+    </div>
+    <div style="margin-bottom:16px;">
+      <input type="text" id="buscaFornecedorCadastro" placeholder="🔍 Buscar fornecedor..." oninput="renderizarFornecedoresCadastro()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:280px;">
+    </div>
+    <div class="loading" id="loadingFornCadastro">⏳ Carregando...</div>
+    <div id="listaFornCadastro"></div>
+    <div class="modal-overlay" id="modalFornecedor"><div class="modal" onclick="event.stopPropagation()">
+      <h3 id="modalFornecedorTitulo">Novo Fornecedor</h3>
+      <input type="hidden" id="fornCadId">
+      <label>Nome</label>
+      <input type="text" id="fornCadNome" placeholder="Ex: Datacenter Alfa">
+      <label>Empresa / razão social</label>
+      <input type="text" id="fornCadEmpresa" placeholder="Ex: Alfa Tecnologia S.A.">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div><label>Contato (e-mail)</label><input type="email" id="fornCadEmail" placeholder="contato@alfa.com.br"></div>
+        <div><label>Telefone</label><input type="text" id="fornCadTelefone" placeholder="(00) 0000-0000"></div>
+      </div>
+      <label>Serviço prestado / o que fornece</label>
+      <input type="text" id="fornCadDetalhes" placeholder="Ex: hospedagem dos servidores de produção">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div><label>Setor responsável pelo contrato</label><input type="text" id="fornCadSetor" placeholder="Ex: TI, Compras"></div>
+        <div><label>Endereço</label><input type="text" id="fornCadEndereco" placeholder="Cidade ou endereço"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalFornecedor()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarFornecedorCadastro()">Salvar</button>
+      </div>
+    </div></div>`;
+
+  document.getElementById('btnNovoFornecedor').style.display = podeMexer ? 'inline-block' : 'none';
+
+  try {
+    const [deps, avals] = await Promise.all([API.getDependencias(), API.getAvaliacoesFornecedor()]);
+    fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
+    avaliacoesFornecedorData = avals;
+  } catch (e) {
+    console.error('Cadastro de fornecedores: falha ao carregar', e);
+    document.getElementById('loadingFornCadastro').style.display = 'none';
+    document.getElementById('listaFornCadastro').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
+      Não foi possível carregar os fornecedores.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="fornecedoresCadastro()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+  document.getElementById('loadingFornCadastro').style.display = 'none';
+  renderizarFornecedoresCadastro();
+}
+
+function renderizarFornecedoresCadastro() {
+  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const lista = document.getElementById('listaFornCadastro');
+  if (!lista) return;
+
+  const busca = (document.getElementById('buscaFornecedorCadastro')?.value || '').toLowerCase();
+  const data = fornecedoresData.filter((f) => !busca
+    || (f.nome || '').toLowerCase().includes(busca)
+    || (f.empresa || '').toLowerCase().includes(busca));
+
+  lista.innerHTML = `
+    <div class="data-table">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:24%;">Nome</th>
+            <th style="width:22%;">Empresa</th>
+            <th style="width:22%;">Serviço prestado</th>
+            <th style="width:10%;">Setor</th>
+            <th style="width:14%;">Contato</th>
+            <th style="width:12%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.length ? data.map((f) => `
+            <tr>
+              <td style="font-weight:600;">${esc(f.nome)}</td>
+              <td style="color:#666;">${esc(f.empresa || '–')}</td>
+              <td style="color:#666;font-size:0.9em;">${esc(f.detalhes || '–')}</td>
+              <td style="color:#666;font-size:0.88em;">${esc(f.setor || '–')}</td>
+              <td style="color:#666;font-size:0.88em;">${esc(f.email || f.telefone || '–')}</td>
+              <td style="text-align:center;">
+                ${podeMexer ? `
+                  <button class="btn-icon" onclick="abrirModalFornecedor('${esc(f.id)}')" title="Editar">✏️</button>
+                  <button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
+              </td>
+            </tr>`).join('')
+            : `<tr><td colspan="6" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com essa busca.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    <div style="font-size:0.75em;color:#999;margin-top:10px;line-height:1.5;">
+      Os fornecedores daqui são os mesmos do catálogo de Dependências, categoria Fornecedores — é a lista que os processos usam
+      para dizer de quem dependem. As outras categorias do catálogo (Infraestrutura, Pessoas, Sistemas, Processos Internos)
+      pertencem ao BIA e não são alteradas por esta tela.
+    </div>`;
+}
+
+window.abrirModalFornecedor = (id) => {
+  const f = id ? fornecedoresData.find((x) => String(x.id) === String(id)) : null;
+  document.getElementById('modalFornecedorTitulo').textContent = f ? 'Editar Fornecedor' : 'Novo Fornecedor';
+  document.getElementById('fornCadId').value = f ? f.id : '';
+  document.getElementById('fornCadNome').value = f ? (f.nome || '') : '';
+  document.getElementById('fornCadEmpresa').value = f ? (f.empresa || '') : '';
+  document.getElementById('fornCadEmail').value = f ? (f.email || '') : '';
+  document.getElementById('fornCadTelefone').value = f ? (f.telefone || '') : '';
+  document.getElementById('fornCadDetalhes').value = f ? (f.detalhes || '') : '';
+  document.getElementById('fornCadSetor').value = f ? (f.setor || '') : '';
+  document.getElementById('fornCadEndereco').value = f ? (f.endereco || '') : '';
+  document.getElementById('modalFornecedor').classList.add('open');
+};
+
+window.fecharModalFornecedor = () => document.getElementById('modalFornecedor').classList.remove('open');
+
+window.salvarFornecedorCadastro = async () => {
+  const nome = document.getElementById('fornCadNome').value.trim();
+  if (!nome) return showToast('Informe o nome do fornecedor.', '#e65100');
+  const id = document.getElementById('fornCadId').value || null;
+
+  try {
+    await API.salvarDependencia({
+      id,
+      // A categoria e sempre Fornecedores nesta tela. E o que mantem o
+      // fornecedor no mesmo catalogo de que os processos dependem, e o que a
+      // regra do banco exige para este perfil poder gravar.
+      categoria: CATEGORIA_FORNECEDOR_PADRAO,
+      nome,
+      empresa: document.getElementById('fornCadEmpresa').value.trim(),
+      email: document.getElementById('fornCadEmail').value.trim(),
+      telefone: document.getElementById('fornCadTelefone').value.trim(),
+      detalhes: document.getElementById('fornCadDetalhes').value.trim(),
+      // Setor e endereco existem no catalogo e sao gravados por esta tela. Sem
+      // eles no formulario, salvar aqui apagaria o que estava preenchido: a
+      // gravacao regrava a linha inteira, e campo ausente vira vazio.
+      setor: document.getElementById('fornCadSetor').value.trim(),
+      endereco: document.getElementById('fornCadEndereco').value.trim(),
+    });
+    fecharModalFornecedor();
+    API.invalidate('getDependencias');
+    const deps = await API.getDependencias();
+    fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
+    renderizarFornecedoresCadastro();
+    showToast('✅ Salvo!', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+  }
+};
+
+/**
+ * Apaga o fornecedor, depois de dizer o que fica para tras.
+ *
+ * O fornecedor e referenciado pela avaliacao, pelo risco e pelos processos que
+ * declaram depender dele. Apagar em silencio deixaria essas linhas apontando
+ * para nada, e ninguem descobriria antes de precisar do dado. Entao o aviso
+ * conta, com numero, o que sobra.
+ */
+window.excluirFornecedorCadastro = async (id) => {
+  const f = fornecedoresData.find((x) => String(x.id) === String(id));
+  if (!f) return;
+
+  const temAvaliacao = avaliacoesFornecedorData.some((a) => String(a.fornecedorId) === String(id));
+  const pendencias = [];
+  if (temAvaliacao) pendencias.push('as avaliações já feitas continuam guardadas (elas são o histórico, e não são apagadas)');
+
+  try {
+    const riscos = await API.getRiscos();
+    const n = riscos.filter((r) => String(r.fornecedor || '') === String(id)).length;
+    if (n) pendencias.push(`${n} risco${n > 1 ? 's' : ''} aponta${n > 1 ? 'm' : ''} para este fornecedor e vai${n > 1 ? 'ão' : ''} ficar sem o nome dele`);
+  } catch (e) {
+    // Perfil de fornecedores nao le riscos. Nao poder conferir nao e motivo
+    // para esconder o aviso: melhor dizer que nao foi possivel conferir.
+    pendencias.push('não foi possível verificar se há riscos apontando para este fornecedor');
+  }
+
+  const aviso = `Excluir o fornecedor "${f.nome}"?\n\n${pendencias.length ? pendencias.map((p) => '• ' + p).join('\n') + '\n\n' : ''}Os processos que declaram depender dele também deixam de encontrá-lo. Continuar?`;
+  if (!confirm(aviso)) return;
+
+  try {
+    await API.excluirDependencia(id);
+    API.invalidate('getDependencias');
+    const deps = await API.getDependencias();
+    fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
+    renderizarFornecedoresCadastro();
+    showToast('✅ Fornecedor excluído.', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
   }
 };

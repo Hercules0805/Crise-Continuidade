@@ -287,10 +287,16 @@ async function _lerComponentes() {
  * configurado.
  */
 async function _lerRiscos() {
-  const ehAdmin = window.USER_PERFIL === 'admin';
+  const ehAdmin = Perfis.ehAdmin(window.USER_PERFIL);
   const area = window.USER_AREA;
   if (!ehAdmin && !area) {
-    throw new Error('Seu acesso ainda não está vinculado a uma área. Procure a Segurança da Informação.');
+    // Mensagem diferente por perfil: o gestor precisa de area, o perfil de
+    // fornecedores simplesmente nao tem acesso ao registro de riscos. Dizer
+    // "procure a Seguranca da Informacao" para a propria Seguranca da
+    // Informacao nao ajuda ninguem.
+    throw new Error(Perfis.exigeArea(window.USER_PERFIL)
+      ? 'Seu acesso ainda não está vinculado a uma área. Procure a Segurança da Informação.'
+      : 'O seu perfil não tem acesso ao registro de riscos.');
   }
   const docs = ehAdmin
     ? await _getAll(COLLECTION.riscos)

@@ -41,6 +41,30 @@
   /** O perfil de quem nao esta cadastrado. O menor acesso possivel. */
   var PERFIL_PADRAO = PERFIL.GESTOR;
 
+  /**
+   * As telas que cada perfil ve.
+   *
+   * ANTES ISTO ERA UMA LISTA DO QUE ESCONDER, e foi por isso que quebrou: quem
+   * tem o perfil de fornecedores continuava vendo Processos, PCNs, Riscos e
+   * Indicadores, porque nenhuma dessas telas estava na lista de esconder. Lista
+   * de exclusao erra por omissao — basta esquecer um nome, ou criar uma tela
+   * nova, para abrir acesso sem ninguem perceber.
+   *
+   * Agora e o contrario: cada perfil DECLARA o que ve, e tela que nao esta aqui
+   * nao aparece nem abre. Tela nova nasce invisivel ate alguem decidir de quem
+   * ela e — que e o lado certo para errar.
+   */
+  var TELAS = {};
+  TELAS[PERFIL.ADMIN] = '*';
+  TELAS[PERFIL.GESTOR] = [
+    'processos', 'pcns', 'riscos',
+    'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
+    'admin',
+  ];
+  TELAS[PERFIL.FORNECEDORES] = [
+    'fornecedores', 'fornecedores-cadastro', 'fornecedores-criterios',
+  ];
+
   var CATALOGO = [
     {
       valor: PERFIL.ADMIN,
@@ -95,10 +119,54 @@
     return normalizar(valor) === PERFIL.ADMIN;
   }
 
-  /** Cadastrar criterios e gravar avaliacao de fornecedor. */
+  /**
+   * Ve esta tela.
+   *
+   * Tela desconhecida devolve false, sempre: a resposta para "essa tela e sua?"
+   * nunca e "deve ser".
+   */
+  function podeVerTela(valor, pagina) {
+    var permitidas = TELAS[normalizar(valor)];
+    if (permitidas === '*') return true;
+    if (!permitidas) return false;
+    return permitidas.indexOf(String(pagina || '')) !== -1;
+  }
+
+  function telasDoPerfil(valor) {
+    var permitidas = TELAS[normalizar(valor)];
+    return permitidas === '*' ? '*' : (permitidas || []).slice();
+  }
+
+  /**
+   * Manda no modulo de fornecedores: cadastrar, editar e apagar fornecedor,
+   * cadastrar criterio e avaliar.
+   *
+   * O fornecedor mora em /dependencias, junto com Infraestrutura, Pessoas,
+   * Sistemas e Processos Internos, que sao do BIA. Este perfil manda SO na
+   * categoria Fornecedores — ver categoriaDeFornecedor e a regra do banco.
+   */
   function podeGerenciarFornecedores(valor) {
     var p = normalizar(valor);
     return p === PERFIL.ADMIN || p === PERFIL.FORNECEDORES;
+  }
+
+  /** As categorias de /dependencias que sao "fornecedor". */
+  var CATEGORIAS_FORNECEDOR = ['Fornecedores', 'Fornecedor'];
+
+  function categoriaDeFornecedor(categoria) {
+    return CATEGORIAS_FORNECEDOR.indexOf(String(categoria || '').trim()) !== -1;
+  }
+
+  /**
+   * Pode mexer nesta linha de /dependencias.
+   *
+   * Admin mexe em qualquer categoria. O perfil de fornecedores mexe apenas em
+   * fornecedor: sem esta guarda, quem avalia fornecedor poderia apagar as
+   * dependencias de infraestrutura e sistemas que o BIA inteiro usa.
+   */
+  function podeMexerNaDependencia(valor, categoria) {
+    if (ehAdmin(valor)) return true;
+    return podeGerenciarFornecedores(valor) && categoriaDeFornecedor(categoria);
   }
 
   /**
@@ -121,6 +189,12 @@
     rotulo: rotulo,
     exigeArea: exigeArea,
     ehAdmin: ehAdmin,
+    TELAS: TELAS,
+    CATEGORIAS_FORNECEDOR: CATEGORIAS_FORNECEDOR,
+    podeVerTela: podeVerTela,
+    telasDoPerfil: telasDoPerfil,
+    categoriaDeFornecedor: categoriaDeFornecedor,
+    podeMexerNaDependencia: podeMexerNaDependencia,
     podeGerenciarFornecedores: podeGerenciarFornecedores,
     podeGerenciarPerfis: podeGerenciarPerfis,
   };

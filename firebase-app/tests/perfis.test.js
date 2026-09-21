@@ -137,3 +137,116 @@ test('as regras nao conhecem perfil que esta lista nao tem', () => {
     assert.ok(Perfis.conhecido(v), `firestore.rules compara com o perfil '${v}', que nao existe em perfis.js`);
   });
 });
+
+// ============================================================
+// QUEM VE QUAL TELA
+//
+// Antes era uma lista do que ESCONDER, e ela deixou passar Processos, PCNs,
+// Riscos e Indicadores para o perfil de fornecedores. Lista de exclusao erra
+// por omissao. Agora cada perfil declara o que ve, e estes testes garantem que
+// tela nova nao nasce visivel para quem nao deveria.
+// ============================================================
+
+const TODAS_AS_TELAS = [
+  'processos', 'pcns', 'areas', 'riscos',
+  'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
+  'dependencias', 'componentes', 'perguntas',
+  'admin', 'perfis',
+  'fornecedores', 'fornecedores-cadastro', 'fornecedores-criterios',
+];
+
+test('admin ve todas as telas', () => {
+  TODAS_AS_TELAS.forEach((t) => {
+    assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.ADMIN, t), true, t);
+  });
+});
+
+test('o perfil de fornecedores ve SO as tres telas de fornecedor', () => {
+  const vistas = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela(Perfis.PERFIL.FORNECEDORES, t));
+  assert.deepStrictEqual(vistas.sort(), ['fornecedores', 'fornecedores-cadastro', 'fornecedores-criterios']);
+});
+
+test('o perfil de fornecedores NAO ve processos, PCNs, riscos nem indicadores', () => {
+  ['processos', 'pcns', 'riscos', 'indicadores-dashboard', 'indicadores-cadastro',
+    'indicadores-lancamento', 'indicadores-matriz', 'admin', 'perfis',
+    'areas', 'perguntas', 'dependencias', 'componentes'].forEach((t) => {
+    assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.FORNECEDORES, t), false, `nao deveria ver ${t}`);
+  });
+});
+
+test('gestor NAO ve as telas de cadastro nem as de fornecedor', () => {
+  ['areas', 'perguntas', 'dependencias', 'componentes', 'perfis',
+    'fornecedores', 'fornecedores-cadastro', 'fornecedores-criterios'].forEach((t) => {
+    assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, t), false, `nao deveria ver ${t}`);
+  });
+});
+
+test('gestor continua vendo o que sempre viu', () => {
+  ['processos', 'pcns', 'riscos', 'indicadores-dashboard', 'indicadores-matriz', 'admin'].forEach((t) => {
+    assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, t), true, t);
+  });
+});
+
+test('tela desconhecida nao abre para ninguem, menos admin', () => {
+  assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, 'tela-que-nao-existe'), false);
+  assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.FORNECEDORES, 'tela-que-nao-existe'), false);
+  assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, ''), false);
+  assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, null), false);
+});
+
+test('perfil desconhecido ve o que o menor acesso ve, e nada mais', () => {
+  const doDesconhecido = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela('auditor-inventado', t));
+  const doGestor = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela(Perfis.PERFIL.GESTOR, t));
+  assert.deepStrictEqual(doDesconhecido, doGestor);
+});
+
+test('cada perfil tem pelo menos uma tela, senao a pessoa entra e nao ve nada', () => {
+  Perfis.CATALOGO.forEach((p) => {
+    const telas = Perfis.telasDoPerfil(p.valor);
+    assert.ok(telas === '*' || telas.length > 0, `${p.valor} nao tem tela nenhuma`);
+  });
+});
+
+// ============================================================
+// PERMISSAO TOTAL NO MODULO, E SO NELE
+// ============================================================
+
+test('o perfil de fornecedores cadastra, edita e apaga fornecedor', () => {
+  assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.FORNECEDORES, 'Fornecedores'), true);
+  assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.FORNECEDORES, 'Fornecedor'), true);
+});
+
+test('o perfil de fornecedores NAO mexe nas outras categorias do catalogo do BIA', () => {
+  ['Infraestrutura', 'Pessoas', 'Sistemas', 'Processos Internos', '', null].forEach((cat) => {
+    assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.FORNECEDORES, cat), false, `categoria ${cat}`);
+  });
+});
+
+test('admin mexe em qualquer categoria do catalogo', () => {
+  ['Fornecedores', 'Infraestrutura', 'Pessoas', 'Sistemas', 'Processos Internos'].forEach((cat) => {
+    assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.ADMIN, cat), true, cat);
+  });
+});
+
+test('gestor nao mexe no catalogo de dependencias', () => {
+  assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.GESTOR, 'Fornecedores'), false);
+});
+
+test('categoriaDeFornecedor aceita as duas grafias em uso e recusa o resto', () => {
+  assert.strictEqual(Perfis.categoriaDeFornecedor('Fornecedores'), true);
+  assert.strictEqual(Perfis.categoriaDeFornecedor('Fornecedor'), true);
+  assert.strictEqual(Perfis.categoriaDeFornecedor(' Fornecedores '), true);
+  assert.strictEqual(Perfis.categoriaDeFornecedor('fornecedores'), false, 'minuscula nao e a grafia gravada no catalogo');
+  assert.strictEqual(Perfis.categoriaDeFornecedor('Sistemas'), false);
+});
+
+test('as regras do banco tambem guardam a categoria em /dependencias', () => {
+  const regras = lerRegras();
+  const bloco = regras.slice(regras.indexOf('match /dependencias/'));
+  const corpo = bloco.slice(0, bloco.indexOf('\n    }'));
+  assert.ok(corpo.includes('categoriaDeFornecedor'),
+    'sem a guarda de categoria, quem avalia fornecedor apagaria as dependencias do BIA');
+  // As duas pontas: como esta e como vai ficar.
+  assert.ok(corpo.includes('resource.data.categoria') && corpo.includes('request.resource.data.categoria'),
+    'checar so uma ponta deixaria mover dependencia de Sistemas para Fornecedores');
+});

@@ -85,9 +85,29 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // /dependencias guarda o catalogo dos 5 Ps do BIA (Fornecedores,
+    // Infraestrutura, Pessoas, Sistemas, Processos Internos). O perfil de
+    // fornecedores manda na categoria Fornecedores e em NENHUMA outra: sem a
+    // guarda de categoria, quem avalia fornecedor poderia apagar as
+    // dependencias de infraestrutura e sistemas que o BIA inteiro usa.
+    //
+    // As duas pontas sao checadas de proposito: a linha como esta hoje
+    // (resource) e como vai ficar (request.resource). Checar so uma deixaria
+    // mover uma dependencia de Sistemas para Fornecedores, ou o contrario.
+    function categoriaDeFornecedor(cat) {
+      return cat == 'Fornecedores' || cat == 'Fornecedor';
+    }
+
     match /dependencias/{id} {
       allow read: if isCorpUser();
-      allow write: if isAdmin();
+      allow create: if isAdmin()
+        || (isGestorFornecedores() && categoriaDeFornecedor(request.resource.data.categoria));
+      allow update: if isAdmin()
+        || (isGestorFornecedores()
+            && categoriaDeFornecedor(resource.data.categoria)
+            && categoriaDeFornecedor(request.resource.data.categoria));
+      allow delete: if isAdmin()
+        || (isGestorFornecedores() && categoriaDeFornecedor(resource.data.categoria));
     }
 
     match /componentes/{id} {

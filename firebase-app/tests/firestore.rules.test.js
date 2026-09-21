@@ -359,4 +359,47 @@ describe('Security Rules — livro de medições', () => {
     await assertFails(db(GESTOR).doc('config_perfis/alguem@fortestecnologia.com.br').set({ perfil: 'gestor', area: 'RH' }));
     await assertSucceeds(db(ADMIN).doc('config_perfis/alguem@fortestecnologia.com.br').set({ perfil: 'gestor', area: 'RH' }));
   });
+  test('perfil de fornecedores cadastra, edita e apaga fornecedor', async () => {
+    const F = { email: 'seguranca6@fortestecnologia.com.br' };
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`config_perfis/${F.email}`).set({ email: F.email, perfil: 'fornecedores' });
+    });
+    await assertSucceeds(db(F).doc('dependencias/d-forn').set({ categoria: 'Fornecedores', nome: 'Alfa' }));
+    await assertSucceeds(db(F).doc('dependencias/d-forn').set({ nome: 'Alfa S.A.' }, { merge: true }));
+    await assertSucceeds(db(F).doc('dependencias/d-forn').delete());
+  });
+
+  test('perfil de fornecedores NÃO mexe nas outras categorias do catálogo do BIA', async () => {
+    const F = { email: 'seguranca7@fortestecnologia.com.br' };
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`config_perfis/${F.email}`).set({ email: F.email, perfil: 'fornecedores' });
+      await ctx.firestore().doc('dependencias/d-sis').set({ categoria: 'Sistemas', nome: 'ERP' });
+    });
+    await assertFails(db(F).doc('dependencias/d-sis').set({ nome: 'ERP novo' }, { merge: true }));
+    await assertFails(db(F).doc('dependencias/d-sis').delete());
+    await assertFails(db(F).doc('dependencias/d-infra').set({ categoria: 'Infraestrutura', nome: 'Link' }));
+  });
+
+  test('perfil de fornecedores NÃO move dependência de Sistemas para Fornecedores', async () => {
+    const F = { email: 'seguranca8@fortestecnologia.com.br' };
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`config_perfis/${F.email}`).set({ email: F.email, perfil: 'fornecedores' });
+      await ctx.firestore().doc('dependencias/d-sis2').set({ categoria: 'Sistemas', nome: 'ERP' });
+    });
+    // Sem a checagem das duas pontas, isto passaria e daria acesso à linha.
+    await assertFails(db(F).doc('dependencias/d-sis2').set({ categoria: 'Fornecedores' }, { merge: true }));
+  });
+
+  test('perfil de fornecedores NÃO tira um fornecedor da categoria para escapar da guarda', async () => {
+    const F = { email: 'seguranca9@fortestecnologia.com.br' };
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`config_perfis/${F.email}`).set({ email: F.email, perfil: 'fornecedores' });
+      await ctx.firestore().doc('dependencias/d-forn2').set({ categoria: 'Fornecedores', nome: 'Beta' });
+    });
+    await assertFails(db(F).doc('dependencias/d-forn2').set({ categoria: 'Sistemas' }, { merge: true }));
+  });
+
+  test('gestor não mexe no catálogo de dependências', async () => {
+    await assertFails(db(GESTOR).doc('dependencias/d-g').set({ categoria: 'Fornecedores', nome: 'X' }));
+  });
 });

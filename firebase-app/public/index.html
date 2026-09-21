@@ -37,6 +37,7 @@
         <button type="button" class="nav-group-label">Fornecedores <span class="caret">▾</span></button>
         <div class="nav-dropdown">
           <a href="#fornecedores" class="nav-link" data-page="fornecedores">Avaliação</a>
+          <a href="#fornecedores-cadastro" class="nav-link" data-page="fornecedores-cadastro">Cadastro</a>
           <a href="#fornecedores-criterios" class="nav-link" data-page="fornecedores-criterios">Critérios</a>
         </div>
       </div>
@@ -71,12 +72,12 @@
   <script src="vendor/purify-3.4.15.min.js?v=1"></script>
   <script src="sanitizar-pcn.js?v=1"></script>
   <script src="util.js?v=1"></script>
-  <script src="perfis.js?v=1"></script>
+  <script src="perfis.js?v=2"></script>
   <script src="criticidade.js?v=2"></script>
   <script src="risco-consolidado.js?v=2"></script>
   <script src="fornecedor-score.js?v=1"></script>
   <script src="api-legacy.js?v=6"></script>
-  <script src="api.js?v=23"></script>
+  <script src="api.js?v=24"></script>
   <script>
     if (!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     const auth = firebase.auth();
@@ -91,25 +92,25 @@
       window.USER_EMAIL = user.email;
       try {
         const perfil = await API.getPerfil(user.email);
-        window.USER_PERFIL = perfil.perfil || 'gestor';
+        window.USER_PERFIL = Perfis.normalizar(perfil.perfil);
         window.USER_AREA = perfil.area || null;
       } catch(e) {
-        console.error('Falha ao carregar perfil, assumindo gestor:', e);
-        window.USER_PERFIL = 'gestor';
+        // Falha ao ler o perfil cai no MENOR acesso, nunca no maior.
+        console.error('Falha ao carregar perfil, assumindo o menor acesso:', e);
+        window.USER_PERFIL = Perfis.PERFIL_PADRAO;
         window.USER_AREA = null;
       }
       // Aplicar restricoes de perfil.
       //
-      // Quem decide o que cada perfil ve e perfis.js, nunca comparacao de texto
-      // aqui: era assim que se perdia o controle de quem enxerga o que.
+      // O menu e montado pelo que o perfil PODE ver (perfis.js), nao por uma
+      // lista do que esconder. A lista de esconder deixou passar Processos,
+      // PCNs, Riscos e Indicadores para o perfil de fornecedores: ela erra por
+      // omissao, e tela nova nascia visivel para todo mundo.
       if (!Perfis.ehAdmin(window.USER_PERFIL)) {
-        const esconder = ['areas', 'perguntas', 'dependencias', 'componentes', 'perfis'];
-        // O perfil de fornecedores gerencia os proprios criterios.
-        if (!Perfis.podeGerenciarFornecedores(window.USER_PERFIL)) esconder.push('fornecedores-criterios');
-        esconder.forEach(pagina => {
-          document.querySelectorAll('.nav-link[data-page="' + pagina + '"]').forEach(el => el.style.display = 'none');
+        document.querySelectorAll('.nav-link[data-page]').forEach(el => {
+          if (!Perfis.podeVerTela(window.USER_PERFIL, el.dataset.page)) el.style.display = 'none';
         });
-        // Esconder grupos do menu que ficaram sem nenhum item visível (ex: Cadastros para gestor)
+        // Esconder grupos do menu que ficaram sem nenhum item visível
         document.querySelectorAll('.nav-group').forEach(g => {
           const temItemVisivel = Array.from(g.querySelectorAll('.nav-link')).some(a => a.style.display !== 'none');
           if (!temItemVisivel) g.style.display = 'none';
@@ -143,6 +144,6 @@
       if (window._routePendente) route();
     });
   </script>
-  <script src="app.js?v=49"></script>
+  <script src="app.js?v=51"></script>
 </body>
 </html>
