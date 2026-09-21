@@ -1,0 +1,29 @@
+[debug] [2026-09-21T14:17:54.477Z] ----------------------------------------------------------------------
+[debug] [2026-09-21T14:17:54.479Z] Command:       /usr/bin/node /sessions/rcw-01kbwvxvtfyop5jl1xmdstkx/fbtools/node_modules/.bin/firebase emulators:exec --only firestore --project bia-forte-2025 --config ../firebase.json npx jest --runInBand --config jest.config.js
+[debug] [2026-09-21T14:17:54.479Z] CLI Version:   15.30.2
+[debug] [2026-09-21T14:17:54.480Z] Platform:      linux
+[debug] [2026-09-21T14:17:54.480Z] Node Version:  v22.23.2
+[debug] [2026-09-21T14:17:54.480Z] Detected Agent: unknown
+[debug] [2026-09-21T14:17:54.480Z] Time:          Mon Sep 21 2026 14:17:54 GMT+0000 (Coordinated Universal Time)
+[debug] [2026-09-21T14:17:54.481Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-09-21T14:17:54.496Z] >>> [apiv2][query] GET https://firebase-public.firebaseio.com/cli.json [none]
+[debug] [2026-09-21T14:17:55.702Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] Failed to authenticate, have you run firebase login?
+[warn] ⚠  emulators: You are not currently authenticated so some features may not work correctly. Please run firebase login to authenticate the CLI. 
+[debug] [2026-09-21T14:17:55.800Z] *** [apiv2] error from fetch(https://firebase-public.firebaseio.com/cli.json, {"headers":{},"method":"GET","dispatcher":{"_events":{},"_eventsCount":0}}): Error: Request was cancelled.
+[warn] ⚠  Unable to fetch the CLI MOTD and remote config. This is not a fatal error, but may indicate an issue with your network connection. 
+[debug] [2026-09-21T14:17:55.800Z] Failed to fetch MOTD FirebaseError: Failed to make request to https://firebase-public.firebaseio.com/cli.json
+[debug] [2026-09-21T14:17:55.804Z] Picked up JAVA_TOOL_OPTIONS: -javaagent:/usr/local/lib/node_modules_global/lib/node_modules/@anthropic-ai/sandbox-runtime/vendor/java-proxy-agent/srt-proxy-agent.jar
+
+[debug] [2026-09-21T14:17:55.943Z] openjdk version "11.0.32" 2026-07-21
+
+[debug] [2026-09-21T14:17:55.944Z] OpenJDK Runtime Environment (build 11.0.32+9-post-1ubuntu1-22.04-Ubuntu)
+OpenJDK 64-Bit Server VM (build 11.0.32+9-post-1ubuntu1-22.04-Ubuntu, mixed mode, sharing)
+
+[debug] [2026-09-21T14:17:55.948Z] Parsed Java major version: 11
+[debug] [2026-09-21T14:17:55.955Z] Could not find VSCode notification endpoint: TypeError: fetch failed. If you are not running the Firebase SQL Connect VSCode extension, this is expected and not an issue.
+[info] i  emulators: Shutting down emulators. {"metadata":{"emulator":{"name":"hub"},"message":"Shutting down emulators."}}
+[debug] [2026-09-21T14:17:55.957Z] Could not find VSCode notification endpoint: TypeError: fetch failed. If you are not running the Firebase SQL Connect VSCode extension, this is expected and not an issue.
+[error] 
+[error] Error: firebase-tools no longer supports Java version before 21. Please install a JDK at version 21 or above to get a compatible runtime.
