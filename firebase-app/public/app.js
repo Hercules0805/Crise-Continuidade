@@ -3492,23 +3492,11 @@ function _corStatusRisco(status) {
  * escala. O servidor faz o mesmo recalculo ao registrar a medicao — aqui e a
  * versao de exibicao, com os mesmos pesos.
  */
-const _PESO_PROB_RISCO = { 'Baixa': 1, 'Média': 2, 'Alta': 3 };
-const _PESO_IMP_RISCO = { 'Baixo': 1, 'Moderado': 2, 'Alto': 3, 'Crítico': 4 };
-
-function _scoreDoRisco(r) {
-  const p = _PESO_PROB_RISCO[String((r && r.probabilidade) || '').trim()];
-  const i = _PESO_IMP_RISCO[String((r && r.impacto) || '').trim()];
-  if (!p || !i) return null;
-  return p * i;
-}
-
-/** Faixas do score, de 1 a 12. */
-function _faixaScoreRisco(n) {
-  if (n >= 9) return { rotulo: 'Crítico', cor: '#c62828', fundo: '#ffebee' };
-  if (n >= 6) return { rotulo: 'Alto', cor: '#e65100', fundo: '#fff3e0' };
-  if (n >= 3) return { rotulo: 'Moderado', cor: '#f57c00', fundo: '#fff8e1' };
-  return { rotulo: 'Baixo', cor: '#2e7d32', fundo: '#e8f5e9' };
-}
+// A regra vive em risco-consolidado.js, que tambem alimenta o numero por area
+// e da empresa. Estas duas linhas existem para o resto do app.js nao precisar
+// mudar — e para nao voltar a haver duas copias da mesma escala.
+const _scoreDoRisco = (r) => RiscoConsolidado.scoreDoRisco(r);
+const _faixaScoreRisco = (n) => RiscoConsolidado.faixaScore(n);
 
 function _badgeScoreRisco(r) {
   const n = _scoreDoRisco(r);
@@ -3546,6 +3534,7 @@ async function riscos() {
         <button class="btn btn-primary" onclick="abrirDrawerRisco()" id="btnNovoRisco" style="display:none;">+ Novo Risco</button>
       </div>
     </div>
+    <div id="painelRiscoConsolidado" style="margin-bottom:20px;"></div>
     <div style="margin-bottom:16px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
       <div>
         <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Área:</label>
@@ -3602,10 +3591,19 @@ async function riscos() {
   try {
     // Indicadores entram aqui para que a sugestao de probabilidade funcione ao
     // abrir um risco gerado por desvio de indicador.
-    const [riscos_, areas_, deps_, inds_] = await Promise.all([
+    // Processos entram aqui porque o numero consolidado pondera cada risco pela
+    // criticidade do processo ligado a ele — sem os processos, todo risco viraria
+    // peso padrao e o numero perderia justamente o que liga o BIA ao risco.
+    const [riscos_, areas_, deps_, inds_, procs_] = await Promise.all([
       API.getRiscos(), API.getAreas(), API.getDependencias(), API.getIndicadoresSeguranca(),
+      // Nao pode derrubar a pagina: se os processos nao vierem, o registro de
+      // riscos continua utilizavel e o painel avisa que esta sem os pesos.
+      API.getProcessos().catch((e) => {
+        console.error('Riscos: processos nao carregaram; o numero consolidado usara peso padrao', e);
+        return [];
+      }),
     ]);
-    riscosData = riscos_; riscosAreasCache = areas_; indicadoresData = inds_;
+    riscosData = riscos_; riscosAreasCache = areas_; indicadoresData = inds_; riscosProcessosCache = procs_;
     riscosFornecedoresCache = deps_.filter(d => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
   } catch (e) {
     // Antes este catch zerava a lista em silencio, e a tela dizia "Nenhum risco
@@ -3636,7 +3634,83 @@ async function riscos() {
   renderizarRiscos();
 }
 
+/**
+ * Numero de risco consolidado: da empresa e de cada area.
+ *
+ * Le SEMPRE a lista inteira de riscos, nunca a lista filtrada. Um numero que
+ * muda quando alguem mexe num filtro de tela nao e o risco da empresa — e o
+ * risco daquela tela, e ninguem leva isso a um comite.
+ *
+ * Mostra tambem quantos riscos ficaram fora por nao terem probabilidade ou
+ * impacto preenchidos. Sem esse aviso, um registro pela metade se disfarca de
+ * risco baixo.
+ */
+function _renderPainelRiscoConsolidado() {
+  const painel = document.getElementById('painelRiscoConsolidado');
+  if (!painel) return;
+
+  const r = RiscoConsolidado.consolidar(riscosData, riscosProcessosCache);
+  const emp = r.empresa;
+  const semNada = emp.contados === 0 && emp.semAvaliacao === 0;
+
+  const avisoSemAvaliacao = (n) => n > 0
+    ? `<div style="font-size:0.74em;color:#e65100;margin-top:6px;">⚠ ${n} risco${n > 1 ? 's' : ''} sem probabilidade ou impacto — fora da conta</div>`
+    : '';
+
+  const cartaoEmpresa = `
+    <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;">
+      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Risco da empresa</div>
+      <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 6px;">
+        <span style="font-size:2.8em;font-weight:800;line-height:1;color:${emp.faixa.cor};">${semNada ? '–' : emp.numero}</span>
+        ${semNada ? '' : '<span style="font-size:0.85em;color:#aaa;">de 100</span>'}
+      </div>
+      <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.76em;font-weight:700;background:${emp.faixa.fundo};color:${emp.faixa.cor};">${esc(emp.faixa.rotulo)}</span>
+      <div style="font-size:0.76em;color:#777;margin-top:10px;">
+        ${emp.contados} risco${emp.contados === 1 ? '' : 's'} na conta${emp.piorScore !== null ? ` · pior caso ${emp.piorScore} de 12` : ''}
+      </div>
+      ${avisoSemAvaliacao(emp.semAvaliacao)}
+      ${!riscosProcessosCache.length && (riscosData || []).some((x) => x.processoId)
+        ? '<div style="font-size:0.74em;color:#e65100;margin-top:6px;">\u26a0 Os processos não carregaram: todo risco está pesando igual. Recarregue a página.</div>'
+        : ''}
+    </div>`;
+
+  const linhasAreas = r.areas.map((a) => `
+    <tr>
+      <td style="padding:7px 10px;font-weight:600;color:#333;">${esc(a.area)}</td>
+      <td style="padding:7px 10px;width:45%;">
+        <div style="background:#f0f0f0;border-radius:6px;height:9px;overflow:hidden;">
+          <div style="width:${a.numero}%;height:100%;background:${a.faixa.cor};"></div>
+        </div>
+      </td>
+      <td style="padding:7px 10px;text-align:right;font-weight:700;color:${a.faixa.cor};white-space:nowrap;">${a.contados ? a.numero : '–'}</td>
+      <td style="padding:7px 10px;font-size:0.82em;color:#777;white-space:nowrap;">
+        ${a.contados} risco${a.contados === 1 ? '' : 's'}${a.semAvaliacao ? ` <span style="color:#e65100;" title="${a.semAvaliacao} sem probabilidade ou impacto — fora da conta">+${a.semAvaliacao} ⚠</span>` : ''}
+      </td>
+    </tr>`).join('');
+
+  const cartaoAreas = `
+    <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 8px 10px;background:#fff;">
+      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;padding:0 10px 6px;">Risco por área</div>
+      ${r.areas.length
+        ? `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">${linhasAreas}</table>`
+        : '<div style="padding:10px;color:#999;font-size:0.88em;">Nenhum risco registrado.</div>'}
+    </div>`;
+
+  painel.innerHTML = `
+    <div style="display:grid;grid-template-columns:240px 1fr;gap:16px;align-items:start;">
+      ${cartaoEmpresa}
+      ${cartaoAreas}
+    </div>
+    <div style="font-size:0.74em;color:#999;margin-top:8px;line-height:1.5;">
+      Como a conta é feita: média dos riscos ponderada pela criticidade do processo (Tier 1 pesa 3, Tier 2 pesa 2, Tier 3 pesa 1;
+      risco corporativo ou em processo ainda Pendente pesa 2), convertida para uma escala de 0 a 100.
+      Riscos aceitos entram na conta — aceitar um risco não o faz desaparecer. Encerrados ficam fora${r.foraPorStatus ? ` (${r.foraPorStatus} hoje)` : ''}.
+      Faixas: até 24 baixo, 25 a 49 moderado, 50 a 74 alto, 75 ou mais crítico.
+    </div>`;
+}
+
 function renderizarRiscos() {
+  _renderPainelRiscoConsolidado();
   let data = [...riscosData];
   const isAdmin = window.USER_PERFIL === 'admin';
 
