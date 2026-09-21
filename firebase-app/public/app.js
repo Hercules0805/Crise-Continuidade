@@ -3476,7 +3476,7 @@ let riscosAreasCache = [];
 let riscosProcessosCache = [];
 let riscosFornecedoresCache = [];
 const RISCO_STATUS = ['Identificado', 'Em Análise', 'Em Avaliação', 'Em Tratamento', 'Em Monitoramento', 'Aceito', 'Encerrado'];
-const RISCO_CATEGORIAS_PADRAO = ['Operacional', 'Tecnológico', 'Financeiro', 'Regulatório', 'Reputacional', 'Ambiental', 'Estratégico'];
+const RISCO_CATEGORIAS = ['Financeiro', 'Operacional', 'Reputacional', 'Regulatório/Legal'];
 
 function _corStatusRisco(status) {
   const cores = {
@@ -3750,6 +3750,10 @@ function _htmlDrawerRisco() {
               <label style="${lbl}">Título / Evento</label>
               <input type="text" id="rTitulo" placeholder="Ex: Falha de energia no data center" style="${inp}border:2px solid #1a237e;font-weight:600;">
             </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Descrição</label>
+              <textarea id="rDescricao" rows="3" placeholder="Descreva o risco e seu impacto potencial" style="${inp}resize:vertical;"></textarea>
+            </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
                 <label style="${lbl}">Área</label>
@@ -3775,8 +3779,10 @@ function _htmlDrawerRisco() {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
                 <label style="${lbl}">Categoria</label>
-                <input type="text" id="rCategoria" list="rCategoriaList" placeholder="Ex: Operacional" style="${inp}">
-                <datalist id="rCategoriaList"></datalist>
+                <select id="rCategoria" style="${inp}">
+                  <option value="">Selecione...</option>
+                  ${RISCO_CATEGORIAS.map(c => `<option value="${c}">${c}</option>`).join('')}
+                </select>
               </div>
               <div>
                 <label style="${lbl}">Responsável (Owner)</label>
@@ -3792,10 +3798,6 @@ function _htmlDrawerRisco() {
                 <label style="${lbl}">Status</label>
                 <select id="rStatus" style="${inp}">${RISCO_STATUS.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
               </div>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Descrição</label>
-              <textarea id="rDescricao" rows="3" placeholder="Descreva o risco e seu impacto potencial" style="${inp}resize:vertical;"></textarea>
             </div>
             <div id="rOrigemInfo" style="font-size:0.8em;color:#888;"></div>
           </div>
@@ -3888,21 +3890,37 @@ function _htmlDrawerRisco() {
               <textarea id="rEstrategiaDescricao" rows="3" placeholder="Descreva a estratégia de tratamento" style="${inp}resize:vertical;"></textarea>
             </div>
             <div>
-              <label style="${lbl}margin-bottom:8px;">Plano de Ação</label>
+              <label style="${lbl}margin-bottom:8px;">Plano de Ação (5W2H)</label>
               <div id="planoAcaoTabela"></div>
-              <div style="display:grid;grid-template-columns:2fr 1.3fr 1fr 1.3fr auto;gap:8px;margin-top:10px;align-items:end;">
-                <div><input type="text" id="paAcao" placeholder="Ação" style="${inp}"></div>
-                <div><input type="text" id="paResponsavel" placeholder="Responsável" style="${inp}"></div>
-                <div><input type="date" id="paPrazo" style="${inp}"></div>
-                <div>
-                  <select id="paStatus" style="${inp}">
-                    <option value="Pendente">Pendente</option>
-                    <option value="Em andamento">Em andamento</option>
-                    <option value="Concluído">Concluído</option>
-                    <option value="Atrasado">Atrasado</option>
-                  </select>
+              <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:14px;margin-top:10px;">
+                <div style="margin-bottom:10px;">
+                  <label style="${lbl}">Ação (o quê)</label>
+                  <input type="text" id="paAcao" placeholder="O que será feito" style="${inp}">
                 </div>
-                <button class="btn btn-ghost" onclick="adicionarPlanoAcaoItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                  <div><label style="${lbl}">Por quê</label><input type="text" id="paPorque" placeholder="Motivo da ação" style="${inp}"></div>
+                  <div><label style="${lbl}">Responsável (quem)</label><input type="text" id="paResponsavel" placeholder="Nome ou área" style="${inp}"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                  <div><label style="${lbl}">Onde</label><input type="text" id="paOnde" placeholder="Local ou sistema" style="${inp}"></div>
+                  <div><label style="${lbl}">Quando</label><input type="date" id="paQuando" style="${inp}"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+                  <div><label style="${lbl}">Como</label><input type="text" id="paComo" placeholder="Forma de execução" style="${inp}"></div>
+                  <div><label style="${lbl}">Quanto custa (R$)</label><input type="number" id="paQuantoCusta" placeholder="0,00" style="${inp}"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end;">
+                  <div>
+                    <label style="${lbl}">Status</label>
+                    <select id="paStatus" style="${inp}">
+                      <option value="Pendente">Pendente</option>
+                      <option value="Em andamento">Em andamento</option>
+                      <option value="Concluído">Concluído</option>
+                      <option value="Atrasado">Atrasado</option>
+                    </select>
+                  </div>
+                  <button class="btn btn-ghost" onclick="adicionarPlanoAcaoItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+                </div>
               </div>
             </div>
           </div>
@@ -3911,26 +3929,34 @@ function _htmlDrawerRisco() {
           <div id="painel-risco-monitoramento" style="display:none;">
             <label style="${lbl}margin-bottom:8px;">Indicadores-Chave de Risco (KRIs)</label>
             <div id="krisTabela"></div>
-            <div style="display:grid;grid-template-columns:1.6fr 1fr 1fr 1fr 1.2fr auto;gap:8px;margin-top:10px;align-items:end;">
-              <div><input type="text" id="kriIndicador" placeholder="Indicador" style="${inp}"></div>
-              <div><input type="text" id="kriMeta" placeholder="Meta" style="${inp}"></div>
-              <div><input type="text" id="kriValorAtual" placeholder="Valor atual" style="${inp}"></div>
-              <div>
-                <select id="kriFrequencia" style="${inp}">
-                  <option value="Diária">Diária</option>
-                  <option value="Semanal">Semanal</option>
-                  <option value="Mensal">Mensal</option>
-                  <option value="Trimestral">Trimestral</option>
-                </select>
+            <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:14px;margin-top:10px;">
+              <div id="kriEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:10px;">
+                ✎ Editando lançamento — <a href="#" onclick="cancelarEdicaoKri();return false;" style="color:#1565c0;">cancelar edição</a>
               </div>
-              <div>
-                <select id="kriStatus" style="${inp}">
-                  <option value="Dentro da meta">Dentro da meta</option>
-                  <option value="Atenção">Atenção</option>
-                  <option value="Fora da meta">Fora da meta</option>
-                </select>
+              <div style="margin-bottom:10px;"><input type="text" id="kriIndicador" placeholder="Indicador" style="${inp}"></div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div><input type="text" id="kriMeta" placeholder="Meta" style="${inp}"></div>
+                <div><input type="text" id="kriValorAtual" placeholder="Valor atual" style="${inp}"></div>
+                <div><input type="date" id="kriDataLancamento" style="${inp}"></div>
               </div>
-              <button class="btn btn-ghost" onclick="adicionarKriItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+              <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
+                <div>
+                  <select id="kriFrequencia" style="${inp}">
+                    <option value="Diária">Diária</option>
+                    <option value="Semanal">Semanal</option>
+                    <option value="Mensal">Mensal</option>
+                    <option value="Trimestral">Trimestral</option>
+                  </select>
+                </div>
+                <div>
+                  <select id="kriStatus" style="${inp}">
+                    <option value="Dentro da meta">Dentro da meta</option>
+                    <option value="Atenção">Atenção</option>
+                    <option value="Fora da meta">Fora da meta</option>
+                  </select>
+                </div>
+                <button class="btn btn-ghost" id="btnAdicionarKri" onclick="adicionarKriItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+              </div>
             </div>
           </div>
 
@@ -3962,7 +3988,7 @@ function _htmlDrawerRisco() {
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="fecharDrawerRisco()">Cancelar</button>
+        <button class="btn btn-ghost" onclick="fecharDrawerRisco()">Fechar</button>
         <button class="btn btn-primary" onclick="salvarRisco()" id="btnSalvarRisco">Salvar</button>
       </div>
     </div>`;
@@ -3976,6 +4002,14 @@ window.trocarAbaRisco = (aba) => {
     btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
   });
 };
+
+/** Título + badge de status do drawer. Reaproveitado ao abrir e depois de salvar
+ *  (Salvar não fecha mais o drawer — ver salvarRisco). */
+function _atualizarTituloDrawerRisco(r) {
+  const titulo = r ? 'Editar Risco' : 'Novo Risco';
+  const subtitulo = r && r.titulo ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(r.titulo)}</div>` : '';
+  document.getElementById('riscoDrawerTitulo').innerHTML = titulo + (r ? ` ${_badgeStatusRisco(r.status)}` : '') + subtitulo;
+}
 
 window.abrirDrawerRisco = async (r) => {
   const isAdmin = window.USER_PERFIL === 'admin';
@@ -4023,9 +4057,6 @@ window.abrirDrawerRisco = async (r) => {
     if (sel.value) _sugerirProbabilidadePeloIndicador(sel.value);
   };
 
-  const categorias = [...new Set([...RISCO_CATEGORIAS_PADRAO, ...riscosData.map(x => x.categoria).filter(Boolean)])].sort();
-  document.getElementById('rCategoriaList').innerHTML = categorias.map(c => `<option value="${c}">`).join('');
-
   _limparSugestoes();
   document.getElementById('rArea').value = r ? r.area : '';
   document.getElementById('rProcesso').value = r && r.processoId ? r.processoId : '';
@@ -4055,6 +4086,7 @@ window.abrirDrawerRisco = async (r) => {
   renderPlanoAcaoRisco();
 
   window._riscoKris = r && r.kris ? [...r.kris] : [];
+  window.cancelarEdicaoKri();
   renderKrisRisco();
 
   document.getElementById('rDataUltimaReavaliacao').value = r ? (r.dataUltimaReavaliacao || '') : '';
@@ -4063,9 +4095,7 @@ window.abrirDrawerRisco = async (r) => {
   document.getElementById('rDataEncerramento').value = r ? (r.dataEncerramento || '') : '';
   document.getElementById('rJustificativaEncerramento').value = r ? (r.justificativaEncerramento || '') : '';
 
-  const titulo = r ? 'Editar Risco' : 'Novo Risco';
-  const subtitulo = r && r.titulo ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(r.titulo)}</div>` : '';
-  document.getElementById('riscoDrawerTitulo').innerHTML = titulo + (r ? ` ${_badgeStatusRisco(r.status)}` : '') + subtitulo;
+  _atualizarTituloDrawerRisco(r);
 
   // Somente admin edita; demais perfis visualizam em modo leitura.
   // Setas da Fase 3: o BIA sugere o impacto, o indicador sugere a probabilidade.
@@ -4146,12 +4176,17 @@ window.salvarRisco = async () => {
 
   try {
     const result = await API.salvarRisco(r);
-    if (isNew) r.id = result.id;
+    if (isNew) {
+      r.id = result.id;
+      // Sem fechar o drawer, o proximo "Salvar" precisa gravar no MESMO
+      // registro em vez de criar um segundo risco identico.
+      document.getElementById('rId').value = r.id;
+    }
     const idx = riscosData.findIndex(x => x.id === r.id);
     if (idx !== -1) riscosData[idx] = { ...riscosData[idx], ...r };
     else riscosData.push({ origem: 'Manual', ...r });
-    fecharDrawerRisco();
     renderizarRiscos();
+    _atualizarTituloDrawerRisco(r);
     showToast('✅ Salvo!', '#2e7d32');
     API.invalidate('getRiscos');
   } catch (e) { showToast('❌ Erro: ' + e.message, '#c62828'); }
@@ -4279,11 +4314,19 @@ function renderPlanoAcaoRisco() {
   const itens = window._riscoPlanoAcao || [];
   const isAdmin = window.USER_PERFIL === 'admin';
   if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhuma ação cadastrada.</p>'; return; }
+  // Compatibilidade com itens salvos no formato antigo (acao/responsavel/prazo/status):
+  // `quando` cai para `prazo` quando o item nao tem o campo novo.
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((it, i) => `<tr>
-        <td style="font-weight:600;color:#222;">${esc(it.acao)}</td>
+        <td>
+          <div style="font-weight:600;color:#222;">${esc(it.acao)}</div>
+          ${it.porque ? `<div style="font-size:0.78em;color:#888;margin-top:2px;">Por quê: ${esc(it.porque)}</div>` : ''}
+          ${it.como ? `<div style="font-size:0.78em;color:#888;margin-top:2px;">Como: ${esc(it.como)}</div>` : ''}
+        </td>
         <td style="font-size:0.85em;color:#555;">${esc(it.responsavel || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${it.prazo || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(it.onde || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${it.quando || it.prazo || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${it.quantoCusta != null && it.quantoCusta !== '' ? 'R$ ' + Number(it.quantoCusta).toLocaleString('pt-BR') : '-'}</td>
         <td>${it.status || '-'}</td>
         <td style="text-align:center;">${isAdmin ? `<button class="btn-icon" onclick="removerPlanoAcaoItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
       </tr>`).join('') + `</tbody></table>`;
@@ -4291,17 +4334,21 @@ function renderPlanoAcaoRisco() {
 window.adicionarPlanoAcaoItem = () => {
   const acao = document.getElementById('paAcao').value.trim();
   if (!acao) return showToast('Informe a ação.', '#e65100');
+  const quantoCusta = document.getElementById('paQuantoCusta').value;
   window._riscoPlanoAcao = window._riscoPlanoAcao || [];
   window._riscoPlanoAcao.push({
     acao,
+    porque: document.getElementById('paPorque').value.trim(),
     responsavel: document.getElementById('paResponsavel').value.trim(),
-    prazo: document.getElementById('paPrazo').value,
+    onde: document.getElementById('paOnde').value.trim(),
+    quando: document.getElementById('paQuando').value,
+    como: document.getElementById('paComo').value.trim(),
+    quantoCusta: quantoCusta !== '' ? Number(quantoCusta) : null,
     status: document.getElementById('paStatus').value,
-    observacao: '',
   });
-  document.getElementById('paAcao').value = '';
-  document.getElementById('paResponsavel').value = '';
-  document.getElementById('paPrazo').value = '';
+  ['paAcao', 'paPorque', 'paResponsavel', 'paOnde', 'paQuando', 'paComo', 'paQuantoCusta'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
   renderPlanoAcaoRisco();
 };
 window.removerPlanoAcaoItem = (idx) => {
@@ -4311,41 +4358,82 @@ window.removerPlanoAcaoItem = (idx) => {
 
 // KRIs (sub-lista embutida no risco)
 window._riscoKris = [];
+window._kriEditandoIndex = null;
 function renderKrisRisco() {
   const container = document.getElementById('krisTabela');
   if (!container) return;
   const itens = window._riscoKris || [];
   const isAdmin = window.USER_PERFIL === 'admin';
   if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum KRI cadastrado.</p>'; return; }
+  // dataLancamento e o nome novo do campo; ultimaAtualizacao e o antigo, mantido
+  // como fallback para KRIs ja lancados antes desta tela ganhar o campo visivel.
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((it, i) => `<tr>
         <td style="font-weight:600;color:#222;">${esc(it.indicador)}</td>
-        <td style="font-size:0.85em;color:#555;">${it.meta || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${it.valorAtual || '-'}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(it.meta || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(it.valorAtual || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${it.dataLancamento || it.ultimaAtualizacao || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${it.frequencia || '-'}</td>
         <td>${it.status || '-'}</td>
-        <td style="text-align:center;">${isAdmin ? `<button class="btn-icon" onclick="removerKriItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
+        <td style="text-align:center;white-space:nowrap;">${isAdmin ? `
+          <button class="btn-icon" onclick="editarKriItem(${i})" title="Editar">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="removerKriItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
       </tr>`).join('') + `</tbody></table>`;
+}
+function _limparFormularioKri() {
+  ['kriIndicador', 'kriMeta', 'kriValorAtual'].forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('kriDataLancamento').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('kriFrequencia').value = 'Mensal';
+  document.getElementById('kriStatus').value = 'Dentro da meta';
 }
 window.adicionarKriItem = () => {
   const indicador = document.getElementById('kriIndicador').value.trim();
   if (!indicador) return showToast('Informe o indicador.', '#e65100');
-  window._riscoKris = window._riscoKris || [];
-  window._riscoKris.push({
+  const item = {
     indicador,
     meta: document.getElementById('kriMeta').value.trim(),
     valorAtual: document.getElementById('kriValorAtual').value.trim(),
+    dataLancamento: document.getElementById('kriDataLancamento').value || new Date().toISOString().slice(0, 10),
     frequencia: document.getElementById('kriFrequencia').value,
     status: document.getElementById('kriStatus').value,
-    ultimaAtualizacao: new Date().toISOString().slice(0, 10),
-  });
-  document.getElementById('kriIndicador').value = '';
-  document.getElementById('kriMeta').value = '';
-  document.getElementById('kriValorAtual').value = '';
+  };
+  window._riscoKris = window._riscoKris || [];
+  if (window._kriEditandoIndex != null) {
+    window._riscoKris[window._kriEditandoIndex] = item;
+    window._kriEditandoIndex = null;
+    document.getElementById('kriEdicaoAviso').style.display = 'none';
+    document.getElementById('btnAdicionarKri').textContent = '+ Adicionar';
+  } else {
+    window._riscoKris.push(item);
+  }
+  _limparFormularioKri();
   renderKrisRisco();
+};
+window.editarKriItem = (idx) => {
+  const it = window._riscoKris[idx];
+  if (!it) return;
+  window._kriEditandoIndex = idx;
+  document.getElementById('kriIndicador').value = it.indicador || '';
+  document.getElementById('kriMeta').value = it.meta || '';
+  document.getElementById('kriValorAtual').value = it.valorAtual || '';
+  document.getElementById('kriDataLancamento').value = it.dataLancamento || it.ultimaAtualizacao || '';
+  document.getElementById('kriFrequencia').value = it.frequencia || 'Mensal';
+  document.getElementById('kriStatus').value = it.status || 'Dentro da meta';
+  document.getElementById('kriEdicaoAviso').style.display = 'block';
+  document.getElementById('btnAdicionarKri').textContent = 'Salvar alteração';
+  trocarAbaRisco('monitoramento');
+};
+window.cancelarEdicaoKri = () => {
+  window._kriEditandoIndex = null;
+  document.getElementById('kriEdicaoAviso').style.display = 'none';
+  document.getElementById('btnAdicionarKri').textContent = '+ Adicionar';
+  _limparFormularioKri();
 };
 window.removerKriItem = (idx) => {
   window._riscoKris.splice(idx, 1);
+  if (window._kriEditandoIndex === idx) window.cancelarEdicaoKri();
   renderKrisRisco();
 };
 
@@ -4790,7 +4878,10 @@ async function _lancarResultadosIndicador(indicador, novasEntradas, arquivoOrige
         area: '',
         titulo: `Desvio no indicador "${esc(indicador.nome)}"`,
         descricao: `O indicador "${esc(indicador.nome)}" (${esc(indicador.pilar || 'sem pilar')}) atingiu ${ultimoComDado.desempenho}% de desempenho em ${_formatMes(ultimoComDado.mes)}, ${indicador.sentidoMeta === SENTIDO_META.MENOR_MELHOR ? 'acima da meta máxima' : 'abaixo da meta mínima'} de ${indicador.metaMinima}%.`,
-        categoria: indicador.pilar || 'Tecnológico',
+        // Desvio de indicador e falha de controle: cai sempre em Operacional,
+        // dentro da lista fechada de categorias de risco (o Pilar do indicador
+        // e outra taxonomia e nunca bateu com essa lista).
+        categoria: 'Operacional',
         responsavel: indicador.responsavel || '',
         dataIdentificacao: new Date().toISOString().slice(0, 10),
         status: 'Identificado',
