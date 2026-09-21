@@ -40,6 +40,7 @@ const COLLECTION = {
   lancamentos: 'lancamentos_indicadores',
   criteriosFornecedor: 'criterios_fornecedor',
   avaliacoesFornecedor: 'avaliacoes_fornecedor',
+  categoriasFornecedor: 'categorias_fornecedor',
 };
 
 // ------------------------------------------------------------
@@ -259,6 +260,10 @@ async function _lerDependencias() {
     // So usado por Fornecedores: uma empresa pode ter N pessoas associadas.
     // Nas outras 4 categorias este campo nunca e escrito e chega vazio.
     pessoas: Array.isArray(d.pessoas) ? d.pessoas : [],
+    // Idem: segmento de negocio (catalogo categorias_fornecedor) e o
+    // responsavel interno pelo contrato.
+    categoriaFornecedor: d.categoriaFornecedor || '',
+    gestorContrato: d.gestorContrato || '',
   }));
 }
 
@@ -436,6 +441,43 @@ async function _salvarCriterioFornecedor(c) {
   if (data.ordem === undefined) data.ordem = Date.now();
   const ref = await _db.collection(COLLECTION.criteriosFornecedor).add(data);
   return { success: true, id: ref.id, criteriosVersao: await _subirVersaoCriterios() };
+}
+
+/**
+ * Categorias de segmento do fornecedor (ex.: "Nuvem, Data Center e
+ * Cibersegurança"). Classificacao de negocio, nao entra em calculo nenhum —
+ * por isso, ao contrario dos criterios de avaliacao, nao tem versao.
+ */
+async function _lerCategoriasFornecedor() {
+  const docs = await _getAll(COLLECTION.categoriasFornecedor);
+  return docs.map((d) => ({
+    id: d.id,
+    nome: d.nome || '',
+    ativo: d.ativo !== false,
+    ordem: Number(d.ordem) || 0,
+    criadoEm: d.criadoEm || '',
+    atualizadoEm: d.atualizadoEm || '',
+  })).sort((a, b) => (a.ordem - b.ordem) || a.nome.localeCompare(b.nome));
+}
+
+const _CAMPOS_CATEGORIA_FORNECEDOR = ['nome', 'ativo', 'ordem'];
+
+async function _salvarCategoriaFornecedor(c) {
+  const data = {};
+  _CAMPOS_CATEGORIA_FORNECEDOR.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(c, campo) && c[campo] !== undefined) data[campo] = c[campo];
+  });
+  data.atualizadoEm = new Date().toISOString();
+
+  if (c.id) {
+    await _db.collection(COLLECTION.categoriasFornecedor).doc(String(c.id)).set(data, { merge: true });
+    return { success: true, id: c.id };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = (window.USER_EMAIL || '').toLowerCase();
+  if (data.ordem === undefined) data.ordem = Date.now();
+  const ref = await _db.collection(COLLECTION.categoriasFornecedor).add(data);
+  return { success: true, id: ref.id };
 }
 
 // Versao da regua de criterios, no mesmo lugar da regua do BIA mas em outro
@@ -714,6 +756,8 @@ async function _salvarDependencia(d) {
     email: d.email || '',
     endereco: d.endereco || '',
     pessoas: Array.isArray(d.pessoas) ? d.pessoas : [],
+    categoriaFornecedor: d.categoriaFornecedor || '',
+    gestorContrato: d.gestorContrato || '',
   };
   if (d.id) {
     await _db.collection(COLLECTION.dependencias).doc(String(d.id)).set(data, { merge: true });
@@ -987,6 +1031,7 @@ const _GET_FIRESTORE = {
   getRiscosPorArea: (params) => _lerRiscos().then((rs) => (params.area ? rs.filter((r) => r.area === params.area) : rs)),
   getIndicadoresSeguranca: () => _lerIndicadoresSeguranca(),
   getCriteriosFornecedor: () => _lerCriteriosFornecedor(),
+  getCategoriasFornecedor: () => _lerCategoriasFornecedor(),
   getAvaliacoesFornecedor: () => _lerAvaliacoesFornecedor(),
   getConfigFornecedor: () => _lerConfigFornecedor(),
   getPerfis: () => _lerPerfis(),
@@ -1014,6 +1059,8 @@ const _POST_FIRESTORE = {
   salvarCriterioFornecedor: (b) => _salvarCriterioFornecedor(b),
   excluirCriterioFornecedor: (b) => _db.collection(COLLECTION.criteriosFornecedor).doc(String(b.id)).delete()
     .then(() => _subirVersaoCriterios()).then((versao) => ({ success: true, criteriosVersao: versao })),
+  salvarCategoriaFornecedor: (b) => _salvarCategoriaFornecedor(b),
+  excluirCategoriaFornecedor: (b) => _db.collection(COLLECTION.categoriasFornecedor).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarAvaliacaoFornecedor: (b) => _salvarAvaliacaoFornecedor(b),
   salvarConfigFornecedor: (b) => _salvarConfigFornecedor(b),
   salvarPerfilAcesso: (b) => _salvarPerfilAcesso(b),
@@ -1164,6 +1211,7 @@ const API = {
   excluirRisco: (id) => API.post('excluirRisco', { id }),
   getIndicadoresSeguranca: () => API.get('getIndicadoresSeguranca'),
   getCriteriosFornecedor: () => API.get('getCriteriosFornecedor'),
+  getCategoriasFornecedor: () => API.get('getCategoriasFornecedor'),
   getAvaliacoesFornecedor: () => API.get('getAvaliacoesFornecedor'),
   getConfigFornecedor: () => API.get('getConfigFornecedor'),
   getPerfis: () => API.get('getPerfis'),
@@ -1177,6 +1225,10 @@ const API = {
     .then((r) => { API.invalidate('getCriteriosFornecedor'); return r; }),
   excluirCriterioFornecedor: (id) => API.post('excluirCriterioFornecedor', { id })
     .then((r) => { API.invalidate('getCriteriosFornecedor'); return r; }),
+  salvarCategoriaFornecedor: (c) => API.post('salvarCategoriaFornecedor', c)
+    .then((r) => { API.invalidate('getCategoriasFornecedor'); return r; }),
+  excluirCategoriaFornecedor: (id) => API.post('excluirCategoriaFornecedor', { id })
+    .then((r) => { API.invalidate('getCategoriasFornecedor'); return r; }),
   salvarAvaliacaoFornecedor: (a) => API.post('salvarAvaliacaoFornecedor', a)
     .then((r) => { API.invalidate('getAvaliacoesFornecedor'); return r; }),
   salvarIndicadorSeguranca: (ind) => API.post('salvarIndicadorSeguranca', ind),

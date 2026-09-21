@@ -38,6 +38,7 @@
         <div class="nav-dropdown">
           <a href="#fornecedores" class="nav-link" data-page="fornecedores">Avaliação</a>
           <a href="#fornecedores-cadastro" class="nav-link" data-page="fornecedores-cadastro">Cadastro</a>
+          <a href="#fornecedores-categorias" class="nav-link" data-page="fornecedores-categorias">Categorias</a>
           <a href="#fornecedores-criterios" class="nav-link" data-page="fornecedores-criterios">Critérios</a>
         </div>
       </div>
@@ -77,7 +78,7 @@
   <script src="risco-consolidado.js?v=2"></script>
   <script src="fornecedor-score.js?v=1"></script>
   <script src="api-legacy.js?v=6"></script>
-  <script src="api.js?v=25"></script>
+  <script src="api.js?v=26"></script>
   <script>
     if (!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     const auth = firebase.auth();
@@ -144,6 +145,6 @@
       if (window._routePendente) route();
     });
   </script>
-  <script src="app.js?v=53"></script>
+  <script src="app.js?v=54"></script>
 </body>
 </html>

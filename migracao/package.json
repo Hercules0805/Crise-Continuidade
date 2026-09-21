@@ -16,7 +16,8 @@
     "preencher-medicoes": "ts-node src/preencher-medicoes.ts",
     "migrar-lancamentos": "ts-node src/migrar-lancamentos.ts",
     "migrar-categorias-risco": "ts-node src/migrar-categorias-risco.ts",
-    "migrar-fornecedores-pessoas": "ts-node src/migrar-fornecedores-pessoas.ts"
+    "migrar-fornecedores-pessoas": "ts-node src/migrar-fornecedores-pessoas.ts",
+    "seed-categorias-fornecedor": "ts-node src/seed-categorias-fornecedor.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

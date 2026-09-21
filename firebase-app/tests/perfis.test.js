@@ -120,9 +120,9 @@ test('o perfil de fornecedores nao pode escrever em config_perfis', () => {
   assert.ok(corpo.includes('isAdmin()'), 'admin tem que poder gerenciar perfis');
 });
 
-test('as duas colecoes de fornecedor usam a permissao, nao o perfil admin direto', () => {
+test('as colecoes de fornecedor usam a permissao, nao o perfil admin direto', () => {
   const regras = lerRegras();
-  ['criterios_fornecedor', 'avaliacoes_fornecedor'].forEach((col) => {
+  ['criterios_fornecedor', 'avaliacoes_fornecedor', 'categorias_fornecedor'].forEach((col) => {
     const bloco = regras.slice(regras.indexOf(`match /${col}/`));
     const corpo = bloco.slice(0, bloco.indexOf('\n    }'));
     assert.ok(corpo.includes('podeGerenciarFornecedores()'), `${col} deveria usar podeGerenciarFornecedores()`);

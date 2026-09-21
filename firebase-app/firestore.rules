@@ -219,6 +219,14 @@ service cloud.firestore {
       allow write: if podeGerenciarFornecedores();
     }
 
+    // Categorias de segmento do fornecedor (ex.: "Nuvem, Data Center e
+    // Ciberseguranca") -- classificacao de negocio, nao entra em calculo
+    // nenhum. Mesma permissao dos criterios de avaliacao.
+    match /categorias_fornecedor/{id} {
+      allow read: if isCorpUser();
+      allow write: if podeGerenciarFornecedores();
+    }
+
     // Append-only: cada avaliacao e um documento novo, a mais recente vale.
     // Sem update e sem delete — o historico da nota do fornecedor e o que
     // permite mostrar a evolucao dele, e uma nota apagada nao se recupera.

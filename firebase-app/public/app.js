@@ -12,6 +12,7 @@ const pages = {
   fornecedores,
   'fornecedores-criterios': fornecedoresCriterios,
   'fornecedores-cadastro': fornecedoresCadastro,
+  'fornecedores-categorias': fornecedoresCategorias,
   perfis,
 };
 
@@ -7422,6 +7423,140 @@ window.excluirCriterio = async (id) => {
 };
 
 // ============================================================
+// PÁGINA: FORNECEDORES — CATEGORIAS
+//
+// Segmento de negócio do fornecedor (ex.: "Nuvem, Data Center e
+// Cibersegurança"). Cadastrável/editável/excluível, ao contrário das 5 Ps do
+// BIA (Fornecedores/Infraestrutura/Pessoas/Sistemas/Processos Internos, essas
+// sim fixas). Mesmo molde de Critérios, sem peso nem versão — categoria não
+// entra em cálculo nenhum.
+// ============================================================
+
+let categoriasFornecedorData = [];
+
+async function fornecedoresCategorias() {
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Categorias de Fornecedores</h2><p class="page-sub">O segmento de negócio de cada fornecedor</p></div>
+      <button class="btn btn-primary" onclick="abrirModalCategoriaFornecedor()" id="btnNovaCategoriaForn" style="display:none;">+ Nova Categoria</button>
+    </div>
+    <div class="loading" id="loadingCategoriasForn">⏳ Carregando...</div>
+    <div id="listaCategoriasForn"></div>
+    <div class="modal-overlay" id="modalCategoriaForn"><div class="modal" onclick="event.stopPropagation()">
+      <h3 id="modalCategoriaFornTitulo">Nova Categoria</h3>
+      <input type="hidden" id="catFornId">
+      <label>Categoria</label>
+      <input type="text" id="catFornNome" placeholder="Ex: Nuvem, Data Center e Cibersegurança">
+      <label class="check-label"><input type="checkbox" id="catFornAtivo" checked> Categoria ativa</label>
+      <span style="font-size:0.75em;color:#888;display:block;">Desativar tira a categoria do cadastro de fornecedores novos. Fornecedores já classificados nela continuam mostrando o nome dela.</span>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalCategoriaFornecedor()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarCategoriaFornecedor()">Salvar</button>
+      </div>
+    </div></div>`;
+
+  document.getElementById('btnNovaCategoriaForn').style.display = isAdmin ? 'inline-block' : 'none';
+
+  try {
+    categoriasFornecedorData = await API.getCategoriasFornecedor();
+  } catch (e) {
+    console.error('Categorias de fornecedor: falha ao carregar', e);
+    document.getElementById('loadingCategoriasForn').style.display = 'none';
+    document.getElementById('listaCategoriasForn').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
+      Não foi possível carregar as categorias.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="fornecedoresCategorias()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+  document.getElementById('loadingCategoriasForn').style.display = 'none';
+  renderizarCategoriasFornecedor();
+}
+
+function renderizarCategoriasFornecedor() {
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const lista = document.getElementById('listaCategoriasForn');
+  if (!lista) return;
+
+  if (!categoriasFornecedorData.length) {
+    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
+      Nenhuma categoria cadastrada ainda.<br>
+      <span style="font-size:0.9em;">Sem categoria, o cadastro de fornecedores fica sem essa opção pra escolher.</span></div>`;
+    return;
+  }
+
+  lista.innerHTML = `
+    <div class="data-table">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:70%;">Categoria</th>
+            <th style="width:15%;text-align:center;">Status</th>
+            <th style="width:15%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${categoriasFornecedorData.map((c) => `
+            <tr style="${c.ativo ? '' : 'opacity:0.5;'}">
+              <td style="font-weight:600;">${esc(c.nome)}</td>
+              <td style="text-align:center;">${c.ativo
+                ? '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#e8f5e9;color:#2e7d32;">Ativa</span>'
+                : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativa</span>'}</td>
+              <td style="text-align:center;">
+                ${isAdmin ? `
+                  <button class="btn-icon" onclick="abrirModalCategoriaFornecedor('${c.id}')" title="Editar">✏️</button>
+                  <button class="btn-icon" onclick="excluirCategoriaFornecedor('${c.id}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+window.abrirModalCategoriaFornecedor = (id) => {
+  const c = id ? categoriasFornecedorData.find((x) => x.id === id) : null;
+  document.getElementById('modalCategoriaFornTitulo').textContent = c ? 'Editar Categoria' : 'Nova Categoria';
+  document.getElementById('catFornId').value = c ? c.id : '';
+  document.getElementById('catFornNome').value = c ? c.nome : '';
+  document.getElementById('catFornAtivo').checked = c ? c.ativo : true;
+  document.getElementById('modalCategoriaForn').classList.add('open');
+};
+
+window.fecharModalCategoriaFornecedor = () => document.getElementById('modalCategoriaForn').classList.remove('open');
+
+window.salvarCategoriaFornecedor = async () => {
+  const nome = document.getElementById('catFornNome').value.trim();
+  if (!nome) return showToast('Informe a categoria.', '#e65100');
+
+  try {
+    await API.salvarCategoriaFornecedor({
+      id: document.getElementById('catFornId').value || null,
+      nome,
+      ativo: document.getElementById('catFornAtivo').checked,
+    });
+    fecharModalCategoriaFornecedor();
+    categoriasFornecedorData = await API.getCategoriasFornecedor();
+    renderizarCategoriasFornecedor();
+    showToast('✅ Salvo!', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+  }
+};
+
+window.excluirCategoriaFornecedor = async (id) => {
+  const c = categoriasFornecedorData.find((x) => x.id === id);
+  if (!confirm(`Excluir a categoria "${c ? c.nome : id}"?\n\nFornecedores que já usam esta categoria continuam mostrando o nome dela até serem editados. Se a ideia é só parar de oferecê-la em fornecedores novos, é melhor desativar em vez de excluir.`)) return;
+  try {
+    await API.excluirCategoriaFornecedor(id);
+    categoriasFornecedorData = await API.getCategoriasFornecedor();
+    renderizarCategoriasFornecedor();
+    showToast('✅ Excluída.', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ============================================================
 // PÁGINA: FORNECEDORES — AVALIAÇÃO
 //
 // A lista de fornecedores vem de Dependencias (categoria Fornecedores), que e o
@@ -7488,13 +7623,15 @@ async function fornecedores() {
   document.getElementById('btnIrCriterios').style.display = isAdmin ? 'inline-block' : 'none';
 
   try {
-    const [deps, crits, avals, cfg] = await Promise.all([
+    const [deps, crits, avals, cfg, cats] = await Promise.all([
       API.getDependencias(), API.getCriteriosFornecedor(), API.getAvaliacoesFornecedor(), API.getConfigFornecedor(),
+      API.getCategoriasFornecedor(),
     ]);
     fornecedoresData = deps.filter((d) => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
     criteriosFornecedorData = crits;
     avaliacoesFornecedorData = avals;
     configFornecedor = cfg;
+    categoriasFornecedorData = cats;
   } catch (e) {
     console.error('Fornecedores: falha ao carregar', e);
     document.getElementById('loadingFornecedores').style.display = 'none';
@@ -7978,9 +8115,10 @@ async function fornecedoresCadastro() {
   document.getElementById('btnNovoFornecedor').style.display = podeMexer ? 'inline-block' : 'none';
 
   try {
-    const [deps, avals] = await Promise.all([API.getDependencias(), API.getAvaliacoesFornecedor()]);
+    const [deps, avals, cats] = await Promise.all([API.getDependencias(), API.getAvaliacoesFornecedor(), API.getCategoriasFornecedor()]);
     fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
     avaliacoesFornecedorData = avals;
+    categoriasFornecedorData = cats;
   } catch (e) {
     console.error('Cadastro de fornecedores: falha ao carregar', e);
     document.getElementById('loadingFornCadastro').style.display = 'none';
@@ -8009,10 +8147,11 @@ function renderizarFornecedoresCadastro() {
       <table>
         <thead>
           <tr>
-            <th style="width:26%;">Empresa</th>
-            <th style="width:26%;">Serviço prestado</th>
-            <th style="width:12%;">Setor</th>
-            <th style="width:22%;">Pessoas</th>
+            <th style="width:22%;">Empresa</th>
+            <th style="width:16%;">Categoria</th>
+            <th style="width:20%;">Serviço prestado</th>
+            <th style="width:10%;">Setor</th>
+            <th style="width:18%;">Pessoas</th>
             <th style="width:14%;text-align:center;">Ações</th>
           </tr>
         </thead>
@@ -8020,6 +8159,7 @@ function renderizarFornecedoresCadastro() {
           ${data.length ? data.map((f) => `
             <tr>
               <td style="font-weight:600;">${esc(f.nome)}</td>
+              <td style="color:#666;font-size:0.88em;">${esc(f.categoriaFornecedor || '–')}</td>
               <td style="color:#666;font-size:0.9em;">${esc(f.detalhes || '–')}</td>
               <td style="color:#666;font-size:0.88em;">${esc(f.setor || '–')}</td>
               <td style="color:#666;font-size:0.88em;">${_resumoPessoasFornecedor(f)}</td>
@@ -8029,7 +8169,7 @@ function renderizarFornecedoresCadastro() {
                   <button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
               </td>
             </tr>`).join('')
-            : `<tr><td colspan="5" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com essa busca.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
+            : `<tr><td colspan="6" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com essa busca.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -8054,6 +8194,10 @@ function _htmlModalFornecedorCadastro() {
       <input type="hidden" id="fornCadId">
       <label>Nome da empresa</label>
       <input type="text" id="fornCadNome" placeholder="Ex: Alfa Tecnologia S.A.">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div><label>Categoria</label><select id="fornCadCategoria"><option value="">Selecione...</option></select></div>
+        <div><label>Gestor do Contrato</label><input type="text" id="fornCadGestorContrato" placeholder="Nome de quem responde por este contrato"></div>
+      </div>
       <label>Serviço prestado / o que fornece</label>
       <input type="text" id="fornCadDetalhes" placeholder="Ex: hospedagem dos servidores de produção">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -8167,6 +8311,17 @@ window.abrirModalFornecedor = (id) => {
   document.getElementById('modalFornecedorTitulo').textContent = f ? 'Editar Fornecedor' : 'Novo Fornecedor';
   document.getElementById('fornCadId').value = f ? f.id : '';
   document.getElementById('fornCadNome').value = f ? (f.nome || '') : '';
+  const categoriasAtivas = (categoriasFornecedorData || []).filter((c) => c.ativo);
+  // Se o fornecedor ja tem uma categoria desativada/apagada, mantem ela como
+  // opcao extra selecionada — senao editar o cadastro trocaria a categoria em
+  // silencio so por causa da tela.
+  const categoriaAtual = f && f.categoriaFornecedor;
+  const temNaLista = categoriasAtivas.some((c) => c.nome === categoriaAtual);
+  document.getElementById('fornCadCategoria').innerHTML = '<option value="">Selecione...</option>' +
+    categoriasAtivas.map((c) => `<option value="${esc(c.nome)}">${esc(c.nome)}</option>`).join('') +
+    (categoriaAtual && !temNaLista ? `<option value="${esc(categoriaAtual)}">${esc(categoriaAtual)} (inativa)</option>` : '');
+  document.getElementById('fornCadCategoria').value = categoriaAtual || '';
+  document.getElementById('fornCadGestorContrato').value = f ? (f.gestorContrato || '') : '';
   document.getElementById('fornCadDetalhes').value = f ? (f.detalhes || '') : '';
   document.getElementById('fornCadSetor').value = f ? (f.setor || '') : '';
   document.getElementById('fornCadEndereco').value = f ? (f.endereco || '') : '';
@@ -8191,6 +8346,8 @@ window.salvarFornecedorCadastro = async () => {
       // regra do banco exige para este perfil poder gravar.
       categoria: CATEGORIA_FORNECEDOR_PADRAO,
       nome,
+      categoriaFornecedor: document.getElementById('fornCadCategoria').value,
+      gestorContrato: document.getElementById('fornCadGestorContrato').value.trim(),
       detalhes: document.getElementById('fornCadDetalhes').value.trim(),
       // Setor e endereco existem no catalogo e sao gravados por esta tela. Sem
       // eles no formulario, salvar aqui apagaria o que estava preenchido: a

@@ -62,7 +62,7 @@
     'admin',
   ];
   TELAS[PERFIL.FORNECEDORES] = [
-    'fornecedores', 'fornecedores-cadastro', 'fornecedores-criterios',
+    'fornecedores', 'fornecedores-cadastro', 'fornecedores-categorias', 'fornecedores-criterios',
   ];
 
   var CATALOGO = [
