@@ -3830,15 +3830,15 @@ function _htmlDrawerRisco() {
               <div id="impactoFinanceiroTabela"></div>
               <div style="display:grid;grid-template-columns:1.5fr 1.5fr 1fr auto;gap:8px;margin-top:10px;align-items:end;">
                 <div>
-                  <input type="text" id="ifCategoria" list="ifCategoriaList" placeholder="Categoria (ex: Perda de Receita)" style="${inp}">
-                  <datalist id="ifCategoriaList">
-                    <option value="Perda de Receita">
-                    <option value="Custo de Recuperação/Remediação">
-                    <option value="Multas e Penalidades Regulatórias">
-                    <option value="Custos Legais/Indenizações">
-                    <option value="Perda de Produtividade">
-                    <option value="Dano à Reputação/Imagem (estimado)">
-                  </datalist>
+                  <select id="ifCategoria" style="${inp}">
+                    <option value="">Selecione...</option>
+                    <option value="Perda de Receita">Perda de Receita</option>
+                    <option value="Custo de Recuperação/Remediação">Custo de Recuperação/Remediação</option>
+                    <option value="Multas e Penalidades Regulatórias">Multas e Penalidades Regulatórias</option>
+                    <option value="Custos Legais/Indenizações">Custos Legais/Indenizações</option>
+                    <option value="Perda de Produtividade">Perda de Produtividade</option>
+                    <option value="Dano à Reputação/Imagem (estimado)">Dano à Reputação/Imagem (estimado)</option>
+                  </select>
                 </div>
                 <div><input type="text" id="ifDescricao" placeholder="Descrição (opcional)" style="${inp}"></div>
                 <div><input type="number" id="ifValor" placeholder="Valor R$" style="${inp}"></div>
@@ -3893,6 +3893,9 @@ function _htmlDrawerRisco() {
               <label style="${lbl}margin-bottom:8px;">Plano de Ação (5W2H)</label>
               <div id="planoAcaoTabela"></div>
               <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:14px;margin-top:10px;">
+                <div id="paEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:10px;">
+                  ✎ Editando ação — <a href="#" onclick="cancelarEdicaoPlanoAcao();return false;" style="color:#1565c0;">cancelar edição</a>
+                </div>
                 <div style="margin-bottom:10px;">
                   <label style="${lbl}">Ação (o quê)</label>
                   <input type="text" id="paAcao" placeholder="O que será feito" style="${inp}">
@@ -3919,7 +3922,7 @@ function _htmlDrawerRisco() {
                       <option value="Atrasado">Atrasado</option>
                     </select>
                   </div>
-                  <button class="btn btn-ghost" onclick="adicionarPlanoAcaoItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+                  <button class="btn btn-ghost" id="btnAdicionarPlanoAcao" onclick="adicionarPlanoAcaoItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
                 </div>
               </div>
             </div>
@@ -4083,6 +4086,7 @@ window.abrirDrawerRisco = async (r) => {
   document.getElementById('rEstrategiaTratamento').value = r ? (r.estrategiaTratamento || '') : '';
   document.getElementById('rEstrategiaDescricao').value = r ? (r.estrategiaDescricao || '') : '';
   window._riscoPlanoAcao = r && r.planoAcao ? [...r.planoAcao] : [];
+  window.cancelarEdicaoPlanoAcao();
   renderPlanoAcaoRisco();
 
   window._riscoKris = r && r.kris ? [...r.kris] : [];
@@ -4308,6 +4312,7 @@ window.removerImpactoFinanceiroItem = (idx) => {
 };
 
 window._riscoPlanoAcao = [];
+window._planoAcaoEditandoIndex = null;
 function renderPlanoAcaoRisco() {
   const container = document.getElementById('planoAcaoTabela');
   if (!container) return;
@@ -4328,15 +4333,24 @@ function renderPlanoAcaoRisco() {
         <td style="font-size:0.85em;color:#555;">${it.quando || it.prazo || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${it.quantoCusta != null && it.quantoCusta !== '' ? 'R$ ' + Number(it.quantoCusta).toLocaleString('pt-BR') : '-'}</td>
         <td>${it.status || '-'}</td>
-        <td style="text-align:center;">${isAdmin ? `<button class="btn-icon" onclick="removerPlanoAcaoItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
+        <td style="text-align:center;white-space:nowrap;">${isAdmin ? `
+          <button class="btn-icon" onclick="editarPlanoAcaoItem(${i})" title="Editar">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="removerPlanoAcaoItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
       </tr>`).join('') + `</tbody></table>`;
+}
+function _limparFormularioPlanoAcao() {
+  ['paAcao', 'paPorque', 'paResponsavel', 'paOnde', 'paQuando', 'paComo', 'paQuantoCusta'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('paStatus').value = 'Pendente';
 }
 window.adicionarPlanoAcaoItem = () => {
   const acao = document.getElementById('paAcao').value.trim();
   if (!acao) return showToast('Informe a ação.', '#e65100');
   const quantoCusta = document.getElementById('paQuantoCusta').value;
-  window._riscoPlanoAcao = window._riscoPlanoAcao || [];
-  window._riscoPlanoAcao.push({
+  const item = {
     acao,
     porque: document.getElementById('paPorque').value.trim(),
     responsavel: document.getElementById('paResponsavel').value.trim(),
@@ -4345,14 +4359,44 @@ window.adicionarPlanoAcaoItem = () => {
     como: document.getElementById('paComo').value.trim(),
     quantoCusta: quantoCusta !== '' ? Number(quantoCusta) : null,
     status: document.getElementById('paStatus').value,
-  });
-  ['paAcao', 'paPorque', 'paResponsavel', 'paOnde', 'paQuando', 'paComo', 'paQuantoCusta'].forEach(id => {
-    document.getElementById(id).value = '';
-  });
+  };
+  window._riscoPlanoAcao = window._riscoPlanoAcao || [];
+  if (window._planoAcaoEditandoIndex != null) {
+    window._riscoPlanoAcao[window._planoAcaoEditandoIndex] = item;
+    window._planoAcaoEditandoIndex = null;
+    document.getElementById('paEdicaoAviso').style.display = 'none';
+    document.getElementById('btnAdicionarPlanoAcao').textContent = '+ Adicionar';
+  } else {
+    window._riscoPlanoAcao.push(item);
+  }
+  _limparFormularioPlanoAcao();
   renderPlanoAcaoRisco();
+};
+window.editarPlanoAcaoItem = (idx) => {
+  const it = window._riscoPlanoAcao[idx];
+  if (!it) return;
+  window._planoAcaoEditandoIndex = idx;
+  document.getElementById('paAcao').value = it.acao || '';
+  document.getElementById('paPorque').value = it.porque || '';
+  document.getElementById('paResponsavel').value = it.responsavel || '';
+  document.getElementById('paOnde').value = it.onde || '';
+  document.getElementById('paQuando').value = it.quando || it.prazo || '';
+  document.getElementById('paComo').value = it.como || '';
+  document.getElementById('paQuantoCusta').value = it.quantoCusta != null ? it.quantoCusta : '';
+  document.getElementById('paStatus').value = it.status || 'Pendente';
+  document.getElementById('paEdicaoAviso').style.display = 'block';
+  document.getElementById('btnAdicionarPlanoAcao').textContent = 'Salvar alteração';
+  trocarAbaRisco('tratamento');
+};
+window.cancelarEdicaoPlanoAcao = () => {
+  window._planoAcaoEditandoIndex = null;
+  document.getElementById('paEdicaoAviso').style.display = 'none';
+  document.getElementById('btnAdicionarPlanoAcao').textContent = '+ Adicionar';
+  _limparFormularioPlanoAcao();
 };
 window.removerPlanoAcaoItem = (idx) => {
   window._riscoPlanoAcao.splice(idx, 1);
+  if (window._planoAcaoEditandoIndex === idx) window.cancelarEdicaoPlanoAcao();
   renderPlanoAcaoRisco();
 };
 
