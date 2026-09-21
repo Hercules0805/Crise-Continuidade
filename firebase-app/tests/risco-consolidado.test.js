@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const RC = require('../public/risco-consolidado.js');
+const Criticidade = require('../public/criticidade.js');
 
 // Processos de apoio: um de cada Tier, mais um nunca avaliado.
 const PROCESSOS = [
@@ -15,41 +16,89 @@ const risco = (extra) => Object.assign({
 }, extra);
 
 test('os processos de apoio estao nos Tiers que o teste assume', () => {
-  const Criticidade = require('../public/criticidade.js');
   assert.strictEqual(Criticidade.tierDoProcesso(PROCESSOS[0]), Criticidade.TIER.T1);
   assert.strictEqual(Criticidade.tierDoProcesso(PROCESSOS[1]), Criticidade.TIER.T2);
   assert.strictEqual(Criticidade.tierDoProcesso(PROCESSOS[2]), Criticidade.TIER.T3);
   assert.strictEqual(Criticidade.tierDoProcesso(PROCESSOS[3]), Criticidade.TIER.PENDENTE);
 });
 
-test('sem risco nenhum o numero e 0 e a faixa diz que nada foi registrado', () => {
+// ============================================================
+// O TESTE QUE EXISTE POR CAUSA DE UM ERRO REAL
+// ============================================================
+
+test('ACRESCENTAR RISCO NUNCA BAIXA A CARGA — o defeito achado no teste de 21/09', () => {
+  // Caso exato relatado: uma area com um risco maximo, e um risco menor entra.
+  // Com media ponderada a area caia de 100 para 80. Com soma, nunca cai.
+  const grave = risco({ processoId: 'p1', probabilidade: 'Alta', impacto: 'Crítico' });
+  const menor = risco({ processoId: 'p2', probabilidade: 'Média', impacto: 'Moderado' });
+
+  const antes = RC.consolidar([grave], PROCESSOS).empresa.carga;
+  const depois = RC.consolidar([grave, menor], PROCESSOS).empresa.carga;
+
+  assert.ok(depois > antes, `carga caiu ou empatou: ${antes} -> ${depois}`);
+  assert.strictEqual(antes, 36);   // 12 x 3
+  assert.strictEqual(depois, 44);  // 36 + (4 x 2)
+});
+
+test('monotonicidade: qualquer risco adicionado, de qualquer tamanho, so faz subir', () => {
+  const base = [risco({ processoId: 'p1', probabilidade: 'Alta', impacto: 'Crítico' })];
+  let anterior = RC.consolidar(base, PROCESSOS).empresa.carga;
+  const adicionais = [
+    { probabilidade: 'Baixa', impacto: 'Baixo', processoId: 'p3' },
+    { probabilidade: 'Baixa', impacto: 'Baixo' },
+    { probabilidade: 'Média', impacto: 'Alto', processoId: 'p2' },
+    { probabilidade: 'Alta', impacto: 'Crítico', processoId: 'p1' },
+    { probabilidade: 'Baixa', impacto: 'Moderado', area: 'Outra' },
+  ];
+  adicionais.forEach((extra, i) => {
+    base.push(risco(extra));
+    const agora = RC.consolidar(base, PROCESSOS).empresa.carga;
+    assert.ok(agora > anterior, `risco ${i + 1} baixou a carga: ${anterior} -> ${agora}`);
+    anterior = agora;
+  });
+});
+
+test('encerrar risco baixa a carga — o numero tem que responder a melhora', () => {
+  const a = risco({ probabilidade: 'Alta', impacto: 'Crítico' });
+  const b = risco({ probabilidade: 'Alta', impacto: 'Crítico' });
+  const cheia = RC.consolidar([a, b], PROCESSOS).empresa.carga;
+  const parcial = RC.consolidar([a, Object.assign({}, b, { status: 'Encerrado' })], PROCESSOS).empresa.carga;
+  assert.ok(parcial < cheia, `encerrar nao baixou: ${cheia} -> ${parcial}`);
+});
+
+test('reduzir probabilidade ou impacto de um risco baixa a carga', () => {
+  const antes = RC.consolidar([risco({ probabilidade: 'Alta', impacto: 'Crítico' })], PROCESSOS).empresa.carga;
+  const depois = RC.consolidar([risco({ probabilidade: 'Baixa', impacto: 'Crítico' })], PROCESSOS).empresa.carga;
+  assert.ok(depois < antes, `reduzir nao baixou: ${antes} -> ${depois}`);
+});
+
+// ============================================================
+// A CONTA
+// ============================================================
+
+test('sem risco nenhum a carga e 0 e nao ha areas', () => {
   const r = RC.consolidar([], PROCESSOS);
-  assert.strictEqual(r.empresa.numero, 0);
+  assert.strictEqual(r.empresa.carga, 0);
   assert.strictEqual(r.empresa.contados, 0);
-  assert.strictEqual(r.empresa.faixa.rotulo, 'Sem risco registrado');
+  assert.strictEqual(r.empresa.piorScore, null);
   assert.deepStrictEqual(r.areas, []);
 });
 
-test('um unico risco maximo da 100', () => {
-  const r = RC.consolidar([risco({ processoId: 'p1' })], PROCESSOS);
-  assert.strictEqual(r.empresa.numero, 100);
-  assert.strictEqual(r.empresa.faixa.rotulo, 'Crítico');
+test('um risco soma score x peso, e o maximo por risco e 36', () => {
+  assert.strictEqual(RC.cargaDoRisco({ probabilidade: 'Alta', impacto: 'Crítico', processoId: 'p1' }, { p1: PROCESSOS[0] }), 36);
+  assert.strictEqual(RC.CARGA_MAXIMA_POR_RISCO, 36);
+  assert.strictEqual(RC.cargaDoRisco({ probabilidade: 'Baixa', impacto: 'Baixo', processoId: 'p3' }, { p3: PROCESSOS[2] }), 1);
 });
 
-test('o menor risco possivel da 8, nao 0 — ausencia tem que ser distinguivel', () => {
-  const r = RC.consolidar([risco({ probabilidade: 'Baixa', impacto: 'Baixo' })], PROCESSOS);
-  assert.strictEqual(r.empresa.numero, 8);
-  assert.notStrictEqual(r.empresa.faixa.rotulo, 'Sem risco registrado');
-});
-
-test('risco em processo Tier 1 pesa 3 vezes o de Tier 3', () => {
-  assert.strictEqual(RC.pesoDoRisco({ processoId: 'p1' }, { p1: PROCESSOS[0] }), 3);
-  assert.strictEqual(RC.pesoDoRisco({ processoId: 'p2' }, { p2: PROCESSOS[1] }), 2);
-  assert.strictEqual(RC.pesoDoRisco({ processoId: 'p3' }, { p3: PROCESSOS[2] }), 1);
+test('risco em processo Tier 1 soma 3 vezes o mesmo risco em Tier 3', () => {
+  const mapa = { p1: PROCESSOS[0], p3: PROCESSOS[2] };
+  const t1 = RC.cargaDoRisco({ probabilidade: 'Média', impacto: 'Alto', processoId: 'p1' }, mapa);
+  const t3 = RC.cargaDoRisco({ probabilidade: 'Média', impacto: 'Alto', processoId: 'p3' }, mapa);
+  assert.strictEqual(t1, t3 * 3);
 });
 
 test('risco corporativo (sem processo) pesa 2, o meio da escala', () => {
-  assert.strictEqual(RC.pesoDoRisco({ processoId: null }, {}), RC.PESO_PADRAO);
+  assert.strictEqual(RC.pesoDoRisco({ processoId: null }, {}), 2);
   assert.strictEqual(RC.PESO_PADRAO, 2);
 });
 
@@ -61,30 +110,36 @@ test('processo apagado ou id que nao existe mais cai no peso padrao, sem quebrar
   assert.strictEqual(RC.pesoDoRisco({ processoId: 'nao-existe' }, {}), RC.PESO_PADRAO);
 });
 
-test('a ponderacao muda o resultado: o risco do Tier 1 domina o do Tier 3', () => {
-  const grave = risco({ processoId: 'p1', probabilidade: 'Alta', impacto: 'Crítico' });   // 12, peso 3
-  const leve = risco({ processoId: 'p3', probabilidade: 'Baixa', impacto: 'Baixo' });     // 1, peso 1
-  const r = RC.consolidar([grave, leve], PROCESSOS);
-  // (12*3 + 1*1) / (3+1) = 9.25 -> 77
-  assert.strictEqual(r.empresa.numero, 77);
-  // Media simples daria (12+1)/2 = 6.5 -> 54. A ponderacao existe para isso.
-  assert.notStrictEqual(r.empresa.numero, 54);
+test('A CARGA DA EMPRESA E A SOMA DAS AREAS — conferivel somando a coluna', () => {
+  const riscos = [
+    risco({ area: 'A', probabilidade: 'Alta', impacto: 'Crítico', processoId: 'p1' }),
+    risco({ area: 'B', probabilidade: 'Média', impacto: 'Moderado' }),
+    risco({ area: 'B', probabilidade: 'Baixa', impacto: 'Baixo', processoId: 'p3' }),
+    risco({ area: 'C', probabilidade: 'Alta', impacto: 'Alto', processoId: 'p2' }),
+  ];
+  const r = RC.consolidar(riscos, PROCESSOS);
+  const somaDasAreas = r.areas.reduce((t, a) => t + a.carga, 0);
+  assert.strictEqual(r.empresa.carga, somaDasAreas);
 });
 
-test('risco Encerrado fica fora da conta e e contado em foraPorStatus', () => {
+// ============================================================
+// O QUE ENTRA E O QUE FICA DE FORA
+// ============================================================
+
+test('risco Encerrado fica fora da soma e e contado em foraPorStatus', () => {
   const r = RC.consolidar([
     risco({ status: 'Encerrado', probabilidade: 'Alta', impacto: 'Crítico' }),
     risco({ probabilidade: 'Baixa', impacto: 'Baixo' }),
   ], PROCESSOS);
   assert.strictEqual(r.empresa.contados, 1);
   assert.strictEqual(r.foraPorStatus, 1);
-  assert.strictEqual(r.empresa.numero, 8);
+  assert.strictEqual(r.empresa.carga, 2);  // 1 x 2
 });
 
-test('risco Aceito ENTRA na conta — decisao 21/09/2026', () => {
+test('risco Aceito ENTRA na soma — aceitar nao faz o risco desaparecer', () => {
   const r = RC.consolidar([risco({ status: 'Aceito', probabilidade: 'Alta', impacto: 'Crítico' })], PROCESSOS);
   assert.strictEqual(r.empresa.contados, 1);
-  assert.strictEqual(r.empresa.numero, 100);
+  assert.strictEqual(r.empresa.carga, 24);  // 12 x 2 (corporativo)
   assert.strictEqual(r.foraPorStatus, 0);
 });
 
@@ -110,18 +165,19 @@ test('risco sem probabilidade ou sem impacto nao entra, mas aparece em semAvalia
   assert.strictEqual(r.areas[0].semAvaliacao, 2);
 });
 
-test('escala fora do padrao (risco importado de PCN) nao entra como zero', () => {
+test('escala fora do padrao (risco importado de PCN) nao entra como zero silencioso', () => {
   assert.strictEqual(RC.scoreDoRisco({ probabilidade: 'Medio', impacto: 'Grave' }), null);
+  assert.strictEqual(RC.cargaDoRisco({ probabilidade: 'Medio', impacto: 'Grave' }, {}), null);
   const r = RC.consolidar([risco({ probabilidade: 'Medio', impacto: 'Grave' })], PROCESSOS);
-  assert.strictEqual(r.empresa.numero, 0);
+  assert.strictEqual(r.empresa.carga, 0);
   assert.strictEqual(r.empresa.semAvaliacao, 1);
 });
 
-test('area com risco so sem avaliacao aparece na lista, com numero 0 e o aviso', () => {
+test('area com risco so sem avaliacao aparece na lista, com carga 0 e o aviso', () => {
   const r = RC.consolidar([risco({ area: 'Jurídico', probabilidade: '', impacto: '' })], PROCESSOS);
   assert.strictEqual(r.areas.length, 1);
   assert.strictEqual(r.areas[0].area, 'Jurídico');
-  assert.strictEqual(r.areas[0].numero, 0);
+  assert.strictEqual(r.areas[0].carga, 0);
   assert.strictEqual(r.areas[0].semAvaliacao, 1);
 });
 
@@ -132,51 +188,63 @@ test('risco que nasceu sem area (desvio de indicador) vai para Corporativo, e na
   assert.strictEqual(r.empresa.contados, 1);
 });
 
-test('o numero da empresa e a media de todos os riscos, nao a media das areas', () => {
-  // Area A: 1 risco de 12. Area B: 3 riscos de 1. Todos corporativos (peso 2).
-  const riscos = [
-    risco({ area: 'A', probabilidade: 'Alta', impacto: 'Crítico' }),
-    risco({ area: 'B', probabilidade: 'Baixa', impacto: 'Baixo' }),
-    risco({ area: 'B', probabilidade: 'Baixa', impacto: 'Baixo' }),
-    risco({ area: 'B', probabilidade: 'Baixa', impacto: 'Baixo' }),
-  ];
-  const r = RC.consolidar(riscos, PROCESSOS);
-  // (12 + 1 + 1 + 1) / 4 = 3.75 -> 31
-  assert.strictEqual(r.empresa.numero, 31);
-  // Media das areas seria (100 + 8) / 2 = 54. Nao e isso.
-  assert.notStrictEqual(r.empresa.numero, 54);
-});
+// ============================================================
+// COMO O NUMERO SE LE: composicao e pior caso, nao faixa do total
+// ============================================================
 
-test('as areas voltam ordenadas do maior risco para o menor', () => {
+test('a composicao diz de que a carga e feita, por faixa', () => {
   const r = RC.consolidar([
-    risco({ area: 'Baixa', probabilidade: 'Baixa', impacto: 'Baixo' }),
-    risco({ area: 'Alta', probabilidade: 'Alta', impacto: 'Crítico' }),
-    risco({ area: 'Meio', probabilidade: 'Média', impacto: 'Moderado' }),
+    risco({ probabilidade: 'Alta', impacto: 'Crítico' }),   // 12 Crítico
+    risco({ probabilidade: 'Alta', impacto: 'Alto' }),      // 9  Crítico
+    risco({ probabilidade: 'Média', impacto: 'Alto' }),     // 6  Alto
+    risco({ probabilidade: 'Média', impacto: 'Moderado' }), // 4  Moderado
+    risco({ probabilidade: 'Baixa', impacto: 'Baixo' }),    // 1  Baixo
   ], PROCESSOS);
-  assert.deepStrictEqual(r.areas.map((a) => a.area), ['Alta', 'Meio', 'Baixa']);
+  assert.deepStrictEqual(r.empresa.composicao, { 'Crítico': 2, 'Alto': 1, 'Moderado': 1, 'Baixo': 1 });
+  assert.strictEqual(r.empresa.contados, 5);
 });
 
-test('as faixas do consolidado batem com as do risco individual', () => {
-  // 9 de 12 = Crítico -> 75; 6 = Alto -> 50; 3 = Moderado -> 25.
-  assert.strictEqual(RC.paraEscala100(9), 75);
-  assert.strictEqual(RC.paraEscala100(6), 50);
-  assert.strictEqual(RC.paraEscala100(3), 25);
-  assert.strictEqual(RC.faixaConsolidado(75).rotulo, RC.faixaScore(9).rotulo);
-  assert.strictEqual(RC.faixaConsolidado(50).rotulo, RC.faixaScore(6).rotulo);
-  assert.strictEqual(RC.faixaConsolidado(25).rotulo, RC.faixaScore(3).rotulo);
-  assert.strictEqual(RC.faixaConsolidado(24).rotulo, 'Baixo');
-  assert.strictEqual(RC.faixaConsolidado(74).rotulo, 'Alto');
+test('vinte riscos moderados NAO empatam com uma catastrofe — o motivo de nao ter teto', () => {
+  const moderados = Array.from({ length: 20 }, () => risco({ probabilidade: 'Média', impacto: 'Moderado' }));
+  const catastrofe = [risco({ probabilidade: 'Alta', impacto: 'Crítico', processoId: 'p1' })];
+  const cargaModerados = RC.consolidar(moderados, PROCESSOS).empresa.carga;
+  const cargaCatastrofe = RC.consolidar(catastrofe, PROCESSOS).empresa.carga;
+  assert.notStrictEqual(cargaModerados, cargaCatastrofe);
+  // E a composicao permite distinguir os dois casos, que a carga sozinha nao faria.
+  assert.strictEqual(RC.consolidar(moderados, PROCESSOS).empresa.composicao['Crítico'], 0);
+  assert.strictEqual(RC.consolidar(catastrofe, PROCESSOS).empresa.composicao['Crítico'], 1);
 });
 
-test('o pior risco volta junto, para a tela poder mostrar media e pior caso', () => {
+test('o pior caso volta junto, com a faixa dele', () => {
   const r = RC.consolidar([
     risco({ probabilidade: 'Baixa', impacto: 'Baixo' }),
     risco({ probabilidade: 'Alta', impacto: 'Crítico' }),
   ], PROCESSOS);
   assert.strictEqual(r.empresa.piorScore, 12);
+  assert.strictEqual(r.empresa.piorFaixa.rotulo, 'Crítico');
+});
+
+test('as faixas do risco individual seguem a regra de 1 a 12 de sempre', () => {
+  assert.strictEqual(RC.faixaScore(12).rotulo, 'Crítico');
+  assert.strictEqual(RC.faixaScore(9).rotulo, 'Crítico');
+  assert.strictEqual(RC.faixaScore(8).rotulo, 'Alto');
+  assert.strictEqual(RC.faixaScore(6).rotulo, 'Alto');
+  assert.strictEqual(RC.faixaScore(5).rotulo, 'Moderado');
+  assert.strictEqual(RC.faixaScore(3).rotulo, 'Moderado');
+  assert.strictEqual(RC.faixaScore(2).rotulo, 'Baixo');
+  assert.strictEqual(RC.faixaScore(1).rotulo, 'Baixo');
+});
+
+test('as areas voltam ordenadas da maior carga para a menor', () => {
+  const r = RC.consolidar([
+    risco({ area: 'Leve', probabilidade: 'Baixa', impacto: 'Baixo' }),
+    risco({ area: 'Pesada', probabilidade: 'Alta', impacto: 'Crítico' }),
+    risco({ area: 'Meio', probabilidade: 'Média', impacto: 'Moderado' }),
+  ], PROCESSOS);
+  assert.deepStrictEqual(r.areas.map((a) => a.area), ['Pesada', 'Meio', 'Leve']);
 });
 
 test('lista nula ou undefined nao quebra', () => {
-  assert.strictEqual(RC.consolidar(null, null).empresa.numero, 0);
+  assert.strictEqual(RC.consolidar(null, null).empresa.carga, 0);
   assert.strictEqual(RC.consolidar(undefined, undefined).areas.length, 0);
 });

@@ -3635,15 +3635,21 @@ async function riscos() {
 }
 
 /**
- * Numero de risco consolidado: da empresa e de cada area.
+ * Carga de risco consolidada: da empresa e de cada area.
  *
  * Le SEMPRE a lista inteira de riscos, nunca a lista filtrada. Um numero que
  * muda quando alguem mexe num filtro de tela nao e o risco da empresa — e o
  * risco daquela tela, e ninguem leva isso a um comite.
  *
+ * A carga nao tem teto, de proposito (ver risco-consolidado.js). Por isso a
+ * tela NAO pinta faixa nem cor no total: "312" nao e bom nem ruim por si. O que
+ * se le e a composicao (quantos criticos, altos, moderados, baixos), o pior
+ * caso, e — quando o grafico existir — a variacao no tempo. As barras das areas
+ * sao relativas a maior area, nao a um maximo absoluto que nao existe.
+ *
  * Mostra tambem quantos riscos ficaram fora por nao terem probabilidade ou
- * impacto preenchidos. Sem esse aviso, um registro pela metade se disfarca de
- * risco baixo.
+ * impacto preenchidos. Sem esse aviso, um registro pela metade baixa a carga e
+ * se disfarca de melhora.
  */
 function _renderPainelRiscoConsolidado() {
   const painel = document.getElementById('painelRiscoConsolidado');
@@ -3652,21 +3658,29 @@ function _renderPainelRiscoConsolidado() {
   const r = RiscoConsolidado.consolidar(riscosData, riscosProcessosCache);
   const emp = r.empresa;
   const semNada = emp.contados === 0 && emp.semAvaliacao === 0;
+  const maiorCarga = r.areas.reduce((m, a) => Math.max(m, a.carga), 0);
+
+  const badgesComposicao = (comp, compacto) => RiscoConsolidado.FAIXAS
+    .filter((f) => comp[f] > 0)
+    .map((f) => {
+      const cor = RiscoConsolidado.faixaScore(f === 'Crítico' ? 9 : f === 'Alto' ? 6 : f === 'Moderado' ? 3 : 1);
+      return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:${compacto ? '0.74em' : '0.78em'};font-weight:700;background:${cor.fundo};color:${cor.cor};margin-right:4px;" title="${comp[f]} risco(s) na faixa ${f}">${comp[f]} ${compacto ? f.charAt(0) : f}</span>`;
+    }).join('');
 
   const avisoSemAvaliacao = (n) => n > 0
-    ? `<div style="font-size:0.74em;color:#e65100;margin-top:6px;">⚠ ${n} risco${n > 1 ? 's' : ''} sem probabilidade ou impacto — fora da conta</div>`
+    ? `<div style="font-size:0.74em;color:#e65100;margin-top:6px;">\u26a0 ${n} risco${n > 1 ? 's' : ''} sem probabilidade ou impacto — fora da conta, o que puxa a carga para baixo</div>`
     : '';
 
   const cartaoEmpresa = `
     <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;">
-      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Risco da empresa</div>
-      <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 6px;">
-        <span style="font-size:2.8em;font-weight:800;line-height:1;color:${emp.faixa.cor};">${semNada ? '–' : emp.numero}</span>
-        ${semNada ? '' : '<span style="font-size:0.85em;color:#aaa;">de 100</span>'}
+      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Carga de risco da empresa</div>
+      <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 10px;">
+        <span style="font-size:2.8em;font-weight:800;line-height:1;color:#1a237e;">${semNada ? '–' : emp.carga}</span>
+        ${semNada ? '' : '<span style="font-size:0.85em;color:#aaa;">pontos</span>'}
       </div>
-      <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.76em;font-weight:700;background:${emp.faixa.fundo};color:${emp.faixa.cor};">${esc(emp.faixa.rotulo)}</span>
+      <div>${badgesComposicao(emp.composicao, false) || '<span style="font-size:0.8em;color:#999;">Nenhum risco na conta</span>'}</div>
       <div style="font-size:0.76em;color:#777;margin-top:10px;">
-        ${emp.contados} risco${emp.contados === 1 ? '' : 's'} na conta${emp.piorScore !== null ? ` · pior caso ${emp.piorScore} de 12` : ''}
+        ${emp.contados} risco${emp.contados === 1 ? '' : 's'} somado${emp.contados === 1 ? '' : 's'}${emp.piorScore !== null ? ` · pior caso ${emp.piorScore} de 12 (${esc(emp.piorFaixa.rotulo)})` : ''}
       </div>
       ${avisoSemAvaliacao(emp.semAvaliacao)}
       ${!riscosProcessosCache.length && (riscosData || []).some((x) => x.processoId)
@@ -3677,35 +3691,36 @@ function _renderPainelRiscoConsolidado() {
   const linhasAreas = r.areas.map((a) => `
     <tr>
       <td style="padding:7px 10px;font-weight:600;color:#333;">${esc(a.area)}</td>
-      <td style="padding:7px 10px;width:45%;">
-        <div style="background:#f0f0f0;border-radius:6px;height:9px;overflow:hidden;">
-          <div style="width:${a.numero}%;height:100%;background:${a.faixa.cor};"></div>
+      <td style="padding:7px 10px;width:38%;">
+        <div style="background:#f0f0f0;border-radius:6px;height:9px;overflow:hidden;" title="Barra proporcional à área de maior carga">
+          <div style="width:${maiorCarga ? Math.round((a.carga / maiorCarga) * 100) : 0}%;height:100%;background:${a.piorFaixa ? a.piorFaixa.cor : '#bbb'};"></div>
         </div>
       </td>
-      <td style="padding:7px 10px;text-align:right;font-weight:700;color:${a.faixa.cor};white-space:nowrap;">${a.contados ? a.numero : '–'}</td>
-      <td style="padding:7px 10px;font-size:0.82em;color:#777;white-space:nowrap;">
-        ${a.contados} risco${a.contados === 1 ? '' : 's'}${a.semAvaliacao ? ` <span style="color:#e65100;" title="${a.semAvaliacao} sem probabilidade ou impacto — fora da conta">+${a.semAvaliacao} ⚠</span>` : ''}
+      <td style="padding:7px 10px;text-align:right;font-weight:700;color:#1a237e;white-space:nowrap;">${a.contados ? a.carga : '–'}</td>
+      <td style="padding:7px 10px;white-space:nowrap;">
+        ${badgesComposicao(a.composicao, true)}${a.semAvaliacao ? `<span style="color:#e65100;font-size:0.74em;" title="${a.semAvaliacao} sem probabilidade ou impacto — fora da conta">+${a.semAvaliacao} \u26a0</span>` : ''}
       </td>
     </tr>`).join('');
 
   const cartaoAreas = `
     <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 8px 10px;background:#fff;">
-      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;padding:0 10px 6px;">Risco por área</div>
+      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;padding:0 10px 6px;">Carga por área</div>
       ${r.areas.length
         ? `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">${linhasAreas}</table>`
         : '<div style="padding:10px;color:#999;font-size:0.88em;">Nenhum risco registrado.</div>'}
     </div>`;
 
   painel.innerHTML = `
-    <div style="display:grid;grid-template-columns:240px 1fr;gap:16px;align-items:start;">
+    <div style="display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start;">
       ${cartaoEmpresa}
       ${cartaoAreas}
     </div>
     <div style="font-size:0.74em;color:#999;margin-top:8px;line-height:1.5;">
-      Como a conta é feita: média dos riscos ponderada pela criticidade do processo (Tier 1 pesa 3, Tier 2 pesa 2, Tier 3 pesa 1;
-      risco corporativo ou em processo ainda Pendente pesa 2), convertida para uma escala de 0 a 100.
-      Riscos aceitos entram na conta — aceitar um risco não o faz desaparecer. Encerrados ficam fora${r.foraPorStatus ? ` (${r.foraPorStatus} hoje)` : ''}.
-      Faixas: até 24 baixo, 25 a 49 moderado, 50 a 74 alto, 75 ou mais crítico.
+      Como a conta é feita: cada risco soma a sua nota (1 a 12) multiplicada pela criticidade do processo ligado a ele
+      (Tier 1 pesa 3, Tier 2 pesa 2, Tier 3 pesa 1; risco corporativo ou em processo ainda Pendente pesa 2).
+      Um risco soma no máximo 36 pontos. A carga da empresa é a soma das áreas — dá para conferir somando a coluna.
+      Riscos aceitos entram na conta: aceitar um risco não o faz desaparecer. Encerrados ficam fora${r.foraPorStatus ? ` (${r.foraPorStatus} hoje)` : ''}.
+      A carga não tem teto, então não existe número "bom" ou "ruim" por si: o que se lê é a composição, o pior caso e a variação ao longo do tempo.
     </div>`;
 }
 
