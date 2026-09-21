@@ -1861,12 +1861,24 @@ window.salvarDepBcp = async () => {
   // tela e pior. Mas fornecedor criado por aqui nasce SEM avaliacao, e ficaria
   // invisivel: o aviso abaixo existe para isso nao passar em silencio.
   const ehFornecedor = Perfis.categoriaDeFornecedor(d.categoria);
+  // Empresa agora pode ter N pessoas (nome/e-mail/telefone por pessoa), e este
+  // formulario generico so tem um nome (o da empresa) e um e-mail/telefone
+  // soltos, sem como dizer de quem e o contato. Em vez de gravar um contato sem
+  // nome que a tela de Fornecedores nao consegue mostrar, este caminho so grava
+  // o nome da empresa quando a categoria e Fornecedor — o aviso abaixo diz isso.
+  let contatoIgnorado = false;
+  if (ehFornecedor) {
+    if (d.empresa || d.email || d.telefone) contatoIgnorado = true;
+    d.empresa = '';
+    d.email = '';
+    d.telefone = '';
+  }
 
   try {
     const result = await API.salvarDependencia(d);
     fecharModalDepBcp();
     showToast(ehFornecedor && !d.id
-      ? '✅ Fornecedor criado! Ele aparece em Fornecedores como "Não avaliado" — avalie para ele entrar na conta de risco.'
+      ? `✅ Fornecedor criado! Ele aparece em Fornecedores como "Não avaliado" — avalie para ele entrar na conta de risco.${contatoIgnorado ? ' Contato não foi salvo: cadastre a pessoa em Fornecedores → Cadastro.' : ''}`
       : '✅ Dependência salva!', '#2e7d32');
     // Atualizar catálogo local
     if (d.id) {
@@ -4206,7 +4218,7 @@ window.abrirDrawerRisco = async (r) => {
     } catch (e) { riscosFornecedoresCache = []; }
   }
   document.getElementById('rFornecedor').innerHTML = '<option value="">-- Nenhum --</option>' +
-    riscosFornecedoresCache.map(f => `<option value="${f.id}" data-nome="${esc(f.nome)}">${esc(f.nome)}${f.empresa ? ' — ' + f.empresa : ''}</option>`).join('');
+    riscosFornecedoresCache.map(f => `<option value="${f.id}" data-nome="${esc(f.nome)}">${esc(f.nome)}</option>`).join('');
 
   // Vinculo risco -> indicador. Um risco aponta para no maximo um indicador; um
   // indicador pode ter varios riscos. O risco gerado por desvio de meta ja nasce
@@ -7016,8 +7028,8 @@ function renderFornecedoresBcp() {
   let html = `<table style="width:100%;border-collapse:collapse;font-size:0.88em;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;">
     <thead>
       <tr style="background:#f5f6fa;">
-        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Nome</th>
         <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Empresa</th>
+        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Contato</th>
         <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Papel</th>
         <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Telefone</th>
         <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Contingência / Plano B</th>
@@ -7028,11 +7040,12 @@ function renderFornecedoresBcp() {
   
   fornecedores.forEach(nome => {
     const dep = catalogo.find(d => d.nome === nome) || {};
+    const contato = (dep.pessoas || [])[0];
     html += `<tr style="border-bottom:1px solid #f0f0f0;">
       <td style="padding:10px 14px;font-weight:600;color:#222;">${nome}</td>
-      <td style="padding:10px 14px;color:#555;">${esc(dep.empresa || '-')}</td>
+      <td style="padding:10px 14px;color:#555;">${esc(contato ? contato.nome : '-')}</td>
       <td style="padding:10px 14px;color:#555;">${esc(dep.detalhes || '-')}</td>
-      <td style="padding:10px 14px;color:#555;">${esc(dep.telefone || '-')}</td>
+      <td style="padding:10px 14px;color:#555;">${esc(contato ? contato.telefone || '-' : '-')}</td>
       <td style="padding:6px 8px;"><input type="text" class="planoB-contingencia" data-dep="${esc(nome)}" value="${esc(planoBSalvo[nome] || '')}" placeholder="Ex: Provedor alternativo..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
       <td style="padding:6px 8px;"><input type="text" class="sla-valor" data-dep="${esc(nome)}" value="${esc(slasSalvo[nome] || '')}" placeholder="Ex: Suporte 24x7, 15min..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
     </tr>`;
@@ -7448,6 +7461,14 @@ function _dataCurtaForn(iso) {
   return isNaN(d.getTime()) ? '–' : d.toLocaleDateString('pt-BR');
 }
 
+/** Resumo das pessoas da empresa: primeiro contato + quantos ficaram de fora. */
+function _resumoPessoasFornecedor(f) {
+  const pessoas = f.pessoas || [];
+  if (!pessoas.length) return '<span style="color:#999;">Nenhuma pessoa cadastrada</span>';
+  const extra = pessoas.length - 1;
+  return `${esc(pessoas[0].nome)}${extra > 0 ? ` <span style="color:#999;">+${extra}</span>` : ''}`;
+}
+
 async function fornecedores() {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
   app.innerHTML = `
@@ -7522,7 +7543,7 @@ function renderizarFornecedores() {
   const busca = (document.getElementById('buscaFornecedor')?.value || '').toLowerCase();
   const data = fornecedoresData.filter((f) => !busca
     || (f.nome || '').toLowerCase().includes(busca)
-    || (f.empresa || '').toLowerCase().includes(busca));
+    || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)));
 
   if (!fornecedoresData.length) {
     lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
@@ -7536,12 +7557,12 @@ function renderizarFornecedores() {
       <table>
         <thead>
           <tr>
-            <th style="width:26%;">Fornecedor</th>
-            <th style="width:20%;">Empresa</th>
+            <th style="width:22%;">Empresa</th>
+            <th style="width:20%;">Pessoas</th>
             <th style="width:8%;text-align:center;">Nota</th>
             <th style="width:16%;">Situação</th>
             <th style="width:14%;">Última avaliação</th>
-            <th style="width:16%;text-align:center;">Ações</th>
+            <th style="width:20%;text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody>
@@ -7551,7 +7572,7 @@ function renderizarFornecedores() {
             return `
             <tr>
               <td style="font-weight:600;">${esc(f.nome)}</td>
-              <td style="color:#666;">${esc(f.empresa || '–')}</td>
+              <td style="color:#666;font-size:0.88em;">${_resumoPessoasFornecedor(f)}</td>
               <td style="text-align:center;">
                 ${av && av.nota !== null
                   ? `<span title="${esc(FornecedorScore.faixaNota(av.nota).rotulo)} — ${av.nota} de 100" style="display:inline-block;min-width:30px;padding:3px 8px;border-radius:10px;font-size:0.84em;font-weight:700;background:${FornecedorScore.faixaNota(av.nota).fundo};color:${FornecedorScore.faixaNota(av.nota).cor};">${av.nota}</span>`
@@ -7612,8 +7633,9 @@ window.abrirAvaliacaoFornecedor = (fornecedorId) => {
   const ativos = criteriosFornecedorData.filter(FornecedorScore.criterioAtivo);
 
   document.getElementById('fornAvalId').value = f.id;
+  const primeiraPessoa = (f.pessoas || [])[0];
   document.getElementById('fornDrawerTitulo').innerHTML = `${isAdmin ? (av ? 'Reavaliar' : 'Avaliar') : 'Avaliação de'} fornecedor
-    <div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(f.nome)}${f.empresa ? ' — ' + esc(f.empresa) : ''}</div>`;
+    <div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(f.nome)}${primeiraPessoa ? ' — ' + esc(primeiraPessoa.nome) : ''}</div>`;
   document.getElementById('fornObservacao').value = av ? (av.observacao || '') : '';
 
   const respostasAnteriores = av ? (av.respostas || {}) : {};
@@ -7980,36 +8002,34 @@ function renderizarFornecedoresCadastro() {
   const busca = (document.getElementById('buscaFornecedorCadastro')?.value || '').toLowerCase();
   const data = fornecedoresData.filter((f) => !busca
     || (f.nome || '').toLowerCase().includes(busca)
-    || (f.empresa || '').toLowerCase().includes(busca));
+    || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)));
 
   lista.innerHTML = `
     <div class="data-table">
       <table>
         <thead>
           <tr>
-            <th style="width:24%;">Nome</th>
-            <th style="width:22%;">Empresa</th>
-            <th style="width:22%;">Serviço prestado</th>
-            <th style="width:10%;">Setor</th>
-            <th style="width:14%;">Contato</th>
-            <th style="width:12%;text-align:center;">Ações</th>
+            <th style="width:26%;">Empresa</th>
+            <th style="width:26%;">Serviço prestado</th>
+            <th style="width:12%;">Setor</th>
+            <th style="width:22%;">Pessoas</th>
+            <th style="width:14%;text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody>
           ${data.length ? data.map((f) => `
             <tr>
               <td style="font-weight:600;">${esc(f.nome)}</td>
-              <td style="color:#666;">${esc(f.empresa || '–')}</td>
               <td style="color:#666;font-size:0.9em;">${esc(f.detalhes || '–')}</td>
               <td style="color:#666;font-size:0.88em;">${esc(f.setor || '–')}</td>
-              <td style="color:#666;font-size:0.88em;">${esc(f.email || f.telefone || '–')}</td>
+              <td style="color:#666;font-size:0.88em;">${_resumoPessoasFornecedor(f)}</td>
               <td style="text-align:center;">
                 ${podeMexer ? `
                   <button class="btn-icon" onclick="abrirModalFornecedor('${esc(f.id)}')" title="Editar">✏️</button>
                   <button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
               </td>
             </tr>`).join('')
-            : `<tr><td colspan="6" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com essa busca.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
+            : `<tr><td colspan="5" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com essa busca.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -8029,23 +8049,36 @@ function renderizarFornecedoresCadastro() {
  */
 function _htmlModalFornecedorCadastro() {
   return `
-    <div class="modal-overlay" id="modalFornecedor"><div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-overlay" id="modalFornecedor"><div class="modal" onclick="event.stopPropagation()" style="max-width:640px;">
       <h3 id="modalFornecedorTitulo">Novo Fornecedor</h3>
       <input type="hidden" id="fornCadId">
-      <label>Nome</label>
-      <input type="text" id="fornCadNome" placeholder="Ex: Datacenter Alfa">
-      <label>Empresa / razão social</label>
-      <input type="text" id="fornCadEmpresa" placeholder="Ex: Alfa Tecnologia S.A.">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div><label>Contato (e-mail)</label><input type="email" id="fornCadEmail" placeholder="contato@alfa.com.br"></div>
-        <div><label>Telefone</label><input type="text" id="fornCadTelefone" placeholder="(00) 0000-0000"></div>
-      </div>
+      <label>Nome da empresa</label>
+      <input type="text" id="fornCadNome" placeholder="Ex: Alfa Tecnologia S.A.">
       <label>Serviço prestado / o que fornece</label>
       <input type="text" id="fornCadDetalhes" placeholder="Ex: hospedagem dos servidores de produção">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
         <div><label>Setor responsável pelo contrato</label><input type="text" id="fornCadSetor" placeholder="Ex: TI, Compras"></div>
         <div><label>Endereço</label><input type="text" id="fornCadEndereco" placeholder="Cidade ou endereço"></div>
       </div>
+
+      <label style="margin-top:14px;display:block;">Pessoas associadas</label>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:-6px;margin-bottom:8px;">Uma empresa pode ter mais de um contato.</span>
+      <div id="pessoasFornecedorTabela"></div>
+      <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:12px;margin-top:8px;">
+        <div id="pessoaFornEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
+          ✎ Editando pessoa — <a href="#" onclick="cancelarEdicaoPessoaFornecedor();return false;" style="color:#1565c0;">cancelar edição</a>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
+          <input type="text" id="pessoaFornNome" placeholder="Nome da pessoa">
+          <input type="text" id="pessoaFornCargo" placeholder="Cargo (ex: Comercial, Suporte)">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:center;">
+          <input type="email" id="pessoaFornEmail" placeholder="E-mail">
+          <input type="text" id="pessoaFornTelefone" placeholder="Telefone">
+          <button class="btn btn-ghost" id="btnAdicionarPessoaForn" onclick="adicionarPessoaFornecedor()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+        </div>
+      </div>
+
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalFornecedor()">Cancelar</button>
         <button class="btn btn-primary" onclick="salvarFornecedorCadastro()">Salvar</button>
@@ -8053,17 +8086,93 @@ function _htmlModalFornecedorCadastro() {
     </div></div>`;
 }
 
+window._fornecedorPessoas = [];
+window._pessoaFornEditandoIndex = null;
+
+function renderPessoasFornecedor() {
+  const container = document.getElementById('pessoasFornecedorTabela');
+  if (!container) return;
+  const itens = window._fornecedorPessoas || [];
+  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhuma pessoa cadastrada.</p>'; return; }
+  container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
+    itens.map((p, i) => `<tr>
+        <td style="font-weight:600;color:#222;">${esc(p.nome)}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(p.cargo || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(p.email || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(p.telefone || '-')}</td>
+        <td style="text-align:center;white-space:nowrap;">
+          <button class="btn-icon" onclick="editarPessoaFornecedor(${i})" title="Editar">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="removerPessoaFornecedor(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
+        </td>
+      </tr>`).join('') + `</tbody></table>`;
+}
+
+function _limparFormularioPessoaFornecedor() {
+  ['pessoaFornNome', 'pessoaFornCargo', 'pessoaFornEmail', 'pessoaFornTelefone'].forEach((id) => {
+    document.getElementById(id).value = '';
+  });
+}
+
+window.adicionarPessoaFornecedor = () => {
+  const nome = document.getElementById('pessoaFornNome').value.trim();
+  if (!nome) return showToast('Informe o nome da pessoa.', '#e65100');
+  const item = {
+    nome,
+    cargo: document.getElementById('pessoaFornCargo').value.trim(),
+    email: document.getElementById('pessoaFornEmail').value.trim(),
+    telefone: document.getElementById('pessoaFornTelefone').value.trim(),
+  };
+  window._fornecedorPessoas = window._fornecedorPessoas || [];
+  if (window._pessoaFornEditandoIndex != null) {
+    window._fornecedorPessoas[window._pessoaFornEditandoIndex] = item;
+    window._pessoaFornEditandoIndex = null;
+    document.getElementById('pessoaFornEdicaoAviso').style.display = 'none';
+    document.getElementById('btnAdicionarPessoaForn').textContent = '+ Adicionar';
+  } else {
+    window._fornecedorPessoas.push(item);
+  }
+  _limparFormularioPessoaFornecedor();
+  renderPessoasFornecedor();
+};
+
+window.editarPessoaFornecedor = (idx) => {
+  const p = window._fornecedorPessoas[idx];
+  if (!p) return;
+  window._pessoaFornEditandoIndex = idx;
+  document.getElementById('pessoaFornNome').value = p.nome || '';
+  document.getElementById('pessoaFornCargo').value = p.cargo || '';
+  document.getElementById('pessoaFornEmail').value = p.email || '';
+  document.getElementById('pessoaFornTelefone').value = p.telefone || '';
+  document.getElementById('pessoaFornEdicaoAviso').style.display = 'block';
+  document.getElementById('btnAdicionarPessoaForn').textContent = 'Salvar alteração';
+};
+
+window.cancelarEdicaoPessoaFornecedor = () => {
+  window._pessoaFornEditandoIndex = null;
+  document.getElementById('pessoaFornEdicaoAviso').style.display = 'none';
+  document.getElementById('btnAdicionarPessoaForn').textContent = '+ Adicionar';
+  _limparFormularioPessoaFornecedor();
+};
+
+window.removerPessoaFornecedor = (idx) => {
+  window._fornecedorPessoas.splice(idx, 1);
+  if (window._pessoaFornEditandoIndex === idx) window.cancelarEdicaoPessoaFornecedor();
+  renderPessoasFornecedor();
+};
+
 window.abrirModalFornecedor = (id) => {
   const f = id ? fornecedoresData.find((x) => String(x.id) === String(id)) : null;
   document.getElementById('modalFornecedorTitulo').textContent = f ? 'Editar Fornecedor' : 'Novo Fornecedor';
   document.getElementById('fornCadId').value = f ? f.id : '';
   document.getElementById('fornCadNome').value = f ? (f.nome || '') : '';
-  document.getElementById('fornCadEmpresa').value = f ? (f.empresa || '') : '';
-  document.getElementById('fornCadEmail').value = f ? (f.email || '') : '';
-  document.getElementById('fornCadTelefone').value = f ? (f.telefone || '') : '';
   document.getElementById('fornCadDetalhes').value = f ? (f.detalhes || '') : '';
   document.getElementById('fornCadSetor').value = f ? (f.setor || '') : '';
   document.getElementById('fornCadEndereco').value = f ? (f.endereco || '') : '';
+  window._fornecedorPessoas = f && Array.isArray(f.pessoas) ? [...f.pessoas] : [];
+  window.cancelarEdicaoPessoaFornecedor();
+  renderPessoasFornecedor();
   document.getElementById('modalFornecedor').classList.add('open');
 };
 
@@ -8082,15 +8191,15 @@ window.salvarFornecedorCadastro = async () => {
       // regra do banco exige para este perfil poder gravar.
       categoria: CATEGORIA_FORNECEDOR_PADRAO,
       nome,
-      empresa: document.getElementById('fornCadEmpresa').value.trim(),
-      email: document.getElementById('fornCadEmail').value.trim(),
-      telefone: document.getElementById('fornCadTelefone').value.trim(),
       detalhes: document.getElementById('fornCadDetalhes').value.trim(),
       // Setor e endereco existem no catalogo e sao gravados por esta tela. Sem
       // eles no formulario, salvar aqui apagaria o que estava preenchido: a
       // gravacao regrava a linha inteira, e campo ausente vira vazio.
       setor: document.getElementById('fornCadSetor').value.trim(),
       endereco: document.getElementById('fornCadEndereco').value.trim(),
+      // empresa/email/telefone soltos saem daqui: uma empresa agora pode ter
+      // N pessoas, cada uma com seu proprio contato.
+      pessoas: window._fornecedorPessoas || [],
     });
     fecharModalFornecedor();
     API.invalidate('getDependencias');

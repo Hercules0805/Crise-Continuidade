@@ -15,7 +15,8 @@
     "migrar-rto": "ts-node src/migrar-rto.ts",
     "preencher-medicoes": "ts-node src/preencher-medicoes.ts",
     "migrar-lancamentos": "ts-node src/migrar-lancamentos.ts",
-    "migrar-categorias-risco": "ts-node src/migrar-categorias-risco.ts"
+    "migrar-categorias-risco": "ts-node src/migrar-categorias-risco.ts",
+    "migrar-fornecedores-pessoas": "ts-node src/migrar-fornecedores-pessoas.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",

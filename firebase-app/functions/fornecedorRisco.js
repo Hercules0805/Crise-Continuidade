@@ -103,14 +103,15 @@ function decidir({ avaliacao, fornecedor, riscos, limiar, hoje }) {
 
   if (abaixoDoLimiar(nota, lim)) {
     if (abertos.length) return { acao: 'nada', motivo: 'já existe risco aberto para este fornecedor' };
-    const empresa = fornecedor && fornecedor.empresa ? ` (${fornecedor.empresa})` : '';
     return {
       acao: 'abrir',
       risco: {
         // Fornecedor nao pertence a uma area: entra como risco corporativo.
         area: '',
         titulo: `Fornecedor "${nome}" com nota de conformidade ${nota}`,
-        descricao: `A avaliação do fornecedor "${nome}"${empresa} resultou em nota ${nota} de 100, abaixo do limiar de ${lim}. Informe o impacto para este risco entrar na carga de risco da empresa.`,
+        // "nome" e sempre o nome da empresa (uma empresa pode ter N pessoas
+        // associadas, mas quem e avaliada e quem entra no risco e a empresa).
+        descricao: `A avaliação do fornecedor "${nome}" resultou em nota ${nota} de 100, abaixo do limiar de ${lim}. Informe o impacto para este risco entrar na carga de risco da empresa.`,
         categoria: CATEGORIA,
         responsavel: '',
         dataIdentificacao: data,

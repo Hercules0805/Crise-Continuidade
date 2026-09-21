@@ -256,6 +256,9 @@ async function _lerDependencias() {
     telefone: d.telefone || '',
     email: d.email || '',
     endereco: d.endereco || '',
+    // So usado por Fornecedores: uma empresa pode ter N pessoas associadas.
+    // Nas outras 4 categorias este campo nunca e escrito e chega vazio.
+    pessoas: Array.isArray(d.pessoas) ? d.pessoas : [],
   }));
 }
 
@@ -710,6 +713,7 @@ async function _salvarDependencia(d) {
     telefone: d.telefone || '',
     email: d.email || '',
     endereco: d.endereco || '',
+    pessoas: Array.isArray(d.pessoas) ? d.pessoas : [],
   };
   if (d.id) {
     await _db.collection(COLLECTION.dependencias).doc(String(d.id)).set(data, { merge: true });
