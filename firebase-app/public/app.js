@@ -7461,7 +7461,8 @@ async function fornecedores() {
     </div>
     <div class="loading" id="loadingFornecedores">⏳ Carregando...</div>
     <div id="listaFornecedores"></div>
-    ${_htmlDrawerAvaliacaoFornecedor()}`;
+    ${_htmlDrawerAvaliacaoFornecedor()}
+    ${_htmlModalFornecedorCadastro()}`;
 
   document.getElementById('btnIrCriterios').style.display = isAdmin ? 'inline-block' : 'none';
 
@@ -7563,9 +7564,10 @@ function renderizarFornecedores() {
               <td style="color:#666;font-size:0.9em;">
                 ${av ? `${_dataCurtaForn(av.avaliadoEm)}<div style="font-size:0.8em;color:#aaa;">${esc(av.avaliadoPor || '')}</div>` : '–'}
               </td>
-              <td style="text-align:center;">
+              <td style="text-align:center;white-space:nowrap;">
                 ${isAdmin
-                  ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">${av ? 'Reavaliar' : 'Avaliar'}</button>`
+                  ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">${av ? 'Reavaliar' : 'Avaliar'}</button>
+                     <button class="btn-icon" onclick="abrirModalFornecedor('${esc(f.id)}')" title="Editar dados do fornecedor">✏️</button>`
                   : (av ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">Ver</button>` : '–')}
               </td>
             </tr>`;
@@ -7949,28 +7951,7 @@ async function fornecedoresCadastro() {
     </div>
     <div class="loading" id="loadingFornCadastro">⏳ Carregando...</div>
     <div id="listaFornCadastro"></div>
-    <div class="modal-overlay" id="modalFornecedor"><div class="modal" onclick="event.stopPropagation()">
-      <h3 id="modalFornecedorTitulo">Novo Fornecedor</h3>
-      <input type="hidden" id="fornCadId">
-      <label>Nome</label>
-      <input type="text" id="fornCadNome" placeholder="Ex: Datacenter Alfa">
-      <label>Empresa / razão social</label>
-      <input type="text" id="fornCadEmpresa" placeholder="Ex: Alfa Tecnologia S.A.">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div><label>Contato (e-mail)</label><input type="email" id="fornCadEmail" placeholder="contato@alfa.com.br"></div>
-        <div><label>Telefone</label><input type="text" id="fornCadTelefone" placeholder="(00) 0000-0000"></div>
-      </div>
-      <label>Serviço prestado / o que fornece</label>
-      <input type="text" id="fornCadDetalhes" placeholder="Ex: hospedagem dos servidores de produção">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div><label>Setor responsável pelo contrato</label><input type="text" id="fornCadSetor" placeholder="Ex: TI, Compras"></div>
-        <div><label>Endereço</label><input type="text" id="fornCadEndereco" placeholder="Cidade ou endereço"></div>
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="fecharModalFornecedor()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarFornecedorCadastro()">Salvar</button>
-      </div>
-    </div></div>`;
+    ${_htmlModalFornecedorCadastro()}`;
 
   document.getElementById('btnNovoFornecedor').style.display = podeMexer ? 'inline-block' : 'none';
 
@@ -8039,6 +8020,39 @@ function renderizarFornecedoresCadastro() {
     </div>`;
 }
 
+/**
+ * Modal de cadastro/edição de fornecedor.
+ *
+ * Compartilhado entre Cadastro (onde nasce) e Avaliação (onde também precisa
+ * corrigir dado do fornecedor sem trocar de tela no meio da avaliação) — mesmo
+ * HTML, mesmas funções de abrir/salvar/fechar.
+ */
+function _htmlModalFornecedorCadastro() {
+  return `
+    <div class="modal-overlay" id="modalFornecedor"><div class="modal" onclick="event.stopPropagation()">
+      <h3 id="modalFornecedorTitulo">Novo Fornecedor</h3>
+      <input type="hidden" id="fornCadId">
+      <label>Nome</label>
+      <input type="text" id="fornCadNome" placeholder="Ex: Datacenter Alfa">
+      <label>Empresa / razão social</label>
+      <input type="text" id="fornCadEmpresa" placeholder="Ex: Alfa Tecnologia S.A.">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div><label>Contato (e-mail)</label><input type="email" id="fornCadEmail" placeholder="contato@alfa.com.br"></div>
+        <div><label>Telefone</label><input type="text" id="fornCadTelefone" placeholder="(00) 0000-0000"></div>
+      </div>
+      <label>Serviço prestado / o que fornece</label>
+      <input type="text" id="fornCadDetalhes" placeholder="Ex: hospedagem dos servidores de produção">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div><label>Setor responsável pelo contrato</label><input type="text" id="fornCadSetor" placeholder="Ex: TI, Compras"></div>
+        <div><label>Endereço</label><input type="text" id="fornCadEndereco" placeholder="Cidade ou endereço"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalFornecedor()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarFornecedorCadastro()">Salvar</button>
+      </div>
+    </div></div>`;
+}
+
 window.abrirModalFornecedor = (id) => {
   const f = id ? fornecedoresData.find((x) => String(x.id) === String(id)) : null;
   document.getElementById('modalFornecedorTitulo').textContent = f ? 'Editar Fornecedor' : 'Novo Fornecedor';
@@ -8082,7 +8096,11 @@ window.salvarFornecedorCadastro = async () => {
     API.invalidate('getDependencias');
     const deps = await API.getDependencias();
     fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
+    // O modal e compartilhado entre Cadastro e Avaliação — cada renderizador só
+    // desenha se o próprio container estiver na página, então chamar os dois é
+    // seguro e atualiza qualquer uma das telas de onde o modal foi aberto.
     renderizarFornecedoresCadastro();
+    renderizarFornecedores();
     showToast('✅ Salvo!', '#2e7d32');
   } catch (e) {
     showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
