@@ -3760,10 +3760,17 @@ function _htmlDrawerRisco() {
                 <select id="rProcesso" style="${inp}"><option value="">-- Nenhum (risco corporativo) --</option></select>
               </div>
             </div>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Fornecedor Relacionado (opcional)</label>
-              <select id="rFornecedor" style="${inp}"><option value="">-- Nenhum --</option></select>
-              <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Use quando o risco foi reportado por (ou envolve) um fornecedor do catálogo de Dependências.</span>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="${lbl}">Fornecedor Relacionado (opcional)</label>
+                <select id="rFornecedor" style="${inp}"><option value="">-- Nenhum --</option></select>
+                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Use quando o risco foi reportado por (ou envolve) um fornecedor do catálogo de Dependências.</span>
+              </div>
+              <div>
+                <label style="${lbl}">Indicador Relacionado (opcional)</label>
+                <select id="rIndicador" style="${inp}"><option value="">-- Nenhum --</option></select>
+                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Use quando o risco tem relação com um indicador de segurança. Risco gerado por desvio de meta já vem preenchido.</span>
+              </div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
@@ -4000,6 +4007,22 @@ window.abrirDrawerRisco = async (r) => {
   document.getElementById('rFornecedor').innerHTML = '<option value="">-- Nenhum --</option>' +
     riscosFornecedoresCache.map(f => `<option value="${f.id}" data-nome="${esc(f.nome)}">${esc(f.nome)}${f.empresa ? ' — ' + f.empresa : ''}</option>`).join('');
 
+  // Vinculo risco -> indicador. Um risco aponta para no maximo um indicador; um
+  // indicador pode ter varios riscos. O risco gerado por desvio de meta ja nasce
+  // com o vinculo; este campo permite que um risco criado a mao aponte para o
+  // mesmo indicador, que e o que faz o indicador virar insumo do hub.
+  if (!(indicadoresData || []).length) {
+    try { indicadoresData = await API.getIndicadoresSeguranca(); } catch (e) { indicadoresData = []; }
+  }
+  document.getElementById('rIndicador').innerHTML = '<option value="">-- Nenhum --</option>' +
+    (indicadoresData || []).map(i => `<option value="${esc(i.id)}">${esc(i.nome)}${i.pilar ? ' — ' + esc(i.pilar) : ''}${i.foraDaMeta ? ' (fora da meta)' : ''}</option>`).join('');
+  document.getElementById('rIndicador').onchange = () => {
+    const sel = document.getElementById('rIndicador');
+    const aviso = document.getElementById('rProbabilidade-sugestao');
+    if (aviso) aviso.remove();
+    if (sel.value) _sugerirProbabilidadePeloIndicador(sel.value);
+  };
+
   const categorias = [...new Set([...RISCO_CATEGORIAS_PADRAO, ...riscosData.map(x => x.categoria).filter(Boolean)])].sort();
   document.getElementById('rCategoriaList').innerHTML = categorias.map(c => `<option value="${c}">`).join('');
 
@@ -4007,6 +4030,7 @@ window.abrirDrawerRisco = async (r) => {
   document.getElementById('rArea').value = r ? r.area : '';
   document.getElementById('rProcesso').value = r && r.processoId ? r.processoId : '';
   document.getElementById('rFornecedor').value = r && r.fornecedor ? r.fornecedor : '';
+  document.getElementById('rIndicador').value = r && r.indicadorId ? r.indicadorId : '';
   document.getElementById('rTitulo').value = r ? r.titulo : '';
   document.getElementById('rCategoria').value = r ? (r.categoria || '') : '';
   document.getElementById('rResponsavel').value = r ? (r.responsavel || '') : '';
@@ -4048,7 +4072,8 @@ window.abrirDrawerRisco = async (r) => {
   // Ambas so preenchem campo vazio — um risco ja avaliado nao e tocado.
   const opProc = document.getElementById('rProcesso').selectedOptions[0];
   if (opProc) _sugerirImpactoPeloTier(opProc.dataset.tier || '');
-  if (r && r.indicadorId) _sugerirProbabilidadePeloIndicador(r.indicadorId);
+  const indSel = document.getElementById('rIndicador');
+  if (indSel && indSel.value) _sugerirProbabilidadePeloIndicador(indSel.value);
 
   document.querySelectorAll('#drawerRisco input, #drawerRisco select, #drawerRisco textarea').forEach(el => { el.disabled = !isAdmin; });
   document.querySelectorAll('#drawerRisco .btn-ghost[onclick*="Item("], #drawerRisco .btn-ghost[onclick^="adicionar"]').forEach(el => { el.style.display = isAdmin ? 'inline-block' : 'none'; });
@@ -4089,6 +4114,7 @@ window.salvarRisco = async () => {
     processo: procSel.value && procOpt ? procOpt.textContent.split(' — ').slice(1).join(' — ') : null,
     fornecedor: fornSel.value || null,
     fornecedorNome: fornSel.value && fornOpt ? fornOpt.dataset.nome : null,
+    indicadorId: document.getElementById('rIndicador').value || null,
     titulo: document.getElementById('rTitulo').value.trim(),
     descricao: document.getElementById('rDescricao').value.trim(),
     categoria: document.getElementById('rCategoria').value.trim(),
