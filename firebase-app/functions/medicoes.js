@@ -36,6 +36,21 @@ const ESCALA = {
   SCORE_BIA: 'score-bia',        // soma das respostas do questionario
   PERCENTUAL: 'percentual',      // 0 a 100
   SCORE_RISCO: 'score-risco',    // probabilidade x impacto
+  CONFORMIDADE: 'conformidade',  // 0 a 100, MAIOR E MELHOR (fornecedor)
+};
+
+/**
+ * Sentido da escala: para onde aponta o "bom".
+ *
+ * Existe porque as escalas deste livro nao apontam todas para o mesmo lado. Um
+ * score de risco 12 e o pior caso; uma conformidade de fornecedor 100 e o melhor.
+ * Sem esta marca, o grafico que ainda vamos construir leria conformidade alta
+ * como risco alto — que foi exatamente o erro que os indicadores "quanto menor
+ * melhor" ja cometeram uma vez na tela.
+ */
+const SENTIDO = {
+  MAIOR_PIOR: 'maiorPior',
+  MAIOR_MELHOR: 'maiorMelhor',
 };
 
 const FONTE = {
@@ -229,6 +244,55 @@ function medicaoDeRisco(origemId, risco, anterior) {
   };
 }
 
+/**
+ * Converte uma avaliacao de fornecedor em medicao.
+ *
+ * A nota e CONFORMIDADE: maior e melhor. Por isso a medicao carrega o sentido
+ * junto — ver SENTIDO, acima.
+ *
+ * Avaliacao sem nota (nenhum criterio respondido, ou todos "Nao se aplica") NAO
+ * vira medicao: ausencia de nota nao e nota zero, e um ponto de valor 0 na curva
+ * diria que o fornecedor nao atende nada.
+ *
+ * A faixa (Adequado, Aceitavel, Insuficiente, Critico) NAO e gravada aqui de
+ * proposito: ela e regra de exibicao e vive em um lugar so, em
+ * fornecedor-score.js. Gravar a faixa criaria uma segunda copia dos limites,
+ * que e o problema que este projeto passou semanas removendo.
+ */
+function medicaoDeAvaliacaoFornecedor(origemId, av) {
+  if (!av) return null;
+
+  const valor = _numeroMedido(av.nota);
+  if (valor === null) return null;
+
+  const fornecedorId = String(av.fornecedorId || '').trim();
+  if (!fornecedorId) return null;
+
+  const coletadoEm = av.avaliadoEm || new Date().toISOString();
+  if (isNaN(new Date(coletadoEm).getTime())) return null;
+
+  return {
+    sujeitoTipo: 'fornecedor',
+    sujeitoId: fornecedorId,
+    sujeitoRotulo: String(av.fornecedorNome || fornecedorId),
+    // Fornecedor nao pertence a uma area: fica sem, e so admin le a medicao.
+    area: '',
+    fonte: FONTE.FORNECEDOR,
+    metrica: 'conformidade',
+    escala: ESCALA.CONFORMIDADE,
+    sentido: SENTIDO.MAIOR_MELHOR,
+    valor,
+    classificacao: av.completa ? 'completa' : 'incompleta',
+    coletadoEm,
+    registradoEm: new Date().toISOString(),
+    registradoPor: String(av.avaliadoPor || '').trim(),
+    reguaVersao: Number(av.criteriosVersao) || 1,
+    validoAte: _somarDias(coletadoEm, VALIDADE_DIAS[FONTE.FORNECEDOR]),
+    origemColecao: 'avaliacoes_fornecedor',
+    origemId,
+  };
+}
+
 module.exports = {
   PESO_PROBABILIDADE,
   PESO_IMPACTO,
@@ -241,4 +305,6 @@ module.exports = {
   VALIDADE_DIAS,
   idDaMedicao,
   medicaoDeRespostaBia,
+  medicaoDeAvaliacaoFornecedor,
+  SENTIDO,
 };

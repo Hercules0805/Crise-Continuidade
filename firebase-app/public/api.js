@@ -21,6 +21,9 @@ if (typeof firebase !== 'undefined' && typeof firebase.firestore === 'function')
 }
 const _db = firebase.firestore();
 
+// Dominio das contas que acessam o sistema. Usado na validacao do perfil.
+const DOMINIO_CORPORATIVO = '@fortestecnologia.com.br';
+
 const COLLECTION = {
   perguntas: 'perguntas',
   areas: 'areas',
@@ -35,6 +38,8 @@ const COLLECTION = {
   riscos: 'riscos',
   indicadoresSeguranca: 'indicadores_seguranca',
   lancamentos: 'lancamentos_indicadores',
+  criteriosFornecedor: 'criterios_fornecedor',
+  avaliacoesFornecedor: 'avaliacoes_fornecedor',
 };
 
 // ------------------------------------------------------------
@@ -114,40 +119,109 @@ async function _lerAreas() {
 // - área do gestor: área cujo campo email casa com o do usuário (mesma regra
 //   do getPerfil antigo). Persiste o campo `area` em config_perfis para que as
 //   Security Rules (que leem config_perfis.area) autorizem o gestor.
+/**
+ * Perfil de acesso da pessoa logada.
+ *
+ * DOIS CUIDADOS AQUI, e o segundo era um defeito de verdade:
+ *
+ *   1. Quem nao esta cadastrado cai no MENOR acesso, e perfil desconhecido
+ *      tambem (Perfis.normalizar). Um erro de digitacao no console do Firebase
+ *      nao pode promover ninguem.
+ *
+ *   2. A resolucao de area pelo e-mail responsavel gravava
+ *      `{ perfil: 'gestor', area }` de volta no documento. Com dois perfis isso
+ *      passava; com tres, uma pessoa de outro perfil que tambem fosse
+ *      responsavel por uma area seria REBAIXADA a gestor em silencio, no
+ *      primeiro login. Agora essa gravacao so acontece para quem ja e gestor, e
+ *      ela nunca escreve o campo perfil.
+ */
 async function _lerPerfil(email) {
   const emailLower = String(email || '').trim().toLowerCase();
-  if (!emailLower) return { perfil: 'gestor', area: null };
+  if (!emailLower) return { perfil: Perfis.PERFIL_PADRAO, area: null };
 
   const perfilSnap = await _db.collection(COLLECTION.configPerfis).doc(emailLower).get();
   const perfilData = perfilSnap.exists ? perfilSnap.data() : null;
-  const perfil = perfilData && perfilData.perfil ? String(perfilData.perfil).trim().toLowerCase() : 'gestor';
+  const perfil = Perfis.normalizar(perfilData && perfilData.perfil);
 
-  if (perfil === 'admin') {
-    return { perfil: 'admin', area: null };
-  }
+  // Somente o perfil de gestor esta amarrado a uma area.
+  if (!Perfis.exigeArea(perfil)) return { perfil, area: null };
 
-  // Gestor: área já registrada no perfil, senão resolve pela aba Áreas (email).
   let area = perfilData && perfilData.area ? String(perfilData.area).trim() : null;
   if (!area) {
     const areas = await _getAll(COLLECTION.areas);
     const match = areas.find((a) => String(a.email || '').trim().toLowerCase() === emailLower);
     if (match) area = String(match.nome).trim();
 
-    // Persistir a área resolvida no perfil (necessário para as rules do gestor).
+    // Persistir a area resolvida (as rules do gestor dependem dela). NUNCA
+    // gravar `perfil` junto: ver cuidado 2 acima.
     if (area) {
       try {
         await _db.collection(COLLECTION.configPerfis).doc(emailLower).set(
-          { email: emailLower, perfil: 'gestor', area },
+          { email: emailLower, area },
           { merge: true }
         );
       } catch (e) {
-        // Sem permissão de escrita (rules) não é fatal para a leitura do perfil.
+        // Sem permissao de escrita (rules) nao e fatal para a leitura do perfil.
         console.warn('Não foi possível persistir área do perfil:', e.message);
       }
     }
   }
 
-  return { perfil: 'gestor', area: area || null };
+  return { perfil, area: area || null };
+}
+
+// ------------------------------------------------------------
+// Perfis de acesso (tela de Administracao)
+// ------------------------------------------------------------
+
+async function _lerPerfis() {
+  const docs = await _getAll(COLLECTION.configPerfis);
+  return docs.map((d) => ({
+    id: d.id,
+    email: String(d.email || d.id || '').toLowerCase(),
+    perfil: Perfis.normalizar(d.perfil),
+    perfilGravado: String(d.perfil || ''),
+    area: d.area || '',
+    atualizadoEm: d.atualizadoEm || '',
+    atualizadoPor: d.atualizadoPor || '',
+  })).sort((a, b) => a.email.localeCompare(b.email));
+}
+
+/**
+ * Cria ou altera o perfil de uma pessoa.
+ *
+ * O documento tem o e-mail como id, em minusculas: e assim que as rules acham
+ * o perfil de quem esta logado. Gravar com outra grafia faria a pessoa entrar
+ * como gestor sem ninguem entender por que.
+ */
+async function _salvarPerfilAcesso(p) {
+  const email = String(p.email || '').trim().toLowerCase();
+  if (!email) throw new Error('Informe o e-mail.');
+  if (!email.endsWith(DOMINIO_CORPORATIVO)) {
+    throw new Error(`O e-mail tem que ser do domínio ${DOMINIO_CORPORATIVO}.`);
+  }
+  if (!Perfis.conhecido(p.perfil)) throw new Error('Perfil inválido.');
+
+  const perfil = Perfis.normalizar(p.perfil);
+  const precisaArea = Perfis.exigeArea(perfil);
+  const area = precisaArea ? String(p.area || '').trim() : '';
+  if (precisaArea && !area) throw new Error('Gestor precisa de uma área.');
+
+  const dados = {
+    email,
+    perfil,
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  };
+
+  // Perfil que nao usa area tem o campo REMOVIDO, nao gravado em branco.
+  // Gravar `area: ''` fazia a pessoa valer como gestor da "area vazia" — e os
+  // riscos corporativos nascem com area vazia. A regra do banco tambem foi
+  // corrigida; as duas guardas existem de proposito.
+  dados.area = precisaArea ? area : firebase.firestore.FieldValue.delete();
+
+  await _db.collection(COLLECTION.configPerfis).doc(email).set(dados, { merge: true });
+  return { success: true, id: email };
 }
 
 async function _lerConfigRespostas() {
@@ -310,6 +384,162 @@ async function _lerIndicadoresSeguranca() {
     atualizadoEm: d.atualizadoEm || '',
     criadoPor: d.criadoPor || '',
   }));
+}
+
+// ------------------------------------------------------------
+// Fornecedores: criterios e avaliacoes
+//
+// O fornecedor em si NAO tem cadastro proprio: ele e uma linha de
+// /dependencias com categoria Fornecedores, que e onde o processo ja diz de
+// quem depende e onde o risco ja aponta. Um segundo cadastro faria o mesmo
+// fornecedor existir duas vezes.
+// ------------------------------------------------------------
+
+async function _lerCriteriosFornecedor() {
+  const docs = await _getAll(COLLECTION.criteriosFornecedor);
+  return docs.map((d) => ({
+    id: d.id,
+    nome: d.nome || '',
+    descricao: d.descricao || '',
+    peso: Number(d.peso) > 0 ? Number(d.peso) : 1,
+    ativo: d.ativo !== false,
+    ordem: Number(d.ordem) || 0,
+    criadoEm: d.criadoEm || '',
+    atualizadoEm: d.atualizadoEm || '',
+  })).sort((a, b) => (a.ordem - b.ordem) || a.nome.localeCompare(b.nome));
+}
+
+const _CAMPOS_CRITERIO_FORNECEDOR = ['nome', 'descricao', 'peso', 'ativo', 'ordem'];
+
+async function _salvarCriterioFornecedor(c) {
+  const data = {};
+  _CAMPOS_CRITERIO_FORNECEDOR.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(c, campo) && c[campo] !== undefined) data[campo] = c[campo];
+  });
+  data.atualizadoEm = new Date().toISOString();
+
+  if (c.id) {
+    await _db.collection(COLLECTION.criteriosFornecedor).doc(String(c.id)).set(data, { merge: true });
+    return { success: true, id: c.id, criteriosVersao: await _subirVersaoCriterios() };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = (window.USER_EMAIL || '').toLowerCase();
+  if (data.ordem === undefined) data.ordem = Date.now();
+  const ref = await _db.collection(COLLECTION.criteriosFornecedor).add(data);
+  return { success: true, id: ref.id, criteriosVersao: await _subirVersaoCriterios() };
+}
+
+// Versao da regua de criterios, no mesmo lugar da regua do BIA mas em outro
+// documento. Cada avaliacao grava a versao que a pontuou — sem isso, mudar um
+// peso muda as notas passadas e ninguem consegue explicar por que a nota do
+// fornecedor mudou sozinha.
+async function _versaoCriteriosAtual() {
+  try {
+    const snap = await _db.collection(COLLECTION.regua).doc('fornecedor').get();
+    return snap.exists ? Number((snap.data() || {}).versao) || 1 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+// Limiar de nota que abre risco automatico. Fica no mesmo documento da versao
+// dos criterios porque e configuracao da mesma regua.
+async function _lerConfigFornecedor() {
+  try {
+    const snap = await _db.collection(COLLECTION.regua).doc('fornecedor').get();
+    const d = snap.exists ? (snap.data() || {}) : {};
+    const lim = Number(d.limiarRisco);
+    return {
+      versao: Number(d.versao) || 1,
+      limiarRisco: Number.isFinite(lim) && lim >= 0 && lim <= 100 ? lim : FornecedorScore.LIMIAR_RISCO_PADRAO,
+    };
+  } catch {
+    return { versao: 1, limiarRisco: FornecedorScore.LIMIAR_RISCO_PADRAO };
+  }
+}
+
+async function _salvarConfigFornecedor(d) {
+  const lim = Number(d.limiarRisco);
+  if (!Number.isFinite(lim) || lim < 0 || lim > 100) throw new Error('O limiar tem que ser um número de 0 a 100.');
+  await _db.collection(COLLECTION.regua).doc('fornecedor').set({
+    limiarRisco: lim,
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  }, { merge: true });
+  return { success: true, limiarRisco: lim };
+}
+
+async function _subirVersaoCriterios() {
+  const ref = _db.collection(COLLECTION.regua).doc('fornecedor');
+  const snap = await ref.get();
+  const versao = (snap.exists ? Number((snap.data() || {}).versao) || 1 : 1) + 1;
+  await ref.set({
+    versao,
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  }, { merge: true });
+  return versao;
+}
+
+/**
+ * Avaliacoes de fornecedor, a mais recente de cada um.
+ *
+ * A colecao e append-only: cada avaliacao e um documento novo. Aqui devolvemos
+ * so a ultima por fornecedor, que e o que as telas usam; o historico continua
+ * gravado para o grafico de evolucao do fornecedor.
+ */
+async function _lerAvaliacoesFornecedor() {
+  const docs = await _getAll(COLLECTION.avaliacoesFornecedor);
+  const ultima = new Map();
+  docs.forEach((d) => {
+    const fid = String(d.fornecedorId || '');
+    if (!fid) return;
+    const atual = ultima.get(fid);
+    if (!atual || String(d.avaliadoEm || '') > String(atual.avaliadoEm || '')) {
+      ultima.set(fid, {
+        id: d.id,
+        fornecedorId: fid,
+        fornecedorNome: d.fornecedorNome || '',
+        respostas: d.respostas || {},
+        nota: d.nota === null || d.nota === undefined ? null : Number(d.nota),
+        completa: !!d.completa,
+        criteriosVersao: Number(d.criteriosVersao) || 1,
+        observacao: d.observacao || '',
+        avaliadoEm: d.avaliadoEm || '',
+        avaliadoPor: d.avaliadoPor || '',
+      });
+    }
+  });
+  return [...ultima.values()];
+}
+
+/**
+ * Grava uma avaliacao nova. Nunca sobrescreve a anterior.
+ *
+ * A nota vem calculada aqui, a partir dos criterios do banco — nao da tela.
+ * A tela mostra o numero para a pessoa conferir, mas quem grava e esta funcao,
+ * pela mesma razao que o score do risco e recalculado no servidor.
+ */
+async function _salvarAvaliacaoFornecedor(a) {
+  const criterios = await _lerCriteriosFornecedor();
+  const calc = FornecedorScore.calcular(criterios, a.respostas || {});
+  const agora = new Date().toISOString();
+
+  const data = {
+    fornecedorId: String(a.fornecedorId || ''),
+    fornecedorNome: String(a.fornecedorNome || ''),
+    respostas: a.respostas || {},
+    nota: calc.nota,
+    completa: calc.completa,
+    criteriosVersao: await _versaoCriteriosAtual(),
+    observacao: String(a.observacao || ''),
+    avaliadoEm: agora,
+    avaliadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  };
+  if (!data.fornecedorId) throw new Error('Avaliação sem fornecedor.');
+
+  const ref = await _db.collection(COLLECTION.avaliacoesFornecedor).add(data);
+  return { success: true, id: ref.id, nota: calc.nota, completa: calc.completa };
 }
 
 // Última resposta por area||processo -> score/tier/avaliado/respostas
@@ -746,6 +976,10 @@ const _GET_FIRESTORE = {
   getRiscosPorProcesso: (params) => _lerRiscos().then((rs) => (params.processoId ? rs.filter((r) => r.processoId === params.processoId) : rs)),
   getRiscosPorArea: (params) => _lerRiscos().then((rs) => (params.area ? rs.filter((r) => r.area === params.area) : rs)),
   getIndicadoresSeguranca: () => _lerIndicadoresSeguranca(),
+  getCriteriosFornecedor: () => _lerCriteriosFornecedor(),
+  getAvaliacoesFornecedor: () => _lerAvaliacoesFornecedor(),
+  getConfigFornecedor: () => _lerConfigFornecedor(),
+  getPerfis: () => _lerPerfis(),
 };
 
 // Ações de ESCRITA atendidas pelo Firestore
@@ -767,6 +1001,14 @@ const _POST_FIRESTORE = {
   salvarRisco: (b) => _salvarRisco(b),
   excluirRisco: (b) => _db.collection(COLLECTION.riscos).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarIndicadorSeguranca: (b) => _salvarIndicadorSeguranca(b),
+  salvarCriterioFornecedor: (b) => _salvarCriterioFornecedor(b),
+  excluirCriterioFornecedor: (b) => _db.collection(COLLECTION.criteriosFornecedor).doc(String(b.id)).delete()
+    .then(() => _subirVersaoCriterios()).then((versao) => ({ success: true, criteriosVersao: versao })),
+  salvarAvaliacaoFornecedor: (b) => _salvarAvaliacaoFornecedor(b),
+  salvarConfigFornecedor: (b) => _salvarConfigFornecedor(b),
+  salvarPerfilAcesso: (b) => _salvarPerfilAcesso(b),
+  excluirPerfilAcesso: (b) => _db.collection(COLLECTION.configPerfis).doc(String(b.email || '').toLowerCase()).delete()
+    .then(() => ({ success: true })),
   excluirIndicadorSeguranca: (b) => _db.collection(COLLECTION.indicadoresSeguranca).doc(String(b.id)).delete().then(() => ({ success: true })),
 };
 
@@ -911,6 +1153,22 @@ const API = {
   salvarRisco: (r) => API.post('salvarRisco', r),
   excluirRisco: (id) => API.post('excluirRisco', { id }),
   getIndicadoresSeguranca: () => API.get('getIndicadoresSeguranca'),
+  getCriteriosFornecedor: () => API.get('getCriteriosFornecedor'),
+  getAvaliacoesFornecedor: () => API.get('getAvaliacoesFornecedor'),
+  getConfigFornecedor: () => API.get('getConfigFornecedor'),
+  getPerfis: () => API.get('getPerfis'),
+  salvarPerfilAcesso: (p) => API.post('salvarPerfilAcesso', p)
+    .then((r) => { API.invalidate('getPerfis'); return r; }),
+  excluirPerfilAcesso: (email) => API.post('excluirPerfilAcesso', { email })
+    .then((r) => { API.invalidate('getPerfis'); return r; }),
+  salvarConfigFornecedor: (c) => API.post('salvarConfigFornecedor', c)
+    .then((r) => { API.invalidate('getConfigFornecedor'); return r; }),
+  salvarCriterioFornecedor: (c) => API.post('salvarCriterioFornecedor', c)
+    .then((r) => { API.invalidate('getCriteriosFornecedor'); return r; }),
+  excluirCriterioFornecedor: (id) => API.post('excluirCriterioFornecedor', { id })
+    .then((r) => { API.invalidate('getCriteriosFornecedor'); return r; }),
+  salvarAvaliacaoFornecedor: (a) => API.post('salvarAvaliacaoFornecedor', a)
+    .then((r) => { API.invalidate('getAvaliacoesFornecedor'); return r; }),
   salvarIndicadorSeguranca: (ind) => API.post('salvarIndicadorSeguranca', ind),
   lancarResultados: (indicadorId, entradas, arquivo) => _lancarResultados(indicadorId, entradas, arquivo)
     .then((r) => { API.invalidate('getIndicadoresSeguranca'); return r; }),

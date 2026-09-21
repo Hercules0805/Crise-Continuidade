@@ -260,4 +260,103 @@ describe('Security Rules — livro de medições', () => {
     });
     await assertFails(db(ADMIN).doc('medicoes/m-apagar').delete());
   });
+  // ---- Fornecedores ----
+
+  test('gestor lê os critérios de fornecedor, mas não escreve', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('criterios_fornecedor/c1').set({ nome: 'ISO 27001', peso: 3, ativo: true });
+    });
+    await assertSucceeds(db(GESTOR).doc('criterios_fornecedor/c1').get());
+    await assertFails(db(GESTOR).doc('criterios_fornecedor/c1').set({ peso: 1 }));
+  });
+
+  test('admin cadastra e altera critério de fornecedor', async () => {
+    await assertSucceeds(db(ADMIN).doc('criterios_fornecedor/c2').set({ nome: 'DPO', peso: 2, ativo: true }));
+    await assertSucceeds(db(ADMIN).doc('criterios_fornecedor/c2').set({ peso: 3 }, { merge: true }));
+  });
+
+  test('admin grava avaliação de fornecedor; gestor não', async () => {
+    await assertSucceeds(db(ADMIN).doc('avaliacoes_fornecedor/a1').set({ fornecedorId: 'f1', nota: 80 }));
+    await assertFails(db(GESTOR).doc('avaliacoes_fornecedor/a2').set({ fornecedorId: 'f1', nota: 80 }));
+  });
+
+  test('avaliação de fornecedor é append-only: NEM admin altera a que já existe', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('avaliacoes_fornecedor/a3').set({ fornecedorId: 'f1', nota: 40 });
+    });
+    await assertFails(db(ADMIN).doc('avaliacoes_fornecedor/a3').set({ nota: 95 }, { merge: true }));
+  });
+
+  test('ninguém apaga avaliação de fornecedor — a nota antiga é o histórico dele', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('avaliacoes_fornecedor/a4').set({ fornecedorId: 'f1', nota: 40 });
+    });
+    await assertFails(db(ADMIN).doc('avaliacoes_fornecedor/a4').delete());
+    await assertFails(db(GESTOR).doc('avaliacoes_fornecedor/a4').delete());
+  });
+
+  test('qualquer usuário do domínio lê a avaliação do fornecedor', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('avaliacoes_fornecedor/a5').set({ fornecedorId: 'f1', nota: 72 });
+    });
+    await assertSucceeds(db(GESTOR).doc('avaliacoes_fornecedor/a5').get());
+  });
+  // ---- Perfis de acesso ----
+
+  test('perfil com area VAZIA não vira gestor dos riscos corporativos', async () => {
+    const FORNEC = { email: 'seguranca@fortestecnologia.com.br' };
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`config_perfis/${FORNEC.email}`).set({ email: FORNEC.email, perfil: 'fornecedores', area: '' });
+      // Risco corporativo: os automáticos (indicador, fornecedor) nascem assim.
+      await ctx.firestore().doc('riscos/r-corp').set({ area: '', titulo: 'Desvio', origem: 'Indicador de Segurança' });
+    });
+    await assertFails(db(FORNEC).doc('riscos/r-corp').get());
+    await assertFails(db(FORNEC).doc('riscos/r-corp').set({ titulo: 'alterado' }, { merge: true }));
+  });
+
+  test('perfil de fornecedores gerencia critérios e grava avaliação', async () => {
+    const FORNEC = { email: 'seguranca2@fortestecnologia.com.br' };
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`config_perfis/${FORNEC.email}`).set({ email: FORNEC.email, perfil: 'fornecedores' });
+    });
+    await assertSucceeds(db(FORNEC).doc('criterios_fornecedor/c-sec').set({ nome: 'ISO', peso: 3, ativo: true }));
+    await assertSucceeds(db(FORNEC).doc('avaliacoes_fornecedor/a-sec').set({ fornecedorId: 'f1', nota: 55 }));
+  });
+
+  test('perfil de fornecedores NÃO escreve em riscos — o servidor abre o risco', async () => {
+    const FORNEC = { email: 'seguranca3@fortestecnologia.com.br' };
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`config_perfis/${FORNEC.email}`).set({ email: FORNEC.email, perfil: 'fornecedores' });
+    });
+    await assertFails(db(FORNEC).doc('riscos/r-novo').set({ area: '', titulo: 'inventado' }));
+  });
+
+  test('perfil de fornecedores NÃO se promove a admin', async () => {
+    const FORNEC = { email: 'seguranca4@fortestecnologia.com.br' };
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`config_perfis/${FORNEC.email}`).set({ email: FORNEC.email, perfil: 'fornecedores' });
+    });
+    await assertFails(db(FORNEC).doc(`config_perfis/${FORNEC.email}`).set({ perfil: 'admin' }, { merge: true }));
+    await assertFails(db(FORNEC).doc('config_perfis/outro@fortestecnologia.com.br').set({ perfil: 'admin' }));
+  });
+
+  test('perfil de fornecedores NÃO mexe no catálogo do BIA nem em processos', async () => {
+    const FORNEC = { email: 'seguranca5@fortestecnologia.com.br' };
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc(`config_perfis/${FORNEC.email}`).set({ email: FORNEC.email, perfil: 'fornecedores' });
+    });
+    await assertFails(db(FORNEC).doc('perguntas/p-nova').set({ pergunta: 'x' }));
+    await assertFails(db(FORNEC).doc('config_respostas/cr-nova').set({ valor: 9 }));
+    await assertFails(db(FORNEC).doc('processos/pr-novo').set({ area: 'TI', processo: 'x' }));
+  });
+
+  test('gestor pode gravar a PRÓPRIA área, mas não o próprio perfil', async () => {
+    await assertSucceeds(db(GESTOR).doc(`config_perfis/${GESTOR.email}`).set({ email: GESTOR.email, area: 'TI' }, { merge: true }));
+    await assertFails(db(GESTOR).doc(`config_perfis/${GESTOR.email}`).set({ perfil: 'admin' }, { merge: true }));
+  });
+
+  test('ninguém mexe no perfil de outra pessoa, só admin', async () => {
+    await assertFails(db(GESTOR).doc('config_perfis/alguem@fortestecnologia.com.br').set({ perfil: 'gestor', area: 'RH' }));
+    await assertSucceeds(db(ADMIN).doc('config_perfis/alguem@fortestecnologia.com.br').set({ perfil: 'gestor', area: 'RH' }));
+  });
 });

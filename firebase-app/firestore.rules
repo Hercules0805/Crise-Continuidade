@@ -38,11 +38,36 @@ service cloud.firestore {
       return isCorpUser() && hasPerfil() && perfilDoc().data.perfil == 'admin';
     }
 
+    // Perfil de fornecedores: avalia fornecedor e cadastra criterio, e nada
+    // mais. NAO edita config_perfis — se editasse, se promoveria a admin em
+    // dois cliques e o limite nao seria limite. Os nomes dos perfis espelham
+    // public/perfis.js; um teste falha se as duas listas divergirem.
+    function isGestorFornecedores() {
+      return isCorpUser() && hasPerfil() && perfilDoc().data.perfil == 'fornecedores';
+    }
+
+    function podeGerenciarFornecedores() {
+      return isAdmin() || isGestorFornecedores();
+    }
+
     // Área vinculada ao gestor: em config_perfis (campo area) OU, se ausente,
     // pela área cujo e-mail de responsável é o do usuário (resolvido no cliente
     // e replicado aqui via config_perfis.area quando disponível).
+    // ATENCAO: area VAZIA nao e area.
+    //
+    // A regra original so testava se o campo `area` existia. Com dois perfis
+    // isso passava. Ao entrar um terceiro perfil (fornecedores), um documento
+    // com `area: ''` — que e o que se grava para perfil que nao precisa de area
+    // — passava a valer como "gestor da area vazia". E os riscos corporativos
+    // (os gerados por desvio de indicador e por nota de fornecedor) nascem
+    // justamente com area vazia: qualquer pessoa com `area: ''` no perfil
+    // leria e escreveria neles. Dai a comparacao com '' aqui.
     function gestorArea() {
-      return hasPerfil() && ('area' in perfilDoc().data) ? perfilDoc().data.area : null;
+      return hasPerfil()
+        && ('area' in perfilDoc().data)
+        && perfilDoc().data.area != null
+        && perfilDoc().data.area != ''
+        ? perfilDoc().data.area : null;
     }
 
     function isGestorDaArea(area) {
@@ -115,10 +140,25 @@ service cloud.firestore {
     }
 
     match /config_perfis/{email} {
-      // Qualquer usuário do domínio lê (necessário para resolver o próprio perfil);
-      // apenas admin altera perfis.
+      // Qualquer usuário do domínio lê (necessário para resolver o próprio perfil).
       allow read: if isCorpUser();
-      allow write: if isAdmin();
+
+      // Só admin mexe em perfil. Nem o perfil de fornecedores: se pudesse, ele
+      // se promoveria a admin e o limite não seria limite nenhum.
+      //
+      // A exceção é estreita de propósito: o gestor pode gravar a PRÓPRIA área
+      // resolvida pelo e-mail responsável (o cliente faz isso no primeiro
+      // login, porque as regras do gestor dependem do campo area). Ele não
+      // pode tocar no campo perfil nem no documento de outra pessoa.
+      allow update: if isAdmin()
+        || (isCorpUser()
+            && email == emailKey()
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['perfil']));
+      allow create: if isAdmin()
+        || (isCorpUser()
+            && email == emailKey()
+            && !('perfil' in request.resource.data));
+      allow delete: if isAdmin();
     }
 
     // ---- Dados operacionais: admin (tudo) ou gestor (própria área) ----
@@ -147,6 +187,27 @@ service cloud.firestore {
     // Leitura: mesmo recorte dos riscos — admin ve tudo, gestor ve a propria
     // area. Vale a mesma armadilha: com regra por documento, consulta sem
     // filtro de area falha inteira para o gestor.
+    // ---- Fornecedores ----
+    // O cadastro do fornecedor em si vive em /dependencias (categoria
+    // Fornecedores) — nao existe cadastro paralelo, de proposito.
+    //
+    // Escrita somente admin, igual aos outros catalogos. Se Compras ou Juridico
+    // forem avaliar sem serem admin, isto precisa de um perfil "avaliador" —
+    // decisao em aberto, registrada no roteiro de evolucao.
+    match /criterios_fornecedor/{id} {
+      allow read: if isCorpUser();
+      allow write: if podeGerenciarFornecedores();
+    }
+
+    // Append-only: cada avaliacao e um documento novo, a mais recente vale.
+    // Sem update e sem delete — o historico da nota do fornecedor e o que
+    // permite mostrar a evolucao dele, e uma nota apagada nao se recupera.
+    match /avaliacoes_fornecedor/{id} {
+      allow read: if isCorpUser();
+      allow create: if podeGerenciarFornecedores();
+      allow update, delete: if false;
+    }
+
     match /medicoes/{id} {
       allow read: if isAdmin() || isGestorDaArea(resource.data.area);
       allow write: if false;

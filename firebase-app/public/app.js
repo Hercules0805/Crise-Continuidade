@@ -9,6 +9,9 @@ const pages = {
   'indicadores-cadastro': indicadoresCadastro,
   'indicadores-lancamento': indicadoresLancamento,
   'indicadores-matriz': indicadoresMatriz,
+  fornecedores,
+  'fornecedores-criterios': fornecedoresCriterios,
+  perfis,
 };
 
 // Paleta rotativa de 10 cores para tags de categoria dinâmicas (dependências/BIA).
@@ -4162,6 +4165,7 @@ window.abrirDrawerRisco = async (r) => {
   document.getElementById('rDescricao').value = r ? (r.descricao || '') : '';
   document.getElementById('rOrigemInfo').textContent = r && r.origem === 'Importado de PCN' ? '📥 Origem: importado de um PCN'
     : r && r.origem === 'Indicador de Segurança' ? '📊 Origem: gerado automaticamente por desvio de indicador de segurança'
+    : r && r.origem === 'Fornecedor' ? '🏢 Origem: gerado automaticamente por nota de conformidade do fornecedor abaixo do limiar'
     : '';
 
   document.getElementById('rProbabilidade').value = r ? (r.probabilidade || '') : '';
@@ -7135,5 +7139,717 @@ window.excluirPCN = async (id, area, processo) => {
     pcns(); // Recarregar lista
   } catch(e) {
     showToast('❌ ' + e.message, '#c62828');
+  }
+};
+
+// ============================================================
+// PÁGINA: FORNECEDORES — CRITÉRIOS DE AVALIAÇÃO
+//
+// O fornecedor NAO tem cadastro proprio: ele e uma linha de Dependencias com
+// categoria Fornecedores. Aqui se cadastra so a REGUA com que ele e avaliado.
+// ============================================================
+
+let criteriosFornecedorData = [];
+let configFornecedor = { limiarRisco: 70 };
+
+async function fornecedoresCriterios() {
+  // Permissao, nao perfil: o perfil de fornecedores tambem gerencia os criterios.
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Critérios de Avaliação de Fornecedores</h2><p class="page-sub">A régua com que todo fornecedor é avaliado — cada critério vale um peso</p></div>
+      <button class="btn btn-primary" onclick="abrirModalCriterio()" id="btnNovoCriterio" style="display:none;">+ Novo Critério</button>
+    </div>
+    <div id="fornLimiarBox" style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 16px;background:#fff;margin-bottom:18px;"></div>
+    <div class="loading" id="loadingCriterios">⏳ Carregando...</div>
+    <div id="listaCriterios"></div>
+    <div class="modal-overlay" id="modalCriterio"><div class="modal" onclick="event.stopPropagation()">
+      <h3 id="modalCriterioTitulo">Novo Critério</h3>
+      <input type="hidden" id="critId">
+      <label>Critério</label>
+      <input type="text" id="critNome" placeholder="Ex: Possui certificação ISO 27001 válida">
+      <label>Descrição / o que conta como atendido</label>
+      <input type="text" id="critDescricao" placeholder="Ex: Certificado vigente, emitido por organismo acreditado">
+      <label>Peso</label>
+      <input type="number" id="critPeso" min="1" max="10" step="1" value="1">
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:-6px;">Quanto este critério pesa na nota, de 1 a 10. Um critério de peso 3 vale o triplo de um de peso 1.</span>
+      <label class="check-label"><input type="checkbox" id="critAtivo" checked> Critério ativo</label>
+      <span style="font-size:0.75em;color:#888;display:block;">Desativar tira o critério das avaliações novas. As avaliações antigas continuam guardadas como foram feitas.</span>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalCriterio()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarCriterio()">Salvar</button>
+      </div>
+    </div></div>`;
+
+  document.getElementById('btnNovoCriterio').style.display = isAdmin ? 'inline-block' : 'none';
+
+  try {
+    const [crits, cfg] = await Promise.all([API.getCriteriosFornecedor(), API.getConfigFornecedor()]);
+    criteriosFornecedorData = crits;
+    configFornecedor = cfg;
+  } catch (e) {
+    // Nunca deixar a tela dizer "nenhum critério" quando o que houve foi falha
+    // de leitura: e indistinguivel de cadastro vazio, e alguem recadastra tudo.
+    console.error('Critérios de fornecedor: falha ao carregar', e);
+    document.getElementById('loadingCriterios').style.display = 'none';
+    document.getElementById('listaCriterios').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
+      Não foi possível carregar os critérios.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="fornecedoresCriterios()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+  document.getElementById('loadingCriterios').style.display = 'none';
+  renderLimiarFornecedor();
+  renderizarCriterios();
+}
+
+function renderLimiarFornecedor() {
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const box = document.getElementById('fornLimiarBox');
+  if (!box) return;
+  box.innerHTML = `
+    <div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;">
+      <div>
+        <label style="font-size:0.78em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">Nota que abre risco</label>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="color:#666;font-size:0.9em;">abaixo de</span>
+          <input type="number" id="fornLimiar" min="0" max="100" step="1" value="${configFornecedor.limiarRisco}" ${isAdmin ? '' : 'disabled'} style="width:80px;padding:7px 10px;border:1px solid #ddd;border-radius:7px;font-size:0.95em;font-weight:700;text-align:center;">
+          <span style="color:#666;font-size:0.9em;">de 100</span>
+          ${isAdmin ? '<button class="btn btn-ghost" onclick="salvarLimiarFornecedor()" style="padding:6px 14px;">Salvar</button>' : ''}
+        </div>
+      </div>
+      <div style="font-size:0.76em;color:#888;max-width:520px;line-height:1.5;">
+        Fornecedor que tirar menos que isso abre um risco automático, do mesmo jeito que um indicador fora da meta.
+        A nota do fornecedor é de conformidade: <strong>quanto maior, melhor</strong> — 100 é quem atende todos os critérios.
+      </div>
+    </div>`;
+}
+
+window.salvarLimiarFornecedor = async () => {
+  const valor = Number(document.getElementById('fornLimiar').value);
+  try {
+    await API.salvarConfigFornecedor({ limiarRisco: valor });
+    configFornecedor.limiarRisco = valor;
+    showToast('✅ Limiar salvo!', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+  }
+};
+
+function renderizarCriterios() {
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const lista = document.getElementById('listaCriterios');
+  if (!lista) return;
+
+  if (!criteriosFornecedorData.length) {
+    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
+      Nenhum critério cadastrado ainda.<br>
+      <span style="font-size:0.9em;">Sem critério não existe nota: o fornecedor aparece como "Não avaliado".</span></div>`;
+    return;
+  }
+
+  const ativos = criteriosFornecedorData.filter((c) => c.ativo);
+  const pesoTotal = ativos.reduce((t, c) => t + c.peso, 0);
+
+  lista.innerHTML = `
+    <div class="data-table">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:32%;">Critério</th>
+            <th style="width:38%;">Descrição</th>
+            <th style="width:8%;text-align:center;">Peso</th>
+            <th style="width:12%;text-align:center;">Vale na nota</th>
+            <th style="width:10%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${criteriosFornecedorData.map((c) => `
+            <tr style="${c.ativo ? '' : 'opacity:0.5;'}">
+              <td style="font-weight:600;">${esc(c.nome)}${c.ativo ? '' : ' <span style="font-size:0.78em;color:#888;font-weight:400;">(desativado)</span>'}</td>
+              <td style="color:#666;font-size:0.9em;">${esc(c.descricao)}</td>
+              <td style="text-align:center;font-weight:700;">${c.peso}</td>
+              <td style="text-align:center;color:#666;font-size:0.9em;">${c.ativo && pesoTotal ? Math.round((c.peso / pesoTotal) * 100) + '%' : '–'}</td>
+              <td style="text-align:center;">
+                ${isAdmin ? `
+                  <button class="btn-icon" onclick="abrirModalCriterio('${c.id}')" title="Editar">✏️</button>
+                  <button class="btn-icon" onclick="excluirCriterio('${c.id}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="font-size:0.76em;color:#999;margin-top:10px;line-height:1.5;">
+      ${ativos.length} critério${ativos.length === 1 ? '' : 's'} ativo${ativos.length === 1 ? '' : 's'}, peso total ${pesoTotal}.
+      A nota é o quanto o fornecedor aproveita desse peso: Sim vale o peso inteiro, Parcial vale a metade, Não vale zero.
+      "Não se aplica" tira o critério da conta, sem dar nem tirar ponto.
+      Mudar peso ou ativar critério sobe a versão da régua — as avaliações antigas guardam a versão que as pontuou e não mudam de nota sozinhas.
+    </div>`;
+}
+
+window.abrirModalCriterio = (id) => {
+  const c = id ? criteriosFornecedorData.find((x) => x.id === id) : null;
+  document.getElementById('modalCriterioTitulo').textContent = c ? 'Editar Critério' : 'Novo Critério';
+  document.getElementById('critId').value = c ? c.id : '';
+  document.getElementById('critNome').value = c ? c.nome : '';
+  document.getElementById('critDescricao').value = c ? c.descricao : '';
+  document.getElementById('critPeso').value = c ? c.peso : 1;
+  document.getElementById('critAtivo').checked = c ? c.ativo : true;
+  document.getElementById('modalCriterio').classList.add('open');
+};
+
+window.fecharModalCriterio = () => document.getElementById('modalCriterio').classList.remove('open');
+
+window.salvarCriterio = async () => {
+  const nome = document.getElementById('critNome').value.trim();
+  if (!nome) return showToast('Informe o critério.', '#e65100');
+  const peso = Number(document.getElementById('critPeso').value);
+  if (!Number.isFinite(peso) || peso < 1) return showToast('O peso tem que ser 1 ou mais.', '#e65100');
+
+  try {
+    await API.salvarCriterioFornecedor({
+      id: document.getElementById('critId').value || null,
+      nome,
+      descricao: document.getElementById('critDescricao').value.trim(),
+      peso,
+      ativo: document.getElementById('critAtivo').checked,
+    });
+    fecharModalCriterio();
+    criteriosFornecedorData = await API.getCriteriosFornecedor();
+    renderizarCriterios();
+    showToast('✅ Salvo!', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+  }
+};
+
+window.excluirCriterio = async (id) => {
+  const c = criteriosFornecedorData.find((x) => x.id === id);
+  if (!confirm(`Excluir o critério "${c ? c.nome : id}"?\n\nAs avaliações já feitas continuam guardadas, mas este critério sai das avaliações novas. Se a ideia é só pará-lo de usar, é melhor desativar em vez de excluir.`)) return;
+  try {
+    await API.excluirCriterioFornecedor(id);
+    criteriosFornecedorData = await API.getCriteriosFornecedor();
+    renderizarCriterios();
+    showToast('✅ Excluído.', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ============================================================
+// PÁGINA: FORNECEDORES — AVALIAÇÃO
+//
+// A lista de fornecedores vem de Dependencias (categoria Fornecedores), que e o
+// cadastro que ja existe e ao qual processo e risco ja apontam. Aqui se avalia,
+// nao se cadastra.
+// ============================================================
+
+let fornecedoresData = [];
+let avaliacoesFornecedorData = [];
+
+function _avaliacaoDoFornecedor(id) {
+  return avaliacoesFornecedorData.find((a) => a.fornecedorId === String(id)) || null;
+}
+
+/**
+ * Situacao do fornecedor em uma frase, com cor.
+ *
+ * Sao quatro estados diferentes e a tela nao pode confundi-los:
+ *   nunca avaliado / avaliado sem nota / avaliacao pela metade / vencida.
+ * "Nao avaliado" nao e nota zero, e "vencida" nao e "nao avaliada".
+ */
+function _situacaoFornecedor(av) {
+  if (!av) return { rotulo: 'Não avaliado', cor: '#999', fundo: '#f5f5f5', aviso: '' };
+  if (av.nota === null) {
+    return { rotulo: 'Sem nota', cor: '#999', fundo: '#f5f5f5', aviso: 'Nenhum critério respondido, ou todos marcados como "Não se aplica"' };
+  }
+  const faixa = FornecedorScore.faixaNota(av.nota);
+  const venceu = FornecedorScore.vencida(av.avaliadoEm);
+  if (venceu) return { rotulo: 'Vencida', cor: '#e65100', fundo: '#fff3e0', aviso: `A última avaliação é de ${_dataCurtaForn(av.avaliadoEm)} e passou de um ano` };
+  if (!av.completa) return { rotulo: faixa.rotulo, cor: '#e65100', fundo: '#fff3e0', aviso: 'Avaliação incompleta: há critérios sem resposta, então a nota está provisória' };
+  return { rotulo: faixa.rotulo, cor: faixa.cor, fundo: faixa.fundo, aviso: '' };
+}
+
+function _dataCurtaForn(iso) {
+  if (!iso) return '–';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '–' : d.toLocaleDateString('pt-BR');
+}
+
+async function fornecedores() {
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Avaliação de Fornecedores</h2><p class="page-sub">Nota de conformidade de cada fornecedor — quanto maior, melhor</p></div>
+      <a href="#fornecedores-criterios" class="btn btn-ghost" id="btnIrCriterios" style="display:none;">Critérios</a>
+    </div>
+    <div id="fornResumo" style="margin-bottom:18px;"></div>
+    <div style="margin-bottom:16px;">
+      <input type="text" id="buscaFornecedor" placeholder="🔍 Buscar fornecedor..." oninput="renderizarFornecedores()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:280px;">
+    </div>
+    <div class="loading" id="loadingFornecedores">⏳ Carregando...</div>
+    <div id="listaFornecedores"></div>
+    ${_htmlDrawerAvaliacaoFornecedor()}`;
+
+  document.getElementById('btnIrCriterios').style.display = isAdmin ? 'inline-block' : 'none';
+
+  try {
+    const [deps, crits, avals, cfg] = await Promise.all([
+      API.getDependencias(), API.getCriteriosFornecedor(), API.getAvaliacoesFornecedor(), API.getConfigFornecedor(),
+    ]);
+    fornecedoresData = deps.filter((d) => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
+    criteriosFornecedorData = crits;
+    avaliacoesFornecedorData = avals;
+    configFornecedor = cfg;
+  } catch (e) {
+    console.error('Fornecedores: falha ao carregar', e);
+    document.getElementById('loadingFornecedores').style.display = 'none';
+    document.getElementById('listaFornecedores').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
+      Não foi possível carregar os fornecedores.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="fornecedores()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+  document.getElementById('loadingFornecedores').style.display = 'none';
+  renderizarFornecedores();
+}
+
+function renderizarFornecedores() {
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const lista = document.getElementById('listaFornecedores');
+  const resumo = document.getElementById('fornResumo');
+  if (!lista) return;
+
+  const ativos = criteriosFornecedorData.filter(FornecedorScore.criterioAtivo);
+
+  if (resumo) {
+    const comNota = fornecedoresData.filter((f) => { const a = _avaliacaoDoFornecedor(f.id); return a && a.nota !== null; });
+    const semAvaliacao = fornecedoresData.length - comNota.length;
+    const vencidas = comNota.filter((f) => FornecedorScore.vencida(_avaliacaoDoFornecedor(f.id).avaliadoEm)).length;
+    const abaixo = comNota.filter((f) => FornecedorScore.abreRisco(_avaliacaoDoFornecedor(f.id).nota, configFornecedor.limiarRisco)).length;
+
+    resumo.innerHTML = !ativos.length
+      ? `<div style="border:1px solid #ffe0b2;background:#fff8e1;border-radius:10px;padding:14px 16px;color:#e65100;font-size:0.9em;">
+           Nenhum critério ativo cadastrado. Sem critério não existe nota — todo fornecedor vai aparecer como "Não avaliado".
+           ${isAdmin ? ' <a href="#fornecedores-criterios" style="color:#e65100;font-weight:700;">Cadastrar critérios</a>' : ''}
+         </div>`
+      : `<div style="display:flex;gap:12px;flex-wrap:wrap;">
+           ${[
+             { n: fornecedoresData.length, t: 'fornecedores no catálogo', c: '#1a237e' },
+             { n: semAvaliacao, t: 'sem avaliação', c: semAvaliacao ? '#e65100' : '#999' },
+             { n: vencidas, t: 'com avaliação vencida', c: vencidas ? '#e65100' : '#999' },
+             { n: abaixo, t: `abaixo de ${configFornecedor.limiarRisco}`, c: abaixo ? '#c62828' : '#2e7d32' },
+           ].map((x) => `<div style="border:1px solid #e0e0e0;border-radius:10px;padding:12px 16px;background:#fff;min-width:130px;">
+                <div style="font-size:1.7em;font-weight:800;color:${x.c};line-height:1;">${x.n}</div>
+                <div style="font-size:0.74em;color:#888;margin-top:4px;">${esc(x.t)}</div>
+              </div>`).join('')}
+         </div>`;
+  }
+
+  const busca = (document.getElementById('buscaFornecedor')?.value || '').toLowerCase();
+  const data = fornecedoresData.filter((f) => !busca
+    || (f.nome || '').toLowerCase().includes(busca)
+    || (f.empresa || '').toLowerCase().includes(busca));
+
+  if (!fornecedoresData.length) {
+    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
+      Nenhum fornecedor no catálogo de Dependências.<br>
+      <span style="font-size:0.9em;">Os fornecedores são cadastrados em Cadastros → Dependências, com a categoria Fornecedores.</span></div>`;
+    return;
+  }
+
+  lista.innerHTML = `
+    <div class="data-table">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:26%;">Fornecedor</th>
+            <th style="width:20%;">Empresa</th>
+            <th style="width:8%;text-align:center;">Nota</th>
+            <th style="width:16%;">Situação</th>
+            <th style="width:14%;">Última avaliação</th>
+            <th style="width:16%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.length ? data.map((f) => {
+            const av = _avaliacaoDoFornecedor(f.id);
+            const sit = _situacaoFornecedor(av);
+            return `
+            <tr>
+              <td style="font-weight:600;">${esc(f.nome)}</td>
+              <td style="color:#666;">${esc(f.empresa || '–')}</td>
+              <td style="text-align:center;">
+                ${av && av.nota !== null
+                  ? `<span title="${esc(FornecedorScore.faixaNota(av.nota).rotulo)} — ${av.nota} de 100" style="display:inline-block;min-width:30px;padding:3px 8px;border-radius:10px;font-size:0.84em;font-weight:700;background:${FornecedorScore.faixaNota(av.nota).fundo};color:${FornecedorScore.faixaNota(av.nota).cor};">${av.nota}</span>`
+                  : '<span style="color:#999;font-weight:600;" title="Sem nota — não é o mesmo que nota zero">–</span>'}
+              </td>
+              <td>
+                <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:${sit.fundo};color:${sit.cor};">${esc(sit.rotulo)}</span>
+                ${sit.aviso ? `<div style="font-size:0.72em;color:#e65100;margin-top:3px;">${esc(sit.aviso)}</div>` : ''}
+              </td>
+              <td style="color:#666;font-size:0.9em;">
+                ${av ? `${_dataCurtaForn(av.avaliadoEm)}<div style="font-size:0.8em;color:#aaa;">${esc(av.avaliadoPor || '')}</div>` : '–'}
+              </td>
+              <td style="text-align:center;">
+                ${isAdmin
+                  ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">${av ? 'Reavaliar' : 'Avaliar'}</button>`
+                  : (av ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">Ver</button>` : '–')}
+              </td>
+            </tr>`;
+          }).join('') : '<tr><td colspan="6" style="padding:20px;text-align:center;color:#888;">Nenhum fornecedor encontrado com essa busca.</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+}
+
+// ---- Drawer de avaliação do fornecedor ----
+
+function _htmlDrawerAvaliacaoFornecedor() {
+  return `
+    <div class="drawer-overlay" id="drawerOverlayFornecedor" onclick="fecharAvaliacaoFornecedor()"></div>
+    <div class="drawer" id="drawerFornecedor">
+      <div class="drawer-header">
+        <h3 id="fornDrawerTitulo">Avaliar Fornecedor</h3>
+        <button onclick="fecharAvaliacaoFornecedor()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <input type="hidden" id="fornAvalId">
+        <div id="fornNotaPreview" style="position:sticky;top:0;background:#fff;padding:12px 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
+        <div id="fornCriteriosLista"></div>
+        <div style="margin-top:20px;">
+          <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">Observação geral (opcional)</label>
+          <textarea id="fornObservacao" rows="3" placeholder="Contexto que ajuda quem for ler esta avaliação depois" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;font-family:inherit;"></textarea>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharAvaliacaoFornecedor()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarAvaliacaoFornecedor()" id="btnSalvarAvaliacaoForn">Salvar avaliação</button>
+      </div>
+    </div>`;
+}
+
+window.abrirAvaliacaoFornecedor = (fornecedorId) => {
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const f = fornecedoresData.find((x) => String(x.id) === String(fornecedorId));
+  if (!f) return showToast('Fornecedor não encontrado.', '#c62828');
+
+  const av = _avaliacaoDoFornecedor(f.id);
+  const ativos = criteriosFornecedorData.filter(FornecedorScore.criterioAtivo);
+
+  document.getElementById('fornAvalId').value = f.id;
+  document.getElementById('fornDrawerTitulo').innerHTML = `${isAdmin ? (av ? 'Reavaliar' : 'Avaliar') : 'Avaliação de'} fornecedor
+    <div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(f.nome)}${f.empresa ? ' — ' + esc(f.empresa) : ''}</div>`;
+  document.getElementById('fornObservacao').value = av ? (av.observacao || '') : '';
+
+  const respostasAnteriores = av ? (av.respostas || {}) : {};
+
+  document.getElementById('fornCriteriosLista').innerHTML = ativos.length
+    ? ativos.map((c) => {
+        const r = respostasAnteriores[c.id] || {};
+        const opcoes = FornecedorScore.RESPOSTAS.map((op) => `
+          <label style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.88em;cursor:pointer;">
+            <input type="radio" name="fornResp_${esc(c.id)}" value="${esc(op)}" ${String(r.resposta || '') === op ? 'checked' : ''} onchange="atualizarPreviewNotaFornecedor()">
+            ${esc(op)}
+          </label>`).join('');
+        return `
+          <div data-criterio="${esc(c.id)}" style="border:1px solid #eee;border-radius:9px;padding:13px 15px;margin-bottom:12px;">
+            <div style="font-weight:600;color:#333;">${esc(c.nome)}
+              <span style="font-size:0.75em;color:#888;font-weight:400;margin-left:6px;">peso ${c.peso}</span>
+            </div>
+            ${c.descricao ? `<div style="font-size:0.8em;color:#888;margin-top:3px;">${esc(c.descricao)}</div>` : ''}
+            <div style="margin-top:9px;">${opcoes}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+              <input type="url" class="forn-link" value="${esc(r.link || '')}" placeholder="Link do documento (SharePoint, Drive, portal)" style="padding:7px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:0.85em;">
+              <input type="text" class="forn-obs" value="${esc(r.observacao || '')}" placeholder="Observação deste critério" style="padding:7px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:0.85em;">
+            </div>
+          </div>`;
+      }).join('')
+    : `<div style="padding:24px;text-align:center;color:#e65100;background:#fff8e1;border-radius:9px;">
+         Nenhum critério ativo cadastrado. Cadastre os critérios antes de avaliar.
+       </div>`;
+
+  document.querySelectorAll('#drawerFornecedor input, #drawerFornecedor textarea').forEach((el) => { el.disabled = !isAdmin; });
+  document.getElementById('btnSalvarAvaliacaoForn').style.display = isAdmin && ativos.length ? 'inline-block' : 'none';
+
+  atualizarPreviewNotaFornecedor();
+  document.getElementById('drawerFornecedor').classList.add('open');
+  document.getElementById('drawerOverlayFornecedor').classList.add('open');
+};
+
+window.fecharAvaliacaoFornecedor = () => {
+  document.getElementById('drawerFornecedor').classList.remove('open');
+  document.getElementById('drawerOverlayFornecedor').classList.remove('open');
+};
+
+/** Lê o formulário e devolve o mapa criterioId -> { resposta, link, observacao }. */
+function _coletarRespostasFornecedor() {
+  const mapa = {};
+  document.querySelectorAll('#fornCriteriosLista [data-criterio]').forEach((bloco) => {
+    const id = bloco.dataset.criterio;
+    const marcado = bloco.querySelector(`input[name="fornResp_${id}"]:checked`);
+    mapa[id] = {
+      resposta: marcado ? marcado.value : '',
+      link: (bloco.querySelector('.forn-link')?.value || '').trim(),
+      observacao: (bloco.querySelector('.forn-obs')?.value || '').trim(),
+    };
+  });
+  return mapa;
+}
+
+/**
+ * Nota ao vivo, enquanto a pessoa responde.
+ *
+ * E so previa: o que vale e o recalculo na gravacao, feito sobre os criterios
+ * do banco — mesma razao pela qual o score do risco e recalculado no servidor.
+ */
+window.atualizarPreviewNotaFornecedor = () => {
+  const box = document.getElementById('fornNotaPreview');
+  if (!box) return;
+  const calc = FornecedorScore.calcular(criteriosFornecedorData, _coletarRespostasFornecedor());
+  const limiar = configFornecedor.limiarRisco;
+  const abre = FornecedorScore.abreRisco(calc.nota, limiar);
+
+  box.innerHTML = `
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:baseline;gap:6px;">
+        <span style="font-size:2em;font-weight:800;line-height:1;color:${calc.faixa.cor};">${calc.nota === null ? '–' : calc.nota}</span>
+        ${calc.nota === null ? '' : '<span style="font-size:0.8em;color:#aaa;">de 100</span>'}
+      </div>
+      <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:700;background:${calc.faixa.fundo};color:${calc.faixa.cor};">${esc(calc.faixa.rotulo)}</span>
+      <span style="font-size:0.78em;color:#777;">
+        ${calc.respondidos} de ${calc.criteriosAtivos} critério${calc.criteriosAtivos === 1 ? '' : 's'} respondido${calc.respondidos === 1 ? '' : 's'}${calc.naoSeAplica ? ` · ${calc.naoSeAplica} fora da conta` : ''}
+      </span>
+    </div>
+    ${calc.pendentes.length ? `<div style="font-size:0.75em;color:#e65100;margin-top:6px;">⚠ ${calc.pendentes.length} critério${calc.pendentes.length > 1 ? 's' : ''} sem resposta — a nota fica provisória até você responder tudo</div>` : ''}
+    ${abre ? `<div style="font-size:0.75em;color:#c62828;margin-top:6px;">Abaixo de ${limiar}: salvar assim abre um risco automático para este fornecedor</div>` : ''}`;
+};
+
+window.salvarAvaliacaoFornecedor = async () => {
+  const fornecedorId = document.getElementById('fornAvalId').value;
+  const f = fornecedoresData.find((x) => String(x.id) === String(fornecedorId));
+  if (!f) return showToast('Fornecedor não encontrado.', '#c62828');
+
+  const respostas = _coletarRespostasFornecedor();
+  const calc = FornecedorScore.calcular(criteriosFornecedorData, respostas);
+
+  if (!calc.completa && !confirm(`Faltam ${calc.pendentes.length} critério(s) sem resposta.\n\nA avaliação vai ser gravada como incompleta e a nota fica provisória. Salvar assim mesmo?`)) return;
+
+  const btn = document.getElementById('btnSalvarAvaliacaoForn');
+  btn.disabled = true;
+  try {
+    const r = await API.salvarAvaliacaoFornecedor({
+      fornecedorId: f.id,
+      fornecedorNome: f.nome,
+      respostas,
+      observacao: document.getElementById('fornObservacao').value.trim(),
+    });
+
+    avaliacoesFornecedorData = await API.getAvaliacoesFornecedor();
+    fecharAvaliacaoFornecedor();
+    renderizarFornecedores();
+
+    const abre = FornecedorScore.abreRisco(r.nota, configFornecedor.limiarRisco);
+    showToast(`✅ Avaliação salva!${abre ? ' Um risco será aberto para este fornecedor em alguns segundos.' : ''}`, '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+  } finally {
+    btn.disabled = false;
+  }
+};
+
+/*
+ * O risco automatico do fornecedor NAO e mais criado aqui.
+ *
+ * Ele e decidido e gravado no servidor, por um gatilho na propria gravacao da
+ * avaliacao (functions/fornecedorRisco.js). Duas razoes: quem avalia fornecedor
+ * deixou de precisar de acesso ao registro de riscos da empresa, e nao existe
+ * mais caminho que grave a avaliacao e esqueca o risco.
+ *
+ * Como o servidor decide depois, a tela nao afirma o que aconteceu com o risco
+ * — ela diz o que VAI acontecer, com base na nota, e avisa que pode levar alguns
+ * segundos. Afirmar "risco gerado" antes de o servidor responder seria mentir
+ * quando o gatilho falhasse.
+ */
+
+// ============================================================
+// PÁGINA: PERFIS DE ACESSO
+//
+// Antes desta tela, cada pessoa nova era um documento digitado a mao no console
+// do Firebase, e ninguem conseguia ver quem tinha qual acesso sem entrar la.
+// Numa auditoria, "quem pode alterar o registro de riscos?" nao tinha resposta
+// que se pudesse mostrar.
+// ============================================================
+
+let perfisData = [];
+let perfisAreasCache = [];
+
+async function perfis() {
+  const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIL);
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Perfis de Acesso</h2><p class="page-sub">Quem tem qual acesso ao sistema</p></div>
+      <button class="btn btn-primary" onclick="abrirModalPerfil()" id="btnNovoPerfil" style="display:none;">+ Dar acesso a alguém</button>
+    </div>
+    <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 16px;background:#fff;margin-bottom:18px;">
+      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">O que cada perfil pode</div>
+      ${Perfis.CATALOGO.map((p) => `
+        <div style="display:flex;gap:10px;margin-bottom:7px;font-size:0.86em;">
+          <span style="font-weight:700;color:#1a237e;min-width:130px;">${esc(p.rotulo)}</span>
+          <span style="color:#666;">${esc(p.descricao)}</span>
+        </div>`).join('')}
+      <div style="font-size:0.75em;color:#e65100;margin-top:10px;line-height:1.5;">
+        Quem entra no sistema sem estar nesta lista recebe o menor acesso (Gestor de área) e, sem área definida, não altera nada.
+        Somente administrador mexe nesta tela — se outro perfil pudesse, ele se promoveria a administrador.
+      </div>
+    </div>
+    <div class="loading" id="loadingPerfis">⏳ Carregando...</div>
+    <div id="listaPerfis"></div>
+    <div class="modal-overlay" id="modalPerfil"><div class="modal" onclick="event.stopPropagation()">
+      <h3 id="modalPerfilTitulo">Dar acesso a alguém</h3>
+      <input type="hidden" id="perfEmailOriginal">
+      <label>E-mail corporativo</label>
+      <input type="email" id="perfEmail" placeholder="nome@fortestecnologia.com.br">
+      <label>Perfil</label>
+      <select id="perfPerfil" onchange="ajustarCampoAreaPerfil()">
+        ${Perfis.CATALOGO.map((p) => `<option value="${esc(p.valor)}">${esc(p.rotulo)}</option>`).join('')}
+      </select>
+      <span id="perfDescricao" style="font-size:0.75em;color:#888;display:block;margin-top:-6px;"></span>
+      <div id="perfAreaBox">
+        <label>Área</label>
+        <select id="perfArea"></select>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalPerfil()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarPerfilAcesso()">Salvar</button>
+      </div>
+    </div></div>`;
+
+  document.getElementById('btnNovoPerfil').style.display = podeGerenciar ? 'inline-block' : 'none';
+
+  try {
+    const [lista, areas] = await Promise.all([API.getPerfis(), API.getAreas()]);
+    perfisData = lista;
+    perfisAreasCache = areas;
+  } catch (e) {
+    console.error('Perfis: falha ao carregar', e);
+    document.getElementById('loadingPerfis').style.display = 'none';
+    document.getElementById('listaPerfis').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
+      Não foi possível carregar os perfis.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="perfis()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+  document.getElementById('loadingPerfis').style.display = 'none';
+  renderizarPerfis();
+}
+
+function renderizarPerfis() {
+  const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIL);
+  const lista = document.getElementById('listaPerfis');
+  if (!lista) return;
+
+  const admins = perfisData.filter((p) => p.perfil === Perfis.PERFIL.ADMIN);
+  const meuEmail = String(window.USER_EMAIL || '').toLowerCase();
+
+  lista.innerHTML = `
+    ${admins.length === 1 ? `<div style="border:1px solid #ffe0b2;background:#fff8e1;border-radius:9px;padding:12px 14px;color:#e65100;font-size:0.86em;margin-bottom:14px;">
+      Existe um único administrador (${esc(admins[0].email)}). Se esse acesso for perdido, ninguém consegue dar acesso a mais ninguém sem entrar no console do Firebase.
+    </div>` : ''}
+    <div class="data-table">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:34%;">E-mail</th>
+            <th style="width:20%;">Perfil</th>
+            <th style="width:20%;">Área</th>
+            <th style="width:16%;">Alterado em</th>
+            <th style="width:10%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${perfisData.length ? perfisData.map((p) => {
+            const euMesmo = p.email === meuEmail;
+            const desconhecido = p.perfilGravado && !Perfis.conhecido(p.perfilGravado);
+            return `
+            <tr>
+              <td style="font-weight:600;">${esc(p.email)}${euMesmo ? ' <span style="font-size:0.75em;color:#888;font-weight:400;">(você)</span>' : ''}</td>
+              <td>
+                <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:${p.perfil === Perfis.PERFIL.ADMIN ? '#e8eaf6' : '#f5f5f5'};color:${p.perfil === Perfis.PERFIL.ADMIN ? '#1a237e' : '#555'};">${esc(Perfis.rotulo(p.perfil))}</span>
+                ${desconhecido ? `<div style="font-size:0.72em;color:#e65100;margin-top:3px;">Gravado como "${esc(p.perfilGravado)}", que não existe — está valendo o menor acesso</div>` : ''}
+              </td>
+              <td style="color:#666;">${esc(p.area || (Perfis.exigeArea(p.perfil) ? '— sem área, não altera nada' : '–'))}</td>
+              <td style="color:#666;font-size:0.88em;">${p.atualizadoEm ? new Date(p.atualizadoEm).toLocaleDateString('pt-BR') : '–'}</td>
+              <td style="text-align:center;">
+                ${podeGerenciar ? `
+                  <button class="btn-icon" onclick="abrirModalPerfil('${esc(p.email)}')" title="Alterar">✏️</button>
+                  ${euMesmo ? '' : `<button class="btn-icon" onclick="excluirPerfilAcesso('${esc(p.email)}')" title="Remover acesso" style="color:#c62828;">🗑️</button>`}` : '–'}
+              </td>
+            </tr>`;
+          }).join('') : '<tr><td colspan="5" style="padding:20px;text-align:center;color:#888;">Ninguém cadastrado. Todo mundo que entrar cai no menor acesso.</td></tr>'}
+        </tbody>
+      </table>
+    </div>
+    <div style="font-size:0.75em;color:#999;margin-top:10px;line-height:1.5;">
+      Remover alguém desta lista não bloqueia o acesso ao sistema: a pessoa volta ao menor acesso (Gestor de área) e,
+      sem área, não consegue alterar nada. Para impedir a entrada, o acesso tem que ser retirado na conta Google dela.
+    </div>`;
+}
+
+window.ajustarCampoAreaPerfil = () => {
+  const perfil = document.getElementById('perfPerfil').value;
+  const box = document.getElementById('perfAreaBox');
+  const info = document.getElementById('perfDescricao');
+  const cat = Perfis.CATALOGO.find((p) => p.valor === perfil);
+  if (info) info.textContent = cat ? cat.descricao : '';
+  if (box) box.style.display = Perfis.exigeArea(perfil) ? 'block' : 'none';
+};
+
+window.abrirModalPerfil = (email) => {
+  const p = email ? perfisData.find((x) => x.email === email) : null;
+  document.getElementById('modalPerfilTitulo').textContent = p ? 'Alterar acesso' : 'Dar acesso a alguém';
+  document.getElementById('perfEmailOriginal').value = p ? p.email : '';
+  document.getElementById('perfEmail').value = p ? p.email : '';
+  document.getElementById('perfEmail').disabled = !!p;
+  document.getElementById('perfPerfil').value = p ? p.perfil : Perfis.PERFIL.GESTOR;
+  document.getElementById('perfArea').innerHTML = '<option value="">Selecione...</option>' +
+    perfisAreasCache.map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
+  document.getElementById('perfArea').value = p ? (p.area || '') : '';
+  ajustarCampoAreaPerfil();
+  document.getElementById('modalPerfil').classList.add('open');
+};
+
+window.fecharModalPerfil = () => document.getElementById('modalPerfil').classList.remove('open');
+
+window.salvarPerfilAcesso = async () => {
+  const email = document.getElementById('perfEmail').value.trim().toLowerCase();
+  const perfil = document.getElementById('perfPerfil').value;
+  const area = document.getElementById('perfArea').value;
+  const meuEmail = String(window.USER_EMAIL || '').toLowerCase();
+
+  // Tirar o proprio acesso de administrador deixa o sistema sem quem de acesso.
+  if (email === meuEmail && !Perfis.ehAdmin(perfil)
+    && !confirm('Você está retirando o seu próprio acesso de administrador.\n\nSe não houver outro administrador, ninguém mais consegue dar acesso a ninguém sem entrar no console do Firebase. Continuar?')) return;
+
+  try {
+    await API.salvarPerfilAcesso({ email, perfil, area });
+    fecharModalPerfil();
+    perfisData = await API.getPerfis();
+    renderizarPerfis();
+    showToast('✅ Acesso salvo!', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+  }
+};
+
+window.excluirPerfilAcesso = async (email) => {
+  if (!confirm(`Remover o acesso de ${email}?\n\nA pessoa volta ao menor acesso (Gestor de área) e, sem área, não altera nada. Isso não impede a entrada no sistema — para isso, o acesso tem que ser retirado na conta Google dela.`)) return;
+  try {
+    await API.excluirPerfilAcesso(email);
+    perfisData = await API.getPerfis();
+    renderizarPerfis();
+    showToast('✅ Acesso removido.', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível remover.'), '#c62828');
   }
 };

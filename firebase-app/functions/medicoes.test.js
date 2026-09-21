@@ -194,3 +194,82 @@ test('todas as combinações da escala dão score entre 1 e 12', () => {
     }
   }
 });
+
+// ============================================================
+// FORNECEDOR -> MEDICAO
+// ============================================================
+
+const medicoes = require('./medicoes');
+
+const avaliacao = (extra) => Object.assign({
+  fornecedorId: 'f1',
+  fornecedorNome: 'Datacenter Alfa',
+  nota: 82,
+  completa: true,
+  criteriosVersao: 3,
+  avaliadoEm: '2026-09-21T10:00:00.000Z',
+  avaliadoPor: 'hercules@fortestecnologia.com.br',
+}, extra);
+
+test('avaliacao de fornecedor vira medicao de conformidade', () => {
+  const m = medicoes.medicaoDeAvaliacaoFornecedor('av1', avaliacao());
+  assert.strictEqual(m.sujeitoTipo, 'fornecedor');
+  assert.strictEqual(m.sujeitoId, 'f1');
+  assert.strictEqual(m.sujeitoRotulo, 'Datacenter Alfa');
+  assert.strictEqual(m.fonte, medicoes.FONTE.FORNECEDOR);
+  assert.strictEqual(m.escala, medicoes.ESCALA.CONFORMIDADE);
+  assert.strictEqual(m.valor, 82);
+  assert.strictEqual(m.reguaVersao, 3);
+  assert.strictEqual(m.origemColecao, 'avaliacoes_fornecedor');
+  assert.strictEqual(m.origemId, 'av1');
+});
+
+test('a medicao do fornecedor carrega o sentido: maior e MELHOR', () => {
+  const m = medicoes.medicaoDeAvaliacaoFornecedor('av1', avaliacao());
+  assert.strictEqual(m.sentido, medicoes.SENTIDO.MAIOR_MELHOR);
+  assert.notStrictEqual(m.sentido, medicoes.SENTIDO.MAIOR_PIOR);
+});
+
+test('a medicao do fornecedor NAO grava a faixa — ela vive em um lugar so', () => {
+  const m = medicoes.medicaoDeAvaliacaoFornecedor('av1', avaliacao({ nota: 95 }));
+  assert.strictEqual(m.faixa, undefined);
+  assert.strictEqual(m.classificacao, 'completa', 'classificacao diz se a avaliacao esta completa, nao a faixa');
+});
+
+test('avaliacao incompleta vira medicao, mas marcada como incompleta', () => {
+  const m = medicoes.medicaoDeAvaliacaoFornecedor('av1', avaliacao({ completa: false }));
+  assert.strictEqual(m.classificacao, 'incompleta');
+  assert.strictEqual(m.valor, 82);
+});
+
+test('nota zero vira medicao — zero e "nao atende nada", que e uma medicao real', () => {
+  const m = medicoes.medicaoDeAvaliacaoFornecedor('av1', avaliacao({ nota: 0 }));
+  assert.ok(m, 'nota 0 tem que virar medicao');
+  assert.strictEqual(m.valor, 0);
+});
+
+test('avaliacao SEM nota nao vira medicao — ausencia nao e zero na curva', () => {
+  assert.strictEqual(medicoes.medicaoDeAvaliacaoFornecedor('av1', avaliacao({ nota: null })), null);
+  assert.strictEqual(medicoes.medicaoDeAvaliacaoFornecedor('av1', avaliacao({ nota: '' })), null);
+  assert.strictEqual(medicoes.medicaoDeAvaliacaoFornecedor('av1', avaliacao({ nota: undefined })), null);
+});
+
+test('avaliacao sem fornecedor ou com data invalida nao vira medicao', () => {
+  assert.strictEqual(medicoes.medicaoDeAvaliacaoFornecedor('av1', avaliacao({ fornecedorId: '' })), null);
+  assert.strictEqual(medicoes.medicaoDeAvaliacaoFornecedor('av1', avaliacao({ avaliadoEm: 'ontem' })), null);
+  assert.strictEqual(medicoes.medicaoDeAvaliacaoFornecedor('av1', null), null);
+});
+
+test('a avaliacao de fornecedor vale um ano', () => {
+  const m = medicoes.medicaoDeAvaliacaoFornecedor('av1', avaliacao());
+  assert.strictEqual(medicoes.VALIDADE_DIAS[medicoes.FONTE.FORNECEDOR], 365);
+  assert.strictEqual(m.validoAte.slice(0, 10), '2027-09-21');
+});
+
+test('cada avaliacao e um ponto proprio: o id da medicao segue o id da avaliacao', () => {
+  assert.strictEqual(medicoes.idDaMedicao(medicoes.FONTE.FORNECEDOR, 'av1'), 'fornecedor__av1');
+  assert.notStrictEqual(
+    medicoes.idDaMedicao(medicoes.FONTE.FORNECEDOR, 'av1'),
+    medicoes.idDaMedicao(medicoes.FONTE.FORNECEDOR, 'av2'),
+  );
+});

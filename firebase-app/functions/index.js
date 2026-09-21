@@ -17,7 +17,8 @@ const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/
 const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { READ_ACTIONS, WRITE_ACTIONS, TokenError } = require('./tokenLogic');
-const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia, medicaoDeLancamento, medicaoDeRisco, scoreDeRisco } = require('./medicoes');
+const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia, medicaoDeLancamento, medicaoDeRisco, medicaoDeAvaliacaoFornecedor, scoreDeRisco } = require('./medicoes');
+const fornecedorRisco = require('./fornecedorRisco');
 const {
   READ_ACTIONS: APP_READ,
   WRITE_ACTIONS: APP_WRITE,
@@ -267,6 +268,93 @@ exports.medicaoDeIndicador = onDocumentCreated(
         .set(medicao, { merge: true });
     } catch (err) {
       logger.error('medicaoDeIndicador: falha ao gravar medicao', { id: event.params.id, erro: err.message });
+    }
+  }
+);
+
+// Avaliacao de fornecedor -> medicao.
+//
+// A colecao e append-only (cada avaliacao e um documento novo), entao o gatilho
+// e so na criacao e o id da medicao e o id da avaliacao: um ponto por avaliacao,
+// nenhum sobrescrito. E o servidor que grava, nao o navegador — pela mesma razao
+// dos outros: um caminho de escrita esquecido nao pode deixar de medir.
+exports.medicaoDeFornecedor = onDocumentCreated(
+  { region: 'us-central1', document: 'avaliacoes_fornecedor/{id}' },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const medicao = medicaoDeAvaliacaoFornecedor(event.params.id, snap.data());
+    if (!medicao) {
+      // Avaliacao sem nota e caso legitimo (tudo "Nao se aplica"): nao e erro,
+      // so nao vira ponto na curva.
+      logger.info('medicaoDeFornecedor: avaliacao sem nota, nada a medir', { id: event.params.id });
+      return;
+    }
+
+    try {
+      await db.collection(COLECAO_MEDICOES)
+        .doc(idDaMedicao(FONTE.FORNECEDOR, event.params.id))
+        .set(medicao, { merge: true });
+    } catch (err) {
+      logger.error('medicaoDeFornecedor: falha ao gravar medicao', { id: event.params.id, erro: err.message });
+    }
+  }
+);
+
+// Avaliacao de fornecedor -> risco automatico.
+//
+// Roda NO SERVIDOR, e nao na tela, por dois motivos (ver fornecedorRisco.js):
+// quem avalia fornecedor nao precisa de acesso ao registro de riscos da empresa,
+// e nao existe caminho que grave a avaliacao e esqueca o risco.
+exports.riscoDeFornecedor = onDocumentCreated(
+  { region: 'us-central1', document: 'avaliacoes_fornecedor/{id}' },
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+    const avaliacao = snap.data();
+    const fornecedorId = String((avaliacao && avaliacao.fornecedorId) || '');
+    if (!fornecedorId) return;
+
+    try {
+      const [cfgSnap, fornSnap, riscosSnap] = await Promise.all([
+        db.collection('config_regua').doc('fornecedor').get(),
+        db.collection('dependencias').doc(fornecedorId).get(),
+        db.collection('riscos').where('fornecedor', '==', fornecedorId).get(),
+      ]);
+
+      const limiar = cfgSnap.exists ? (cfgSnap.data() || {}).limiarRisco : undefined;
+      const fornecedor = fornSnap.exists ? Object.assign({ id: fornSnap.id }, fornSnap.data()) : null;
+      const riscos = riscosSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+
+      const decisao = fornecedorRisco.decidir({ avaliacao, fornecedor, riscos, limiar });
+
+      if (decisao.acao === 'abrir') {
+        const agora = new Date().toISOString();
+        await db.collection('riscos').add(Object.assign({}, decisao.risco, {
+          criadoEm: agora,
+          atualizadoEm: agora,
+          criadoPor: String(avaliacao.avaliadoPor || ''),
+        }));
+        logger.info('riscoDeFornecedor: risco aberto', { fornecedorId, nota: avaliacao.nota });
+        return;
+      }
+
+      if (decisao.acao === 'encerrar') {
+        const lote = db.batch();
+        decisao.ids.forEach((id) => {
+          lote.set(db.collection('riscos').doc(id),
+            Object.assign({}, decisao.patch, { atualizadoEm: new Date().toISOString() }),
+            { merge: true });
+        });
+        await lote.commit();
+        logger.info('riscoDeFornecedor: risco(s) encerrado(s)', { fornecedorId, ids: decisao.ids });
+        return;
+      }
+
+      logger.info('riscoDeFornecedor: nada a fazer', { fornecedorId, motivo: decisao.motivo });
+    } catch (err) {
+      logger.error('riscoDeFornecedor: falha ao tratar o risco automatico', { fornecedorId, erro: err.message });
     }
   }
 );
