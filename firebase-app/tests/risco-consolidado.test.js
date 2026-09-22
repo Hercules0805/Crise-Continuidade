@@ -261,7 +261,7 @@ const riscoForn = (extra) => Object.assign({
 }, extra);
 
 test('risco de fornecedor com criticidade Alta pesa 3, o mesmo peso do Tier 1', () => {
-  const criticidade = { f1: 7 }; // 7 = faixa Alta
+  const criticidade = { f1: 15 }; // 15 = faixa Alta (escala 0-18, perguntas operacionais)
   assert.strictEqual(RC.pesoDoRisco(riscoForn(), {}, criticidade), 3);
 });
 
@@ -288,7 +288,7 @@ test('a carga da empresa reflete a criticidade do fornecedor: Alta pesa mais que
   const riscos = [
     riscoForn({ fornecedor: 'critico', probabilidade: 'Alta', impacto: 'Crítico' }),
   ];
-  const cargaAlta = RC.consolidar(riscos, [], { critico: 8 }).empresa.carga;
+  const cargaAlta = RC.consolidar(riscos, [], { critico: 15 }).empresa.carga;
   const cargaBaixa = RC.consolidar(riscos, [], { critico: 0 }).empresa.carga;
   assert.ok(cargaAlta > cargaBaixa, `criticidade Alta deveria pesar mais: ${cargaAlta} <= ${cargaBaixa}`);
   assert.strictEqual(cargaAlta, 12 * 3); // score 12, peso 3 (Alta)
