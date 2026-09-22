@@ -260,6 +260,40 @@ describe('Security Rules — livro de medições', () => {
     });
     await assertFails(db(ADMIN).doc('medicoes/m-apagar').delete());
   });
+});
+
+// --- Retrato diario do risco consolidado (Fase 5 -- O monitor) ---
+// So admin le, por enquanto (um documento por dia carrega TODAS as areas
+// juntas -- nao ha como filtrar por area dentro de um documento so). Escrita
+// so pelo servidor, mesma razao do livro de medicoes.
+describe('Security Rules — retrato diário do risco', () => {
+  test('admin lê o retrato do dia', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('historico_risco/2026-09-22').set({ dia: '2026-09-22', empresa: { carga: 42 }, areas: [] });
+    });
+    await assertSucceeds(db(ADMIN).doc('historico_risco/2026-09-22').get());
+  });
+
+  test('gestor NÃO lê o retrato do dia — o documento mistura todas as áreas', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('historico_risco/2026-09-23').set({ dia: '2026-09-23', empresa: { carga: 10 }, areas: [] });
+    });
+    await assertFails(db(GESTOR).doc('historico_risco/2026-09-23').get());
+  });
+
+  test('NEM admin escreve o retrato — só o servidor grava', async () => {
+    await assertFails(db(ADMIN).doc('historico_risco/2026-09-24').set({ dia: '2026-09-24', empresa: { carga: 1 }, areas: [] }));
+  });
+
+  test('ninguém apaga um retrato já gravado', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('historico_risco/2026-09-25').set({ dia: '2026-09-25', empresa: { carga: 5 }, areas: [] });
+    });
+    await assertFails(db(ADMIN).doc('historico_risco/2026-09-25').delete());
+  });
+});
+
+describe('Security Rules — fornecedores, perfis e dependências', () => {
   // ---- Fornecedores ----
 
   test('gestor lê os critérios de fornecedor, mas não escreve', async () => {

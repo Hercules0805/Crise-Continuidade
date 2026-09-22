@@ -255,6 +255,22 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ---- Retrato diario do risco consolidado (Fase 5 -- O monitor) ----
+    // Um documento por dia, com a carga da empresa E de todas as areas juntas
+    // (nao um documento por area). Por isso a leitura e SO ADMIN por enquanto:
+    // abrir para cada gestor ver so a propria area exigiria guardar um
+    // documento por area por dia (como riscos/medicoes ja fazem), que e uma
+    // mudanca maior -- registrada na aba Roadmap como pendencia, nao decidida
+    // a construir agora.
+    //
+    // Escrita: SO pelo servidor (retratoDiarioRisco, e o backfill manual, os
+    // dois com Admin SDK). Mesma razao do livro de medicoes: um ponto da
+    // curva forjado pelo navegador destroi a credibilidade do monitor.
+    match /historico_risco/{dia} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     // ---- Tokens ----
     // FECHADO PARA TODO MUNDO, de propósito (20/09/2026).
     //

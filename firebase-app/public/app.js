@@ -9,6 +9,7 @@ const pages = {
   'indicadores-cadastro': indicadoresCadastro,
   'indicadores-lancamento': indicadoresLancamento,
   'indicadores-matriz': indicadoresMatriz,
+  monitor,
   fornecedores,
   'fornecedores-criterios': fornecedoresCriterios,
   'fornecedores-cadastro': fornecedoresCadastro,
@@ -4017,6 +4018,208 @@ function _renderPainelRiscoConsolidado() {
       A carga não tem teto, então não existe número "bom" ou "ruim" por si: o que se lê é a composição, o pior caso e a variação ao longo do tempo.
     </div>`;
 }
+
+// ============================================================
+// MONITOR — Risco no tempo (Fase 5)
+//
+// Le o retrato diario (historico_risco, gravado 1x por dia pela Cloud
+// Function retratoDiarioRisco + o backfill que reconstroi o passado a
+// partir do livro de medicoes). So admin ve esta tela por enquanto — ver
+// firestore.rules e a aba Roadmap para o motivo (documento por dia mistura
+// todas as areas, nao ha como recortar por gestor ainda).
+//
+// Paleta: slots 1-4 da paleta categorica validada (dataviz), sempre na
+// mesma ordem — a cor nunca acompanha o ranking do dia, acompanha a
+// entidade (Empresa e sempre azul; a 2a maior area de hoje pode nao ser a
+// 2a maior de ontem, mas mantem a cor que recebeu ao entrar no grafico).
+const _CORES_MONITOR = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100'];
+
+function _idadeEmDias(diaISO) {
+  const hoje = new Date();
+  const dia = new Date(diaISO + 'T12:00:00');
+  return Math.max(0, Math.round((hoje - dia) / (24 * 60 * 60 * 1000)));
+}
+
+function _corIdade(dias) {
+  if (dias <= 1) return { cor: '#2e7d32', fundo: '#e8f5e9', rotulo: 'em dia' };
+  if (dias <= 6) return { cor: '#e65100', fundo: '#fff3e0', rotulo: 'atrasado' };
+  return { cor: '#c62828', fundo: '#ffebee', rotulo: 'muito atrasado' };
+}
+
+function _dataCurta(diaISO) {
+  const [, m, d] = diaISO.split('-');
+  return `${d}/${m}`;
+}
+
+/**
+ * Monta o SVG da curva. `historico` vem em ordem cronologica (mais antigo
+ * primeiro) — ver _lerHistoricoRisco em api.js.
+ */
+function _svgLinhaTempoRisco(historico) {
+  if (!historico || historico.length === 0) return null;
+
+  const LARGURA = 760, ALTURA = 280;
+  const MARGEM = { topo: 16, baixo: 34, esq: 46, dir: 16 };
+  const areaW = LARGURA - MARGEM.esq - MARGEM.dir;
+  const areaH = ALTURA - MARGEM.topo - MARGEM.baixo;
+
+  // Quais areas entram no grafico: as de MAIOR carga no dia mais recente,
+  // no maximo 3 — alem de Empresa. Fixadas pelo ultimo dia para a cor de
+  // cada linha nao pular de area a cada atualizacao.
+  const ultimoDia = historico[historico.length - 1];
+  const topAreas = (ultimoDia.areas || [])
+    .slice()
+    .sort((a, b) => b.carga - a.carga)
+    .slice(0, 3)
+    .map((a) => a.area);
+
+  const series = [{ nome: 'Empresa', cor: _CORES_MONITOR[0] }]
+    .concat(topAreas.map((area, i) => ({ nome: area, cor: _CORES_MONITOR[i + 1] })));
+
+  const valorDoDia = (dia, nomeSerie) => {
+    if (nomeSerie === 'Empresa') return dia.empresa.carga;
+    const a = (dia.areas || []).find((x) => x.area === nomeSerie);
+    return a ? a.carga : 0;
+  };
+
+  const todosValores = series.flatMap((s) => historico.map((dia) => valorDoDia(dia, s.nome)));
+  const maxValor = Math.max(1, ...todosValores) * 1.15;
+
+  const n = historico.length;
+  const x = (i) => MARGEM.esq + (n === 1 ? areaW / 2 : (areaW * i) / (n - 1));
+  const y = (v) => MARGEM.topo + areaH - (areaH * v) / maxValor;
+
+  // Grade horizontal + rotulos do eixo Y (4 faixas).
+  const NUM_FAIXAS = 4;
+  let grade = '';
+  for (let f = 0; f <= NUM_FAIXAS; f++) {
+    const v = Math.round((maxValor / NUM_FAIXAS) * f);
+    const yy = y(v);
+    grade += `<line x1="${MARGEM.esq}" y1="${yy}" x2="${LARGURA - MARGEM.dir}" y2="${yy}" stroke="#eee" stroke-width="1"/>`;
+    grade += `<text x="${MARGEM.esq - 8}" y="${yy + 4}" text-anchor="end" font-size="10" fill="#999">${v}</text>`;
+  }
+
+  // Rotulos do eixo X: primeiro, ultimo, e alguns no meio (nunca mais que ~7, senao colide).
+  const passo = Math.max(1, Math.ceil(n / 7));
+  let rotulosX = '';
+  for (let i = 0; i < n; i += passo) {
+    rotulosX += `<text x="${x(i)}" y="${ALTURA - MARGEM.baixo + 16}" text-anchor="middle" font-size="10" fill="#999">${_dataCurta(historico[i].dia)}</text>`;
+  }
+  if ((n - 1) % passo !== 0) {
+    rotulosX += `<text x="${x(n - 1)}" y="${ALTURA - MARGEM.baixo + 16}" text-anchor="middle" font-size="10" fill="#999">${_dataCurta(historico[n - 1].dia)}</text>`;
+  }
+
+  const linhas = series.map((s) => {
+    const pontos = historico.map((dia, i) => `${x(i)},${y(valorDoDia(dia, s.nome))}`).join(' ');
+    const circulos = historico.map((dia, i) => {
+      const v = valorDoDia(dia, s.nome);
+      return `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${s.cor}"><title>${esc(s.nome)} — ${_dataCurta(dia.dia)}: ${v} pontos</title></circle>`;
+    }).join('');
+    const linha = n > 1
+      ? `<polyline points="${pontos}" fill="none" stroke="${s.cor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`
+      : '';
+    return linha + circulos;
+  }).join('');
+
+  const legenda = series.map((s) => `
+    <span style="display:inline-flex;align-items:center;gap:5px;margin-right:16px;font-size:0.78em;color:#555;">
+      <span style="width:10px;height:10px;border-radius:50%;background:${s.cor};display:inline-block;"></span>${esc(s.nome)}
+    </span>`).join('');
+
+  const svg = `<svg viewBox="0 0 ${LARGURA} ${ALTURA}" width="100%" height="${ALTURA}" role="img" aria-label="Carga de risco ao longo do tempo">
+    ${grade}${rotulosX}${linhas}
+    <line x1="${MARGEM.esq}" y1="${MARGEM.topo}" x2="${MARGEM.esq}" y2="${ALTURA - MARGEM.baixo}" stroke="#ccc" stroke-width="1"/>
+    <line x1="${MARGEM.esq}" y1="${ALTURA - MARGEM.baixo}" x2="${LARGURA - MARGEM.dir}" y2="${ALTURA - MARGEM.baixo}" stroke="#ccc" stroke-width="1"/>
+  </svg>`;
+
+  return { svg, legendaHtml: legenda };
+}
+
+async function monitor() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Monitor de Risco</h2><p class="page-sub">A carga de risco da empresa ao longo do tempo — empresa e as áreas mais carregadas hoje</p></div>
+    </div>
+    <div class="loading" id="loadingMonitor">⏳ Carregando...</div>
+    <div id="monitorConteudo"></div>`;
+
+  let historico;
+  try {
+    historico = await API.getHistoricoRisco();
+  } catch (e) {
+    console.error('Monitor: falha ao carregar', e);
+    document.getElementById('loadingMonitor').style.display = 'none';
+    document.getElementById('monitorConteudo').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
+      Não foi possível carregar o histórico.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="monitor()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+  document.getElementById('loadingMonitor').style.display = 'none';
+  const conteudo = document.getElementById('monitorConteudo');
+
+  if (!historico.length) {
+    conteudo.innerHTML = `<div style="border:1px solid #e0e0e0;border-radius:10px;padding:24px;background:#fff;color:#666;">
+      Ainda não existe nenhum retrato registrado.<br>
+      <span style="font-size:0.88em;">A rotina diária grava o primeiro amanhã de manhã. Para preencher os dias já registrados no livro de medições, alguém precisa rodar o script de reconstrução (<code>scripts/backfill-historico-risco.js</code>) uma vez, no computador.</span>
+    </div>`;
+    return;
+  }
+
+  const ultimo = historico[historico.length - 1];
+  const idade = _idadeEmDias(ultimo.dia);
+  const statusIdade = _corIdade(idade);
+  const grafico = _svgLinhaTempoRisco(historico);
+
+  const badgesComposicao = (comp) => RiscoConsolidado.FAIXAS
+    .filter((f) => comp[f] > 0)
+    .map((f) => {
+      const cor = RiscoConsolidado.faixaScore(f === 'Crítico' ? 9 : f === 'Alto' ? 6 : f === 'Moderado' ? 3 : 1);
+      return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.78em;font-weight:700;background:${cor.fundo};color:${cor.cor};margin-right:4px;">${comp[f]} ${f}</span>`;
+    }).join('');
+
+  conteudo.innerHTML = `
+    <div style="display:flex;gap:14px;align-items:center;margin-bottom:16px;">
+      <div>
+        <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Retrato mais recente</div>
+        <div style="font-size:1.3em;font-weight:800;color:#1a237e;">${_dataCurta(ultimo.dia)}</div>
+      </div>
+      <span style="padding:4px 12px;border-radius:12px;font-size:0.82em;font-weight:700;background:${statusIdade.fundo};color:${statusIdade.cor};">
+        ${idade === 0 ? 'hoje' : idade === 1 ? 'há 1 dia' : `há ${idade} dias`} · ${statusIdade.rotulo}
+      </span>
+      ${idade > 1 ? `<span style="font-size:0.82em;color:#999;">A rotina diária roda às 6h — se o atraso continuar, vale checar os logs da função <code>retratoDiarioRisco</code>.</span>` : ''}
+    </div>
+
+    <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;margin-bottom:16px;">
+      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">Carga ao longo do tempo</div>
+      ${grafico ? grafico.svg : '<div style="color:#999;">Sem dados suficientes para o gráfico.</div>'}
+      <div style="margin-top:8px;">${grafico ? grafico.legendaHtml : ''}</div>
+      ${historico.length < 5 ? `<div style="font-size:0.76em;color:#999;margin-top:10px;">Só ${historico.length} dia${historico.length === 1 ? '' : 's'} de histórico até agora — a curva fica mais útil conforme os dias passam.</div>` : ''}
+    </div>
+
+    <div style="display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start;">
+      <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;">
+        <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Carga da empresa hoje</div>
+        <div style="font-size:2.8em;font-weight:800;line-height:1;margin:8px 0 10px;color:#1a237e;">${ultimo.empresa.carga}</div>
+        <div>${badgesComposicao(ultimo.empresa.composicao) || '<span style="font-size:0.8em;color:#999;">Nenhum risco na conta</span>'}</div>
+        <div style="font-size:0.76em;color:#777;margin-top:10px;">${ultimo.empresa.contados} risco${ultimo.empresa.contados === 1 ? '' : 's'} somado${ultimo.empresa.contados === 1 ? '' : 's'}</div>
+      </div>
+      <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 8px 10px;background:#fff;">
+        <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;padding:0 10px 6px;">Carga por área hoje</div>
+        ${(ultimo.areas || []).length ? `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
+          ${ultimo.areas.map((a) => `<tr>
+            <td style="padding:7px 10px;font-weight:600;color:#333;">${esc(a.area)}</td>
+            <td style="padding:7px 10px;text-align:right;font-weight:700;color:#1a237e;">${a.carga}</td>
+            <td style="padding:7px 10px;color:#777;">${badgesComposicao(a.composicao)}</td>
+          </tr>`).join('')}
+        </table>` : '<div style="padding:10px;color:#999;font-size:0.88em;">Nenhum risco registrado.</div>'}
+      </div>
+    </div>
+    <div style="font-size:0.76em;color:#999;margin-top:14px;">
+      Só quem tem perfil de administrador vê esta tela por enquanto — ver a aba Roadmap sobre abrir por área.
+    </div>`;
+}
+
 
 function renderizarRiscos() {
   _renderPainelRiscoConsolidado();

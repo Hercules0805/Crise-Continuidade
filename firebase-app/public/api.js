@@ -41,6 +41,7 @@ const COLLECTION = {
   criteriosFornecedor: 'criterios_fornecedor',
   avaliacoesFornecedor: 'avaliacoes_fornecedor',
   categoriasFornecedor: 'categorias_fornecedor',
+  historicoRisco: 'historico_risco',
 };
 
 // ------------------------------------------------------------
@@ -549,6 +550,24 @@ async function _subirVersaoCriterios() {
  * so a ultima por fornecedor, que e o que as telas usam; o historico continua
  * gravado para o grafico de evolucao do fornecedor.
  */
+/**
+ * Retrato diario do risco consolidado (Fase 5 -- O monitor), do mais antigo
+ * para o mais novo -- ordem que o grafico espera.
+ *
+ * So admin le esta colecao (ver firestore.rules): um documento por dia
+ * carrega a carga de TODAS as areas juntas, entao nao ha como recortar por
+ * area no banco. Quem chamar isto sem ser admin recebe erro de permissao do
+ * Firestore, nao uma lista vazia — ver monitor(), em app.js.
+ */
+async function _lerHistoricoRisco() {
+  const LIMITE_DIAS = 120;
+  const snap = await _db.collection(COLLECTION.historicoRisco)
+    .orderBy('dia', 'desc')
+    .limit(LIMITE_DIAS)
+    .get();
+  return snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).reverse();
+}
+
 async function _lerAvaliacoesFornecedor() {
   const docs = await _getAll(COLLECTION.avaliacoesFornecedor);
   const ultima = new Map();
@@ -1081,6 +1100,7 @@ const _GET_FIRESTORE = {
   getCriteriosFornecedor: () => _lerCriteriosFornecedor(),
   getCategoriasFornecedor: () => _lerCategoriasFornecedor(),
   getAvaliacoesFornecedor: () => _lerAvaliacoesFornecedor(),
+  getHistoricoRisco: () => _lerHistoricoRisco(),
   getConfigFornecedor: () => _lerConfigFornecedor(),
   getPerfis: () => _lerPerfis(),
 };
@@ -1261,6 +1281,7 @@ const API = {
   getCriteriosFornecedor: () => API.get('getCriteriosFornecedor'),
   getCategoriasFornecedor: () => API.get('getCategoriasFornecedor'),
   getAvaliacoesFornecedor: () => API.get('getAvaliacoesFornecedor'),
+  getHistoricoRisco: () => API.get('getHistoricoRisco'),
   getConfigFornecedor: () => API.get('getConfigFornecedor'),
   getPerfis: () => API.get('getPerfis'),
   salvarPerfilAcesso: (p) => API.post('salvarPerfilAcesso', p)

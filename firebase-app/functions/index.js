@@ -14,11 +14,13 @@ const crypto = require('node:crypto');
 const admin = require('firebase-admin');
 const { onRequest } = require('firebase-functions/v2/https');
 const { onDocumentCreated, onDocumentWritten } = require('firebase-functions/v2/firestore');
+const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { READ_ACTIONS, WRITE_ACTIONS, TokenError } = require('./tokenLogic');
 const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia, medicaoDeLancamento, medicaoDeRisco, medicaoDeAvaliacaoFornecedor, scoreDeRisco } = require('./medicoes');
 const fornecedorRisco = require('./fornecedorRisco');
+const retratoRisco = require('./retratoRisco');
 const {
   READ_ACTIONS: APP_READ,
   WRITE_ACTIONS: APP_WRITE,
@@ -397,6 +399,24 @@ exports.medicaoDeRisco = onDocumentWritten(
         .set(medicao, { merge: true });
     } catch (err) {
       logger.error('medicaoDeRisco: falha ao gravar medicao', { id: event.params.id, erro: err.message });
+    }
+  }
+);
+
+// Retrato diario do risco consolidado (Fase 5 -- O monitor). Roda 1x por dia
+// e grava em historico_risco/{YYYY-MM-DD} -- e o que faz a curva existir.
+// Usa a mesma reconstrucao (retratoRisco.js/historicoRisco.js) que o
+// backfill manual (scripts/backfill-historico-risco.js), para os dois
+// nunca poderem divergir sobre como calcular o mesmo numero.
+exports.retratoDiarioRisco = onSchedule(
+  { region: 'us-central1', schedule: '0 6 * * *', timeZone: 'America/Sao_Paulo' },
+  async () => {
+    try {
+      const retrato = await retratoRisco.gerarRetrato(db, new Date().toISOString());
+      const dia = await retratoRisco.salvarRetrato(db, retrato);
+      logger.info('retratoDiarioRisco: gravado', { dia, carga: retrato.empresa.carga, contados: retrato.empresa.contados });
+    } catch (err) {
+      logger.error('retratoDiarioRisco: falha ao gravar o retrato do dia', { erro: err.message });
     }
   }
 );
