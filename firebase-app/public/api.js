@@ -264,6 +264,7 @@ async function _lerDependencias() {
     // responsavel interno pelo contrato.
     categoriaFornecedor: d.categoriaFornecedor || '',
     gestorContrato: d.gestorContrato || '',
+    cnpj: d.cnpj || '',
     // Quais controles do catalogo de conformidade valem para este fornecedor.
     // null = nunca customizado (ausencia, nao "nenhum") — a tela comeca sem
     // nada marcado nesse caso. [] so acontece se alguem explicitamente
@@ -796,6 +797,7 @@ async function _salvarDependencia(d) {
     categoriaFornecedor: d.categoriaFornecedor || '',
     gestorContrato: d.gestorContrato || '',
     tic: d.tic !== false,
+    cnpj: d.cnpj || '',
   };
   if (d.id) {
     await _db.collection(COLLECTION.dependencias).doc(String(d.id)).set(data, { merge: true });

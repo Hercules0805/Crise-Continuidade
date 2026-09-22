@@ -8412,11 +8412,13 @@ function _htmlModalFornecedorCadastro() {
     <div class="modal-overlay" id="modalFornecedor"><div class="modal" onclick="event.stopPropagation()" style="max-width:640px;">
       <h3 id="modalFornecedorTitulo">Novo Fornecedor</h3>
       <input type="hidden" id="fornCadId">
+
+      <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:8px;margin-top:4px;">Dados do fornecedor</label>
       <label>Nome da empresa</label>
       <input type="text" id="fornCadNome" placeholder="Ex: Alfa Tecnologia S.A.">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div><label>CNPJ</label><input type="text" id="fornCadCnpj" placeholder="00.000.000/0000-00"></div>
         <div><label>Categoria</label><select id="fornCadCategoria"><option value="">Selecione...</option></select></div>
-        <div><label>Gestor do Contrato</label><input type="text" id="fornCadGestorContrato" placeholder="Nome de quem responde por este contrato"></div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-weight:400;">
         <input type="checkbox" id="fornCadTic" checked>
@@ -8424,10 +8426,8 @@ function _htmlModalFornecedorCadastro() {
       </label>
       <label>Serviço prestado / o que fornece</label>
       <input type="text" id="fornCadDetalhes" placeholder="Ex: hospedagem dos servidores de produção">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div><label>Setor responsável pelo contrato</label><input type="text" id="fornCadSetor" placeholder="Ex: TI, Compras"></div>
-        <div><label>Endereço</label><input type="text" id="fornCadEndereco" placeholder="Cidade ou endereço"></div>
-      </div>
+      <label>Endereço</label>
+      <input type="text" id="fornCadEndereco" placeholder="Cidade ou endereço">
 
       <label style="margin-top:14px;display:block;">Pessoas associadas</label>
       <span style="font-size:0.75em;color:#888;display:block;margin-top:-6px;margin-bottom:8px;">Uma empresa pode ter mais de um contato.</span>
@@ -8445,6 +8445,12 @@ function _htmlModalFornecedorCadastro() {
           <input type="text" id="pessoaFornTelefone" placeholder="Telefone">
           <button class="btn btn-ghost" id="btnAdicionarPessoaForn" onclick="adicionarPessoaFornecedor()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
         </div>
+      </div>
+
+      <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:8px;margin-top:18px;border-top:1px solid #eee;padding-top:14px;">Dados do contratante</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div><label>Gestor do Contrato</label><input type="text" id="fornCadGestorContrato" placeholder="Nome de quem responde por este contrato"></div>
+        <div><label>Setor responsável pelo contrato</label><input type="text" id="fornCadSetor" placeholder="Ex: TI, Compras"></div>
       </div>
 
       <div class="modal-footer">
@@ -8535,6 +8541,7 @@ window.abrirModalFornecedor = (id) => {
   document.getElementById('modalFornecedorTitulo').textContent = f ? 'Editar Fornecedor' : 'Novo Fornecedor';
   document.getElementById('fornCadId').value = f ? f.id : '';
   document.getElementById('fornCadNome').value = f ? (f.nome || '') : '';
+  document.getElementById('fornCadCnpj').value = f ? (f.cnpj || '') : '';
   const categoriasAtivas = (categoriasFornecedorData || []).filter((c) => c.ativo);
   // Se o fornecedor ja tem uma categoria desativada/apagada, mantem ela como
   // opcao extra selecionada — senao editar o cadastro trocaria a categoria em
@@ -8571,6 +8578,7 @@ window.salvarFornecedorCadastro = async () => {
       // regra do banco exige para este perfil poder gravar.
       categoria: CATEGORIA_FORNECEDOR_PADRAO,
       nome,
+      cnpj: document.getElementById('fornCadCnpj').value.trim(),
       categoriaFornecedor: document.getElementById('fornCadCategoria').value,
       gestorContrato: document.getElementById('fornCadGestorContrato').value.trim(),
       tic: document.getElementById('fornCadTic').checked,
