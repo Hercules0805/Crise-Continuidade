@@ -7575,6 +7575,25 @@ window.excluirCategoriaFornecedor = async (id) => {
 
 let fornecedoresData = [];
 let avaliacoesFornecedorData = [];
+// Cards de resumo funcionam como filtro da grade abaixo, mesmo padrao do
+// dashboard de Indicadores. Clicar no card ja ativo limpa o filtro.
+let fornecedoresFiltroResumo = 'todos'; // 'todos' | 'semAvaliacao' | 'vencida' | 'abaixoLimiar'
+let fornecedoresOrdenacao = { coluna: 'nome', direcao: 'asc' };
+
+window.filtrarFornecedoresResumo = (modo) => {
+  fornecedoresFiltroResumo = fornecedoresFiltroResumo === modo ? 'todos' : modo;
+  renderizarFornecedores();
+};
+
+window.ordenarFornecedores = (coluna) => {
+  if (fornecedoresOrdenacao.coluna === coluna) {
+    fornecedoresOrdenacao.direcao = fornecedoresOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
+  } else {
+    fornecedoresOrdenacao.coluna = coluna;
+    fornecedoresOrdenacao.direcao = 'asc';
+  }
+  renderizarFornecedores();
+};
 
 function _avaliacaoDoFornecedor(id) {
   return avaliacoesFornecedorData.find((a) => a.fornecedorId === String(id)) || null;
@@ -7670,6 +7689,8 @@ function renderizarFornecedores() {
 
   const ativos = criteriosFornecedorData.filter(FornecedorScore.criterioAtivo);
 
+  const anelAtivo = 'outline:2.5px solid #1a237e;outline-offset:2px;';
+
   if (resumo) {
     const comNota = fornecedoresData.filter((f) => { const a = _avaliacaoDoFornecedor(f.id); return a && a.nota !== null; });
     const semAvaliacao = fornecedoresData.length - comNota.length;
@@ -7683,11 +7704,11 @@ function renderizarFornecedores() {
          </div>`
       : `<div style="display:flex;gap:12px;flex-wrap:wrap;">
            ${[
-             { n: fornecedoresData.length, t: 'fornecedores no catálogo', c: '#1a237e' },
-             { n: semAvaliacao, t: 'sem avaliação', c: semAvaliacao ? '#e65100' : '#999' },
-             { n: vencidas, t: 'com avaliação vencida', c: vencidas ? '#e65100' : '#999' },
-             { n: abaixo, t: `abaixo de ${configFornecedor.limiarRisco}`, c: abaixo ? '#c62828' : '#2e7d32' },
-           ].map((x) => `<div style="border:1px solid #e0e0e0;border-radius:10px;padding:12px 16px;background:#fff;min-width:130px;">
+             { modo: 'todos', n: fornecedoresData.length, t: 'fornecedores no catálogo', c: '#1a237e', titulo: 'Ver todos' },
+             { modo: 'semAvaliacao', n: semAvaliacao, t: 'sem avaliação', c: semAvaliacao ? '#e65100' : '#999', titulo: 'Filtrar sem avaliação' },
+             { modo: 'vencida', n: vencidas, t: 'com avaliação vencida', c: vencidas ? '#e65100' : '#999', titulo: 'Filtrar avaliação vencida' },
+             { modo: 'abaixoLimiar', n: abaixo, t: `abaixo de ${configFornecedor.limiarRisco}`, c: abaixo ? '#c62828' : '#2e7d32', titulo: `Filtrar nota abaixo de ${configFornecedor.limiarRisco}` },
+           ].map((x) => `<div style="border-radius:10px;padding:12px 16px;background:#fff;min-width:130px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.08);${fornecedoresFiltroResumo === x.modo ? anelAtivo : ''}" onclick="filtrarFornecedoresResumo('${x.modo}')" title="${esc(x.titulo)}">
                 <div style="font-size:1.7em;font-weight:800;color:${x.c};line-height:1;">${x.n}</div>
                 <div style="font-size:0.74em;color:#888;margin-top:4px;">${esc(x.t)}</div>
               </div>`).join('')}
@@ -7695,9 +7716,17 @@ function renderizarFornecedores() {
   }
 
   const busca = (document.getElementById('buscaFornecedor')?.value || '').toLowerCase();
+  const porResumo = (f) => {
+    const av = _avaliacaoDoFornecedor(f.id);
+    if (fornecedoresFiltroResumo === 'semAvaliacao') return !av || av.nota === null;
+    if (fornecedoresFiltroResumo === 'vencida') return !!(av && av.nota !== null && FornecedorScore.vencida(av.avaliadoEm));
+    if (fornecedoresFiltroResumo === 'abaixoLimiar') return !!(av && FornecedorScore.abreRisco(av.nota, configFornecedor.limiarRisco));
+    return true;
+  };
   const data = fornecedoresData.filter((f) => !busca
     || (f.nome || '').toLowerCase().includes(busca)
-    || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)));
+    || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)))
+    .filter(porResumo);
 
   if (!fornecedoresData.length) {
     lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
@@ -7706,17 +7735,39 @@ function renderizarFornecedores() {
     return;
   }
 
+  // Nulo sempre por ultimo, nas duas direcoes -- ausencia de avaliacao nao e
+  // o pior nem o melhor caso, e "arrastar pro fim" nao deveria trocar de lado
+  // so porque a pessoa inverteu a seta.
+  const valorOrdenacao = (av) => {
+    if (fornecedoresOrdenacao.coluna === 'nota') return av && av.nota !== null ? av.nota : null;
+    if (fornecedoresOrdenacao.coluna === 'criticidade') return av && av.completaCriticidade ? av.scoreCriticidade : null;
+    if (fornecedoresOrdenacao.coluna === 'avaliadoEm') return av && av.avaliadoEm ? av.avaliadoEm : null;
+    return null;
+  };
+  data.sort((a, b) => {
+    const dir = fornecedoresOrdenacao.direcao === 'asc' ? 1 : -1;
+    if (fornecedoresOrdenacao.coluna === 'nome') return dir * (a.nome || '').localeCompare(b.nome || '', 'pt-BR');
+    const vA = valorOrdenacao(_avaliacaoDoFornecedor(a.id));
+    const vB = valorOrdenacao(_avaliacaoDoFornecedor(b.id));
+    if (vA === null && vB === null) return 0;
+    if (vA === null) return 1;
+    if (vB === null) return -1;
+    return dir * (vA > vB ? 1 : vA < vB ? -1 : 0);
+  });
+
+  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarFornecedores('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-forn-${coluna}"></span></th>`;
+
   lista.innerHTML = `
     <div class="data-table">
       <table>
         <thead>
           <tr>
-            <th style="width:20%;">Empresa</th>
+            ${th('nome', 'Empresa', 'width:20%;')}
             <th style="width:16%;">Pessoas</th>
-            <th style="width:8%;text-align:center;">Nota</th>
-            <th style="width:10%;text-align:center;">Criticidade</th>
+            ${th('nota', 'Nota', 'width:8%;text-align:center;')}
+            ${th('criticidade', 'Criticidade', 'width:10%;text-align:center;')}
             <th style="width:14%;">Situação</th>
-            <th style="width:12%;">Última avaliação</th>
+            ${th('avaliadoEm', 'Última avaliação', 'width:12%;')}
             <th style="width:20%;text-align:center;">Ações</th>
           </tr>
         </thead>
@@ -7748,10 +7799,15 @@ function renderizarFornecedores() {
                   : (av ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">Ver</button>` : '–')}
               </td>
             </tr>`;
-          }).join('') : '<tr><td colspan="7" style="padding:20px;text-align:center;color:#888;">Nenhum fornecedor encontrado com essa busca.</td></tr>'}
+          }).join('') : '<tr><td colspan="7" style="padding:20px;text-align:center;color:#888;">Nenhum fornecedor encontrado com esses filtros.</td></tr>'}
         </tbody>
       </table>
     </div>`;
+
+  ['nome', 'nota', 'criticidade', 'avaliadoEm'].forEach((col) => {
+    const el = document.getElementById(`sort-forn-${col}`);
+    if (el) el.textContent = col === fornecedoresOrdenacao.coluna ? (fornecedoresOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
+  });
 }
 
 // ---- Drawer de avaliação do fornecedor ----
