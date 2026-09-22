@@ -248,3 +248,55 @@ test('lista nula ou undefined nao quebra', () => {
   assert.strictEqual(RC.consolidar(null, null).empresa.carga, 0);
   assert.strictEqual(RC.consolidar(undefined, undefined).areas.length, 0);
 });
+
+// ============================================================
+// PESO DO RISCO DE FORNECEDOR (criticidade, 22/09/2026)
+//
+// Mesma ideia do Tier do BIA, mas pro risco que nao tem processo, so
+// fornecedor. As duas escalas foram desenhadas pra caber no mesmo peso 1/2/3.
+// ============================================================
+
+const riscoForn = (extra) => Object.assign({
+  area: '', probabilidade: 'Alta', impacto: 'Crítico', status: 'Identificado', fornecedor: 'f1',
+}, extra);
+
+test('risco de fornecedor com criticidade Alta pesa 3, o mesmo peso do Tier 1', () => {
+  const criticidade = { f1: 7 }; // 7 = faixa Alta
+  assert.strictEqual(RC.pesoDoRisco(riscoForn(), {}, criticidade), 3);
+});
+
+test('risco de fornecedor com criticidade Baixa pesa 1, o mesmo peso do Tier 3', () => {
+  const criticidade = { f1: 1 }; // 1 = faixa Baixa
+  assert.strictEqual(RC.pesoDoRisco(riscoForn(), {}, criticidade), 1);
+});
+
+test('risco de fornecedor sem avaliacao de criticidade cai no peso padrao', () => {
+  assert.strictEqual(RC.pesoDoRisco(riscoForn(), {}, {}), RC.PESO_PADRAO);
+  assert.strictEqual(RC.pesoDoRisco(riscoForn(), {}, undefined), RC.PESO_PADRAO);
+});
+
+test('risco com processoId usa o Tier, mesmo que tambem tenha fornecedor', () => {
+  // Nao deveria acontecer na pratica (um risco e de processo OU de fornecedor),
+  // mas se acontecer, processo manda -- e a mesma ordem que decidir() do
+  // servidor usa pra abrir risco (o processo e quem tem o dado mais concreto).
+  const r = riscoForn({ processoId: 'p1' });
+  const criticidade = { f1: 1 }; // faixa Baixa, peso 1 -- nao deveria valer aqui
+  assert.strictEqual(RC.pesoDoRisco(r, { p1: PROCESSOS[0] }, criticidade), 3); // Tier 1
+});
+
+test('a carga da empresa reflete a criticidade do fornecedor: Alta pesa mais que Baixa', () => {
+  const riscos = [
+    riscoForn({ fornecedor: 'critico', probabilidade: 'Alta', impacto: 'Crítico' }),
+  ];
+  const cargaAlta = RC.consolidar(riscos, [], { critico: 8 }).empresa.carga;
+  const cargaBaixa = RC.consolidar(riscos, [], { critico: 0 }).empresa.carga;
+  assert.ok(cargaAlta > cargaBaixa, `criticidade Alta deveria pesar mais: ${cargaAlta} <= ${cargaBaixa}`);
+  assert.strictEqual(cargaAlta, 12 * 3); // score 12, peso 3 (Alta)
+  assert.strictEqual(cargaBaixa, 12 * 1); // score 12, peso 1 (Baixa)
+});
+
+test('consolidar sem o parametro de criticidade nao quebra — risco de fornecedor cai no peso padrao', () => {
+  const riscos = [riscoForn()];
+  const r = RC.consolidar(riscos, []);
+  assert.strictEqual(r.empresa.carga, 12 * RC.PESO_PADRAO);
+});

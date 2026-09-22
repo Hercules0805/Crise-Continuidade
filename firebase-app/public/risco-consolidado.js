@@ -49,16 +49,23 @@
  * score e fica FORA da soma, o que a puxa para baixo. Por isso `semAvaliacao`
  * volta em toda resposta — a tela e obrigada a mostrar quantos ficaram de fora.
  *
- * Carregar ANTES de app.js e DEPOIS de criticidade.js. Tambem exporta como
- * modulo CommonJS para poder ser testada com node --test.
+ * DECISAO 22/09/2026: risco de fornecedor (sem processo) passa a pesar pela
+ * CRITICIDADE DO FORNECEDOR (fornecedor-criticidade.js), do mesmo jeito que
+ * risco de processo ja pesa pelo Tier do BIA. Fornecedor sem avaliacao de
+ * criticidade continua caindo no peso padrao (2) — mesma regra do processo
+ * Pendente acima.
+ *
+ * Carregar ANTES de app.js e DEPOIS de criticidade.js e fornecedor-
+ * criticidade.js. Tambem exporta como modulo CommonJS para poder ser testada
+ * com node --test.
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = factory(require('./criticidade.js'));
+    module.exports = factory(require('./criticidade.js'), require('./fornecedor-criticidade.js'));
   } else {
-    root.RiscoConsolidado = factory(root.Criticidade);
+    root.RiscoConsolidado = factory(root.Criticidade, root.FornecedorCriticidade);
   }
-}(typeof self !== 'undefined' ? self : this, function (Criticidade) {
+}(typeof self !== 'undefined' ? self : this, function (Criticidade, FornecedorCriticidade) {
   'use strict';
 
   var PESO_PROBABILIDADE = { 'Baixa': 1, 'Média': 2, 'Alta': 3 };
@@ -111,21 +118,32 @@
     return STATUS_FORA.indexOf(s) === -1;
   }
 
-  /** Peso do risco = criticidade do processo ligado a ele. */
-  function pesoDoRisco(r, processosPorId) {
-    var id = r && r.processoId;
-    if (!id) return PESO_PADRAO;
-    var p = processosPorId && processosPorId[String(id)];
-    if (!p) return PESO_PADRAO;
-    var peso = PESO_TIER[Criticidade.tierDoProcesso(p)];
-    return peso || PESO_PADRAO;
+  /**
+   * Peso do risco: criticidade do processo ligado a ele, OU criticidade do
+   * fornecedor ligado a ele, quando nao ha processo. As duas escalas (Tier do
+   * BIA e criticidade de fornecedor) foram desenhadas para caber no mesmo
+   * peso 1/2/3 de proposito — ver fornecedor-criticidade.js.
+   */
+  function pesoDoRisco(r, processosPorId, criticidadePorFornecedor) {
+    var idProcesso = r && r.processoId;
+    if (idProcesso) {
+      var p = processosPorId && processosPorId[String(idProcesso)];
+      var pesoTier = p && PESO_TIER[Criticidade.tierDoProcesso(p)];
+      return pesoTier || PESO_PADRAO;
+    }
+    var idFornecedor = r && r.fornecedor;
+    if (idFornecedor && criticidadePorFornecedor) {
+      var pesoForn = FornecedorCriticidade.pesoPorScore(criticidadePorFornecedor[String(idFornecedor)]);
+      if (pesoForn) return pesoForn;
+    }
+    return PESO_PADRAO;
   }
 
   /** Pontos que este risco soma na carga: score x peso. null se sem score. */
-  function cargaDoRisco(r, processosPorId) {
+  function cargaDoRisco(r, processosPorId, criticidadePorFornecedor) {
     var score = scoreDoRisco(r);
     if (score === null) return null;
-    return score * pesoDoRisco(r, processosPorId);
+    return score * pesoDoRisco(r, processosPorId, criticidadePorFornecedor);
   }
 
   function areaDoRisco(r) {
@@ -172,7 +190,7 @@
    * A carga da empresa e a soma das cargas das areas — conferivel somando a
    * coluna na mao.
    */
-  function consolidar(riscos, processos) {
+  function consolidar(riscos, processos, criticidadePorFornecedor) {
     var processosPorId = _indexarProcessos(processos);
     var porArea = {};
     var empresa = _novoAcumulado();
@@ -190,7 +208,7 @@
         empresa.semAvaliacao += 1;
         return;
       }
-      var carga = score * pesoDoRisco(r, processosPorId);
+      var carga = score * pesoDoRisco(r, processosPorId, criticidadePorFornecedor);
       _somar(acc, score, carga);
       _somar(empresa, score, carga);
     });

@@ -3563,6 +3563,7 @@ let riscosOrdenacao = { coluna: 'score', direcao: 'desc' };
 let riscosAreasCache = [];
 let riscosProcessosCache = [];
 let riscosFornecedoresCache = [];
+let riscosCriticidadePorFornecedorCache = {};
 const RISCO_STATUS = ['Identificado', 'Em Análise', 'Em Avaliação', 'Em Tratamento', 'Em Monitoramento', 'Aceito', 'Encerrado'];
 const RISCO_CATEGORIAS = ['Financeiro', 'Operacional', 'Reputacional', 'Regulatório/Legal'];
 
@@ -3682,7 +3683,7 @@ async function riscos() {
     // Processos entram aqui porque o numero consolidado pondera cada risco pela
     // criticidade do processo ligado a ele — sem os processos, todo risco viraria
     // peso padrao e o numero perderia justamente o que liga o BIA ao risco.
-    const [riscos_, areas_, deps_, inds_, procs_] = await Promise.all([
+    const [riscos_, areas_, deps_, inds_, procs_, avalsForn_] = await Promise.all([
       API.getRiscos(), API.getAreas(), API.getDependencias(), API.getIndicadoresSeguranca(),
       // Nao pode derrubar a pagina: se os processos nao vierem, o registro de
       // riscos continua utilizavel e o painel avisa que esta sem os pesos.
@@ -3690,15 +3691,22 @@ async function riscos() {
         console.error('Riscos: processos nao carregaram; o numero consolidado usara peso padrao', e);
         return [];
       }),
+      // Mesma logica: sem as avaliacoes, risco de fornecedor cai no peso padrao.
+      API.getAvaliacoesFornecedor().catch((e) => {
+        console.error('Riscos: avaliacoes de fornecedor nao carregaram; criticidade usara peso padrao', e);
+        return [];
+      }),
     ]);
     riscosData = riscos_; riscosAreasCache = areas_; indicadoresData = inds_; riscosProcessosCache = procs_;
     riscosFornecedoresCache = deps_.filter(d => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
+    riscosCriticidadePorFornecedorCache = {};
+    (avalsForn_ || []).forEach((av) => { if (av && av.fornecedorId) riscosCriticidadePorFornecedorCache[String(av.fornecedorId)] = av.scoreCriticidade; });
   } catch (e) {
     // Antes este catch zerava a lista em silencio, e a tela dizia "Nenhum risco
     // cadastrado" — indistinguivel de registro vazio. Quem visse isso podia
     // concluir que nao havia riscos e recadastrar o que ja existia.
     console.error('Riscos: falha ao carregar', e);
-    riscosData = []; riscosAreasCache = []; riscosFornecedoresCache = [];
+    riscosData = []; riscosAreasCache = []; riscosFornecedoresCache = []; riscosCriticidadePorFornecedorCache = {};
     const corpo = document.getElementById('riscoRows');
     if (corpo) {
       corpo.innerHTML = `<tr><td colspan="10" style="padding:24px;text-align:center;color:#c62828;">
@@ -3743,7 +3751,7 @@ function _renderPainelRiscoConsolidado() {
   const painel = document.getElementById('painelRiscoConsolidado');
   if (!painel) return;
 
-  const r = RiscoConsolidado.consolidar(riscosData, riscosProcessosCache);
+  const r = RiscoConsolidado.consolidar(riscosData, riscosProcessosCache, riscosCriticidadePorFornecedorCache);
   const emp = r.empresa;
   const semNada = emp.contados === 0 && emp.semAvaliacao === 0;
   const maiorCarga = r.areas.reduce((m, a) => Math.max(m, a.carga), 0);
@@ -3805,7 +3813,8 @@ function _renderPainelRiscoConsolidado() {
     </div>
     <div style="font-size:0.74em;color:#999;margin-top:8px;line-height:1.5;">
       Como a conta é feita: cada risco soma a sua nota (1 a 12) multiplicada pela criticidade do processo ligado a ele
-      (Tier 1 pesa 3, Tier 2 pesa 2, Tier 3 pesa 1; risco corporativo ou em processo ainda Pendente pesa 2).
+      (Tier 1 pesa 3, Tier 2 pesa 2, Tier 3 pesa 1; risco corporativo ou em processo ainda Pendente pesa 2). Risco de
+      fornecedor sem processo pesa pela criticidade avaliada do fornecedor (Alta 3, Média 2, Baixa 1; sem avaliação pesa 2).
       Um risco soma no máximo 36 pontos. A carga da empresa é a soma das áreas — dá para conferir somando a coluna.
       Riscos aceitos entram na conta: aceitar um risco não o faz desaparecer. Encerrados ficam fora${r.foraPorStatus ? ` (${r.foraPorStatus} hoje)` : ''}.
       A carga não tem teto, então não existe número "bom" ou "ruim" por si: o que se lê é a composição, o pior caso e a variação ao longo do tempo.
@@ -7596,6 +7605,14 @@ function _dataCurtaForn(iso) {
   return isNaN(d.getTime()) ? '–' : d.toLocaleDateString('pt-BR');
 }
 
+/** Badge de criticidade (aba nova da avaliação) para as tabelas de Fornecedores. */
+function _badgeCriticidadeFornecedor(av) {
+  const score = av && av.completaCriticidade ? av.scoreCriticidade : null;
+  const faixa = FornecedorCriticidade.faixa(score);
+  if (score === null) return '<span style="color:#999;font-weight:600;" title="Criticidade ainda não avaliada">–</span>';
+  return `<span title="${esc(faixa.rotulo)} — ${score} de ${FornecedorCriticidade.SCORE_MAXIMO}" style="display:inline-block;min-width:30px;padding:3px 8px;border-radius:10px;font-size:0.84em;font-weight:700;background:${faixa.fundo};color:${faixa.cor};">${score}</span>`;
+}
+
 /** Resumo das pessoas da empresa: primeiro contato + quantos ficaram de fora. */
 function _resumoPessoasFornecedor(f) {
   const pessoas = f.pessoas || [];
@@ -7694,11 +7711,12 @@ function renderizarFornecedores() {
       <table>
         <thead>
           <tr>
-            <th style="width:22%;">Empresa</th>
-            <th style="width:20%;">Pessoas</th>
+            <th style="width:20%;">Empresa</th>
+            <th style="width:16%;">Pessoas</th>
             <th style="width:8%;text-align:center;">Nota</th>
-            <th style="width:16%;">Situação</th>
-            <th style="width:14%;">Última avaliação</th>
+            <th style="width:10%;text-align:center;">Criticidade</th>
+            <th style="width:14%;">Situação</th>
+            <th style="width:12%;">Última avaliação</th>
             <th style="width:20%;text-align:center;">Ações</th>
           </tr>
         </thead>
@@ -7715,6 +7733,7 @@ function renderizarFornecedores() {
                   ? `<span title="${esc(FornecedorScore.faixaNota(av.nota).rotulo)} — ${av.nota} de 100" style="display:inline-block;min-width:30px;padding:3px 8px;border-radius:10px;font-size:0.84em;font-weight:700;background:${FornecedorScore.faixaNota(av.nota).fundo};color:${FornecedorScore.faixaNota(av.nota).cor};">${av.nota}</span>`
                   : '<span style="color:#999;font-weight:600;" title="Sem nota — não é o mesmo que nota zero">–</span>'}
               </td>
+              <td style="text-align:center;">${_badgeCriticidadeFornecedor(av)}</td>
               <td>
                 <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:${sit.fundo};color:${sit.cor};">${esc(sit.rotulo)}</span>
                 ${sit.aviso ? `<div style="font-size:0.72em;color:#e65100;margin-top:3px;">${esc(sit.aviso)}</div>` : ''}
@@ -7729,7 +7748,7 @@ function renderizarFornecedores() {
                   : (av ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">Ver</button>` : '–')}
               </td>
             </tr>`;
-          }).join('') : '<tr><td colspan="6" style="padding:20px;text-align:center;color:#888;">Nenhum fornecedor encontrado com essa busca.</td></tr>'}
+          }).join('') : '<tr><td colspan="7" style="padding:20px;text-align:center;color:#888;">Nenhum fornecedor encontrado com essa busca.</td></tr>'}
         </tbody>
       </table>
     </div>`;
@@ -7745,13 +7764,25 @@ function _htmlDrawerAvaliacaoFornecedor() {
         <h3 id="fornDrawerTitulo">Avaliar Fornecedor</h3>
         <button onclick="fecharAvaliacaoFornecedor()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
-      <div class="drawer-body">
+      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
         <input type="hidden" id="fornAvalId">
-        <div id="fornNotaPreview" style="position:sticky;top:0;background:#fff;padding:12px 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
-        <div id="fornCriteriosLista"></div>
-        <div style="margin-top:20px;">
-          <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">Observação geral (opcional)</label>
-          <textarea id="fornObservacao" rows="3" placeholder="Contexto que ajuda quem for ler esta avaliação depois" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;font-family:inherit;"></textarea>
+        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
+          <button id="tab-avalForn-conformidade" onclick="trocarAbaAvaliacaoFornecedor('conformidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Conformidade</button>
+          <button id="tab-avalForn-criticidade" onclick="trocarAbaAvaliacaoFornecedor('criticidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Criticidade</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
+          <div id="painel-avalForn-conformidade">
+            <div id="fornNotaPreview" style="position:sticky;top:0;background:#fff;padding:0 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
+            <div id="fornCriteriosLista"></div>
+            <div style="margin-top:20px;">
+              <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">Observação geral (opcional)</label>
+              <textarea id="fornObservacao" rows="3" placeholder="Contexto que ajuda quem for ler esta avaliação depois" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;font-family:inherit;"></textarea>
+            </div>
+          </div>
+          <div id="painel-avalForn-criticidade" style="display:none;">
+            <div id="fornCriticidadePreview" style="position:sticky;top:0;background:#fff;padding:0 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
+            <div id="fornCriticidadeLista"></div>
+          </div>
         </div>
       </div>
       <div class="drawer-footer">
@@ -7760,6 +7791,15 @@ function _htmlDrawerAvaliacaoFornecedor() {
       </div>
     </div>`;
 }
+
+window.trocarAbaAvaliacaoFornecedor = (aba) => {
+  ['conformidade', 'criticidade'].forEach((a) => {
+    document.getElementById('painel-avalForn-' + a).style.display = a === aba ? 'block' : 'none';
+    const btn = document.getElementById('tab-avalForn-' + a);
+    btn.style.color = a === aba ? '#1a237e' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
+  });
+};
 
 window.abrirAvaliacaoFornecedor = (fornecedorId) => {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
@@ -7802,10 +7842,26 @@ window.abrirAvaliacaoFornecedor = (fornecedorId) => {
          Nenhum critério ativo cadastrado. Cadastre os critérios antes de avaliar.
        </div>`;
 
+  const respostasCriticidadeAnteriores = av ? (av.respostasCriticidade || {}) : {};
+  document.getElementById('fornCriticidadeLista').innerHTML = FornecedorCriticidade.PERGUNTAS.map((p) => {
+    const opcoes = p.opcoes.map((op) => `
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;font-size:0.88em;cursor:pointer;">
+        <input type="radio" name="fornCrit_${p.chave}" value="${op.valor}" ${respostasCriticidadeAnteriores[p.chave] === op.valor ? 'checked' : ''} onchange="atualizarPreviewCriticidadeFornecedor()" style="margin-top:3px;">
+        <span>${esc(op.rotulo)} <span style="color:#888;font-weight:600;">(${op.score})</span></span>
+      </label>`).join('');
+    return `
+      <div style="border:1px solid #eee;border-radius:9px;padding:13px 15px;margin-bottom:12px;">
+        <div style="font-weight:600;color:#333;margin-bottom:9px;">${esc(p.titulo)}</div>
+        ${opcoes}
+      </div>`;
+  }).join('');
+
   document.querySelectorAll('#drawerFornecedor input, #drawerFornecedor textarea').forEach((el) => { el.disabled = !isAdmin; });
   document.getElementById('btnSalvarAvaliacaoForn').style.display = isAdmin && ativos.length ? 'inline-block' : 'none';
 
   atualizarPreviewNotaFornecedor();
+  atualizarPreviewCriticidadeFornecedor();
+  trocarAbaAvaliacaoFornecedor('conformidade');
   document.getElementById('drawerFornecedor').classList.add('open');
   document.getElementById('drawerOverlayFornecedor').classList.add('open');
 };
@@ -7858,6 +7914,38 @@ window.atualizarPreviewNotaFornecedor = () => {
     ${abre ? `<div style="font-size:0.75em;color:#c62828;margin-top:6px;">Abaixo de ${limiar}: salvar assim abre um risco automático para este fornecedor</div>` : ''}`;
 };
 
+/** Lê o formulário e devolve o mapa { dados, atividade, dependencia } -> valor da opção marcada. */
+function _coletarRespostasCriticidadeFornecedor() {
+  const mapa = {};
+  FornecedorCriticidade.PERGUNTAS.forEach((p) => {
+    const marcado = document.querySelector(`input[name="fornCrit_${p.chave}"]:checked`);
+    if (marcado) mapa[p.chave] = marcado.value;
+  });
+  return mapa;
+}
+
+/**
+ * Criticidade ao vivo, enquanto a pessoa responde. So previa: o que vale e o
+ * recalculo na gravacao (mesma razao da nota de conformidade, do score do
+ * risco e de tudo mais neste app que e recalculado no servidor).
+ */
+window.atualizarPreviewCriticidadeFornecedor = () => {
+  const box = document.getElementById('fornCriticidadePreview');
+  if (!box) return;
+  const calc = FornecedorCriticidade.calcular(_coletarRespostasCriticidadeFornecedor());
+
+  box.innerHTML = `
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+      <div style="display:flex;align-items:baseline;gap:6px;">
+        <span style="font-size:2em;font-weight:800;line-height:1;color:${calc.faixa.cor};">${calc.score === null ? '–' : calc.score}</span>
+        ${calc.score === null ? '' : `<span style="font-size:0.8em;color:#aaa;">de ${FornecedorCriticidade.SCORE_MAXIMO}</span>`}
+      </div>
+      <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:700;background:${calc.faixa.fundo};color:${calc.faixa.cor};">${esc(calc.faixa.rotulo)}</span>
+    </div>
+    ${calc.pendentes.length ? `<div style="font-size:0.75em;color:#e65100;margin-top:6px;">⚠ ${calc.pendentes.length} pergunta${calc.pendentes.length > 1 ? 's' : ''} sem resposta — a criticidade só existe quando as 3 forem respondidas</div>` : ''}
+    ${calc.completa ? `<div style="font-size:0.72em;color:#888;margin-top:6px;">Usada como peso do risco automático deste fornecedor na carga de risco da empresa.</div>` : ''}`;
+};
+
 window.salvarAvaliacaoFornecedor = async () => {
   const fornecedorId = document.getElementById('fornAvalId').value;
   const f = fornecedoresData.find((x) => String(x.id) === String(fornecedorId));
@@ -7865,6 +7953,7 @@ window.salvarAvaliacaoFornecedor = async () => {
 
   const respostas = _coletarRespostasFornecedor();
   const calc = FornecedorScore.calcular(criteriosFornecedorData, respostas);
+  const respostasCriticidade = _coletarRespostasCriticidadeFornecedor();
 
   if (!calc.completa && !confirm(`Faltam ${calc.pendentes.length} critério(s) sem resposta.\n\nA avaliação vai ser gravada como incompleta e a nota fica provisória. Salvar assim mesmo?`)) return;
 
@@ -7875,6 +7964,7 @@ window.salvarAvaliacaoFornecedor = async () => {
       fornecedorId: f.id,
       fornecedorNome: f.nome,
       respostas,
+      respostasCriticidade,
       observacao: document.getElementById('fornObservacao').value.trim(),
     });
 
@@ -8147,29 +8237,31 @@ function renderizarFornecedoresCadastro() {
       <table>
         <thead>
           <tr>
-            <th style="width:22%;">Empresa</th>
-            <th style="width:16%;">Categoria</th>
-            <th style="width:20%;">Serviço prestado</th>
-            <th style="width:10%;">Setor</th>
-            <th style="width:18%;">Pessoas</th>
+            <th style="width:20%;">Empresa</th>
+            <th style="width:14%;">Categoria</th>
+            <th style="width:18%;">Serviço prestado</th>
+            <th style="width:9%;">Setor</th>
+            <th style="width:16%;">Pessoas</th>
+            <th style="width:9%;text-align:center;">Criticidade</th>
             <th style="width:14%;text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody>
-          ${data.length ? data.map((f) => `
+          ${data.length ? data.map((f) => { const av = _avaliacaoDoFornecedor(f.id); return `
             <tr>
               <td style="font-weight:600;">${esc(f.nome)}</td>
               <td style="color:#666;font-size:0.88em;">${esc(f.categoriaFornecedor || '–')}</td>
               <td style="color:#666;font-size:0.9em;">${esc(f.detalhes || '–')}</td>
               <td style="color:#666;font-size:0.88em;">${esc(f.setor || '–')}</td>
               <td style="color:#666;font-size:0.88em;">${_resumoPessoasFornecedor(f)}</td>
+              <td style="text-align:center;">${_badgeCriticidadeFornecedor(av)}</td>
               <td style="text-align:center;">
                 ${podeMexer ? `
                   <button class="btn-icon" onclick="abrirModalFornecedor('${esc(f.id)}')" title="Editar">✏️</button>
                   <button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
               </td>
-            </tr>`).join('')
-            : `<tr><td colspan="6" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com essa busca.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
+            </tr>`; }).join('')
+            : `<tr><td colspan="7" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com essa busca.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
         </tbody>
       </table>
     </div>

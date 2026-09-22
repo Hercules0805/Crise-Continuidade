@@ -555,6 +555,10 @@ async function _lerAvaliacoesFornecedor() {
         nota: d.nota === null || d.nota === undefined ? null : Number(d.nota),
         completa: !!d.completa,
         criteriosVersao: Number(d.criteriosVersao) || 1,
+        // Criticidade: aba separada da conformidade, na mesma avaliacao.
+        respostasCriticidade: d.respostasCriticidade || {},
+        scoreCriticidade: d.scoreCriticidade === null || d.scoreCriticidade === undefined ? null : Number(d.scoreCriticidade),
+        completaCriticidade: !!d.completaCriticidade,
         observacao: d.observacao || '',
         avaliadoEm: d.avaliadoEm || '',
         avaliadoPor: d.avaliadoPor || '',
@@ -574,6 +578,10 @@ async function _lerAvaliacoesFornecedor() {
 async function _salvarAvaliacaoFornecedor(a) {
   const criterios = await _lerCriteriosFornecedor();
   const calc = FornecedorScore.calcular(criterios, a.respostas || {});
+  // Criticidade e uma aba da MESMA avaliacao, nao uma colecao separada. Assim
+  // como a nota, o score vem calculado aqui — nunca aceito do que a tela
+  // mandar — pela mesma razao que o score do risco e recalculado no servidor.
+  const calcCrit = FornecedorCriticidade.calcular(a.respostasCriticidade || {});
   const agora = new Date().toISOString();
 
   const data = {
@@ -583,6 +591,9 @@ async function _salvarAvaliacaoFornecedor(a) {
     nota: calc.nota,
     completa: calc.completa,
     criteriosVersao: await _versaoCriteriosAtual(),
+    respostasCriticidade: a.respostasCriticidade || {},
+    scoreCriticidade: calcCrit.score,
+    completaCriticidade: calcCrit.completa,
     observacao: String(a.observacao || ''),
     avaliadoEm: agora,
     avaliadoPor: (window.USER_EMAIL || '').toLowerCase(),
@@ -590,7 +601,7 @@ async function _salvarAvaliacaoFornecedor(a) {
   if (!data.fornecedorId) throw new Error('Avaliação sem fornecedor.');
 
   const ref = await _db.collection(COLLECTION.avaliacoesFornecedor).add(data);
-  return { success: true, id: ref.id, nota: calc.nota, completa: calc.completa };
+  return { success: true, id: ref.id, nota: calc.nota, completa: calc.completa, scoreCriticidade: calcCrit.score, completaCriticidade: calcCrit.completa };
 }
 
 // Última resposta por area||processo -> score/tier/avaliado/respostas
