@@ -24,12 +24,17 @@ function chaveDoDia(dataISO) {
   return new Date(dataISO).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 }
 
-/** Busca os quatro insumos que a reconstrucao precisa. */
+/** Busca os cinco insumos que a reconstrucao precisa. */
 async function montarInsumos(db) {
-  const [medicoesSnap, riscosSnap, processosSnap, avaliacoesSnap] = await Promise.all([
+  const [medicoesSnap, riscosSnap, processosSnap, respostasBiaSnap, avaliacoesSnap] = await Promise.all([
     db.collection('medicoes').where('fonte', '==', 'risco').get(),
     db.collection('riscos').get(),
     db.collection('processos').get(),
+    // O score/Tier do processo NAO mora no documento de /processos -- mora em
+    // respostas_bia, unido na leitura. Ver historicoRisco.resolverProcessosComBia
+    // (e o bug que essa uniao corrige: sem ela, todo processo caia em
+    // Pendente/peso 2 aqui, mesmo com BIA respondido).
+    db.collection('respostas_bia').get(),
     db.collection('avaliacoes_fornecedor').get(),
   ]);
 
@@ -45,8 +50,9 @@ async function montarInsumos(db) {
     };
   });
 
-  const processosPorId = {};
-  processosSnap.docs.forEach((d) => { processosPorId[d.id] = d.data() || {}; });
+  const processosRaw = processosSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+  const respostasBia = respostasBiaSnap.docs.map((d) => d.data());
+  const processosPorId = historicoRisco.resolverProcessosComBia(processosRaw, respostasBia);
 
   // Mesma dedupe do cliente (api.js: _lerAvaliacoesFornecedor) -- a ultima
   // avaliacao de cada fornecedor, por avaliadoEm.

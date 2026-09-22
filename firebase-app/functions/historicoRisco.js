@@ -65,6 +65,42 @@ function tierDoProcesso(p) {
   return TIER.PENDENTE;
 }
 
+/**
+ * Resolve score/avaliado de cada processo a partir da ultima resposta do BIA
+ * (respostas_bia, por chave area+processo) — copia de _lerRespostasIndexadas
+ * + _lerProcessos em public/api.js.
+ *
+ * BUG QUE ISSO CORRIGE (22/09/2026): o documento de /processos NAO guarda
+ * score nem avaliado -- eles vivem so em respostas_bia e sao unidos na
+ * leitura. A reconstrucao lia /processos cru, sem esse join, entao
+ * tierDoProcesso() caia sempre em Pendente (peso 2) mesmo pra processo com
+ * BIA respondido -- a carga do retrato saia sistematicamente menor que a
+ * carga ao vivo (caso real: 70 no retrato contra 93 ao vivo, no mesmo dia,
+ * com os mesmos riscos).
+ */
+function resolverProcessosComBia(processosRaw, respostasBia) {
+  const maisRecentePorChave = {};
+  (respostasBia || [])
+    .slice()
+    .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
+    .forEach((r) => {
+      const key = `${r.area}||${r.processo}`;
+      if (!maisRecentePorChave[key]) {
+        maisRecentePorChave[key] = { score: Number(r.score) || 0, avaliado: true };
+      }
+    });
+
+  const processosPorId = {};
+  (processosRaw || []).forEach((p) => {
+    const resp = maisRecentePorChave[`${p.area}||${p.processo}`];
+    processosPorId[p.id] = Object.assign({}, p, {
+      score: resp ? resp.score : 0,
+      avaliado: resp ? resp.avaliado : false,
+    });
+  });
+  return processosPorId;
+}
+
 // --- Pesos (copia de public/risco-consolidado.js) ---------------------------
 const PESO_TIER = {};
 PESO_TIER[TIER.T1] = 3;
@@ -206,6 +242,7 @@ module.exports = {
   PESO_PADRAO,
   PESO_POR_FAIXA_FORNECEDOR,
   tierDoProcesso,
+  resolverProcessosComBia,
   faixaCriticidadeFornecedor,
   pesoPorCriticidadeFornecedor,
   faixaScore,

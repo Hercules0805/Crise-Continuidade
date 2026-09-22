@@ -166,6 +166,66 @@ test('carga da empresa e a soma das cargas das areas', () => {
 });
 
 // ============================================================
+// resolverProcessosComBia — o score/Tier do processo vem de respostas_bia,
+// nao do documento de /processos (bug corrigido em 22/09/2026: sem este
+// join, todo processo caia em Pendente/peso 2 mesmo com BIA respondido)
+// ============================================================
+
+test('processo sem nenhuma resposta_bia fica Pendente (nao avaliado)', () => {
+  const processosRaw = [{ id: 'p1', area: 'Financeiro', processo: 'Faturamento' }];
+  const porId = HR.resolverProcessosComBia(processosRaw, []);
+  assert.strictEqual(porId.p1.avaliado, false);
+  assert.strictEqual(porId.p1.score, 0);
+  assert.strictEqual(HR.tierDoProcesso(porId.p1), HR.TIER.PENDENTE);
+});
+
+test('processo com resposta_bia resolve score/avaliado e o Tier certo', () => {
+  const processosRaw = [{ id: 'p1', area: 'Financeiro', processo: 'Faturamento' }];
+  const respostasBia = [{ area: 'Financeiro', processo: 'Faturamento', score: 14, timestamp: '2026-09-10T00:00:00.000Z' }];
+  const porId = HR.resolverProcessosComBia(processosRaw, respostasBia);
+  assert.strictEqual(porId.p1.avaliado, true);
+  assert.strictEqual(porId.p1.score, 14);
+  assert.strictEqual(HR.tierDoProcesso(porId.p1), HR.TIER.T1, '14 >= 12 e Tier 1');
+});
+
+test('duas respostas_bia do mesmo processo: vence a mais recente por timestamp', () => {
+  const processosRaw = [{ id: 'p1', area: 'Financeiro', processo: 'Faturamento' }];
+  const respostasBia = [
+    { area: 'Financeiro', processo: 'Faturamento', score: 14, timestamp: '2026-09-01T00:00:00.000Z' },
+    { area: 'Financeiro', processo: 'Faturamento', score: 3, timestamp: '2026-09-15T00:00:00.000Z' },
+  ];
+  const porId = HR.resolverProcessosComBia(processosRaw, respostasBia);
+  assert.strictEqual(porId.p1.score, 3, 'a resposta de 15/09 e mais recente que a de 01/09');
+});
+
+test('processo com tierManual mas sem resposta_bia preserva o tierManual', () => {
+  const processosRaw = [{ id: 'p1', area: 'Financeiro', processo: 'Faturamento', tierManual: HR.TIER.T2 }];
+  const porId = HR.resolverProcessosComBia(processosRaw, []);
+  assert.strictEqual(HR.tierDoProcesso(porId.p1), HR.TIER.T2);
+});
+
+test('respostas_bia de outro processo nao vaza pro processo errado', () => {
+  const processosRaw = [{ id: 'p1', area: 'Financeiro', processo: 'Faturamento' }];
+  const respostasBia = [{ area: 'TI', processo: 'Outro', score: 14, timestamp: '2026-09-10T00:00:00.000Z' }];
+  const porId = HR.resolverProcessosComBia(processosRaw, respostasBia);
+  assert.strictEqual(porId.p1.avaliado, false);
+});
+
+test('reconstrucao ponta a ponta: processo com BIA respondido pesa pelo Tier real, nao Pendente', () => {
+  const processosRaw = [{ id: 'p1', area: 'Financeiro', processo: 'Faturamento' }];
+  const respostasBia = [{ area: 'Financeiro', processo: 'Faturamento', score: 14, timestamp: '2026-09-10T00:00:00.000Z' }];
+  const processosPorId = HR.resolverProcessosComBia(processosRaw, respostasBia);
+  const r = HR.reconstruirEmData(
+    [medicao({ valor: 6 })],
+    { r1: { processoId: 'p1', area: 'Financeiro' } },
+    processosPorId,
+    {},
+    '2026-09-20T00:00:00.000Z'
+  );
+  assert.strictEqual(r.empresa.carga, 6 * 3, 'Tier 1 pesa 3, nao 2 (Pendente)');
+});
+
+// ============================================================
 // MONOTONICIDADE NO TEMPO — a mesma licao da carga de hoje, aplicada a curva:
 // um retrato mais recente com um risco a mais nunca pode ficar mais baixo
 // so por causa desse acrescimo, se nada mais mudou.
