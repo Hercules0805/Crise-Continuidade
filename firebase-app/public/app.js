@@ -879,10 +879,16 @@ window.salvarArea = async () => {
     solucao: document.getElementById('fSolucao').value.trim(),
   };
   if (!a.nome) return showToast('Informe o nome da área.', '#e65100');
-  await API.salvarArea(a);
+  const r = await API.salvarArea(a);
+  // Ja sabemos exatamente o que foi gravado (r.dado) -- so atualiza esta area
+  // no array ja carregado, sem reconstruir a pagina inteira nem buscar Areas
+  // e Dependencias de novo (o que areas() fazia).
+  const item = { ...r.dado, id: r.id };
+  const idx = window.areasData.findIndex((x) => String(x.id) === String(r.id));
+  if (idx >= 0) window.areasData[idx] = item; else window.areasData.push(item);
   fecharModal();
   showToast('✅ Salvo!', '#2e7d32');
-  areas();
+  renderizarAreas();
 };
 
 window.excluirArea = async (id) => {
@@ -1030,7 +1036,7 @@ window.salvarPessoaCadastro = async () => {
   const id = document.getElementById('pessoaId').value || null;
 
   try {
-    await API.salvarDependencia({
+    const r = await API.salvarDependencia({
       id,
       categoria: 'Pessoas',
       nome,
@@ -1040,8 +1046,11 @@ window.salvarPessoaCadastro = async () => {
     });
     fecharModalPessoa();
     API.invalidate('getDependencias');
-    const deps = await API.getDependencias();
-    pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+    // Ja sabemos exatamente o que foi gravado (r.dado) -- so atualiza esta
+    // pessoa no array ja carregado, sem buscar o catalogo inteiro de novo.
+    const item = { ...r.dado, id: r.id };
+    const idx = pessoasData.findIndex((x) => String(x.id) === String(r.id));
+    if (idx >= 0) pessoasData[idx] = item; else pessoasData.push(item);
     renderizarPessoas();
     showToast('✅ Salvo!', '#2e7d32');
   } catch (e) {
@@ -7974,13 +7983,13 @@ function renderizarFornecedores() {
       <table>
         <thead>
           <tr>
-            ${th('nome', 'Empresa', 'width:20%;')}
-            <th style="width:16%;">Pessoas</th>
-            ${th('nota', 'Nota', 'width:8%;text-align:center;')}
+            ${th('nome', 'Empresa', 'width:18%;')}
+            <th style="width:14%;">Pessoas</th>
+            ${th('nota', 'Nota de Conformidade', 'width:12%;text-align:center;')}
             ${th('criticidade', 'Criticidade', 'width:10%;text-align:center;')}
-            <th style="width:14%;">Situação</th>
+            <th style="width:13%;">Situação</th>
             ${th('avaliadoEm', 'Última avaliação', 'width:12%;')}
-            <th style="width:20%;text-align:center;">Ações</th>
+            <th style="width:17%;text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody>
@@ -8035,11 +8044,15 @@ function _htmlDrawerAvaliacaoFornecedor() {
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
         <input type="hidden" id="fornAvalId">
         <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
-          <button id="tab-avalForn-conformidade" onclick="trocarAbaAvaliacaoFornecedor('conformidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Conformidade</button>
-          <button id="tab-avalForn-criticidade" onclick="trocarAbaAvaliacaoFornecedor('criticidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Criticidade</button>
+          <button id="tab-avalForn-criticidade" onclick="trocarAbaAvaliacaoFornecedor('criticidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Criticidade</button>
+          <button id="tab-avalForn-conformidade" onclick="trocarAbaAvaliacaoFornecedor('conformidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Conformidade</button>
         </div>
         <div style="flex:1;overflow-y:auto;padding:20px 24px;">
-          <div id="painel-avalForn-conformidade">
+          <div id="painel-avalForn-criticidade">
+            <div id="fornCriticidadePreview" style="position:sticky;top:0;background:#fff;padding:0 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
+            <div id="fornCriticidadeLista"></div>
+          </div>
+          <div id="painel-avalForn-conformidade" style="display:none;">
             <div id="fornNotaPreview" style="position:sticky;top:0;background:#fff;padding:0 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
             <div style="margin-bottom:18px;padding:14px 16px;border:1px solid #e3e6f5;background:#f7f8fd;border-radius:9px;">
               <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:8px;">
@@ -8053,10 +8066,6 @@ function _htmlDrawerAvaliacaoFornecedor() {
               <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">Observação geral (opcional)</label>
               <textarea id="fornObservacao" rows="3" placeholder="Contexto que ajuda quem for ler esta avaliação depois" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;font-family:inherit;"></textarea>
             </div>
-          </div>
-          <div id="painel-avalForn-criticidade" style="display:none;">
-            <div id="fornCriticidadePreview" style="position:sticky;top:0;background:#fff;padding:0 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
-            <div id="fornCriticidadeLista"></div>
           </div>
         </div>
       </div>
@@ -8155,7 +8164,7 @@ window.abrirAvaliacaoFornecedor = (fornecedorId) => {
 
   atualizarPreviewNotaFornecedor();
   atualizarPreviewCriticidadeFornecedor();
-  trocarAbaAvaliacaoFornecedor('conformidade');
+  trocarAbaAvaliacaoFornecedor('criticidade');
   document.getElementById('drawerFornecedor').classList.add('open');
   document.getElementById('drawerOverlayFornecedor').classList.add('open');
 };
@@ -8330,7 +8339,12 @@ window.salvarAvaliacaoFornecedor = async () => {
     });
     f.criteriosAplicaveis = criteriosAplicaveis;
 
-    avaliacoesFornecedorData = await API.getAvaliacoesFornecedor();
+    // Ja sabemos exatamente o que foi gravado (r.dado) -- em vez de buscar a
+    // colecao inteira de avaliacoes de novo (append-only, so cresce), so
+    // atualiza este fornecedor no array ja carregado.
+    const novaAvaliacao = { ...r.dado, id: r.id };
+    const idx = avaliacoesFornecedorData.findIndex((av) => av.fornecedorId === novaAvaliacao.fornecedorId);
+    if (idx >= 0) avaliacoesFornecedorData[idx] = novaAvaliacao; else avaliacoesFornecedorData.push(novaAvaliacao);
     fecharAvaliacaoFornecedor();
     renderizarFornecedores();
 
@@ -8557,8 +8571,20 @@ async function fornecedoresCadastro() {
       <div><h2>Cadastro de Fornecedores</h2><p class="page-sub">Os fornecedores do catálogo de dependências da empresa</p></div>
       <button class="btn btn-primary" onclick="abrirModalFornecedor()" id="btnNovoFornecedor" style="display:none;">+ Novo Fornecedor</button>
     </div>
-    <div style="margin-bottom:16px;">
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end;">
       <input type="text" id="buscaFornecedorCadastro" placeholder="🔍 Buscar fornecedor..." oninput="renderizarFornecedoresCadastro()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:280px;">
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Categoria</label>
+        <select id="filtroFornCadastroCategoria" onchange="renderizarFornecedoresCadastro()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+          <option value="">Todas as categorias</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Setor</label>
+        <select id="filtroFornCadastroSetor" onchange="renderizarFornecedoresCadastro()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+          <option value="">Todos os setores</option>
+        </select>
+      </div>
     </div>
     <div class="loading" id="loadingFornCadastro">⏳ Carregando...</div>
     <div id="listaFornCadastro"></div>
@@ -8575,6 +8601,15 @@ async function fornecedoresCadastro() {
     window.areasData = areasFornecedor;
     avaliacoesFornecedorData = avals;
     categoriasFornecedorData = cats;
+    // Montados uma vez so: renderizarFornecedoresCadastro() roda a cada tecla
+    // da busca, e remontar as opcoes toda hora apagaria o filtro escolhido.
+    document.getElementById('filtroFornCadastroCategoria').innerHTML = '<option value="">Todas as categorias</option>' +
+      categoriasFornecedorData.filter((c) => c.ativo)
+        .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+        .map((c) => `<option value="${esc(c.nome)}">${esc(c.nome)}</option>`).join('');
+    document.getElementById('filtroFornCadastroSetor').innerHTML = '<option value="">Todos os setores</option>' +
+      [...window.areasData].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+        .map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
   } catch (e) {
     console.error('Cadastro de fornecedores: falha ao carregar', e);
     document.getElementById('loadingFornCadastro').style.display = 'none';
@@ -8594,9 +8629,13 @@ function renderizarFornecedoresCadastro() {
   if (!lista) return;
 
   const busca = (document.getElementById('buscaFornecedorCadastro')?.value || '').toLowerCase();
+  const filtroCategoria = document.getElementById('filtroFornCadastroCategoria')?.value || '';
+  const filtroSetor = document.getElementById('filtroFornCadastroSetor')?.value || '';
   const data = fornecedoresData.filter((f) => !busca
     || (f.nome || '').toLowerCase().includes(busca)
-    || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)));
+    || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)))
+    .filter((f) => !filtroCategoria || f.categoriaFornecedor === filtroCategoria)
+    .filter((f) => !filtroSetor || f.setor === filtroSetor);
 
   lista.innerHTML = `
     <div class="data-table">
@@ -8627,7 +8666,7 @@ function renderizarFornecedoresCadastro() {
                   <button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
               </td>
             </tr>`; }).join('')
-            : `<tr><td colspan="7" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com essa busca.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
+            : `<tr><td colspan="7" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -8876,7 +8915,7 @@ window.salvarFornecedorCadastro = async () => {
   const id = document.getElementById('fornCadId').value || null;
 
   try {
-    await API.salvarDependencia({
+    const r = await API.salvarDependencia({
       id,
       // A categoria e sempre Fornecedores nesta tela. E o que mantem o
       // fornecedor no mesmo catalogo de que os processos dependem, e o que a
@@ -8899,8 +8938,15 @@ window.salvarFornecedorCadastro = async () => {
     });
     fecharModalFornecedor();
     API.invalidate('getDependencias');
-    const deps = await API.getDependencias();
-    fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
+    // Ja sabemos exatamente o que foi gravado (r.dado) -- em vez de buscar o
+    // catalogo de dependencias inteiro de novo, so atualiza este fornecedor
+    // no array ja carregado. criteriosAplicaveis nao esta no que _salvarDependencia
+    // grava (de proposito, para nao apagar a escolha feita na avaliacao) --
+    // preserva o que ja estava em memoria.
+    const existente = id ? fornecedoresData.find((x) => String(x.id) === String(id)) : null;
+    const item = { ...r.dado, id: r.id, criteriosAplicaveis: existente ? existente.criteriosAplicaveis : null };
+    const idx = fornecedoresData.findIndex((x) => String(x.id) === String(r.id));
+    if (idx >= 0) fornecedoresData[idx] = item; else fornecedoresData.push(item);
     // O modal e compartilhado entre Cadastro e Avaliação — cada renderizador só
     // desenha se o próprio container estiver na página, então chamar os dois é
     // seguro e atualiza qualquer uma das telas de onde o modal foi aberto.

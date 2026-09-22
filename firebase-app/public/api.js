@@ -597,7 +597,8 @@ async function _salvarAvaliacaoFornecedor(a) {
   const idsAplicaveis = (Array.isArray(a.criteriosAplicaveis) ? a.criteriosAplicaveis : []).map(String);
   if (!idsAplicaveis.length) throw new Error('Selecione ao menos um controle aplicável a este fornecedor.');
 
-  const catalogo = await _lerCriteriosFornecedor();
+  // As duas leituras nao dependem uma da outra -- em paralelo, nao em serie.
+  const [catalogo, criteriosVersao] = await Promise.all([_lerCriteriosFornecedor(), _versaoCriteriosAtual()]);
   const setAplicaveis = new Set(idsAplicaveis);
   const criteriosAplicaveis = catalogo.filter((c) => setAplicaveis.has(String(c.id)));
   const calc = FornecedorScore.calcular(criteriosAplicaveis, a.respostas || {});
@@ -614,7 +615,7 @@ async function _salvarAvaliacaoFornecedor(a) {
     criteriosAplicaveis: idsAplicaveis,
     nota: calc.nota,
     completa: calc.completa,
-    criteriosVersao: await _versaoCriteriosAtual(),
+    criteriosVersao: criteriosVersao,
     respostasCriticidade: a.respostasCriticidade || {},
     scoreCriticidade: calcCrit.score,
     completaCriticidade: calcCrit.completa,
@@ -624,11 +625,18 @@ async function _salvarAvaliacaoFornecedor(a) {
   };
   if (!data.fornecedorId) throw new Error('Avaliação sem fornecedor.');
 
-  const ref = await _db.collection(COLLECTION.avaliacoesFornecedor).add(data);
-  // Vira o padrao deste fornecedor para a proxima avaliacao — a escolha de
-  // controles e uma configuracao dele, nao algo que se refaz do zero toda vez.
-  await _db.collection(COLLECTION.dependencias).doc(data.fornecedorId).set({ criteriosAplicaveis: idsAplicaveis }, { merge: true });
-  return { success: true, id: ref.id, nota: calc.nota, completa: calc.completa, scoreCriticidade: calcCrit.score, completaCriticidade: calcCrit.completa };
+  // As duas gravacoes nao dependem uma da outra (a segunda nao usa o id que a
+  // primeira devolve) -- em paralelo, nao em serie. A segunda vira o padrao
+  // deste fornecedor para a proxima avaliacao — a escolha de controles e uma
+  // configuracao dele, nao algo que se refaz do zero toda vez.
+  const [ref] = await Promise.all([
+    _db.collection(COLLECTION.avaliacoesFornecedor).add(data),
+    _db.collection(COLLECTION.dependencias).doc(data.fornecedorId).set({ criteriosAplicaveis: idsAplicaveis }, { merge: true }),
+  ]);
+  return {
+    success: true, id: ref.id, dado: data,
+    nota: calc.nota, completa: calc.completa, scoreCriticidade: calcCrit.score, completaCriticidade: calcCrit.completa,
+  };
 }
 
 // Última resposta por area||processo -> score/tier/avaliado/respostas
@@ -727,10 +735,10 @@ async function _salvarArea(a) {
   };
   if (a.id) {
     await _db.collection(COLLECTION.areas).doc(String(a.id)).set(data, { merge: true });
-    return { success: true, id: a.id };
+    return { success: true, id: a.id, dado: data };
   }
   const ref = await _db.collection(COLLECTION.areas).add(data);
-  return { success: true, id: ref.id };
+  return { success: true, id: ref.id, dado: data };
 }
 
 
@@ -801,10 +809,10 @@ async function _salvarDependencia(d) {
   };
   if (d.id) {
     await _db.collection(COLLECTION.dependencias).doc(String(d.id)).set(data, { merge: true });
-    return { success: true, id: d.id };
+    return { success: true, id: d.id, dado: data };
   }
   const ref = await _db.collection(COLLECTION.dependencias).add(data);
-  return { success: true, id: ref.id };
+  return { success: true, id: ref.id, dado: data };
 }
 
 async function _salvarComponente(d) {
