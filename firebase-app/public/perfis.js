@@ -63,6 +63,10 @@
   ];
   TELAS[PERFIL.FORNECEDORES] = [
     'fornecedores', 'fornecedores-cadastro', 'fornecedores-categorias', 'fornecedores-criterios',
+    // Gestor do Contrato (Pessoa) e Setor responsavel (Area) sao escolhidos no
+    // cadastro de fornecedor -- sem estas duas telas, quem avalia fornecedor
+    // dependeria do admin pra cadastrar toda pessoa/area nova.
+    'areas', 'pessoas',
   ];
 
   var CATALOGO = [
@@ -158,15 +162,39 @@
   }
 
   /**
+   * DECISAO 22/09/2026: alem de Fornecedores/Fornecedor, o perfil de
+   * fornecedores passa a mexer tambem na categoria Pessoas -- e de onde vem
+   * o Gestor do Contrato do proprio fornecedor. Continua SEM acesso a
+   * Infraestrutura/Sistemas/Processos Internos, que sao do BIA. Funcao
+   * separada de categoriaDeFornecedor de proposito: o resto do sistema usa
+   * categoriaDeFornecedor com o sentido restrito de "e um fornecedor" (ex.:
+   * o filtro que monta a lista de fornecedores), e isso nao pode mudar.
+   */
+  function categoriaGerenciavelPorFornecedores(categoria) {
+    return categoriaDeFornecedor(categoria) || String(categoria || '').trim() === 'Pessoas';
+  }
+
+  /**
    * Pode mexer nesta linha de /dependencias.
    *
-   * Admin mexe em qualquer categoria. O perfil de fornecedores mexe apenas em
-   * fornecedor: sem esta guarda, quem avalia fornecedor poderia apagar as
-   * dependencias de infraestrutura e sistemas que o BIA inteiro usa.
+   * Admin mexe em qualquer categoria. O perfil de fornecedores mexe em
+   * fornecedor e em pessoas: sem esta guarda, quem avalia fornecedor poderia
+   * apagar as dependencias de infraestrutura e sistemas que o BIA inteiro usa.
    */
   function podeMexerNaDependencia(valor, categoria) {
     if (ehAdmin(valor)) return true;
-    return podeGerenciarFornecedores(valor) && categoriaDeFornecedor(categoria);
+    return podeGerenciarFornecedores(valor) && categoriaGerenciavelPorFornecedores(categoria);
+  }
+
+  /**
+   * Pode mexer no cadastro de Areas.
+   *
+   * Areas nao e dividida por categoria como /dependencias -- quem pode mexer,
+   * mexe em qualquer area. O perfil de fornecedores precisa disso pra
+   * cadastrar a area que vira Setor responsavel do proprio fornecedor.
+   */
+  function podeMexerNaArea(valor) {
+    return ehAdmin(valor) || podeGerenciarFornecedores(valor);
   }
 
   /**
@@ -194,7 +222,9 @@
     podeVerTela: podeVerTela,
     telasDoPerfil: telasDoPerfil,
     categoriaDeFornecedor: categoriaDeFornecedor,
+    categoriaGerenciavelPorFornecedores: categoriaGerenciavelPorFornecedores,
     podeMexerNaDependencia: podeMexerNaDependencia,
+    podeMexerNaArea: podeMexerNaArea,
     podeGerenciarFornecedores: podeGerenciarFornecedores,
     podeGerenciarPerfis: podeGerenciarPerfis,
   };

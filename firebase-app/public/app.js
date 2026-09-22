@@ -4,7 +4,7 @@
 
 const app = document.getElementById('app');
 const pages = {
-  processos, perguntas, areas, admin, dependencias, componentes, pcns, riscos,
+  processos, perguntas, areas, pessoas, admin, dependencias, componentes, pcns, riscos,
   'indicadores-dashboard': indicadoresDashboard,
   'indicadores-cadastro': indicadoresCadastro,
   'indicadores-lancamento': indicadoresLancamento,
@@ -718,6 +718,9 @@ window.excluirPergunta = async (id) => {
 // PÁGINA: ÁREAS (Tabela com ordenação)
 // ============================================================
 let areasOrdenacao = { coluna: 'nome', direcao: 'asc' };
+// Compartilhado com Pessoas (Cadastros) e com o modal de Fornecedor: e o
+// mesmo catalogo de dependencias, categoria Pessoas.
+let pessoasData = [];
 
 async function areas() {
   app.innerHTML = `
@@ -749,7 +752,8 @@ async function areas() {
       <label>Nome da Área</label>
       <input type="text" id="fNome" placeholder="Ex: Segurança da Informação">
       <label>Responsável</label>
-      <input type="text" id="fResponsavel" placeholder="Nome do gestor responsável">
+      <select id="fResponsavel"><option value="">Selecione...</option></select>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:-6px;margin-bottom:8px;">Vem do cadastro de Pessoas (Cadastros → Pessoas).</span>
       <label>Email</label>
       <input type="email" id="fEmail" placeholder="email@empresa.com">
       <label>Solução</label>
@@ -769,10 +773,11 @@ async function areas() {
       </div>
     </div></div>`;
 
-  const data = await API.getAreas();
+  const [data, deps] = await Promise.all([API.getAreas(), API.getDependencias()]);
+  pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('lista').style.display = 'block';
-  
+
   window.areasData = data;
   renderizarAreas();
 }
@@ -848,7 +853,15 @@ window.ordenarAreas = (coluna) => {
 window.abrirModalArea = (a) => {
   document.getElementById('fId').value = a ? a.id : '';
   document.getElementById('fNome').value = a ? a.nome : '';
-  document.getElementById('fResponsavel').value = a ? a.responsavel : '';
+  const responsavelAtual = a ? (a.responsavel || '') : '';
+  // Area antiga pode ter responsavel em texto livre que nao bate com nenhuma
+  // pessoa cadastrada -- vira opcao extra selecionada, nunca some em silencio
+  // so por abrir o modal (mesmo padrao ja usado pra Categoria do fornecedor).
+  const temNaLista = pessoasData.some((p) => p.nome === responsavelAtual);
+  document.getElementById('fResponsavel').innerHTML = '<option value="">Selecione...</option>' +
+    pessoasData.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
+    (responsavelAtual && !temNaLista ? `<option value="${esc(responsavelAtual)}">${esc(responsavelAtual)} (não cadastrado como pessoa)</option>` : '');
+  document.getElementById('fResponsavel').value = responsavelAtual;
   document.getElementById('fEmail').value = a ? a.email : '';
   document.getElementById('fSolucao').value = a ? a.solucao : '';
   document.getElementById('modalTitulo').textContent = a ? 'Editar Área' : 'Nova Área';
@@ -877,6 +890,181 @@ window.excluirArea = async (id) => {
   await API.excluirArea(id);
   showToast('🗑️ Excluído.', '#555');
   areas();
+};
+
+// ============================================================
+// PÁGINA: PESSOAS (Tabela com ordenação)
+//
+// Pessoas ja existia como uma das 5 categorias do catalogo /dependencias
+// (Fornecedores, Infraestrutura, Pessoas, Sistemas, Processos Internos), mas
+// so era editavel pela tela generica de Cadastros -> Dependencias. Ganha tela
+// propria pela mesma razao que Fornecedores ja tem uma: e usada em outro
+// lugar do sistema (Gestor do Contrato do fornecedor, Responsavel da area) e
+// precisa de uma lista limpa pra escolher, sem os campos que so fazem
+// sentido pras outras 4 categorias.
+// ============================================================
+let pessoasOrdenacao = { coluna: 'nome', direcao: 'asc' };
+
+async function pessoas() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Pessoas</h2><p class="page-sub">Usadas como Gestor do Contrato (Fornecedores) e Responsável (Áreas)</p></div>
+      <button class="btn btn-primary" onclick="abrirModalPessoa()">+ Nova Pessoa</button>
+    </div>
+    <div style="margin-bottom:16px;">
+      <input type="text" id="buscaPessoa" placeholder="🔍 Buscar pessoa..." oninput="renderizarPessoas()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:300px;">
+    </div>
+    <div class="loading" id="loadingPessoas">⏳ Carregando...</div>
+    <div class="data-table" id="listaPessoas" style="display:none;">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="ordenarPessoas('nome')" style="cursor:pointer;">Nome <span id="sort-pessoa-nome"></span></th>
+            <th onclick="ordenarPessoas('detalhes')" style="cursor:pointer;">Cargo <span id="sort-pessoa-detalhes"></span></th>
+            <th onclick="ordenarPessoas('telefone')" style="cursor:pointer;">Telefone <span id="sort-pessoa-telefone"></span></th>
+            <th onclick="ordenarPessoas('email')" style="cursor:pointer;">Email <span id="sort-pessoa-email"></span></th>
+            <th style="width:100px;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody id="rowsPessoas"></tbody>
+      </table>
+    </div>
+    <div class="modal-overlay" id="modalPessoa"><div class="modal" onclick="event.stopPropagation()">
+      <h3 id="modalPessoaTitulo">Nova Pessoa</h3>
+      <input type="hidden" id="pessoaId">
+      <label>Nome</label>
+      <input type="text" id="pessoaNome" placeholder="Nome da pessoa">
+      <label>Cargo / Papel</label>
+      <input type="text" id="pessoaDetalhes" placeholder="Ex: Gerente de TI">
+      <label>Telefone</label>
+      <input type="text" id="pessoaTelefone" placeholder="Telefone">
+      <label>Email</label>
+      <input type="email" id="pessoaEmail" placeholder="email@empresa.com">
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalPessoa()">Cancelar</button>
+        <button class="btn btn-primary" onclick="salvarPessoaCadastro()">Salvar</button>
+      </div>
+    </div></div>`;
+
+  const deps = await API.getDependencias();
+  pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+  document.getElementById('loadingPessoas').style.display = 'none';
+  document.getElementById('listaPessoas').style.display = 'block';
+  renderizarPessoas();
+}
+
+function renderizarPessoas() {
+  let data = [...pessoasData];
+
+  const busca = (document.getElementById('buscaPessoa') || {}).value || '';
+  if (busca.trim()) {
+    const termo = busca.toLowerCase();
+    data = data.filter((p) =>
+      (p.nome || '').toLowerCase().includes(termo) ||
+      (p.detalhes || '').toLowerCase().includes(termo) ||
+      (p.email || '').toLowerCase().includes(termo));
+  }
+
+  data.sort((a, b) => {
+    const valA = (a[pessoasOrdenacao.coluna] || '').toString().toLowerCase();
+    const valB = (b[pessoasOrdenacao.coluna] || '').toString().toLowerCase();
+    const comparacao = valA.localeCompare(valB);
+    return pessoasOrdenacao.direcao === 'asc' ? comparacao : -comparacao;
+  });
+
+  ['nome', 'detalhes', 'telefone', 'email'].forEach((col) => {
+    const el = document.getElementById(`sort-pessoa-${col}`);
+    if (el) el.textContent = col === pessoasOrdenacao.coluna ? (pessoasOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
+  });
+
+  document.getElementById('rowsPessoas').innerHTML = data.length
+    ? data.map((p) => `<tr>
+        <td style="font-weight:600;">${esc(p.nome)}</td>
+        <td>${esc(p.detalhes || '')}</td>
+        <td>${esc(p.telefone || '')}</td>
+        <td>${esc(p.email || '')}</td>
+        <td style="text-align:center;">
+          <button class="btn-icon" onclick="abrirModalPessoa('${esc(p.id)}')" title="Editar">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+          </button>
+          <button class="btn-icon" onclick="excluirPessoaCadastro('${esc(p.id)}')" title="Excluir">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+          </button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">Nenhuma pessoa cadastrada.</td></tr>';
+}
+
+window.ordenarPessoas = (coluna) => {
+  if (pessoasOrdenacao.coluna === coluna) {
+    pessoasOrdenacao.direcao = pessoasOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
+  } else {
+    pessoasOrdenacao.coluna = coluna;
+    pessoasOrdenacao.direcao = 'asc';
+  }
+  renderizarPessoas();
+};
+
+window.abrirModalPessoa = (id) => {
+  const p = id ? pessoasData.find((x) => String(x.id) === String(id)) : null;
+  document.getElementById('pessoaId').value = p ? p.id : '';
+  document.getElementById('pessoaNome').value = p ? (p.nome || '') : '';
+  document.getElementById('pessoaDetalhes').value = p ? (p.detalhes || '') : '';
+  document.getElementById('pessoaTelefone').value = p ? (p.telefone || '') : '';
+  document.getElementById('pessoaEmail').value = p ? (p.email || '') : '';
+  document.getElementById('modalPessoaTitulo').textContent = p ? 'Editar Pessoa' : 'Nova Pessoa';
+  document.getElementById('modalPessoa').classList.add('open');
+};
+
+window.fecharModalPessoa = () => document.getElementById('modalPessoa').classList.remove('open');
+
+window.salvarPessoaCadastro = async () => {
+  const nome = document.getElementById('pessoaNome').value.trim();
+  if (!nome) return showToast('Informe o nome da pessoa.', '#e65100');
+  const id = document.getElementById('pessoaId').value || null;
+
+  try {
+    await API.salvarDependencia({
+      id,
+      categoria: 'Pessoas',
+      nome,
+      detalhes: document.getElementById('pessoaDetalhes').value.trim(),
+      telefone: document.getElementById('pessoaTelefone').value.trim(),
+      email: document.getElementById('pessoaEmail').value.trim(),
+    });
+    fecharModalPessoa();
+    API.invalidate('getDependencias');
+    const deps = await API.getDependencias();
+    pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+    renderizarPessoas();
+    showToast('✅ Salvo!', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+  }
+};
+
+window.excluirPessoaCadastro = async (id) => {
+  const p = pessoasData.find((x) => String(x.id) === String(id));
+  if (!p) return;
+  const aviso = `Excluir "${p.nome}"?\n\nSe essa pessoa estiver marcada como Gestor do Contrato de algum fornecedor ou Responsável de alguma área, o nome continua lá como texto (não é apagado em cascata), mas deixa de aparecer nas listas de seleção. Continuar?`;
+  if (!confirm(aviso)) return;
+
+  try {
+    await API.excluirDependencia(id);
+    API.invalidate('getDependencias');
+    const deps = await API.getDependencias();
+    pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+    renderizarPessoas();
+    showToast('🗑️ Excluído.', '#555');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+  }
 };
 
 // ============================================================
@@ -7667,11 +7855,15 @@ async function fornecedores() {
   document.getElementById('btnIrCriterios').style.display = isAdmin ? 'inline-block' : 'none';
 
   try {
-    const [deps, crits, avals, cfg, cats] = await Promise.all([
+    const [deps, crits, avals, cfg, cats, areasFornecedor] = await Promise.all([
       API.getDependencias(), API.getCriteriosFornecedor(), API.getAvaliacoesFornecedor(), API.getConfigFornecedor(),
-      API.getCategoriasFornecedor(),
+      API.getCategoriasFornecedor(), API.getAreas(),
     ]);
     fornecedoresData = deps.filter((d) => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
+    // Gestor do Contrato (select) e Setor responsavel (select), no modal de
+    // fornecedor -- mesmo catalogo que as telas de Pessoas e Areas usam.
+    pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+    window.areasData = areasFornecedor;
     criteriosFornecedorData = crits;
     avaliacoesFornecedorData = avals;
     configFornecedor = cfg;
@@ -8375,8 +8567,12 @@ async function fornecedoresCadastro() {
   document.getElementById('btnNovoFornecedor').style.display = podeMexer ? 'inline-block' : 'none';
 
   try {
-    const [deps, avals, cats] = await Promise.all([API.getDependencias(), API.getAvaliacoesFornecedor(), API.getCategoriasFornecedor()]);
+    const [deps, avals, cats, areasFornecedor] = await Promise.all([
+      API.getDependencias(), API.getAvaliacoesFornecedor(), API.getCategoriasFornecedor(), API.getAreas(),
+    ]);
     fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
+    pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+    window.areasData = areasFornecedor;
     avaliacoesFornecedorData = avals;
     categoriasFornecedorData = cats;
   } catch (e) {
@@ -8491,8 +8687,22 @@ function _htmlModalFornecedorCadastro() {
 
       <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:8px;margin-top:18px;border-top:1px solid #eee;padding-top:14px;">Dados do contratante</label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div><label>Gestor do Contrato</label><input type="text" id="fornCadGestorContrato" placeholder="Nome de quem responde por este contrato"></div>
-        <div><label>Setor responsável pelo contrato</label><input type="text" id="fornCadSetor" placeholder="Ex: TI, Compras"></div>
+        <div>
+          <label>Gestor do Contrato</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <select id="fornCadGestorContrato" style="flex:1;"><option value="">Selecione...</option></select>
+            <button type="button" class="btn-icon" onclick="_recarregarPessoasFornecedor()" title="Atualizar lista de pessoas">🔄</button>
+          </div>
+          <a href="#pessoas" target="_blank" style="font-size:0.74em;color:#1a237e;font-weight:600;">+ Cadastrar nova pessoa</a>
+        </div>
+        <div>
+          <label>Setor responsável pelo contrato</label>
+          <div style="display:flex;gap:6px;align-items:center;">
+            <select id="fornCadSetor" style="flex:1;"><option value="">Selecione...</option></select>
+            <button type="button" class="btn-icon" onclick="_recarregarAreasFornecedor()" title="Atualizar lista de áreas">🔄</button>
+          </div>
+          <a href="#areas" target="_blank" style="font-size:0.74em;color:#1a237e;font-weight:600;">+ Cadastrar nova área</a>
+        </div>
       </div>
 
       <div class="modal-footer">
@@ -8578,6 +8788,59 @@ window.removerPessoaFornecedor = (idx) => {
   renderPessoasFornecedor();
 };
 
+/**
+ * Popula o select de Gestor do Contrato a partir de pessoasData.
+ *
+ * Fornecedor antigo pode ter gestorContrato em texto livre que nao bate com
+ * nenhuma pessoa cadastrada -- vira opcao extra selecionada, nunca some em
+ * silencio so por abrir o modal (mesmo padrao ja usado pra Categoria).
+ */
+function _popularSelectPessoasFornecedor(valorAtual) {
+  const sel = document.getElementById('fornCadGestorContrato');
+  if (!sel) return;
+  const temNaLista = pessoasData.some((p) => p.nome === valorAtual);
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    pessoasData.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
+    (valorAtual && !temNaLista ? `<option value="${esc(valorAtual)}">${esc(valorAtual)} (não cadastrado como pessoa)</option>` : '');
+  sel.value = valorAtual || '';
+}
+
+/** Mesma ideia de _popularSelectPessoasFornecedor, pro Setor responsavel (Area). */
+function _popularSelectAreasFornecedor(valorAtual) {
+  const sel = document.getElementById('fornCadSetor');
+  if (!sel) return;
+  const lista = window.areasData || [];
+  const temNaLista = lista.some((a) => a.nome === valorAtual);
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    lista.map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('') +
+    (valorAtual && !temNaLista ? `<option value="${esc(valorAtual)}">${esc(valorAtual)} (não cadastrada como área)</option>` : '');
+  sel.value = valorAtual || '';
+}
+
+/**
+ * Recarrega as listas de Pessoas/Areas sem fechar o modal de fornecedor.
+ *
+ * Existem porque "+ Cadastrar nova pessoa/área" abre em aba nova (pra nao
+ * perder a edicao em andamento) -- criar o registro la nao atualiza sozinho
+ * a lista desta aba.
+ */
+window._recarregarPessoasFornecedor = async () => {
+  const atual = document.getElementById('fornCadGestorContrato').value;
+  API.invalidate('getDependencias');
+  const deps = await API.getDependencias();
+  pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+  _popularSelectPessoasFornecedor(atual);
+  showToast('Lista de pessoas atualizada.', '#2e7d32');
+};
+
+window._recarregarAreasFornecedor = async () => {
+  const atual = document.getElementById('fornCadSetor').value;
+  API.invalidate('getAreas');
+  window.areasData = await API.getAreas();
+  _popularSelectAreasFornecedor(atual);
+  showToast('Lista de áreas atualizada.', '#2e7d32');
+};
+
 window.abrirModalFornecedor = (id) => {
   const f = id ? fornecedoresData.find((x) => String(x.id) === String(id)) : null;
   document.getElementById('modalFornecedorTitulo').textContent = f ? 'Editar Fornecedor' : 'Novo Fornecedor';
@@ -8594,10 +8857,10 @@ window.abrirModalFornecedor = (id) => {
     categoriasAtivas.map((c) => `<option value="${esc(c.nome)}">${esc(c.nome)}</option>`).join('') +
     (categoriaAtual && !temNaLista ? `<option value="${esc(categoriaAtual)}">${esc(categoriaAtual)} (inativa)</option>` : '');
   document.getElementById('fornCadCategoria').value = categoriaAtual || '';
-  document.getElementById('fornCadGestorContrato').value = f ? (f.gestorContrato || '') : '';
+  _popularSelectPessoasFornecedor(f ? (f.gestorContrato || '') : '');
   document.getElementById('fornCadTic').checked = f ? (f.tic !== false) : true;
   document.getElementById('fornCadDetalhes').value = f ? (f.detalhes || '') : '';
-  document.getElementById('fornCadSetor').value = f ? (f.setor || '') : '';
+  _popularSelectAreasFornecedor(f ? (f.setor || '') : '');
   document.getElementById('fornCadEndereco').value = f ? (f.endereco || '') : '';
   window._fornecedorPessoas = f && Array.isArray(f.pessoas) ? [...f.pessoas] : [];
   window.cancelarEdicaoPessoaFornecedor();

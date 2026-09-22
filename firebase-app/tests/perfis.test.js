@@ -148,7 +148,7 @@ test('as regras nao conhecem perfil que esta lista nao tem', () => {
 // ============================================================
 
 const TODAS_AS_TELAS = [
-  'processos', 'pcns', 'areas', 'riscos',
+  'processos', 'pcns', 'areas', 'pessoas', 'riscos',
   'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
   'dependencias', 'componentes', 'perguntas',
   'admin', 'perfis',
@@ -161,21 +161,23 @@ test('admin ve todas as telas', () => {
   });
 });
 
-test('o perfil de fornecedores ve SO as tres telas de fornecedor', () => {
+test('o perfil de fornecedores ve as telas de fornecedor mais Areas e Pessoas', () => {
+  // Areas e Pessoas entraram porque Gestor do Contrato (Pessoa) e Setor
+  // responsavel (Area) sao escolhidos no proprio cadastro de fornecedor.
   const vistas = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela(Perfis.PERFIL.FORNECEDORES, t));
-  assert.deepStrictEqual(vistas.sort(), ['fornecedores', 'fornecedores-cadastro', 'fornecedores-criterios']);
+  assert.deepStrictEqual(vistas.sort(), ['areas', 'fornecedores', 'fornecedores-cadastro', 'fornecedores-criterios', 'pessoas']);
 });
 
 test('o perfil de fornecedores NAO ve processos, PCNs, riscos nem indicadores', () => {
   ['processos', 'pcns', 'riscos', 'indicadores-dashboard', 'indicadores-cadastro',
     'indicadores-lancamento', 'indicadores-matriz', 'admin', 'perfis',
-    'areas', 'perguntas', 'dependencias', 'componentes'].forEach((t) => {
+    'perguntas', 'dependencias', 'componentes'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.FORNECEDORES, t), false, `nao deveria ver ${t}`);
   });
 });
 
 test('gestor NAO ve as telas de cadastro nem as de fornecedor', () => {
-  ['areas', 'perguntas', 'dependencias', 'componentes', 'perfis',
+  ['areas', 'pessoas', 'perguntas', 'dependencias', 'componentes', 'perfis',
     'fornecedores', 'fornecedores-cadastro', 'fornecedores-criterios'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, t), false, `nao deveria ver ${t}`);
   });
@@ -216,8 +218,12 @@ test('o perfil de fornecedores cadastra, edita e apaga fornecedor', () => {
   assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.FORNECEDORES, 'Fornecedor'), true);
 });
 
-test('o perfil de fornecedores NAO mexe nas outras categorias do catalogo do BIA', () => {
-  ['Infraestrutura', 'Pessoas', 'Sistemas', 'Processos Internos', '', null].forEach((cat) => {
+test('o perfil de fornecedores tambem mexe em Pessoas -- e de onde vem o Gestor do Contrato', () => {
+  assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.FORNECEDORES, 'Pessoas'), true);
+});
+
+test('o perfil de fornecedores NAO mexe nas categorias do BIA que nao sao Fornecedor nem Pessoas', () => {
+  ['Infraestrutura', 'Sistemas', 'Processos Internos', '', null].forEach((cat) => {
     assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.FORNECEDORES, cat), false, `categoria ${cat}`);
   });
 });
@@ -244,7 +250,7 @@ test('as regras do banco tambem guardam a categoria em /dependencias', () => {
   const regras = lerRegras();
   const bloco = regras.slice(regras.indexOf('match /dependencias/'));
   const corpo = bloco.slice(0, bloco.indexOf('\n    }'));
-  assert.ok(corpo.includes('categoriaDeFornecedor'),
+  assert.ok(corpo.includes('categoriaGerenciavelPorFornecedores'),
     'sem a guarda de categoria, quem avalia fornecedor apagaria as dependencias do BIA');
   // As duas pontas: como esta e como vai ficar.
   assert.ok(corpo.includes('resource.data.categoria') && corpo.includes('request.resource.data.categoria'),

@@ -82,14 +82,18 @@ service cloud.firestore {
 
     match /areas/{id} {
       allow read: if isCorpUser();
-      allow write: if isAdmin();
+      // Areas nao e dividida por categoria: o perfil de fornecedores precisa
+      // disso pra cadastrar a area que vira Setor responsavel do proprio
+      // fornecedor (ver public/perfis.js, podeMexerNaArea).
+      allow write: if isAdmin() || isGestorFornecedores();
     }
 
     // /dependencias guarda o catalogo dos 5 Ps do BIA (Fornecedores,
     // Infraestrutura, Pessoas, Sistemas, Processos Internos). O perfil de
-    // fornecedores manda na categoria Fornecedores e em NENHUMA outra: sem a
-    // guarda de categoria, quem avalia fornecedor poderia apagar as
-    // dependencias de infraestrutura e sistemas que o BIA inteiro usa.
+    // fornecedores manda nas categorias Fornecedores e Pessoas (ver decisao
+    // abaixo) e em NENHUMA outra: sem a guarda de categoria, quem avalia
+    // fornecedor poderia apagar as dependencias de infraestrutura e sistemas
+    // que o BIA inteiro usa.
     //
     // As duas pontas sao checadas de proposito: a linha como esta hoje
     // (resource) e como vai ficar (request.resource). Checar so uma deixaria
@@ -98,16 +102,26 @@ service cloud.firestore {
       return cat == 'Fornecedores' || cat == 'Fornecedor';
     }
 
+    // DECISAO 22/09/2026: alem de Fornecedores/Fornecedor, o perfil de
+    // fornecedores passa a mexer tambem na categoria Pessoas -- e de onde
+    // vem o Gestor do Contrato do proprio fornecedor. Funcao separada de
+    // categoriaDeFornecedor de proposito: essa continua com o sentido restrito
+    // de "e um fornecedor", usado em outras partes do sistema (ver
+    // public/perfis.js).
+    function categoriaGerenciavelPorFornecedores(cat) {
+      return categoriaDeFornecedor(cat) || cat == 'Pessoas';
+    }
+
     match /dependencias/{id} {
       allow read: if isCorpUser();
       allow create: if isAdmin()
-        || (isGestorFornecedores() && categoriaDeFornecedor(request.resource.data.categoria));
+        || (isGestorFornecedores() && categoriaGerenciavelPorFornecedores(request.resource.data.categoria));
       allow update: if isAdmin()
         || (isGestorFornecedores()
-            && categoriaDeFornecedor(resource.data.categoria)
-            && categoriaDeFornecedor(request.resource.data.categoria));
+            && categoriaGerenciavelPorFornecedores(resource.data.categoria)
+            && categoriaGerenciavelPorFornecedores(request.resource.data.categoria));
       allow delete: if isAdmin()
-        || (isGestorFornecedores() && categoriaDeFornecedor(resource.data.categoria));
+        || (isGestorFornecedores() && categoriaGerenciavelPorFornecedores(resource.data.categoria));
     }
 
     match /componentes/{id} {
