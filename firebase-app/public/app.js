@@ -7622,7 +7622,7 @@ function _situacaoFornecedor(av) {
   const faixa = FornecedorScore.faixaNota(av.nota);
   const venceu = FornecedorScore.vencida(av.avaliadoEm);
   if (venceu) return { rotulo: 'Vencida', cor: '#e65100', fundo: '#fff3e0', aviso: `A última avaliação é de ${_dataCurtaForn(av.avaliadoEm)} e passou de um ano` };
-  if (!av.completa) return { rotulo: faixa.rotulo, cor: '#e65100', fundo: '#fff3e0', aviso: 'Avaliação incompleta: há critérios sem resposta, então a nota está provisória' };
+  if (!av.completa) return { rotulo: faixa.rotulo, cor: '#e65100', fundo: '#fff3e0', aviso: 'Avaliação incompleta: há critérios sem resposta ou sem evidência anexada, então a nota está provisória' };
   return { rotulo: faixa.rotulo, cor: faixa.cor, fundo: faixa.fundo, aviso: '' };
 }
 
@@ -7919,9 +7919,10 @@ window.abrirAvaliacaoFornecedor = (fornecedorId) => {
         const r = respostasAnteriores[c.id] || {};
         const opcoes = FornecedorScore.RESPOSTAS.map((op) => `
           <label style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.88em;cursor:pointer;">
-            <input type="radio" name="fornResp_${esc(c.id)}" value="${esc(op)}" ${String(r.resposta || '') === op ? 'checked' : ''} onchange="atualizarPreviewNotaFornecedor()">
+            <input type="radio" name="fornResp_${esc(c.id)}" value="${esc(op)}" ${String(r.resposta || '') === op ? 'checked' : ''} onchange="_atualizarEvidenciaFornecedor('${esc(c.id)}')">
             ${esc(op)}
           </label>`).join('');
+        const semEvidenciaInicial = _semEvidenciaResposta(r);
         return `
           <div data-criterio="${esc(c.id)}" style="border:1px solid #eee;border-radius:9px;padding:13px 15px;margin-bottom:12px;${aplicaveisAtuais.has(c.id) ? '' : 'display:none;'}">
             <div style="font-weight:600;color:#333;">${esc(c.nome)}
@@ -7930,9 +7931,13 @@ window.abrirAvaliacaoFornecedor = (fornecedorId) => {
             ${c.descricao ? `<div style="font-size:0.8em;color:#888;margin-top:3px;">${esc(c.descricao)}</div>` : ''}
             <div style="margin-top:9px;">${opcoes}</div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
-              <input type="url" class="forn-link" value="${esc(r.link || '')}" placeholder="Link do documento (SharePoint, Drive, portal)" style="padding:7px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:0.85em;">
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="url" class="forn-link" value="${esc(r.link || '')}" placeholder="Link do documento (SharePoint, Drive, portal)" oninput="_atualizarEvidenciaFornecedor('${esc(c.id)}')" style="flex:1;padding:7px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:0.85em;">
+                <a href="${esc(r.link || '')}" target="_blank" rel="noopener" class="forn-link-abrir" id="fornLinkAbrir_${esc(c.id)}" title="Abrir evidência" style="${r.link ? '' : 'display:none;'}">🔗</a>
+              </div>
               <input type="text" class="forn-obs" value="${esc(r.observacao || '')}" placeholder="Observação deste critério" style="padding:7px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:0.85em;">
             </div>
+            <div id="fornEvidAviso_${esc(c.id)}" style="display:${semEvidenciaInicial ? 'block' : 'none'};font-size:0.74em;color:#e65100;margin-top:6px;">⚠ Sem evidência anexada — esta resposta não conta na nota até um link ser informado</div>
           </div>`;
       }).join('')
     : `<div style="padding:24px;text-align:center;color:#e65100;background:#fff8e1;border-radius:9px;">
@@ -7977,6 +7982,37 @@ function _coletarCriteriosAplicaveisFornecedor() {
 window._alternarControleAplicavelFornecedor = (checkbox) => {
   const bloco = document.querySelector(`#fornCriteriosLista [data-criterio="${checkbox.value}"]`);
   if (bloco) bloco.style.display = checkbox.checked ? '' : 'none';
+  atualizarPreviewNotaFornecedor();
+};
+
+/** Sim/Parcial sem link: respondeu, mas nao provou -- mesma regra de FornecedorScore.calcular. */
+function _semEvidenciaResposta(r) {
+  const resposta = (r && r.resposta) || '';
+  const temLink = !!((r && r.link) || '').trim();
+  return (resposta === FornecedorScore.RESPOSTA.SIM || resposta === FornecedorScore.RESPOSTA.PARCIAL) && !temLink;
+}
+
+/**
+ * Reage a cada mudanca de resposta ou de link de UM criterio: mostra/esconde
+ * o aviso de evidencia faltando e o "abrir" do link, sem re-renderizar o
+ * bloco inteiro (perderia o foco de quem esta digitando).
+ */
+window._atualizarEvidenciaFornecedor = (criterioId) => {
+  const bloco = document.querySelector(`#fornCriteriosLista [data-criterio="${criterioId}"]`);
+  if (bloco) {
+    const marcado = bloco.querySelector(`input[name="fornResp_${criterioId}"]:checked`);
+    const link = (bloco.querySelector('.forn-link')?.value || '').trim();
+    const semEvidencia = _semEvidenciaResposta({ resposta: marcado ? marcado.value : '', link });
+
+    const aviso = document.getElementById(`fornEvidAviso_${criterioId}`);
+    if (aviso) aviso.style.display = semEvidencia ? 'block' : 'none';
+
+    const abrir = document.getElementById(`fornLinkAbrir_${criterioId}`);
+    if (abrir) {
+      abrir.style.display = link ? '' : 'none';
+      abrir.href = link;
+    }
+  }
   atualizarPreviewNotaFornecedor();
 };
 
@@ -8034,6 +8070,7 @@ window.atualizarPreviewNotaFornecedor = () => {
       </span>
     </div>
     ${calc.pendentes.length ? `<div style="font-size:0.75em;color:#e65100;margin-top:6px;">⚠ ${calc.pendentes.length} critério${calc.pendentes.length > 1 ? 's' : ''} sem resposta — a nota fica provisória até você responder tudo</div>` : ''}
+    ${calc.semEvidencia.length ? `<div style="font-size:0.75em;color:#e65100;margin-top:6px;">⚠ ${calc.semEvidencia.length} critério${calc.semEvidencia.length > 1 ? 's' : ''} respondido${calc.semEvidencia.length > 1 ? 's' : ''} sem evidência — não conta${calc.semEvidencia.length > 1 ? 'm' : ''} na nota até anexar o link</div>` : ''}
     ${abre ? `<div style="font-size:0.75em;color:#c62828;margin-top:6px;">Abaixo de ${limiar}: salvar assim abre um risco automático para este fornecedor</div>` : ''}`;
 };
 
@@ -8081,7 +8118,12 @@ window.salvarAvaliacaoFornecedor = async () => {
   const calc = FornecedorScore.calcular(criteriosFornecedorData.filter((c) => criteriosAplicaveis.includes(c.id)), respostas);
   const respostasCriticidade = _coletarRespostasCriticidadeFornecedor();
 
-  if (!calc.completa && !confirm(`Faltam ${calc.pendentes.length} critério(s) sem resposta.\n\nA avaliação vai ser gravada como incompleta e a nota fica provisória. Salvar assim mesmo?`)) return;
+  if (!calc.completa) {
+    const partes = [];
+    if (calc.pendentes.length) partes.push(`${calc.pendentes.length} critério(s) sem resposta`);
+    if (calc.semEvidencia.length) partes.push(`${calc.semEvidencia.length} critério(s) sem evidência anexada`);
+    if (!confirm(`Faltam ${partes.join(' e ')}.\n\nA avaliação vai ser gravada como incompleta e a nota fica provisória. Salvar assim mesmo?`)) return;
+  }
 
   const btn = document.getElementById('btnSalvarAvaliacaoForn');
   btn.disabled = true;

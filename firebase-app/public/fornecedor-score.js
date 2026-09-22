@@ -34,6 +34,14 @@
  *   o fornecedor tira 100. Por isso a resposta traz `pendentes` e `completa`, e
  *   a tela e obrigada a mostrar que a avaliacao esta pela metade.
  *
+ * DECISAO 22/09/2026: "Sim"/"Parcial" sem link de evidencia NAO CONTA na nota
+ * -- cai em `semEvidencia`, tratado como pendencia (nao ignorado em silencio,
+ * mesma logica do item acima), so que a causa e outra: a pessoa respondeu, mas
+ * nao provou. So vale para Sim/Parcial, que afirmam algum grau de atendimento
+ * -- "Nao" ja soma 0 e nao afirma nada a provar, e "Nao se aplica" continua
+ * isento como sempre. Sem essa regra, a nota subia so por afirmacao, sem nada
+ * que comprovasse.
+ *
  * Carregar ANTES de app.js. Tambem exporta como modulo CommonJS para poder ser
  * testada com node --test.
  */
@@ -107,12 +115,20 @@
     var respondidos = 0;
     var naoSeAplica = 0;
     var pendentes = [];
+    // Sim/Parcial sem link: respondeu, mas nao provou. Nao conta na nota, mas
+    // e uma pendencia diferente de "sem resposta" -- a tela precisa dizer
+    // qual das duas e a causa.
+    var semEvidencia = [];
 
     ativos.forEach(function (c) {
       var r = mapa[c.id] || {};
       var valor = String(r.resposta || '').trim();
 
       if (!respostaValida(valor)) { pendentes.push(c.id); return; }
+
+      var afirmaConformidade = valor === RESPOSTA.SIM || valor === RESPOSTA.PARCIAL;
+      if (afirmaConformidade && !String(r.link || '').trim()) { semEvidencia.push(c.id); return; }
+
       respondidos += 1;
 
       if (valor === RESPOSTA.NAO_SE_APLICA) { naoSeAplica += 1; return; }
@@ -133,7 +149,8 @@
       respondidos: respondidos,
       naoSeAplica: naoSeAplica,
       pendentes: pendentes,
-      completa: ativos.length > 0 && pendentes.length === 0,
+      semEvidencia: semEvidencia,
+      completa: ativos.length > 0 && pendentes.length === 0 && semEvidencia.length === 0,
       pesoConsiderado: pesoConsiderado,
     };
   }
