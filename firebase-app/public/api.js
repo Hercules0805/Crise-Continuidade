@@ -264,6 +264,11 @@ async function _lerDependencias() {
     // responsavel interno pelo contrato.
     categoriaFornecedor: d.categoriaFornecedor || '',
     gestorContrato: d.gestorContrato || '',
+    // Quais controles do catalogo de conformidade valem para este fornecedor.
+    // null = nunca customizado (ausencia, nao "nenhum") — a tela comeca sem
+    // nada marcado nesse caso. [] so acontece se alguem explicitamente
+    // desmarcou tudo.
+    criteriosAplicaveis: Array.isArray(d.criteriosAplicaveis) ? d.criteriosAplicaveis : null,
   }));
 }
 
@@ -555,6 +560,9 @@ async function _lerAvaliacoesFornecedor() {
         nota: d.nota === null || d.nota === undefined ? null : Number(d.nota),
         completa: !!d.completa,
         criteriosVersao: Number(d.criteriosVersao) || 1,
+        // Retrato de quais controles valeram para ESTA avaliacao — nao o
+        // catalogo inteiro, so o subconjunto marcado como aplicavel na hora.
+        criteriosAplicaveis: Array.isArray(d.criteriosAplicaveis) ? d.criteriosAplicaveis : [],
         // Criticidade: aba separada da conformidade, na mesma avaliacao.
         respostasCriticidade: d.respostasCriticidade || {},
         scoreCriticidade: d.scoreCriticidade === null || d.scoreCriticidade === undefined ? null : Number(d.scoreCriticidade),
@@ -574,10 +582,20 @@ async function _lerAvaliacoesFornecedor() {
  * A nota vem calculada aqui, a partir dos criterios do banco — nao da tela.
  * A tela mostra o numero para a pessoa conferir, mas quem grava e esta funcao,
  * pela mesma razao que o score do risco e recalculado no servidor.
+ *
+ * Os controles considerados sao so os marcados como aplicaveis a este
+ * fornecedor (`a.criteriosAplicaveis`, ids do catalogo) — nunca o catalogo
+ * inteiro. Sem nenhum controle marcado nao existe avaliacao possivel, por
+ * isso essa lista vazia e rejeitada aqui tambem, nao so na tela.
  */
 async function _salvarAvaliacaoFornecedor(a) {
-  const criterios = await _lerCriteriosFornecedor();
-  const calc = FornecedorScore.calcular(criterios, a.respostas || {});
+  const idsAplicaveis = (Array.isArray(a.criteriosAplicaveis) ? a.criteriosAplicaveis : []).map(String);
+  if (!idsAplicaveis.length) throw new Error('Selecione ao menos um controle aplicável a este fornecedor.');
+
+  const catalogo = await _lerCriteriosFornecedor();
+  const setAplicaveis = new Set(idsAplicaveis);
+  const criteriosAplicaveis = catalogo.filter((c) => setAplicaveis.has(String(c.id)));
+  const calc = FornecedorScore.calcular(criteriosAplicaveis, a.respostas || {});
   // Criticidade e uma aba da MESMA avaliacao, nao uma colecao separada. Assim
   // como a nota, o score vem calculado aqui — nunca aceito do que a tela
   // mandar — pela mesma razao que o score do risco e recalculado no servidor.
@@ -588,6 +606,7 @@ async function _salvarAvaliacaoFornecedor(a) {
     fornecedorId: String(a.fornecedorId || ''),
     fornecedorNome: String(a.fornecedorNome || ''),
     respostas: a.respostas || {},
+    criteriosAplicaveis: idsAplicaveis,
     nota: calc.nota,
     completa: calc.completa,
     criteriosVersao: await _versaoCriteriosAtual(),
@@ -601,6 +620,9 @@ async function _salvarAvaliacaoFornecedor(a) {
   if (!data.fornecedorId) throw new Error('Avaliação sem fornecedor.');
 
   const ref = await _db.collection(COLLECTION.avaliacoesFornecedor).add(data);
+  // Vira o padrao deste fornecedor para a proxima avaliacao — a escolha de
+  // controles e uma configuracao dele, nao algo que se refaz do zero toda vez.
+  await _db.collection(COLLECTION.dependencias).doc(data.fornecedorId).set({ criteriosAplicaveis: idsAplicaveis }, { merge: true });
   return { success: true, id: ref.id, nota: calc.nota, completa: calc.completa, scoreCriticidade: calcCrit.score, completaCriticidade: calcCrit.completa };
 }
 

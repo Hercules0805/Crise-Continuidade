@@ -7773,6 +7773,13 @@ function _htmlDrawerAvaliacaoFornecedor() {
         <div style="flex:1;overflow-y:auto;padding:20px 24px;">
           <div id="painel-avalForn-conformidade">
             <div id="fornNotaPreview" style="position:sticky;top:0;background:#fff;padding:0 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
+            <div style="margin-bottom:18px;padding:14px 16px;border:1px solid #e3e6f5;background:#f7f8fd;border-radius:9px;">
+              <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:8px;">
+                Controles aplicáveis a este fornecedor
+              </label>
+              <div id="fornControlesAplicaveisLista" style="display:flex;flex-wrap:wrap;gap:8px 18px;"></div>
+              <div style="font-size:0.74em;color:#888;margin-top:8px;">Marque só os controles que fazem sentido para este fornecedor — só os marcados entram na avaliação e na nota.</div>
+            </div>
             <div id="fornCriteriosLista"></div>
             <div style="margin-top:20px;">
               <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">Observação geral (opcional)</label>
@@ -7818,6 +7825,19 @@ window.abrirAvaliacaoFornecedor = (fornecedorId) => {
 
   const respostasAnteriores = av ? (av.respostas || {}) : {};
 
+  // Ausencia (fornecedor nunca customizado) cai em nenhum marcado — decisao
+  // explicita do usuario, nao herda "tudo aplicavel" so porque o catalogo
+  // existe.
+  const aplicaveisAtuais = new Set(Array.isArray(f.criteriosAplicaveis) ? f.criteriosAplicaveis : []);
+
+  document.getElementById('fornControlesAplicaveisLista').innerHTML = ativos.length
+    ? ativos.map((c) => `
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.86em;cursor:pointer;">
+          <input type="checkbox" class="forn-aplicavel" value="${esc(c.id)}" ${aplicaveisAtuais.has(c.id) ? 'checked' : ''} onchange="_alternarControleAplicavelFornecedor(this)">
+          ${esc(c.nome)}
+        </label>`).join('')
+    : '';
+
   document.getElementById('fornCriteriosLista').innerHTML = ativos.length
     ? ativos.map((c) => {
         const r = respostasAnteriores[c.id] || {};
@@ -7827,7 +7847,7 @@ window.abrirAvaliacaoFornecedor = (fornecedorId) => {
             ${esc(op)}
           </label>`).join('');
         return `
-          <div data-criterio="${esc(c.id)}" style="border:1px solid #eee;border-radius:9px;padding:13px 15px;margin-bottom:12px;">
+          <div data-criterio="${esc(c.id)}" style="border:1px solid #eee;border-radius:9px;padding:13px 15px;margin-bottom:12px;${aplicaveisAtuais.has(c.id) ? '' : 'display:none;'}">
             <div style="font-weight:600;color:#333;">${esc(c.nome)}
               <span style="font-size:0.75em;color:#888;font-weight:400;margin-left:6px;">peso ${c.peso}</span>
             </div>
@@ -7872,11 +7892,31 @@ window.fecharAvaliacaoFornecedor = () => {
   document.getElementById('drawerOverlayFornecedor').classList.remove('open');
 };
 
-/** Lê o formulário e devolve o mapa criterioId -> { resposta, link, observacao }. */
+/** Ids dos controles marcados como aplicáveis a este fornecedor, na tela. */
+function _coletarCriteriosAplicaveisFornecedor() {
+  return Array.from(document.querySelectorAll('#fornControlesAplicaveisLista .forn-aplicavel:checked')).map((el) => el.value);
+}
+
+/** Mostra/esconde o bloco de resposta do controle ao (des)marcar sua aplicabilidade. */
+window._alternarControleAplicavelFornecedor = (checkbox) => {
+  const bloco = document.querySelector(`#fornCriteriosLista [data-criterio="${checkbox.value}"]`);
+  if (bloco) bloco.style.display = checkbox.checked ? '' : 'none';
+  atualizarPreviewNotaFornecedor();
+};
+
+/**
+ * Lê o formulário e devolve o mapa criterioId -> { resposta, link, observacao }.
+ *
+ * So entram os controles marcados como aplicaveis — um bloco desmarcado pode
+ * ter resposta antiga guardada no DOM (de quando esteve marcado), mas ela nao
+ * conta enquanto o controle nao estiver marcado de novo.
+ */
 function _coletarRespostasFornecedor() {
+  const aplicaveis = new Set(_coletarCriteriosAplicaveisFornecedor());
   const mapa = {};
   document.querySelectorAll('#fornCriteriosLista [data-criterio]').forEach((bloco) => {
     const id = bloco.dataset.criterio;
+    if (!aplicaveis.has(id)) return;
     const marcado = bloco.querySelector(`input[name="fornResp_${id}"]:checked`);
     mapa[id] = {
       resposta: marcado ? marcado.value : '',
@@ -7896,7 +7936,13 @@ function _coletarRespostasFornecedor() {
 window.atualizarPreviewNotaFornecedor = () => {
   const box = document.getElementById('fornNotaPreview');
   if (!box) return;
-  const calc = FornecedorScore.calcular(criteriosFornecedorData, _coletarRespostasFornecedor());
+  const idsAplicaveis = _coletarCriteriosAplicaveisFornecedor();
+  if (!idsAplicaveis.length) {
+    box.innerHTML = `<div style="font-size:0.85em;color:#e65100;">⚠ Nenhum controle marcado como aplicável ainda — marque ao menos um acima para avaliar este fornecedor.</div>`;
+    return;
+  }
+  const setAplicaveis = new Set(idsAplicaveis);
+  const calc = FornecedorScore.calcular(criteriosFornecedorData.filter((c) => setAplicaveis.has(c.id)), _coletarRespostasFornecedor());
   const limiar = configFornecedor.limiarRisco;
   const abre = FornecedorScore.abreRisco(calc.nota, limiar);
 
@@ -7952,8 +7998,11 @@ window.salvarAvaliacaoFornecedor = async () => {
   const f = fornecedoresData.find((x) => String(x.id) === String(fornecedorId));
   if (!f) return showToast('Fornecedor não encontrado.', '#c62828');
 
+  const criteriosAplicaveis = _coletarCriteriosAplicaveisFornecedor();
+  if (!criteriosAplicaveis.length) return showToast('Selecione ao menos um controle aplicável a este fornecedor.', '#c62828');
+
   const respostas = _coletarRespostasFornecedor();
-  const calc = FornecedorScore.calcular(criteriosFornecedorData, respostas);
+  const calc = FornecedorScore.calcular(criteriosFornecedorData.filter((c) => criteriosAplicaveis.includes(c.id)), respostas);
   const respostasCriticidade = _coletarRespostasCriticidadeFornecedor();
 
   if (!calc.completa && !confirm(`Faltam ${calc.pendentes.length} critério(s) sem resposta.\n\nA avaliação vai ser gravada como incompleta e a nota fica provisória. Salvar assim mesmo?`)) return;
@@ -7965,9 +8014,11 @@ window.salvarAvaliacaoFornecedor = async () => {
       fornecedorId: f.id,
       fornecedorNome: f.nome,
       respostas,
+      criteriosAplicaveis,
       respostasCriticidade,
       observacao: document.getElementById('fornObservacao').value.trim(),
     });
+    f.criteriosAplicaveis = criteriosAplicaveis;
 
     avaliacoesFornecedorData = await API.getAvaliacoesFornecedor();
     fecharAvaliacaoFornecedor();

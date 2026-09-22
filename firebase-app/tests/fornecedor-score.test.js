@@ -157,6 +157,19 @@ test('criterioAtivo trata ausencia do campo como ativo', () => {
 });
 
 // ============================================================
+// SUBCONJUNTO DE CRITERIOS (controles aplicaveis por fornecedor)
+// ============================================================
+
+test('calcular so considera os criterios do array recebido, nao um catalogo global implicito', () => {
+  // Fornecedor de hardware, so 2 dos 3 controles do catalogo se aplicam a ele.
+  const aplicaveis = CRITERIOS.filter((c) => c.id !== 'c2');
+  const r = FS.calcular(aplicaveis, resp({ c1: { resposta: 'Sim' }, c3: { resposta: 'Sim' } }));
+  assert.strictEqual(r.criteriosAtivos, 2, 'c2 nao entrou porque nao foi passado, nao porque foi respondido');
+  assert.strictEqual(r.completa, true, 'nao pode pedir resposta de um controle que nao se aplica a este fornecedor');
+  assert.strictEqual(r.nota, 100);
+});
+
+// ============================================================
 // VALIDADE
 // ============================================================
 
