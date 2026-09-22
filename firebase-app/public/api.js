@@ -269,6 +269,10 @@ async function _lerDependencias() {
     // nada marcado nesse caso. [] so acontece se alguem explicitamente
     // desmarcou tudo.
     criteriosAplicaveis: Array.isArray(d.criteriosAplicaveis) ? d.criteriosAplicaveis : null,
+    // So usado por Fornecedores: e do tipo TIC? Ausencia do campo (fornecedor
+    // antigo, de antes deste campo existir) conta como TIC -- marcado por
+    // padrao, decisao do usuario.
+    tic: d.tic !== false,
   }));
 }
 
@@ -791,6 +795,7 @@ async function _salvarDependencia(d) {
     pessoas: Array.isArray(d.pessoas) ? d.pessoas : [],
     categoriaFornecedor: d.categoriaFornecedor || '',
     gestorContrato: d.gestorContrato || '',
+    tic: d.tic !== false,
   };
   if (d.id) {
     await _db.collection(COLLECTION.dependencias).doc(String(d.id)).set(data, { merge: true });

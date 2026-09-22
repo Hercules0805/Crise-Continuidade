@@ -7578,10 +7578,18 @@ let avaliacoesFornecedorData = [];
 // Cards de resumo funcionam como filtro da grade abaixo, mesmo padrao do
 // dashboard de Indicadores. Clicar no card ja ativo limpa o filtro.
 let fornecedoresFiltroResumo = 'todos'; // 'todos' | 'semAvaliacao' | 'vencida' | 'abaixoLimiar'
+// Filtro independente do de resumo -- combina com E, nao substitui. Da pra
+// ver "TIC" e "sem avaliacao" ativos ao mesmo tempo.
+let fornecedoresFiltroTic = 'todos'; // 'todos' | 'tic' | 'naoTic'
 let fornecedoresOrdenacao = { coluna: 'nome', direcao: 'asc' };
 
 window.filtrarFornecedoresResumo = (modo) => {
   fornecedoresFiltroResumo = fornecedoresFiltroResumo === modo ? 'todos' : modo;
+  renderizarFornecedores();
+};
+
+window.filtrarFornecedoresTic = (modo) => {
+  fornecedoresFiltroTic = fornecedoresFiltroTic === modo ? 'todos' : modo;
   renderizarFornecedores();
 };
 
@@ -7696,6 +7704,13 @@ function renderizarFornecedores() {
     const semAvaliacao = fornecedoresData.length - comNota.length;
     const vencidas = comNota.filter((f) => FornecedorScore.vencida(_avaliacaoDoFornecedor(f.id).avaliadoEm)).length;
     const abaixo = comNota.filter((f) => FornecedorScore.abreRisco(_avaliacaoDoFornecedor(f.id).nota, configFornecedor.limiarRisco)).length;
+    const qtdTic = fornecedoresData.filter((f) => f.tic !== false).length;
+    const qtdNaoTic = fornecedoresData.length - qtdTic;
+
+    const card = (x) => `<div style="border-radius:10px;padding:12px 16px;background:#fff;min-width:130px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.08);${x.ativo ? anelAtivo : ''}" onclick="${x.onclick}" title="${esc(x.titulo)}">
+                <div style="font-size:1.7em;font-weight:800;color:${x.c};line-height:1;">${x.n}</div>
+                <div style="font-size:0.74em;color:#888;margin-top:4px;">${esc(x.t)}</div>
+              </div>`;
 
     resumo.innerHTML = !ativos.length
       ? `<div style="border:1px solid #ffe0b2;background:#fff8e1;border-radius:10px;padding:14px 16px;color:#e65100;font-size:0.9em;">
@@ -7704,14 +7719,13 @@ function renderizarFornecedores() {
          </div>`
       : `<div style="display:flex;gap:12px;flex-wrap:wrap;">
            ${[
-             { modo: 'todos', n: fornecedoresData.length, t: 'fornecedores no catálogo', c: '#1a237e', titulo: 'Ver todos' },
-             { modo: 'semAvaliacao', n: semAvaliacao, t: 'sem avaliação', c: semAvaliacao ? '#e65100' : '#999', titulo: 'Filtrar sem avaliação' },
-             { modo: 'vencida', n: vencidas, t: 'com avaliação vencida', c: vencidas ? '#e65100' : '#999', titulo: 'Filtrar avaliação vencida' },
-             { modo: 'abaixoLimiar', n: abaixo, t: `abaixo de ${configFornecedor.limiarRisco}`, c: abaixo ? '#c62828' : '#2e7d32', titulo: `Filtrar nota abaixo de ${configFornecedor.limiarRisco}` },
-           ].map((x) => `<div style="border-radius:10px;padding:12px 16px;background:#fff;min-width:130px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.08);${fornecedoresFiltroResumo === x.modo ? anelAtivo : ''}" onclick="filtrarFornecedoresResumo('${x.modo}')" title="${esc(x.titulo)}">
-                <div style="font-size:1.7em;font-weight:800;color:${x.c};line-height:1;">${x.n}</div>
-                <div style="font-size:0.74em;color:#888;margin-top:4px;">${esc(x.t)}</div>
-              </div>`).join('')}
+             { n: fornecedoresData.length, t: 'fornecedores no catálogo', c: '#1a237e', titulo: 'Ver todos', ativo: fornecedoresFiltroResumo === 'todos', onclick: "filtrarFornecedoresResumo('todos')" },
+             { n: semAvaliacao, t: 'sem avaliação', c: semAvaliacao ? '#e65100' : '#999', titulo: 'Filtrar sem avaliação', ativo: fornecedoresFiltroResumo === 'semAvaliacao', onclick: "filtrarFornecedoresResumo('semAvaliacao')" },
+             { n: vencidas, t: 'com avaliação vencida', c: vencidas ? '#e65100' : '#999', titulo: 'Filtrar avaliação vencida', ativo: fornecedoresFiltroResumo === 'vencida', onclick: "filtrarFornecedoresResumo('vencida')" },
+             { n: abaixo, t: `abaixo de ${configFornecedor.limiarRisco}`, c: abaixo ? '#c62828' : '#2e7d32', titulo: `Filtrar nota abaixo de ${configFornecedor.limiarRisco}`, ativo: fornecedoresFiltroResumo === 'abaixoLimiar', onclick: "filtrarFornecedoresResumo('abaixoLimiar')" },
+             { n: qtdTic, t: 'TIC', c: '#1a237e', titulo: 'Filtrar fornecedores de TIC', ativo: fornecedoresFiltroTic === 'tic', onclick: "filtrarFornecedoresTic('tic')" },
+             { n: qtdNaoTic, t: 'Não TIC', c: '#555', titulo: 'Filtrar fornecedores que não são de TIC', ativo: fornecedoresFiltroTic === 'naoTic', onclick: "filtrarFornecedoresTic('naoTic')" },
+           ].map(card).join('')}
          </div>`;
   }
 
@@ -7723,10 +7737,16 @@ function renderizarFornecedores() {
     if (fornecedoresFiltroResumo === 'abaixoLimiar') return !!(av && FornecedorScore.abreRisco(av.nota, configFornecedor.limiarRisco));
     return true;
   };
+  const porTic = (f) => {
+    if (fornecedoresFiltroTic === 'tic') return f.tic !== false;
+    if (fornecedoresFiltroTic === 'naoTic') return f.tic === false;
+    return true;
+  };
   const data = fornecedoresData.filter((f) => !busca
     || (f.nome || '').toLowerCase().includes(busca)
     || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)))
-    .filter(porResumo);
+    .filter(porResumo)
+    .filter(porTic);
 
   if (!fornecedoresData.length) {
     lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
@@ -8398,6 +8418,10 @@ function _htmlModalFornecedorCadastro() {
         <div><label>Categoria</label><select id="fornCadCategoria"><option value="">Selecione...</option></select></div>
         <div><label>Gestor do Contrato</label><input type="text" id="fornCadGestorContrato" placeholder="Nome de quem responde por este contrato"></div>
       </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-weight:400;">
+        <input type="checkbox" id="fornCadTic" checked>
+        Fornecedor de TIC (Tecnologia da Informação e Comunicação)
+      </label>
       <label>Serviço prestado / o que fornece</label>
       <input type="text" id="fornCadDetalhes" placeholder="Ex: hospedagem dos servidores de produção">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -8522,6 +8546,7 @@ window.abrirModalFornecedor = (id) => {
     (categoriaAtual && !temNaLista ? `<option value="${esc(categoriaAtual)}">${esc(categoriaAtual)} (inativa)</option>` : '');
   document.getElementById('fornCadCategoria').value = categoriaAtual || '';
   document.getElementById('fornCadGestorContrato').value = f ? (f.gestorContrato || '') : '';
+  document.getElementById('fornCadTic').checked = f ? (f.tic !== false) : true;
   document.getElementById('fornCadDetalhes').value = f ? (f.detalhes || '') : '';
   document.getElementById('fornCadSetor').value = f ? (f.setor || '') : '';
   document.getElementById('fornCadEndereco').value = f ? (f.endereco || '') : '';
@@ -8548,6 +8573,7 @@ window.salvarFornecedorCadastro = async () => {
       nome,
       categoriaFornecedor: document.getElementById('fornCadCategoria').value,
       gestorContrato: document.getElementById('fornCadGestorContrato').value.trim(),
+      tic: document.getElementById('fornCadTic').checked,
       detalhes: document.getElementById('fornCadDetalhes').value.trim(),
       // Setor e endereco existem no catalogo e sao gravados por esta tela. Sem
       // eles no formulario, salvar aqui apagaria o que estava preenchido: a
