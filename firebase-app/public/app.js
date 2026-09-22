@@ -4207,11 +4207,20 @@ async function monitor() {
       <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 8px 10px;background:#fff;">
         <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;padding:0 10px 6px;">Carga por área hoje</div>
         ${(ultimo.areas || []).length ? `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
-          ${ultimo.areas.map((a) => `<tr>
-            <td style="padding:7px 10px;font-weight:600;color:#333;">${esc(a.area)}</td>
-            <td style="padding:7px 10px;text-align:right;font-weight:700;color:#1a237e;">${a.carga}</td>
-            <td style="padding:7px 10px;color:#777;">${badgesComposicao(a.composicao)}</td>
-          </tr>`).join('')}
+          <thead>
+            <tr>
+              <th style="padding:4px 10px 8px;text-align:left;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Área</th>
+              <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Carga</th>
+              <th style="padding:4px 10px 8px;text-align:left;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Composição</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${ultimo.areas.map((a) => `<tr>
+              <td style="padding:7px 10px;font-weight:600;color:#333;">${esc(a.area)}</td>
+              <td style="padding:7px 10px;text-align:right;font-weight:700;color:#1a237e;">${a.carga}</td>
+              <td style="padding:7px 10px;color:#777;">${badgesComposicao(a.composicao)}</td>
+            </tr>`).join('')}
+          </tbody>
         </table>` : '<div style="padding:10px;color:#999;font-size:0.88em;">Nenhum risco registrado.</div>'}
       </div>
     </div>
