@@ -15,6 +15,16 @@
  *     risco da empresa (risco-consolidado.js), do mesmo jeito que o Tier do
  *     BIA ja pesa o risco de processo.
  *
+ * DECISAO 22/09/2026 (2): 4a pergunta, Transferencia Internacional de Dados,
+ * binaria (Sim=1/Nao=0). Score maximo sobe de 8 para 9. Os limiares de Baixa
+ * (0-2) e Media (3-5) NAO mudaram -- so o teto de Alta abriu de 8 para 9 (a
+ * condicao ja era "score >= 6", sem teto explicito). Motivo: faixa/peso de
+ * risco de um fornecedor sao recalculados na hora a partir do score gravado,
+ * nunca congelados na avaliacao -- se os 3 limiares fossem redivididos em
+ * partes iguais (0-3/4-6/7-9), fornecedores ja avaliados mudariam de peso de
+ * risco sem ninguem ter reavaliado nada. So responder "Sim" nesta pergunta
+ * nova (empurrando o total a 9) pode mudar peso, e so em quem for reavaliado.
+ *
  * SENTIDO: MAIOR e PIOR (igual ao score de risco, diferente da nota de
  * conformidade do fornecedor-score.js, que e o contrario). Os dois numeros do
  * fornecedor -- nota (maior melhor) e criticidade (maior pior) -- convivem na
@@ -70,17 +80,30 @@
         { valor: 'nenhuma', rotulo: 'Nenhuma das anteriores', score: 0 },
       ],
     },
+    {
+      chave: 'transferenciaInternacional',
+      titulo: 'Transferência Internacional de Dados?',
+      // Binaria de verdade -- "Nao" ja cumpre o papel de resposta de valor 0,
+      // nao precisa de uma terceira opcao "nenhuma das anteriores".
+      opcoes: [
+        { valor: 'sim', rotulo: 'Sim', score: 1 },
+        { valor: 'nao', rotulo: 'Não', score: 0 },
+      ],
+    },
   ];
 
-  /** Soma dos scores maximos das 3 perguntas: 2 + 3 + 3. */
+  /** Soma dos scores maximos das perguntas: 2 + 3 + 3 + 1. */
   var SCORE_MAXIMO = PERGUNTAS.reduce(function (t, p) {
     return t + Math.max.apply(null, p.opcoes.map(function (o) { return o.score; }));
   }, 0);
 
   /**
-   * Faixas de 0 a 8. So 3 niveis, de proposito: mapeiam 1:1 pro mesmo peso de
+   * Faixas de 0 a 9. So 3 niveis, de proposito: mapeiam 1:1 pro mesmo peso de
    * 1/2/3 que o Tier do BIA ja usa em risco-consolidado.js (PESO_TIER). Um 4o
    * nivel exigiria mexer em CARGA_MAXIMA_POR_RISCO, que assume peso maximo 3.
+   * Alta nao tem teto superior de proposito (ver decisao 22/09/2026 (2) no
+   * cabecalho) -- assim um score maximo futuro maior que 9 nao regride sem
+   * ninguem perceber.
    */
   function faixa(score) {
     if (score === null || score === undefined) return { rotulo: 'Não avaliado', cor: '#999', fundo: '#f5f5f5' };
