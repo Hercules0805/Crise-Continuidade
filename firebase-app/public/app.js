@@ -4210,6 +4210,7 @@ async function monitor() {
           <thead>
             <tr>
               <th style="padding:4px 10px 8px;text-align:left;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Área</th>
+              <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Nº de Riscos</th>
               <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Carga</th>
               <th style="padding:4px 10px 8px;text-align:left;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Composição</th>
             </tr>
@@ -4217,6 +4218,7 @@ async function monitor() {
           <tbody>
             ${ultimo.areas.map((a) => `<tr>
               <td style="padding:7px 10px;font-weight:600;color:#333;">${esc(a.area)}</td>
+              <td style="padding:7px 10px;text-align:right;color:#555;">${a.contados}</td>
               <td style="padding:7px 10px;text-align:right;font-weight:700;color:#1a237e;">${a.carga}</td>
               <td style="padding:7px 10px;color:#777;">${badgesComposicao(a.composicao)}</td>
             </tr>`).join('')}
