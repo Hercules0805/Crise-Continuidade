@@ -7807,7 +7807,8 @@ window.abrirAvaliacaoFornecedor = (fornecedorId) => {
   if (!f) return showToast('Fornecedor não encontrado.', '#c62828');
 
   const av = _avaliacaoDoFornecedor(f.id);
-  const ativos = criteriosFornecedorData.filter(FornecedorScore.criterioAtivo);
+  const ativos = criteriosFornecedorData.filter(FornecedorScore.criterioAtivo)
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
 
   document.getElementById('fornAvalId').value = f.id;
   const primeiraPessoa = (f.pessoas || [])[0];
