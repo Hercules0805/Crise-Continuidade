@@ -66,7 +66,7 @@
       opcoes: [
         { valor: 'clientesParam', rotulo: 'Resiliência — se o fornecedor sofrer um ataque de ransomware, os CLIENTES da empresa param de operar', score: 3 },
         { valor: 'empresaPara', rotulo: 'Resiliência — se o fornecedor sofrer um ataque de ransomware, a PRÓPRIA empresa para de operar', score: 2 },
-        { valor: 'lockIn', rotulo: 'Lock-in — a dificuldade de migrar rapidamente torna o parceiro crítico para a continuidade', score: 1 },
+        { valor: 'lockIn', rotulo: 'Lock-in: A dificuldade de migrar para outro fornecedor rapidamente torna o parceiro atual crítico para a manutenção da conformidade.', score: 1 },
         { valor: 'nenhuma', rotulo: 'Nenhuma das anteriores', score: 0 },
       ],
     },
