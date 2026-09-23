@@ -179,6 +179,29 @@ test('salvar sem mexer no risco NÃO gera ponto', () => {
   assert.strictEqual(medicaoDeRisco('r1', { ...riscoOk(), descricao: 'texto novo' }, riscoOk()), null);
 });
 
+test('primeira medição (sem anterior) usa dataUltimaReavaliacao quando presente -- nao inventa um ponto no presente pra risco antigo do backfill', () => {
+  const m = medicaoDeRisco('r1', { ...riscoOk(), dataUltimaReavaliacao: '2020-01-01' }, null);
+  assert.strictEqual(m.coletadoEm, '2020-01-01');
+});
+
+test('reavaliação de risco já existente usa atualizadoEm, NUNCA a dataUltimaReavaliacao presa de uma aba diferente', () => {
+  // dataUltimaReavaliacao ficou gravada de uma reavaliação de ontem e é
+  // reenviada em todo salvamento (mesmo edições que não passam por aquela
+  // aba); usá-la aqui dataria o ponto novo ANTES do ponto anterior --
+  // exatamente o bug real: editar só o Impacto Financeiro hoje escondeu o
+  // valor novo atrás de uma medição de ontem "mais recente" por engano.
+  const antes = riscoOk();
+  const depois = {
+    ...riscoOk(),
+    impactoFinanceiro: 450000,
+    dataUltimaReavaliacao: '2026-09-22',
+    atualizadoEm: '2026-09-23T01:54:07.217Z',
+  };
+  const m = medicaoDeRisco('r1', depois, antes);
+  assert.ok(m);
+  assert.strictEqual(m.coletadoEm, '2026-09-23T01:54:07.217Z');
+});
+
 test('a medição guarda probabilidade e impacto do momento', () => {
   const m = medicaoDeRisco('r1', riscoOk(), null);
   assert.strictEqual(m.probabilidade, 'Média');

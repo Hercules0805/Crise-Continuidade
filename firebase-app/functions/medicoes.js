@@ -231,7 +231,21 @@ function medicaoDeRisco(origemId, risco, anterior) {
     if (!mudou) return null;
   }
 
-  const coletadoEm = risco.dataUltimaReavaliacao || risco.atualizadoEm || new Date().toISOString();
+  // dataUltimaReavaliacao so faz sentido como "quando isto passou a valer"
+  // quando NAO ha medicao anterior nenhuma (risco recem-criado ou primeira
+  // medicao do backfill de um risco antigo) -- datar com o instante do
+  // backfill inventaria um ponto no presente para um risco que pode ter anos
+  // (ver scripts/backfill-medicoes-risco.js). Numa REAVALIACAO de um risco que
+  // ja tinha medicao (anterior != null), dataUltimaReavaliacao e um campo
+  // manual de OUTRA aba (Reavaliacao & Encerramento) que fica gravado de uma
+  // edicao anterior e e reenviado em TODO salvamento, mesmo que so o Impacto
+  // Financeiro tenha mudado -- usa-lo aqui gravaria o ponto novo com uma data
+  // mais antiga que o ponto anterior, invertendo a ordem da curva (bug real:
+  // editar so o financeiro de um risco reavaliado no dia anterior fez o
+  // Monitor continuar mostrando o estado de ANTES da edicao).
+  const coletadoEm = anterior
+    ? (risco.atualizadoEm || new Date().toISOString())
+    : (risco.dataUltimaReavaliacao || risco.atualizadoEm || new Date().toISOString());
   if (isNaN(new Date(coletadoEm).getTime())) return null;
 
   return {
