@@ -399,6 +399,19 @@ exports.medicaoDeRisco = onDocumentWritten(
         .set(medicao, { merge: true });
     } catch (err) {
       logger.error('medicaoDeRisco: falha ao gravar medicao', { id: event.params.id, erro: err.message });
+      return;
+    }
+
+    // Sem isto, o retrato de "hoje" (historico_risco) so seria recalculado na
+    // proxima rodada de retratoDiarioRisco (agendada, 1x por dia, 6h) -- o
+    // Monitor de Risco ficaria ate 24h atrasado em relacao a grade de Riscos,
+    // que le a colecao ao vivo. Regrava so o dia de hoje (salvarRetrato e
+    // idempotente por chave de dia); os dias passados continuam intocados.
+    try {
+      const retrato = await retratoRisco.gerarRetrato(db, new Date().toISOString());
+      await retratoRisco.salvarRetrato(db, retrato);
+    } catch (err) {
+      logger.error('medicaoDeRisco: falha ao atualizar o retrato de hoje', { id: event.params.id, erro: err.message });
     }
   }
 );
