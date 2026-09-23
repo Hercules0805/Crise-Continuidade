@@ -3839,6 +3839,10 @@ function _badgeCargaRisco(r, processosPorId) {
   return `<span style="font-weight:700;color:#1a237e;">${carga}</span>`;
 }
 
+function _formatarReais(v) {
+  return 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR');
+}
+
 async function riscos() {
   const isAdmin = window.USER_PERFIL === 'admin';
   app.innerHTML = `
@@ -3880,17 +3884,18 @@ async function riscos() {
       <table>
         <thead>
           <tr>
-            <th onclick="ordenarRiscos('area')" style="cursor:pointer;width:10%;">Área <span id="sort-risco-area"></span></th>
-            <th style="width:11%;">Processo / Fornecedor</th>
-            <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;width:15%;">Título <span id="sort-risco-titulo"></span></th>
-            <th style="width:8%;">Categoria</th>
-            <th style="width:9%;">Responsável</th>
-            <th style="width:7%;">Probab.</th>
-            <th style="width:7%;">Impacto</th>
-            <th onclick="ordenarRiscos('score')" style="cursor:pointer;width:6%;text-align:center;" title="Probabilidade x Impacto, de 1 a 12">Score <span id="sort-risco-score"></span></th>
-            <th style="width:6%;text-align:center;" title="Score x peso do Tier do processo (ou criticidade do fornecedor) -- quanto este risco soma na Carga de Risco da Empresa">Carga</th>
-            <th style="width:8%;">Status</th>
-            <th style="width:7%;">Prioridade</th>
+            <th onclick="ordenarRiscos('area')" style="cursor:pointer;width:9%;">Área <span id="sort-risco-area"></span></th>
+            <th style="width:9%;">Processo / Fornecedor</th>
+            <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;width:13%;">Título <span id="sort-risco-titulo"></span></th>
+            <th style="width:7%;">Categoria</th>
+            <th style="width:8%;">Responsável</th>
+            <th style="width:6%;">Probab.</th>
+            <th style="width:6%;">Impacto</th>
+            <th onclick="ordenarRiscos('score')" style="cursor:pointer;width:5%;text-align:center;" title="Probabilidade x Impacto, de 1 a 12">Score <span id="sort-risco-score"></span></th>
+            <th style="width:5%;text-align:center;" title="Score x peso do Tier do processo (ou criticidade do fornecedor) -- quanto este risco soma na Carga de Risco da Empresa">Carga</th>
+            <th style="width:9%;text-align:right;">Impacto Financeiro</th>
+            <th style="width:7%;">Status</th>
+            <th style="width:6%;">Prioridade</th>
             <th style="width:6%;text-align:center;">Ações</th>
           </tr>
         </thead>
@@ -3940,7 +3945,7 @@ async function riscos() {
     riscosData = []; riscosAreasCache = []; riscosFornecedoresCache = []; riscosCriticidadePorFornecedorCache = {};
     const corpo = document.getElementById('riscoRows');
     if (corpo) {
-      corpo.innerHTML = `<tr><td colspan="12" style="padding:24px;text-align:center;color:#c62828;">
+      corpo.innerHTML = `<tr><td colspan="13" style="padding:24px;text-align:center;color:#c62828;">
         Não foi possível carregar os riscos.<br>
         <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
         <button class="btn btn-ghost" onclick="riscos()" style="margin-top:12px;">Tentar de novo</button>
@@ -4100,7 +4105,7 @@ function _svgLinhaTempoRisco(historico, opcoes) {
   const formatarValor = (opcoes && opcoes.formatarValor) || ((v) => String(v));
   const rotuloGrafico = (opcoes && opcoes.rotulo) || 'Carga de risco ao longo do tempo';
 
-  const LARGURA = 760, ALTURA = 280;
+  const LARGURA = 1200, ALTURA = 280;
   const MARGEM = { topo: 16, baixo: 34, esq: 46, dir: 16 };
   const areaW = LARGURA - MARGEM.esq - MARGEM.dir;
   const areaH = ALTURA - MARGEM.topo - MARGEM.baixo;
@@ -4168,7 +4173,7 @@ function _svgLinhaTempoRisco(historico, opcoes) {
       <span style="width:10px;height:10px;border-radius:50%;background:${s.cor};display:inline-block;"></span>${esc(s.nome)}
     </span>`).join('');
 
-  const svg = `<svg viewBox="0 0 ${LARGURA} ${ALTURA}" width="100%" height="${ALTURA}" role="img" aria-label="${esc(rotuloGrafico)}">
+  const svg = `<svg viewBox="0 0 ${LARGURA} ${ALTURA}" style="width:100%;height:auto;display:block;" role="img" aria-label="${esc(rotuloGrafico)}">
     ${grade}${rotulosX}${linhas}
     <line x1="${MARGEM.esq}" y1="${MARGEM.topo}" x2="${MARGEM.esq}" y2="${ALTURA - MARGEM.baixo}" stroke="#ccc" stroke-width="1"/>
     <line x1="${MARGEM.esq}" y1="${ALTURA - MARGEM.baixo}" x2="${LARGURA - MARGEM.dir}" y2="${ALTURA - MARGEM.baixo}" stroke="#ccc" stroke-width="1"/>
@@ -4212,9 +4217,8 @@ async function monitor() {
   const idade = _idadeEmDias(ultimo.dia);
   const statusIdade = _corIdade(idade);
   const grafico = _svgLinhaTempoRisco(historico, { campo: 'carga', rotulo: 'Carga de risco ao longo do tempo' });
-  const formatarReais = (v) => 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR');
   const graficoFinanceiro = _svgLinhaTempoRisco(historico, {
-    campo: 'impactoFinanceiro', formatarValor: formatarReais, rotulo: 'Impacto financeiro estimado ao longo do tempo',
+    campo: 'impactoFinanceiro', formatarValor: _formatarReais, rotulo: 'Impacto financeiro estimado ao longo do tempo',
   });
 
   const badgesComposicao = (comp) => RiscoConsolidado.FAIXAS
@@ -4236,6 +4240,20 @@ async function monitor() {
       ${idade > 1 ? `<span style="font-size:0.82em;color:#999;">A rotina diária roda às 6h — se o atraso continuar, vale checar os logs da função <code>retratoDiarioRisco</code>.</span>` : ''}
     </div>
 
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
+      <div style="border:1px solid #e0e0e0;border-radius:10px;padding:20px 22px;background:#fff;">
+        <div style="font-size:0.74em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Carga da Empresa Hoje</div>
+        <div style="font-size:3.2em;font-weight:800;line-height:1;margin:10px 0 12px;color:#1a237e;">${ultimo.empresa.carga}</div>
+        <div>${badgesComposicao(ultimo.empresa.composicao) || '<span style="font-size:0.8em;color:#999;">Nenhum risco na conta</span>'}</div>
+        <div style="font-size:0.8em;color:#777;margin-top:12px;">${ultimo.empresa.contados} risco${ultimo.empresa.contados === 1 ? '' : 's'} somado${ultimo.empresa.contados === 1 ? '' : 's'}</div>
+      </div>
+      <div style="border:1px solid #e0e0e0;border-radius:10px;padding:20px 22px;background:#fff;">
+        <div style="font-size:0.74em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Impacto Financeiro Estimado Hoje</div>
+        <div style="font-size:2.4em;font-weight:800;line-height:1;margin:10px 0 10px;color:#1a237e;">${_formatarReais(ultimo.empresa.impactoFinanceiro)}</div>
+        ${ultimo.semImpactoFinanceiro ? `<div style="font-size:0.8em;color:#e65100;margin-top:12px;">${ultimo.semImpactoFinanceiro} risco${ultimo.semImpactoFinanceiro > 1 ? 's' : ''} sem estimativa</div>` : ''}
+      </div>
+    </div>
+
     <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;margin-bottom:16px;">
       <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">Carga ao longo do tempo</div>
       ${grafico ? grafico.svg : '<div style="color:#999;">Sem dados suficientes para o gráfico.</div>'}
@@ -4250,43 +4268,28 @@ async function monitor() {
       ${ultimo.semImpactoFinanceiro ? `<div style="font-size:0.76em;color:#e65100;margin-top:10px;">⚠ ${ultimo.semImpactoFinanceiro} risco${ultimo.semImpactoFinanceiro > 1 ? 's' : ''} sem estimativa financeira — fora desta conta, o que a puxa para baixo</div>` : ''}
     </div>
 
-    <div style="display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start;">
-      <div style="display:flex;flex-direction:column;gap:16px;">
-        <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;">
-          <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Carga da empresa hoje</div>
-          <div style="font-size:2.8em;font-weight:800;line-height:1;margin:8px 0 10px;color:#1a237e;">${ultimo.empresa.carga}</div>
-          <div>${badgesComposicao(ultimo.empresa.composicao) || '<span style="font-size:0.8em;color:#999;">Nenhum risco na conta</span>'}</div>
-          <div style="font-size:0.76em;color:#777;margin-top:10px;">${ultimo.empresa.contados} risco${ultimo.empresa.contados === 1 ? '' : 's'} somado${ultimo.empresa.contados === 1 ? '' : 's'}</div>
-        </div>
-        <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;">
-          <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Impacto Financeiro Estimado Hoje</div>
-          <div style="font-size:1.7em;font-weight:800;line-height:1;margin:8px 0 6px;color:#1a237e;">${formatarReais(ultimo.empresa.impactoFinanceiro)}</div>
-          ${ultimo.semImpactoFinanceiro ? `<div style="font-size:0.74em;color:#e65100;">${ultimo.semImpactoFinanceiro} risco${ultimo.semImpactoFinanceiro > 1 ? 's' : ''} sem estimativa</div>` : ''}
-        </div>
-      </div>
-      <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 8px 10px;background:#fff;">
-        <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;padding:0 10px 6px;">Carga por área hoje</div>
-        ${(ultimo.areas || []).length ? `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
-          <thead>
-            <tr>
-              <th style="padding:4px 10px 8px;text-align:left;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Área</th>
-              <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Nº de Riscos</th>
-              <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Carga</th>
-              <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Impacto Financeiro</th>
-              <th style="padding:4px 10px 8px;text-align:left;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Composição</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${ultimo.areas.map((a) => `<tr>
-              <td style="padding:7px 10px;font-weight:600;color:#333;">${esc(a.area)}</td>
-              <td style="padding:7px 10px;text-align:right;color:#555;">${a.contados}</td>
-              <td style="padding:7px 10px;text-align:right;font-weight:700;color:#1a237e;">${a.carga}</td>
-              <td style="padding:7px 10px;text-align:right;color:#555;">${formatarReais(a.impactoFinanceiro)}</td>
-              <td style="padding:7px 10px;color:#777;">${badgesComposicao(a.composicao)}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>` : '<div style="padding:10px;color:#999;font-size:0.88em;">Nenhum risco registrado.</div>'}
-      </div>
+    <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 8px 10px;background:#fff;margin-bottom:16px;">
+      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;padding:0 10px 6px;">Carga por área hoje</div>
+      ${(ultimo.areas || []).length ? `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
+        <thead>
+          <tr>
+            <th style="padding:4px 10px 8px;text-align:left;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Área</th>
+            <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Nº de Riscos</th>
+            <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Carga</th>
+            <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Impacto Financeiro</th>
+            <th style="padding:4px 10px 8px;text-align:left;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Composição</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${ultimo.areas.map((a) => `<tr>
+            <td style="padding:7px 10px;font-weight:600;color:#333;">${esc(a.area)}</td>
+            <td style="padding:7px 10px;text-align:right;color:#555;">${a.contados}</td>
+            <td style="padding:7px 10px;text-align:right;font-weight:700;color:#1a237e;">${a.carga}</td>
+            <td style="padding:7px 10px;text-align:right;color:#555;">${_formatarReais(a.impactoFinanceiro)}</td>
+            <td style="padding:7px 10px;color:#777;">${badgesComposicao(a.composicao)}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>` : '<div style="padding:10px;color:#999;font-size:0.88em;">Nenhum risco registrado.</div>'}
     </div>
     <div style="font-size:0.76em;color:#999;margin-top:14px;">
       Só quem tem perfil de administrador vê esta tela por enquanto — ver a aba Roadmap sobre abrir por área.
@@ -4358,6 +4361,7 @@ function renderizarRiscos() {
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
         <td style="text-align:center;">${_badgeScoreRisco(r)}</td>
         <td style="text-align:center;">${_badgeCargaRisco(r, processosPorId)}</td>
+        <td style="text-align:right;">${r.impactoFinanceiro === null || r.impactoFinanceiro === undefined ? '<span style="color:#bbb;">-</span>' : _formatarReais(r.impactoFinanceiro)}</td>
         <td>${_badgeStatusRisco(r.status)}</td>
         <td>${_badgeProbImpactoRisco(r.prioridade)}</td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
@@ -4372,7 +4376,7 @@ function renderizarRiscos() {
           </button>` : ''}
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="12" style="text-align:center;color:#999;padding:40px;">Nenhum risco cadastrado.</td></tr>';
+    : '<tr><td colspan="13" style="text-align:center;color:#999;padding:40px;">Nenhum risco cadastrado.</td></tr>';
 }
 
 window.clonarRisco = (id) => {
