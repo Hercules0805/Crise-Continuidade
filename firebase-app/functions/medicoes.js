@@ -259,6 +259,48 @@ function medicaoDeRisco(origemId, risco, anterior) {
 }
 
 /**
+ * Medicao de fechamento quando um risco e EXCLUIDO (documento apagado).
+ *
+ * Ate esta mudanca (23/09/2026), a exclusao de um risco nao gerava medicao
+ * nenhuma -- a reconstrucao do retrato usa a ULTIMA medicao de cada
+ * sujeitoId, entao um risco apagado continuava contando pra sempre no
+ * Monitor, mesmo tendo sumido da grade ao vivo na hora. classificacao
+ * 'Excluído' entra em STATUS_FORA (historicoRisco.js): a partir de AGORA o
+ * risco para de contar, mas retratos ja gravados de dias ANTERIORES a
+ * exclusao continuam intocados (a medicao de fechamento e datada de agora,
+ * e _estadoPorRiscoEmData ignora medicao posterior a data alvo).
+ */
+function medicaoDeExclusaoRisco(origemId, riscoAntes) {
+  if (!riscoAntes) return null;
+  const coletadoEm = new Date().toISOString();
+  return {
+    sujeitoTipo: 'risco',
+    sujeitoId: origemId,
+    sujeitoRotulo: String(riscoAntes.titulo || origemId),
+    area: String(riscoAntes.area || '').trim(),
+    processoId: riscoAntes.processoId || null,
+    fonte: FONTE.RISCO,
+    metrica: 'risco',
+    escala: ESCALA.SCORE_RISCO,
+    // Score/financeiro do momento do fechamento, so pra trilha -- nunca sao
+    // lidos de fato: 'Excluído' cai em STATUS_FORA antes da reconstrucao
+    // chegar a olhar esses campos.
+    valor: scoreDeRisco(riscoAntes.probabilidade, riscoAntes.impacto),
+    valorFinanceiro: _valorFinanceiroDoRisco(riscoAntes),
+    classificacao: 'Excluído',
+    probabilidade: String(riscoAntes.probabilidade || ''),
+    impacto: String(riscoAntes.impacto || ''),
+    coletadoEm,
+    registradoEm: coletadoEm,
+    registradoPor: '',
+    reguaVersao: 1,
+    validoAte: _somarDias(coletadoEm, VALIDADE_DIAS[FONTE.RISCO]),
+    origemColecao: 'riscos',
+    origemId,
+  };
+}
+
+/**
  * Converte uma avaliacao de fornecedor em medicao.
  *
  * A nota e CONFORMIDADE: maior e melhor. Por isso a medicao carrega o sentido
@@ -312,6 +354,7 @@ module.exports = {
   PESO_IMPACTO,
   scoreDeRisco,
   medicaoDeRisco,
+  medicaoDeExclusaoRisco,
   medicaoDeLancamento,
   COLECAO,
   ESCALA,

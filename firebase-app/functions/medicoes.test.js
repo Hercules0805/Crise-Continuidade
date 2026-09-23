@@ -186,6 +186,21 @@ test('a medição guarda probabilidade e impacto do momento', () => {
   assert.strictEqual(m.area, 'TI');
 });
 
+// --- Risco excluido -> medicao de fechamento ---
+const { medicaoDeExclusaoRisco } = require('./medicoes');
+
+test('exclusão de risco gera medição de fechamento com classificação Excluído', () => {
+  const m = medicaoDeExclusaoRisco('r1', riscoOk());
+  assert.ok(m);
+  assert.strictEqual(m.classificacao, 'Excluído');
+  assert.strictEqual(m.sujeitoId, 'r1');
+  assert.strictEqual(m.area, 'TI');
+});
+
+test('sem risco anterior (nada a fechar), não gera medição', () => {
+  assert.strictEqual(medicaoDeExclusaoRisco('r1', null), null);
+});
+
 test('todas as combinações da escala dão score entre 1 e 12', () => {
   for (const p of ['Baixa', 'Média', 'Alta']) {
     for (const i of ['Baixo', 'Moderado', 'Alto', 'Crítico']) {

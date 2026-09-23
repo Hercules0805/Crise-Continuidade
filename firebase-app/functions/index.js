@@ -18,7 +18,7 @@ const { onSchedule } = require('firebase-functions/v2/scheduler');
 const { defineSecret } = require('firebase-functions/params');
 const logger = require('firebase-functions/logger');
 const { READ_ACTIONS, WRITE_ACTIONS, TokenError } = require('./tokenLogic');
-const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia, medicaoDeLancamento, medicaoDeRisco, medicaoDeAvaliacaoFornecedor, scoreDeRisco } = require('./medicoes');
+const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia, medicaoDeLancamento, medicaoDeRisco, medicaoDeExclusaoRisco, medicaoDeAvaliacaoFornecedor, scoreDeRisco } = require('./medicoes');
 const fornecedorRisco = require('./fornecedorRisco');
 const retratoRisco = require('./retratoRisco');
 const {
@@ -372,34 +372,55 @@ exports.medicaoDeRisco = onDocumentWritten(
   async (event) => {
     const depois = event.data && event.data.after && event.data.after.exists
       ? event.data.after.data() : null;
-    if (!depois) return; // risco excluido: a curva mantem os pontos antigos
-
     const antes = event.data.before && event.data.before.exists
       ? event.data.before.data() : null;
 
-    const medicao = medicaoDeRisco(event.params.id, depois, antes);
-    if (!medicao) return; // nada relevante mudou, ou escala nao reconhecida
+    if (!depois) {
+      // Risco excluido: os pontos JA GRAVADOS da curva continuam intocados
+      // (nao reescreve o passado), mas sem uma medicao de FECHAMENTO agora, a
+      // ultima medicao existente (a de antes de excluir) continuaria sendo
+      // "a mais recente" para sempre -- o risco ficaria contando no retrato
+      // de hoje e de todo dia futuro, mesmo tendo sumido da grade ao vivo na
+      // hora. classificacao 'Excluído' (STATUS_FORA em historicoRisco.js)
+      // fecha a conta a partir de agora.
+      if (antes) {
+        const fechamento = medicaoDeExclusaoRisco(event.params.id, antes);
+        if (fechamento) {
+          try {
+            const idPonto = `${event.params.id}__${fechamento.coletadoEm}`;
+            await db.collection(COLECAO_MEDICOES)
+              .doc(idDaMedicao(FONTE.RISCO, idPonto))
+              .set(fechamento, { merge: true });
+          } catch (err) {
+            logger.error('medicaoDeRisco: falha ao gravar fechamento de exclusao', { id: event.params.id, erro: err.message });
+          }
+        }
+      }
+    } else {
+      const medicao = medicaoDeRisco(event.params.id, depois, antes);
+      if (!medicao) return; // nada relevante mudou, ou escala nao reconhecida
 
-    // Divergencia entre o score gravado pelo cliente e o recalculado aqui: nao
-    // corrige o documento (isso e decisao de produto), mas registra, porque e
-    // sinal de escala fora do padrao ou de gravacao direta no banco.
-    const scoreDoCliente = Number(depois.score);
-    if (Number.isFinite(scoreDoCliente) && scoreDoCliente !== medicao.valor) {
-      logger.warn('medicaoDeRisco: score do cliente difere do recalculado', {
-        id: event.params.id, cliente: scoreDoCliente, servidor: medicao.valor,
-      });
-    }
+      // Divergencia entre o score gravado pelo cliente e o recalculado aqui: nao
+      // corrige o documento (isso e decisao de produto), mas registra, porque e
+      // sinal de escala fora do padrao ou de gravacao direta no banco.
+      const scoreDoCliente = Number(depois.score);
+      if (Number.isFinite(scoreDoCliente) && scoreDoCliente !== medicao.valor) {
+        logger.warn('medicaoDeRisco: score do cliente difere do recalculado', {
+          id: event.params.id, cliente: scoreDoCliente, servidor: medicao.valor,
+        });
+      }
 
-    try {
-      // Um ponto por reavaliacao: o id inclui o instante, senao a segunda
-      // reavaliacao sobrescreveria a primeira e o historico nao existiria.
-      const idPonto = `${event.params.id}__${medicao.coletadoEm}`;
-      await db.collection(COLECAO_MEDICOES)
-        .doc(idDaMedicao(FONTE.RISCO, idPonto))
-        .set(medicao, { merge: true });
-    } catch (err) {
-      logger.error('medicaoDeRisco: falha ao gravar medicao', { id: event.params.id, erro: err.message });
-      return;
+      try {
+        // Um ponto por reavaliacao: o id inclui o instante, senao a segunda
+        // reavaliacao sobrescreveria a primeira e o historico nao existiria.
+        const idPonto = `${event.params.id}__${medicao.coletadoEm}`;
+        await db.collection(COLECAO_MEDICOES)
+          .doc(idDaMedicao(FONTE.RISCO, idPonto))
+          .set(medicao, { merge: true });
+      } catch (err) {
+        logger.error('medicaoDeRisco: falha ao gravar medicao', { id: event.params.id, erro: err.message });
+        return;
+      }
     }
 
     // Sem isto, o retrato de "hoje" (historico_risco) so seria recalculado na

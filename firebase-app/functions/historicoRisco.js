@@ -40,7 +40,12 @@
 
 'use strict';
 
-const STATUS_FORA = ['Encerrado'];
+// 'Excluído' e um status sintetico: nunca vem do formulario, so da medicao de
+// fechamento que medicaoDeRisco (index.js) grava quando o documento do risco
+// e apagado. Sem ele, um risco excluido continuaria contando pra sempre no
+// retrato (a reconstrucao so olha a ULTIMA medicao de cada sujeitoId, e uma
+// exclusao nunca gerava medicao nenhuma antes desta mudanca).
+const STATUS_FORA = ['Encerrado', 'Excluído'];
 const AREA_CORPORATIVA = 'Corporativo (sem área)';
 
 // --- Tier do processo (copia de public/criticidade.js) ---------------------

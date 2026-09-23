@@ -59,6 +59,21 @@ test('Encerrado fica fora, mas conta em foraPorStatus', () => {
   assert.strictEqual(r.foraPorStatus, 1);
 });
 
+test('Excluído fica fora, mesma regra de Encerrado -- risco apagado para de contar', () => {
+  const r = reconstruir([medicao({ classificacao: 'Excluído' })], '2026-09-20T00:00:00.000Z');
+  assert.strictEqual(r.empresa.contados, 0);
+  assert.strictEqual(r.foraPorStatus, 1);
+});
+
+test('risco excluido DEPOIS da data alvo ainda contava naquele dia (fechamento nao reescreve o passado)', () => {
+  const medicoes = [
+    medicao({ classificacao: 'Identificado', valor: 6, coletadoEm: '2026-09-10T00:00:00.000Z' }),
+    medicao({ classificacao: 'Excluído', valor: 6, coletadoEm: '2026-09-25T00:00:00.000Z' }),
+  ];
+  const r = reconstruir(medicoes, '2026-09-15T00:00:00.000Z');
+  assert.strictEqual(r.empresa.contados, 1, 'em 15/09 o risco ainda nao tinha sido excluido');
+});
+
 test('Aceito continua contando', () => {
   const r = reconstruir([medicao({ classificacao: 'Aceito' })], '2026-09-20T00:00:00.000Z');
   assert.strictEqual(r.empresa.contados, 1);
