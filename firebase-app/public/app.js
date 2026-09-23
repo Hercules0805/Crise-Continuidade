@@ -3813,15 +3813,30 @@ function _badgeStatusRisco(status) {
   const s = status || 'Identificado';
   return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:white;background:${_corStatusRisco(s)};white-space:nowrap;">${s}</span>`;
 }
+// 'Crítica' (Prioridade, feminino) ao lado de 'Crítico' (Impacto) -- mesmas
+// cores, so a escala de Prioridade usa a forma feminina.
 function _corProbImpactoRisco(valor) {
-  const bg = { 'Alta': '#ffcdd2', 'Alto': '#fff3e0', 'Crítico': '#ffcdd2', 'Média': '#fff3e0', 'Moderado': '#e8f5e9', 'Baixa': '#e8f5e9', 'Baixo': '#f5f5f5' };
-  const texto = { 'Alta': '#c62828', 'Alto': '#e65100', 'Crítico': '#c62828', 'Média': '#e65100', 'Moderado': '#2e7d32', 'Baixa': '#2e7d32', 'Baixo': '#666' };
+  const bg = { 'Alta': '#ffcdd2', 'Alto': '#fff3e0', 'Crítico': '#ffcdd2', 'Crítica': '#ffcdd2', 'Média': '#fff3e0', 'Moderado': '#e8f5e9', 'Baixa': '#e8f5e9', 'Baixo': '#f5f5f5' };
+  const texto = { 'Alta': '#c62828', 'Alto': '#e65100', 'Crítico': '#c62828', 'Crítica': '#c62828', 'Média': '#e65100', 'Moderado': '#2e7d32', 'Baixa': '#2e7d32', 'Baixo': '#666' };
   return { bg: bg[valor] || '#f5f5f5', texto: texto[valor] || '#666' };
 }
 function _badgeProbImpactoRisco(valor) {
   if (!valor) return '<span style="color:#bbb;">-</span>';
   const c = _corProbImpactoRisco(valor);
   return `<span style="display:inline-block;padding:2px 8px;border-radius:8px;font-size:0.78em;font-weight:600;background:${c.bg};color:${c.texto};">${valor}</span>`;
+}
+
+/** Quanto este risco soma na "Carga de Risco da Empresa" -- mesma regra do
+ *  card acima da grade (risco-consolidado.js), nunca recalculada aqui. */
+function _badgeCargaRisco(r, processosPorId) {
+  if (!RiscoConsolidado.contaNoConsolidado(r)) {
+    return '<span title="Encerrado não soma na Carga da Empresa" style="color:#bbb;">-</span>';
+  }
+  const carga = RiscoConsolidado.cargaDoRisco(r, processosPorId, riscosCriticidadePorFornecedorCache);
+  if (carga === null) {
+    return '<span title="Probabilidade ou impacto fora da escala — reavalie este risco" style="color:#999;font-weight:600;">-</span>';
+  }
+  return `<span style="font-weight:700;color:#1a237e;">${carga}</span>`;
 }
 
 async function riscos() {
@@ -3865,15 +3880,17 @@ async function riscos() {
       <table>
         <thead>
           <tr>
-            <th onclick="ordenarRiscos('area')" style="cursor:pointer;width:11%;">Área <span id="sort-risco-area"></span></th>
-            <th style="width:13%;">Processo / Fornecedor</th>
-            <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;width:17%;">Título <span id="sort-risco-titulo"></span></th>
-            <th style="width:10%;">Categoria</th>
-            <th style="width:11%;">Responsável</th>
-            <th style="width:8%;">Probab.</th>
-            <th style="width:8%;">Impacto</th>
-            <th onclick="ordenarRiscos('score')" style="cursor:pointer;width:7%;text-align:center;" title="Probabilidade x Impacto, de 1 a 12">Score <span id="sort-risco-score"></span></th>
-            <th style="width:11%;">Status</th>
+            <th onclick="ordenarRiscos('area')" style="cursor:pointer;width:10%;">Área <span id="sort-risco-area"></span></th>
+            <th style="width:11%;">Processo / Fornecedor</th>
+            <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;width:15%;">Título <span id="sort-risco-titulo"></span></th>
+            <th style="width:8%;">Categoria</th>
+            <th style="width:9%;">Responsável</th>
+            <th style="width:7%;">Probab.</th>
+            <th style="width:7%;">Impacto</th>
+            <th onclick="ordenarRiscos('score')" style="cursor:pointer;width:6%;text-align:center;" title="Probabilidade x Impacto, de 1 a 12">Score <span id="sort-risco-score"></span></th>
+            <th style="width:6%;text-align:center;" title="Score x peso do Tier do processo (ou criticidade do fornecedor) -- quanto este risco soma na Carga de Risco da Empresa">Carga</th>
+            <th style="width:8%;">Status</th>
+            <th style="width:7%;">Prioridade</th>
             <th style="width:6%;text-align:center;">Ações</th>
           </tr>
         </thead>
@@ -3923,7 +3940,7 @@ async function riscos() {
     riscosData = []; riscosAreasCache = []; riscosFornecedoresCache = []; riscosCriticidadePorFornecedorCache = {};
     const corpo = document.getElementById('riscoRows');
     if (corpo) {
-      corpo.innerHTML = `<tr><td colspan="10" style="padding:24px;text-align:center;color:#c62828;">
+      corpo.innerHTML = `<tr><td colspan="12" style="padding:24px;text-align:center;color:#c62828;">
         Não foi possível carregar os riscos.<br>
         <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
         <button class="btn btn-ghost" onclick="riscos()" style="margin-top:12px;">Tentar de novo</button>
@@ -4328,6 +4345,8 @@ function renderizarRiscos() {
     if (el) el.textContent = col === riscosOrdenacao.coluna ? (riscosOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
   });
 
+  const processosPorId = RiscoConsolidado.indexarProcessos(riscosProcessosCache);
+
   document.getElementById('riscoRows').innerHTML = data.length
     ? data.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${r.id}')">
         <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(r.area || '-')}</span></td>
@@ -4338,18 +4357,41 @@ function renderizarRiscos() {
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
         <td style="text-align:center;">${_badgeScoreRisco(r)}</td>
+        <td style="text-align:center;">${_badgeCargaRisco(r, processosPorId)}</td>
         <td>${_badgeStatusRisco(r.status)}</td>
+        <td>${_badgeProbImpactoRisco(r.prioridade)}</td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarRisco('${r.id}')" title="${isAdmin ? 'Editar' : 'Visualizar'}">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
+          ${isAdmin ? `<button class="btn-icon" onclick="clonarRisco('${r.id}')" title="Clonar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a237e" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>` : ''}
           ${isAdmin ? `<button class="btn-icon" onclick="excluirRisco('${r.id}')" title="Excluir">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           </button>` : ''}
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="10" style="text-align:center;color:#999;padding:40px;">Nenhum risco cadastrado.</td></tr>';
+    : '<tr><td colspan="12" style="text-align:center;color:#999;padding:40px;">Nenhum risco cadastrado.</td></tr>';
 }
+
+window.clonarRisco = (id) => {
+  const original = riscosData.find((r) => r.id === id);
+  if (!original) return;
+  abrirDrawerRisco({
+    ...original,
+    id: '',
+    titulo: `${original.titulo} (cópia)`,
+    status: 'Identificado',
+    dataIdentificacao: new Date().toISOString().slice(0, 10),
+    dataUltimaReavaliacao: null,
+    proximaReavaliacao: null,
+    historicoReavaliacao: '',
+    dataEncerramento: null,
+    justificativaEncerramento: '',
+    origem: 'Manual',
+  });
+};
 
 window.filtrarRiscos = () => renderizarRiscos();
 window.ordenarRiscos = (coluna) => {
@@ -4652,7 +4694,10 @@ window.trocarAbaRisco = (aba) => {
 /** Título + badge de status do drawer. Reaproveitado ao abrir e depois de salvar
  *  (Salvar não fecha mais o drawer — ver salvarRisco). */
 function _atualizarTituloDrawerRisco(r) {
-  const titulo = r ? 'Editar Risco' : 'Novo Risco';
+  // r truthy com id vazio e o caso do clone (abrirDrawerRisco chamado com um
+  // rascunho pre-preenchido, mas ainda sem documento gravado) -- so a
+  // presenca de um id de verdade significa "isto ja existe no banco".
+  const titulo = (r && r.id) ? 'Editar Risco' : 'Novo Risco';
   const subtitulo = r && r.titulo ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(r.titulo)}</div>` : '';
   document.getElementById('riscoDrawerTitulo').innerHTML = titulo + (r ? ` ${_badgeStatusRisco(r.status)}` : '') + subtitulo;
 }
@@ -4953,7 +4998,7 @@ function renderImpactoFinanceiroRisco() {
       itensDaSecao.map((it) => `<tr>
           ${s.categorias.length > 1 ? `<td style="font-weight:600;color:#222;">${esc(it.categoria)}</td>` : ''}
           <td style="font-size:0.85em;color:#555;">${esc(it.descricao || '-')}</td>
-          <td style="font-size:0.9em;font-weight:600;color:#333;">R$ ${(Number(it.valor) || 0).toLocaleString('pt-BR')}</td>
+          <td style="font-size:0.9em;font-weight:600;color:${it.valor === null || it.valor === undefined ? '#999' : '#333'};">${it.valor === null || it.valor === undefined ? 'sem valor estimado' : `R$ ${Number(it.valor).toLocaleString('pt-BR')}`}</td>
           <td style="text-align:center;">${isAdmin ? `<button class="btn-icon" onclick="removerImpactoFinanceiroItem(${it._i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
         </tr>`).join('') + `</tbody></table>`;
   });
@@ -4965,13 +5010,18 @@ window.adicionarImpactoFinanceiroItem = (secaoIdx) => {
     ? document.getElementById(`ifCategoria_${secaoIdx}`).value.trim()
     : s.categorias[0];
   if (s.categorias.length > 1 && !categoria) return showToast('Informe a categoria.', '#e65100');
-  const valor = document.getElementById(`ifValor_${secaoIdx}`).value;
-  if (valor === '' || isNaN(Number(valor))) return showToast('Informe um valor válido.', '#e65100');
+  const descricao = document.getElementById(`ifDescricao_${secaoIdx}`).value.trim();
+  const valorRaw = document.getElementById(`ifValor_${secaoIdx}`).value;
+  if (valorRaw !== '' && isNaN(Number(valorRaw))) return showToast('Informe um valor válido.', '#e65100');
+  // Valor deixou de ser obrigatorio (o analista pode so descrever um impacto
+  // ainda nao quantificado), mas uma linha sem descricao NEM valor nao diz
+  // nada -- exige pelo menos um dos dois.
+  if (!descricao && valorRaw === '') return showToast('Informe uma descrição ou um valor.', '#e65100');
   window._riscoImpactoFinanceiro = window._riscoImpactoFinanceiro || [];
   window._riscoImpactoFinanceiro.push({
     categoria,
-    descricao: document.getElementById(`ifDescricao_${secaoIdx}`).value.trim(),
-    valor: Number(valor),
+    descricao,
+    valor: valorRaw === '' ? null : Number(valorRaw),
   });
   if (s.categorias.length > 1) document.getElementById(`ifCategoria_${secaoIdx}`).value = '';
   document.getElementById(`ifDescricao_${secaoIdx}`).value = '';

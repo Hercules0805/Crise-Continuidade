@@ -110,6 +110,16 @@ test('processo apagado ou id que nao existe mais cai no peso padrao, sem quebrar
   assert.strictEqual(RC.pesoDoRisco({ processoId: 'nao-existe' }, {}), RC.PESO_PADRAO);
 });
 
+test('indexarProcessos monta um mapa id -> processo, o mesmo formato que consolidar() usa internamente', () => {
+  const mapa = RC.indexarProcessos([{ id: 'a', nome: 'Um' }, { id: 'b', nome: 'Dois' }]);
+  assert.deepStrictEqual(mapa, { a: { id: 'a', nome: 'Um' }, b: { id: 'b', nome: 'Dois' } });
+});
+
+test('indexarProcessos com lista vazia ou ausente devolve mapa vazio', () => {
+  assert.deepStrictEqual(RC.indexarProcessos([]), {});
+  assert.deepStrictEqual(RC.indexarProcessos(undefined), {});
+});
+
 test('A CARGA DA EMPRESA E A SOMA DAS AREAS — conferivel somando a coluna', () => {
   const riscos = [
     risco({ area: 'A', probabilidade: 'Alta', impacto: 'Crítico', processoId: 'p1' }),

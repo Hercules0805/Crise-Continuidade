@@ -240,6 +240,7 @@
     pesoDoRisco: pesoDoRisco,
     cargaDoRisco: cargaDoRisco,
     areaDoRisco: areaDoRisco,
+    indexarProcessos: _indexarProcessos,
     consolidar: consolidar,
   };
 }));
