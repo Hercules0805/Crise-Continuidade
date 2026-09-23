@@ -22,6 +22,11 @@
  * vir da medicao, nao do documento atual):
  *   - se o risco contava no consolidado naquele dia (status, via `classificacao`)
  *   - o score do risco naquele dia (via `valor`)
+ *   - o impacto financeiro estimado naquele dia (via `valorFinanceiro`,
+ *     22/09/2026) -- somado em R$, SEM aplicar o peso do Tier/criticidade
+ *     (dinheiro ja e o numero final, nao precisa de ponderacao de novo).
+ *     Medicao anterior a essa data nao tem esse campo -- conta em
+ *     `semImpactoFinanceiro`, nunca como estimativa zero.
  *
  * O QUE VEM DO ESTADO ATUAL (aproximacao deliberada -- ver risco-
  * consolidado.js: "Criticidade muda uma vez por ano, Exposicao muda toda
@@ -171,12 +176,19 @@ function _estadoPorRiscoEmData(medicoesRisco, dataAlvoISO) {
 }
 
 function _novoAcumulado() {
-  return { carga: 0, contados: 0, composicao: { 'Crítico': 0, Alto: 0, Moderado: 0, Baixo: 0 } };
+  return { carga: 0, contados: 0, impactoFinanceiro: 0, composicao: { 'Crítico': 0, Alto: 0, Moderado: 0, Baixo: 0 } };
 }
 
-function _somar(acc, score, carga) {
+/**
+ * `valorFinanceiro` pode ser null (medicao antiga, de antes deste campo
+ * existir, ou risco sem estimativa ainda) -- soma 0 nesse caso, mas quem
+ * chama e responsavel por contar em semImpactoFinanceiro (a soma sozinha nao
+ * distingue "somou zero de verdade" de "nao tinha estimativa nenhuma").
+ */
+function _somar(acc, score, carga, valorFinanceiro) {
   acc.carga += carga;
   acc.contados += 1;
+  acc.impactoFinanceiro += (valorFinanceiro || 0);
   acc.composicao[faixaScore(score)] += 1;
 }
 
@@ -196,6 +208,7 @@ function reconstruirEmData(medicoesRisco, vinculosPorRiscoId, processosPorId, cr
   let foraPorStatus = 0;
   let semAvaliacao = 0;
   let semVinculo = 0;
+  let semImpactoFinanceiro = 0;
 
   Object.keys(estadoPorRisco).forEach((riscoId) => {
     const estado = estadoPorRisco[riscoId];
@@ -216,8 +229,14 @@ function reconstruirEmData(medicoesRisco, vinculosPorRiscoId, processosPorId, cr
 
     const peso = pesoDoRisco(vinculo, processosPorId, criticidadePorFornecedor);
     const carga = score * peso;
-    _somar(porArea[area], score, carga);
-    _somar(empresa, score, carga);
+    // Impacto financeiro NAO e ponderado pelo peso do Tier/criticidade -- e um
+    // valor em R$ ja estimado, multiplicar por criticidade nao faz sentido
+    // (dinheiro nao fica "mais dinheiro" por o processo ser mais critico).
+    const valorFinanceiro = estado.valorFinanceiro === null || estado.valorFinanceiro === undefined
+      ? null : Number(estado.valorFinanceiro);
+    if (valorFinanceiro === null) semImpactoFinanceiro += 1;
+    _somar(porArea[area], score, carga, valorFinanceiro);
+    _somar(empresa, score, carga, valorFinanceiro);
   });
 
   const areas = Object.keys(porArea)
@@ -231,6 +250,7 @@ function reconstruirEmData(medicoesRisco, vinculosPorRiscoId, processosPorId, cr
     foraPorStatus,
     semAvaliacao,
     semVinculo,
+    semImpactoFinanceiro,
   };
 }
 

@@ -206,15 +206,28 @@ function scoreDeRisco(probabilidade, impacto) {
  * iguais) ou quando a escala nao e reconhecida — risco importado de PCN usa
  * outra escala, e registrar um numero errado e pior que nao registrar.
  */
+/** Numero ou null -- nunca zero disfarcado, "sem estimativa" e diferente de "estimado em zero". */
+function _valorFinanceiroDoRisco(risco) {
+  const v = risco && risco.impactoFinanceiro;
+  return v === null || v === undefined ? null : Number(v);
+}
+
 function medicaoDeRisco(origemId, risco, anterior) {
   if (!risco) return null;
 
   const score = scoreDeRisco(risco.probabilidade, risco.impacto);
   if (score === null) return null;
 
+  const valorFinanceiro = _valorFinanceiroDoRisco(risco);
+
   if (anterior) {
     const scoreAntes = scoreDeRisco(anterior.probabilidade, anterior.impacto);
-    const mudou = scoreAntes !== score || (anterior.status || '') !== (risco.status || '');
+    const financeiroAntes = _valorFinanceiroDoRisco(anterior);
+    // Impacto Financeiro entra na checagem de "mudou algo relevante" -- sem
+    // isso, editar so o valor estimado (sem mexer em probabilidade/impacto/
+    // status) nunca criaria um ponto novo, e a curva financeira do Monitor
+    // nunca se moveria depois da primeira medicao.
+    const mudou = scoreAntes !== score || (anterior.status || '') !== (risco.status || '') || financeiroAntes !== valorFinanceiro;
     if (!mudou) return null;
   }
 
@@ -231,6 +244,7 @@ function medicaoDeRisco(origemId, risco, anterior) {
     metrica: 'risco',
     escala: ESCALA.SCORE_RISCO,
     valor: score,
+    valorFinanceiro,
     classificacao: String(risco.status || ''),
     probabilidade: String(risco.probabilidade || ''),
     impacto: String(risco.impacto || ''),

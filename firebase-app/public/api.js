@@ -330,7 +330,9 @@ async function _lerRiscos() {
     indicadorId: d.indicadorId || null,
     titulo: d.titulo || '',
     descricao: d.descricao || '',
-    categoria: d.categoria || '',
+    // Risco antigo tem so `categoria` (string, um valor so) -- cai num array
+    // de 1 item, sem precisar de migracao de dado.
+    categorias: Array.isArray(d.categorias) ? d.categorias : (d.categoria ? [d.categoria] : []),
     responsavel: d.responsavel || '',
     dataIdentificacao: d.dataIdentificacao || '',
     status: d.status || 'Identificado',
@@ -923,7 +925,7 @@ async function _salvarIndicadorSeguranca(ind) {
 // sem necessidade de JSON.stringify — diferente de processos, que carrega essa
 // convenção da época em que o backend era uma planilha do Sheets).
 const _CAMPOS_RISCO = [
-  'area', 'processoId', 'processo', 'fornecedor', 'fornecedorNome', 'indicadorId', 'titulo', 'descricao', 'categoria', 'responsavel',
+  'area', 'processoId', 'processo', 'fornecedor', 'fornecedorNome', 'indicadorId', 'titulo', 'descricao', 'categorias', 'responsavel',
   'dataIdentificacao', 'status', 'origem',
   'probabilidade', 'impacto', 'impactoFinanceiro', 'impactoFinanceiroDescricao', 'score', 'prioridade',
   'estrategiaTratamento', 'estrategiaDescricao', 'planoAcao', 'kris', 'impactoFinanceiroComponentes',

@@ -166,6 +166,54 @@ test('carga da empresa e a soma das cargas das areas', () => {
 });
 
 // ============================================================
+// IMPACTO FINANCEIRO (22/09/2026) — soma em R$, SEM peso de Tier/criticidade
+// ============================================================
+
+test('impacto financeiro do risco soma na empresa e na area, sem ponderar pelo peso', () => {
+  const r = reconstruir(
+    [medicao({ valor: 6, valorFinanceiro: 50000 })],
+    '2026-09-20T00:00:00.000Z',
+    { r1: { processoId: 'p1', area: 'Financeiro' } },
+    { p1: { avaliado: true, score: 14 } } // Tier 1, peso 3 -- nao deve afetar o financeiro
+  );
+  assert.strictEqual(r.empresa.impactoFinanceiro, 50000, 'peso 3 nao multiplica o valor em R$');
+  assert.strictEqual(r.areas[0].impactoFinanceiro, 50000);
+});
+
+test('risco sem valorFinanceiro (medicao antiga ou sem estimativa) conta em semImpactoFinanceiro, mas nao para de contar em carga/contados', () => {
+  const r = reconstruir([medicao({ valor: 6 })], '2026-09-20T00:00:00.000Z');
+  assert.strictEqual(r.empresa.impactoFinanceiro, 0);
+  assert.strictEqual(r.semImpactoFinanceiro, 1);
+  assert.strictEqual(r.empresa.contados, 1, 'sem estimativa financeira nao e a mesma coisa que sem avaliacao de risco');
+  assert.strictEqual(r.empresa.carga, 6 * 2, 'a carga (score x peso) continua contando normalmente');
+});
+
+test('valorFinanceiro zero e uma estimativa real (zero de verdade), nao conta em semImpactoFinanceiro', () => {
+  const r = reconstruir([medicao({ valor: 6, valorFinanceiro: 0 })], '2026-09-20T00:00:00.000Z');
+  assert.strictEqual(r.semImpactoFinanceiro, 0, 'estimou e deu zero -- diferente de nao ter estimado');
+  assert.strictEqual(r.empresa.impactoFinanceiro, 0);
+});
+
+test('impacto financeiro da empresa e a soma das areas, mesma garantia da carga', () => {
+  const medicoes = [
+    medicao({ sujeitoId: 'r1', area: 'Financeiro', valor: 6, valorFinanceiro: 10000 }),
+    medicao({ sujeitoId: 'r2', area: 'TI', valor: 9, valorFinanceiro: 25000 }),
+  ];
+  const r = reconstruir(medicoes, '2026-09-20T00:00:00.000Z');
+  const somaAreas = r.areas.reduce((t, a) => t + a.impactoFinanceiro, 0);
+  assert.strictEqual(r.empresa.impactoFinanceiro, 35000);
+  assert.strictEqual(r.empresa.impactoFinanceiro, somaAreas);
+});
+
+test('acrescentar um risco com valor financeiro so aumenta o total, nunca diminui', () => {
+  const base = [medicao({ sujeitoId: 'r1', valor: 6, valorFinanceiro: 10000, coletadoEm: '2026-09-05T00:00:00.000Z' })];
+  const comMais = base.concat([medicao({ sujeitoId: 'r2', valor: 3, valorFinanceiro: 5000, coletadoEm: '2026-09-06T00:00:00.000Z' })]);
+  const antes = reconstruir(base, '2026-09-20T00:00:00.000Z').empresa.impactoFinanceiro;
+  const depois = reconstruir(comMais, '2026-09-20T00:00:00.000Z').empresa.impactoFinanceiro;
+  assert.ok(depois > antes);
+});
+
+// ============================================================
 // resolverProcessosComBia — o score/Tier do processo vem de respostas_bia,
 // nao do documento de /processos (bug corrigido em 22/09/2026: sem este
 // join, todo processo caia em Pendente/peso 2 mesmo com BIA respondido)

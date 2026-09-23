@@ -3763,7 +3763,20 @@ let riscosProcessosCache = [];
 let riscosFornecedoresCache = [];
 let riscosCriticidadePorFornecedorCache = {};
 const RISCO_STATUS = ['Identificado', 'Em Análise', 'Em Avaliação', 'Em Tratamento', 'Em Monitoramento', 'Aceito', 'Encerrado'];
-const RISCO_CATEGORIAS = ['Financeiro', 'Operacional', 'Reputacional', 'Regulatório/Legal'];
+const RISCO_CATEGORIAS = [
+  { valor: 'Financeiro', descricao: 'Risco de perda monetária direta, multas ou custos inesperados. Ex.: fraude, erro de faturamento, multa regulatória.' },
+  { valor: 'Operacional', descricao: 'Risco que compromete a execução normal dos processos do dia a dia. Ex.: falha de sistema, indisponibilidade de infraestrutura, erro humano em processo crítico.' },
+  { valor: 'Reputacional', descricao: 'Risco à imagem da empresa perante clientes, mercado ou colaboradores. Ex.: vazamento de dados divulgado publicamente, crítica pública recorrente, insatisfação de clientes.' },
+  { valor: 'Regulatório/Legal', descricao: 'Risco de descumprimento de lei, norma ou contrato, com possíveis sanções. Ex.: não conformidade com a LGPD, descumprimento de cláusula contratual, autuação de órgão fiscalizador.' },
+];
+
+/** Componentes do Impacto Financeiro do risco, agrupados por secao (aba Análise & Avaliação). */
+const RISCO_IMPACTO_FINANCEIRO_SECOES = [
+  { secao: 'Financeiro', categorias: ['Perda de Receita', 'Custo de Recuperação/Remediação', 'Custos Legais/Indenizações'] },
+  { secao: 'Operacional', categorias: ['Perda de Produtividade'] },
+  { secao: 'Reputacional', categorias: ['Dano à Reputação/Imagem (estimado)'] },
+  { secao: 'Regulatório/Legal', categorias: ['Multas e Penalidades Regulatórias'] },
+];
 
 function _corStatusRisco(status) {
   const cores = {
@@ -3897,6 +3910,9 @@ async function riscos() {
     ]);
     riscosData = riscos_; riscosAreasCache = areas_; indicadoresData = inds_; riscosProcessosCache = procs_;
     riscosFornecedoresCache = deps_.filter(d => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
+    // Responsavel do risco escolhe uma Pessoa -- mesmo catalogo que Areas e
+    // Fornecedores ja usam, sem requisicao nova (deps_ ja veio pro fornecedor).
+    pessoasData = deps_.filter(d => d.categoria === 'Pessoas');
     riscosCriticidadePorFornecedorCache = {};
     (avalsForn_ || []).forEach((av) => { if (av && av.fornecedorId) riscosCriticidadePorFornecedorCache[String(av.fornecedorId)] = av.scoreCriticidade; });
   } catch (e) {
@@ -4054,22 +4070,31 @@ function _dataCurta(diaISO) {
 /**
  * Monta o SVG da curva. `historico` vem em ordem cronologica (mais antigo
  * primeiro) — ver _lerHistoricoRisco em api.js.
+ *
+ * `opcoes.campo` escolhe o que plotar (`'carga'` ou `'impactoFinanceiro'`) --
+ * a mesma funcao serve pros dois graficos do Monitor, so trocando o campo e o
+ * formato do numero. As 3 areas escolhidas pra aparecer sao rankeadas pelo
+ * PROPRIO campo (a area mais critica em risco nao e necessariamente a de
+ * maior exposicao financeira).
  */
-function _svgLinhaTempoRisco(historico) {
+function _svgLinhaTempoRisco(historico, opcoes) {
   if (!historico || historico.length === 0) return null;
+  const campo = (opcoes && opcoes.campo) || 'carga';
+  const formatarValor = (opcoes && opcoes.formatarValor) || ((v) => String(v));
+  const rotuloGrafico = (opcoes && opcoes.rotulo) || 'Carga de risco ao longo do tempo';
 
   const LARGURA = 760, ALTURA = 280;
   const MARGEM = { topo: 16, baixo: 34, esq: 46, dir: 16 };
   const areaW = LARGURA - MARGEM.esq - MARGEM.dir;
   const areaH = ALTURA - MARGEM.topo - MARGEM.baixo;
 
-  // Quais areas entram no grafico: as de MAIOR carga no dia mais recente,
-  // no maximo 3 — alem de Empresa. Fixadas pelo ultimo dia para a cor de
-  // cada linha nao pular de area a cada atualizacao.
+  // Quais areas entram no grafico: as de MAIOR valor (no campo escolhido) no
+  // dia mais recente, no maximo 3 — alem de Empresa. Fixadas pelo ultimo dia
+  // para a cor de cada linha nao pular de area a cada atualizacao.
   const ultimoDia = historico[historico.length - 1];
   const topAreas = (ultimoDia.areas || [])
     .slice()
-    .sort((a, b) => b.carga - a.carga)
+    .sort((a, b) => (b[campo] || 0) - (a[campo] || 0))
     .slice(0, 3)
     .map((a) => a.area);
 
@@ -4077,9 +4102,9 @@ function _svgLinhaTempoRisco(historico) {
     .concat(topAreas.map((area, i) => ({ nome: area, cor: _CORES_MONITOR[i + 1] })));
 
   const valorDoDia = (dia, nomeSerie) => {
-    if (nomeSerie === 'Empresa') return dia.empresa.carga;
+    if (nomeSerie === 'Empresa') return dia.empresa[campo] || 0;
     const a = (dia.areas || []).find((x) => x.area === nomeSerie);
-    return a ? a.carga : 0;
+    return a ? (a[campo] || 0) : 0;
   };
 
   const todosValores = series.flatMap((s) => historico.map((dia) => valorDoDia(dia, s.nome)));
@@ -4096,7 +4121,7 @@ function _svgLinhaTempoRisco(historico) {
     const v = Math.round((maxValor / NUM_FAIXAS) * f);
     const yy = y(v);
     grade += `<line x1="${MARGEM.esq}" y1="${yy}" x2="${LARGURA - MARGEM.dir}" y2="${yy}" stroke="#eee" stroke-width="1"/>`;
-    grade += `<text x="${MARGEM.esq - 8}" y="${yy + 4}" text-anchor="end" font-size="10" fill="#999">${v}</text>`;
+    grade += `<text x="${MARGEM.esq - 8}" y="${yy + 4}" text-anchor="end" font-size="10" fill="#999">${esc(formatarValor(v))}</text>`;
   }
 
   // Rotulos do eixo X: primeiro, ultimo, e alguns no meio (nunca mais que ~7, senao colide).
@@ -4113,7 +4138,7 @@ function _svgLinhaTempoRisco(historico) {
     const pontos = historico.map((dia, i) => `${x(i)},${y(valorDoDia(dia, s.nome))}`).join(' ');
     const circulos = historico.map((dia, i) => {
       const v = valorDoDia(dia, s.nome);
-      return `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${s.cor}"><title>${esc(s.nome)} — ${_dataCurta(dia.dia)}: ${v} pontos</title></circle>`;
+      return `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${s.cor}"><title>${esc(s.nome)} — ${_dataCurta(dia.dia)}: ${esc(formatarValor(v))}</title></circle>`;
     }).join('');
     const linha = n > 1
       ? `<polyline points="${pontos}" fill="none" stroke="${s.cor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`
@@ -4126,7 +4151,7 @@ function _svgLinhaTempoRisco(historico) {
       <span style="width:10px;height:10px;border-radius:50%;background:${s.cor};display:inline-block;"></span>${esc(s.nome)}
     </span>`).join('');
 
-  const svg = `<svg viewBox="0 0 ${LARGURA} ${ALTURA}" width="100%" height="${ALTURA}" role="img" aria-label="Carga de risco ao longo do tempo">
+  const svg = `<svg viewBox="0 0 ${LARGURA} ${ALTURA}" width="100%" height="${ALTURA}" role="img" aria-label="${esc(rotuloGrafico)}">
     ${grade}${rotulosX}${linhas}
     <line x1="${MARGEM.esq}" y1="${MARGEM.topo}" x2="${MARGEM.esq}" y2="${ALTURA - MARGEM.baixo}" stroke="#ccc" stroke-width="1"/>
     <line x1="${MARGEM.esq}" y1="${ALTURA - MARGEM.baixo}" x2="${LARGURA - MARGEM.dir}" y2="${ALTURA - MARGEM.baixo}" stroke="#ccc" stroke-width="1"/>
@@ -4169,7 +4194,11 @@ async function monitor() {
   const ultimo = historico[historico.length - 1];
   const idade = _idadeEmDias(ultimo.dia);
   const statusIdade = _corIdade(idade);
-  const grafico = _svgLinhaTempoRisco(historico);
+  const grafico = _svgLinhaTempoRisco(historico, { campo: 'carga', rotulo: 'Carga de risco ao longo do tempo' });
+  const formatarReais = (v) => 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR');
+  const graficoFinanceiro = _svgLinhaTempoRisco(historico, {
+    campo: 'impactoFinanceiro', formatarValor: formatarReais, rotulo: 'Impacto financeiro estimado ao longo do tempo',
+  });
 
   const badgesComposicao = (comp) => RiscoConsolidado.FAIXAS
     .filter((f) => comp[f] > 0)
@@ -4197,12 +4226,26 @@ async function monitor() {
       ${historico.length < 5 ? `<div style="font-size:0.76em;color:#999;margin-top:10px;">Só ${historico.length} dia${historico.length === 1 ? '' : 's'} de histórico até agora — a curva fica mais útil conforme os dias passam.</div>` : ''}
     </div>
 
+    <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;margin-bottom:16px;">
+      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">Impacto financeiro estimado ao longo do tempo</div>
+      ${graficoFinanceiro ? graficoFinanceiro.svg : '<div style="color:#999;">Sem dados suficientes para o gráfico.</div>'}
+      <div style="margin-top:8px;">${graficoFinanceiro ? graficoFinanceiro.legendaHtml : ''}</div>
+      ${ultimo.semImpactoFinanceiro ? `<div style="font-size:0.76em;color:#e65100;margin-top:10px;">⚠ ${ultimo.semImpactoFinanceiro} risco${ultimo.semImpactoFinanceiro > 1 ? 's' : ''} sem estimativa financeira — fora desta conta, o que a puxa para baixo</div>` : ''}
+    </div>
+
     <div style="display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start;">
-      <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;">
-        <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Carga da empresa hoje</div>
-        <div style="font-size:2.8em;font-weight:800;line-height:1;margin:8px 0 10px;color:#1a237e;">${ultimo.empresa.carga}</div>
-        <div>${badgesComposicao(ultimo.empresa.composicao) || '<span style="font-size:0.8em;color:#999;">Nenhum risco na conta</span>'}</div>
-        <div style="font-size:0.76em;color:#777;margin-top:10px;">${ultimo.empresa.contados} risco${ultimo.empresa.contados === 1 ? '' : 's'} somado${ultimo.empresa.contados === 1 ? '' : 's'}</div>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;">
+          <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Carga da empresa hoje</div>
+          <div style="font-size:2.8em;font-weight:800;line-height:1;margin:8px 0 10px;color:#1a237e;">${ultimo.empresa.carga}</div>
+          <div>${badgesComposicao(ultimo.empresa.composicao) || '<span style="font-size:0.8em;color:#999;">Nenhum risco na conta</span>'}</div>
+          <div style="font-size:0.76em;color:#777;margin-top:10px;">${ultimo.empresa.contados} risco${ultimo.empresa.contados === 1 ? '' : 's'} somado${ultimo.empresa.contados === 1 ? '' : 's'}</div>
+        </div>
+        <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;">
+          <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Impacto Financeiro Estimado Hoje</div>
+          <div style="font-size:1.7em;font-weight:800;line-height:1;margin:8px 0 6px;color:#1a237e;">${formatarReais(ultimo.empresa.impactoFinanceiro)}</div>
+          ${ultimo.semImpactoFinanceiro ? `<div style="font-size:0.74em;color:#e65100;">${ultimo.semImpactoFinanceiro} risco${ultimo.semImpactoFinanceiro > 1 ? 's' : ''} sem estimativa</div>` : ''}
+        </div>
       </div>
       <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 8px 10px;background:#fff;">
         <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;padding:0 10px 6px;">Carga por área hoje</div>
@@ -4212,6 +4255,7 @@ async function monitor() {
               <th style="padding:4px 10px 8px;text-align:left;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Área</th>
               <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Nº de Riscos</th>
               <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Carga</th>
+              <th style="padding:4px 10px 8px;text-align:right;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Impacto Financeiro</th>
               <th style="padding:4px 10px 8px;text-align:left;font-size:0.78em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">Composição</th>
             </tr>
           </thead>
@@ -4220,6 +4264,7 @@ async function monitor() {
               <td style="padding:7px 10px;font-weight:600;color:#333;">${esc(a.area)}</td>
               <td style="padding:7px 10px;text-align:right;color:#555;">${a.contados}</td>
               <td style="padding:7px 10px;text-align:right;font-weight:700;color:#1a237e;">${a.carga}</td>
+              <td style="padding:7px 10px;text-align:right;color:#555;">${formatarReais(a.impactoFinanceiro)}</td>
               <td style="padding:7px 10px;color:#777;">${badgesComposicao(a.composicao)}</td>
             </tr>`).join('')}
           </tbody>
@@ -4254,7 +4299,7 @@ function renderizarRiscos() {
       (r.titulo || '').toLowerCase().includes(termo) ||
       (r.descricao || '').toLowerCase().includes(termo) ||
       (r.responsavel || '').toLowerCase().includes(termo) ||
-      (r.categoria || '').toLowerCase().includes(termo) ||
+      (r.categorias || []).some((c) => c.toLowerCase().includes(termo)) ||
       (r.processo || '').toLowerCase().includes(termo) ||
       (r.fornecedorNome || '').toLowerCase().includes(termo)
     );
@@ -4284,17 +4329,17 @@ function renderizarRiscos() {
   });
 
   document.getElementById('riscoRows').innerHTML = data.length
-    ? data.map(r => `<tr>
+    ? data.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${r.id}')">
         <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(r.area || '-')}</span></td>
         <td style="font-size:0.85em;color:#555;">${r.processo || (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span style="color:#bbb;">Corporativo</span>')}</td>
-        <td style="font-weight:600;color:#222;cursor:pointer;" ondblclick="editarRisco('${r.id}')" title="Duplo-clique para editar">${esc(r.titulo)}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(r.categoria || '-')}</td>
+        <td style="font-weight:600;color:#222;">${esc(r.titulo)}</td>
+        <td style="font-size:0.85em;color:#555;">${esc((r.categorias || []).join(', ')) || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${esc(r.responsavel || '-')}</td>
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
         <td style="text-align:center;">${_badgeScoreRisco(r)}</td>
         <td>${_badgeStatusRisco(r.status)}</td>
-        <td style="text-align:center;white-space:nowrap;">
+        <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarRisco('${r.id}')" title="${isAdmin ? 'Editar' : 'Visualizar'}">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
@@ -4373,18 +4418,19 @@ function _htmlDrawerRisco() {
                 <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Use quando o risco tem relação com um indicador de segurança. Risco gerado por desvio de meta já vem preenchido.</span>
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
-              <div>
-                <label style="${lbl}">Categoria</label>
-                <select id="rCategoria" style="${inp}">
-                  <option value="">Selecione...</option>
-                  ${RISCO_CATEGORIAS.map(c => `<option value="${c}">${c}</option>`).join('')}
-                </select>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Categorias do Risco</label>
+              <div id="rCategoriasLista" style="display:flex;flex-direction:column;gap:8px;">
+                ${RISCO_CATEGORIAS.map(c => `
+                  <label style="display:flex;gap:8px;align-items:flex-start;border:1px solid #eee;border-radius:8px;padding:8px 10px;cursor:pointer;font-size:0.88em;">
+                    <input type="checkbox" class="risco-categoria-check" value="${esc(c.valor)}" style="margin-top:3px;">
+                    <span><strong>${esc(c.valor)}</strong><br><span style="color:#888;">${esc(c.descricao)}</span></span>
+                  </label>`).join('')}
               </div>
-              <div>
-                <label style="${lbl}">Responsável (Owner)</label>
-                <input type="text" id="rResponsavel" placeholder="Nome ou e-mail" style="${inp}">
-              </div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Responsável (Owner)</label>
+              <select id="rResponsavel" style="${inp}"><option value="">Selecione...</option></select>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
@@ -4423,24 +4469,24 @@ function _htmlDrawerRisco() {
               </div>
             </div>
             <div style="margin-bottom:16px;">
-              <label style="${lbl}margin-bottom:8px;">Componentes do Impacto Financeiro</label>
-              <div id="impactoFinanceiroTabela"></div>
-              <div style="display:grid;grid-template-columns:1.5fr 1.5fr 1fr auto;gap:8px;margin-top:10px;align-items:end;">
-                <div>
-                  <select id="ifCategoria" style="${inp}">
-                    <option value="">Selecione...</option>
-                    <option value="Perda de Receita">Perda de Receita</option>
-                    <option value="Custo de Recuperação/Remediação">Custo de Recuperação/Remediação</option>
-                    <option value="Multas e Penalidades Regulatórias">Multas e Penalidades Regulatórias</option>
-                    <option value="Custos Legais/Indenizações">Custos Legais/Indenizações</option>
-                    <option value="Perda de Produtividade">Perda de Produtividade</option>
-                    <option value="Dano à Reputação/Imagem (estimado)">Dano à Reputação/Imagem (estimado)</option>
-                  </select>
-                </div>
-                <div><input type="text" id="ifDescricao" placeholder="Descrição (opcional)" style="${inp}"></div>
-                <div><input type="number" id="ifValor" placeholder="Valor R$" style="${inp}"></div>
-                <button class="btn btn-ghost" onclick="adicionarImpactoFinanceiroItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
-              </div>
+              <label style="${lbl}margin-bottom:8px;">Componentes do Impacto Financeiro, por seção</label>
+              ${RISCO_IMPACTO_FINANCEIRO_SECOES.map((s, i) => `
+                <div style="border:1px solid #eee;border-radius:9px;padding:12px 14px;margin-bottom:10px;">
+                  <div style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">${esc(s.secao)}</div>
+                  <div id="impactoFinanceiroTabela_${i}"></div>
+                  <div style="display:grid;grid-template-columns:${s.categorias.length > 1 ? '1.3fr ' : ''}1.5fr 1fr auto;gap:8px;margin-top:8px;align-items:end;">
+                    ${s.categorias.length > 1 ? `
+                    <div>
+                      <select id="ifCategoria_${i}" style="${inp}">
+                        <option value="">Selecione...</option>
+                        ${s.categorias.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+                      </select>
+                    </div>` : ''}
+                    <div><input type="text" id="ifDescricao_${i}" placeholder="Descrição (opcional)" style="${inp}"></div>
+                    <div><input type="number" id="ifValor_${i}" placeholder="Valor R$" style="${inp}"></div>
+                    <button class="btn btn-ghost" onclick="adicionarImpactoFinanceiroItem(${i})" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+                  </div>
+                </div>`).join('')}
             </div>
             <div style="margin-bottom:16px;">
               <label style="${lbl}">Impacto Financeiro Estimado (R$)</label>
@@ -4663,8 +4709,19 @@ window.abrirDrawerRisco = async (r) => {
   document.getElementById('rFornecedor').value = r && r.fornecedor ? r.fornecedor : '';
   document.getElementById('rIndicador').value = r && r.indicadorId ? r.indicadorId : '';
   document.getElementById('rTitulo').value = r ? r.titulo : '';
-  document.getElementById('rCategoria').value = r ? (r.categoria || '') : '';
-  document.getElementById('rResponsavel').value = r ? (r.responsavel || '') : '';
+  // Risco antigo pode ter so `categoria` (string, um valor so) -- cai num
+  // array de 1 item, sem precisar de migracao de dado.
+  const categoriasAtuais = r ? (Array.isArray(r.categorias) ? r.categorias : (r.categoria ? [r.categoria] : [])) : [];
+  document.querySelectorAll('.risco-categoria-check').forEach((chk) => { chk.checked = categoriasAtuais.includes(chk.value); });
+  const responsavelAtual = r ? (r.responsavel || '') : '';
+  // Risco antigo pode ter responsavel em texto livre que nao bate com nenhuma
+  // pessoa cadastrada -- vira opcao extra selecionada, nunca some em silencio
+  // so por abrir o drawer (mesmo padrao ja usado pra Responsavel de Area).
+  const temNaLista = pessoasData.some((p) => p.nome === responsavelAtual);
+  document.getElementById('rResponsavel').innerHTML = '<option value="">Selecione...</option>' +
+    pessoasData.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
+    (responsavelAtual && !temNaLista ? `<option value="${esc(responsavelAtual)}">${esc(responsavelAtual)} (não cadastrado como pessoa)</option>` : '');
+  document.getElementById('rResponsavel').value = responsavelAtual;
   document.getElementById('rDataIdentificacao').value = r ? (r.dataIdentificacao || '') : new Date().toISOString().slice(0, 10);
   document.getElementById('rStatus').value = r ? (r.status || 'Identificado') : 'Identificado';
   document.getElementById('rDescricao').value = r ? (r.descricao || '') : '';
@@ -4749,7 +4806,7 @@ window.salvarRisco = async () => {
     indicadorId: document.getElementById('rIndicador').value || null,
     titulo: document.getElementById('rTitulo').value.trim(),
     descricao: document.getElementById('rDescricao').value.trim(),
-    categoria: document.getElementById('rCategoria').value.trim(),
+    categorias: Array.from(document.querySelectorAll('.risco-categoria-check:checked')).map((c) => c.value),
     responsavel: document.getElementById('rResponsavel').value.trim(),
     dataIdentificacao: document.getElementById('rDataIdentificacao').value,
     status: document.getElementById('rStatus').value,
@@ -4869,39 +4926,56 @@ window._calcularScoreRisco = () => {
   document.getElementById('rScore').value = (pesoP && pesoI) ? pesoP * pesoI : '';
 };
 
-// Componentes do Impacto Financeiro (sub-lista embutida no risco)
+// Componentes do Impacto Financeiro (sub-lista embutida no risco), agora
+// exibida em 4 sub-tabelas (uma por secao de RISCO_IMPACTO_FINANCEIRO_SECOES)
+// -- o array salvo continua um so e plano, so a exibicao e agrupada.
 window._riscoImpactoFinanceiro = [];
+
 function renderImpactoFinanceiroRisco() {
-  const container = document.getElementById('impactoFinanceiroTabela');
-  if (!container) return;
   const itens = window._riscoImpactoFinanceiro || [];
   const isAdmin = window.USER_PERFIL === 'admin';
   const total = itens.reduce((soma, it) => soma + (Number(it.valor) || 0), 0);
-  document.getElementById('rImpactoFinanceiro').value = itens.length ? total : '';
+  const totalInput = document.getElementById('rImpactoFinanceiro');
+  if (totalInput) totalInput.value = itens.length ? total : '';
 
-  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum componente adicionado.</p>'; return; }
-  container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
-    itens.map((it, i) => `<tr>
-        <td style="font-weight:600;color:#222;">${esc(it.categoria)}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(it.descricao || '-')}</td>
-        <td style="font-size:0.9em;font-weight:600;color:#333;">R$ ${(Number(it.valor) || 0).toLocaleString('pt-BR')}</td>
-        <td style="text-align:center;">${isAdmin ? `<button class="btn-icon" onclick="removerImpactoFinanceiroItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
-      </tr>`).join('') + `</tbody></table>`;
+  RISCO_IMPACTO_FINANCEIRO_SECOES.forEach((s, secaoIdx) => {
+    const container = document.getElementById(`impactoFinanceiroTabela_${secaoIdx}`);
+    if (!container) return;
+    // Guarda o indice no array PLANO (window._riscoImpactoFinanceiro) antes de
+    // filtrar -- e esse indice que removerImpactoFinanceiroItem precisa, nao
+    // a posicao dentro da secao.
+    const itensDaSecao = itens
+      .map((it, i) => ({ ...it, _i: i }))
+      .filter((it) => s.categorias.includes(it.categoria));
+
+    if (!itensDaSecao.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum componente adicionado nesta seção.</p>'; return; }
+    container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
+      itensDaSecao.map((it) => `<tr>
+          ${s.categorias.length > 1 ? `<td style="font-weight:600;color:#222;">${esc(it.categoria)}</td>` : ''}
+          <td style="font-size:0.85em;color:#555;">${esc(it.descricao || '-')}</td>
+          <td style="font-size:0.9em;font-weight:600;color:#333;">R$ ${(Number(it.valor) || 0).toLocaleString('pt-BR')}</td>
+          <td style="text-align:center;">${isAdmin ? `<button class="btn-icon" onclick="removerImpactoFinanceiroItem(${it._i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
+        </tr>`).join('') + `</tbody></table>`;
+  });
 }
-window.adicionarImpactoFinanceiroItem = () => {
-  const categoria = document.getElementById('ifCategoria').value.trim();
-  const valor = document.getElementById('ifValor').value;
-  if (!categoria) return showToast('Informe a categoria.', '#e65100');
+
+window.adicionarImpactoFinanceiroItem = (secaoIdx) => {
+  const s = RISCO_IMPACTO_FINANCEIRO_SECOES[secaoIdx];
+  const categoria = s.categorias.length > 1
+    ? document.getElementById(`ifCategoria_${secaoIdx}`).value.trim()
+    : s.categorias[0];
+  if (s.categorias.length > 1 && !categoria) return showToast('Informe a categoria.', '#e65100');
+  const valor = document.getElementById(`ifValor_${secaoIdx}`).value;
   if (valor === '' || isNaN(Number(valor))) return showToast('Informe um valor válido.', '#e65100');
   window._riscoImpactoFinanceiro = window._riscoImpactoFinanceiro || [];
   window._riscoImpactoFinanceiro.push({
     categoria,
-    descricao: document.getElementById('ifDescricao').value.trim(),
+    descricao: document.getElementById(`ifDescricao_${secaoIdx}`).value.trim(),
     valor: Number(valor),
   });
-  document.getElementById('ifCategoria').value = '';
-  document.getElementById('ifDescricao').value = '';
-  document.getElementById('ifValor').value = '';
+  if (s.categorias.length > 1) document.getElementById(`ifCategoria_${secaoIdx}`).value = '';
+  document.getElementById(`ifDescricao_${secaoIdx}`).value = '';
+  document.getElementById(`ifValor_${secaoIdx}`).value = '';
   renderImpactoFinanceiroRisco();
 };
 window.removerImpactoFinanceiroItem = (idx) => {
