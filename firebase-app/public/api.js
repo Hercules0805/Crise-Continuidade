@@ -34,7 +34,6 @@ const COLLECTION = {
   regua: 'config_regua',
   configPerfis: 'config_perfis',
   dependencias: 'dependencias',
-  componentes: 'componentes',
   riscos: 'riscos',
   indicadoresSeguranca: 'indicadores_seguranca',
   lancamentos: 'lancamentos_indicadores',
@@ -275,22 +274,22 @@ async function _lerDependencias() {
     // antigo, de antes deste campo existir) conta como TIC -- marcado por
     // padrao, decisao do usuario.
     tic: d.tic !== false,
-  }));
-}
-
-async function _lerComponentes() {
-  const docs = await _getAll(COLLECTION.componentes);
-  return docs.map((d) => ({
-    id: d.id,
-    tipo: d.tipo || '',
-    nome: d.nome || '',
-    descricao: d.descricao || '',
+    // So usado pelas 7 categorias tecnicas (API, Banco de Dados,
+    // Infraestrutura, Seguranca, Servidor, Sistema, Outros) -- vieram do
+    // antigo catalogo de Componentes, fundido aqui. Nas outras categorias
+    // (Fornecedores/Pessoas) esses campos nunca sao escritos.
     rto: d.rto || '',
     rpo: d.rpo || '',
     estrategia: d.estrategia || '',
     responsavel: d.responsavel || '',
   }));
 }
+// _lerComponentes/_salvarComponente/COLLECTION.componentes foram removidos: o
+// catalogo de Componentes do Servico se fundiu em Dependencias (ver
+// scripts/migrar-componentes-para-dependencias.js) -- Sistemas, Servidores,
+// Bancos de Dados etc. agora sao categorias de Dependencia, nao uma colecao
+// a parte. Os documentos antigos de "componentes" ficam intocados no
+// Firestore, so pararam de ser lidos por este arquivo.
 
 /**
  * Le os riscos respeitando o recorte por area.
@@ -715,7 +714,6 @@ async function _lerProcessos() {
       drpEscopo: d.drpEscopo || '',
       drpProcedimentos: d.drpProcedimentos || '',
       drpCriterios: d.drpCriterios || '',
-      drpComponentes: d.drpComponentes || [],
       mtd: d.mtd || '',
       workaround: d.workaround || '',
       impactoJanela: d.impactoJanela || '',
@@ -832,6 +830,11 @@ async function _salvarDependencia(d) {
     gestorContrato: d.gestorContrato || '',
     tic: d.tic !== false,
     cnpj: d.cnpj || '',
+    // So usado pelas 7 categorias tecnicas -- ver _lerDependencias.
+    rto: d.rto || '',
+    rpo: d.rpo || '',
+    estrategia: d.estrategia || '',
+    responsavel: d.responsavel || '',
   };
   if (d.id) {
     await _db.collection(COLLECTION.dependencias).doc(String(d.id)).set(data, { merge: true });
@@ -839,24 +842,6 @@ async function _salvarDependencia(d) {
   }
   const ref = await _db.collection(COLLECTION.dependencias).add(data);
   return { success: true, id: ref.id, dado: data };
-}
-
-async function _salvarComponente(d) {
-  const data = {
-    tipo: d.tipo || '',
-    nome: d.nome || '',
-    descricao: d.descricao || '',
-    rto: d.rto || '',
-    rpo: d.rpo || '',
-    estrategia: d.estrategia || '',
-    responsavel: d.responsavel || '',
-  };
-  if (d.id) {
-    await _db.collection(COLLECTION.componentes).doc(String(d.id)).set(data, { merge: true });
-    return { success: true, id: d.id };
-  }
-  const ref = await _db.collection(COLLECTION.componentes).add(data);
-  return { success: true, id: ref.id };
 }
 
 const _CAMPOS_INDICADOR = [
@@ -980,7 +965,7 @@ function _marcarTierManual(dados, anterior) {
 const _CAMPOS_PROCESSO = [
   'area', 'processo', 'descricao', 'dependencia', 'dependenciaItens', 'rto', 'rpo', 'mtpd', 'biaHomologada', 'tier',
   'bcpStatus', 'descricaoFuncional', 'impactoIndisponibilidade', 'bcpObjetivo', 'bcpEscopo', 'bcpContatos', 'bcpRiscos', 'bcpPreventivas',
-  'drpStatus', 'drpObjetivo', 'drpEscopo', 'drpProcedimentos', 'drpCriterios', 'drpComponentes',
+  'drpStatus', 'drpObjetivo', 'drpEscopo', 'drpProcedimentos', 'drpCriterios',
   'mtd', 'workaround', 'impactoJanela', 'bcpPlanoBProvedores', 'bcpSlas', 'bcpGatilhos', 'bcpReconstituicao', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual', 'tierManualPor', 'tierManualEm',
 ];
 
@@ -1098,7 +1083,6 @@ const _GET_FIRESTORE = {
   getProcessosPorArea: (params) => _lerProcessos().then((ps) => (params.area ? ps.filter((p) => p.area === params.area) : ps)),
   getConfigRespostas: () => _lerConfigRespostas(),
   getDependencias: () => _lerDependencias(),
-  getComponentes: () => _lerComponentes(),
   getPerfil: (params) => _lerPerfil(params.email),
   getRiscos: () => _lerRiscos(),
   getRiscosPorProcesso: (params) => _lerRiscos().then((rs) => (params.processoId ? rs.filter((r) => r.processoId === params.processoId) : rs)),
@@ -1126,8 +1110,6 @@ const _POST_FIRESTORE = {
     .then(() => _subirVersaoRegua()).then((versao) => ({ success: true, reguaVersao: versao })),
   salvarDependencia: (b) => _salvarDependencia(b),
   excluirDependencia: (b) => _db.collection(COLLECTION.dependencias).doc(String(b.id)).delete().then(() => ({ success: true })),
-  salvarComponente: (b) => _salvarComponente(b),
-  excluirComponente: (b) => _db.collection(COLLECTION.componentes).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarRisco: (b) => _salvarRisco(b),
   excluirRisco: (b) => _db.collection(COLLECTION.riscos).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarIndicadorSeguranca: (b) => _salvarIndicadorSeguranca(b),
@@ -1190,11 +1172,12 @@ function _extrairErro(texto) {
 }
 
 // Os nomes antigos (gerarTokenBIA etc.) viram um só: gerarLink com o tipo.
+// gerarTokenDRP saiu -- "Componentes do Serviço" se fundiu em Dependencias, e
+// o link de BIA ja cobre as 7 categorias tecnicas (ver Contexto do plano).
 const _TIPO_LINK = {
   gerarToken: 'avaliacao',
   gerarTokenArea: 'area',
   gerarTokenBIA: 'bia',
-  gerarTokenDRP: 'drp',
   gerarTokenLevantamento: 'levantamento',
 };
 
@@ -1235,7 +1218,7 @@ const API = {
     if (_POST_FIRESTORE[action]) {
       const result = await _POST_FIRESTORE[action](body);
       // Invalida caches afetados de forma conservadora.
-      API.invalidate('getProcessos', 'getAreas', 'getPerguntas', 'getConfigRespostas', 'getDependencias', 'getComponentes', 'getProcessosPorArea', 'getRiscos', 'getRiscosPorProcesso', 'getRiscosPorArea', 'getIndicadoresSeguranca');
+      API.invalidate('getProcessos', 'getAreas', 'getPerguntas', 'getConfigRespostas', 'getDependencias', 'getProcessosPorArea', 'getRiscos', 'getRiscosPorProcesso', 'getRiscosPorArea', 'getIndicadoresSeguranca');
       return result;
     }
     // Ações que exigem login -> Cloud Function appApi.
@@ -1276,9 +1259,6 @@ const API = {
   getDependencias: () => API.get('getDependencias'),
   salvarDependencia: (d) => API.post('salvarDependencia', d),
   excluirDependencia: (id) => API.post('excluirDependencia', { id }),
-  getComponentes: () => API.get('getComponentes'),
-  salvarComponente: (d) => API.post('salvarComponente', d),
-  excluirComponente: (id) => API.post('excluirComponente', { id }),
   getRiscos: () => API.get('getRiscos'),
   getRiscosPorProcesso: (processoId) => API.get('getRiscosPorProcesso', { processoId }),
   getRiscosPorArea: (area) => API.get('getRiscosPorArea', { area }),

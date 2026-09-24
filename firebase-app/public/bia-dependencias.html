@@ -70,18 +70,26 @@
     let PROCESSO_INFO = {};
     let CATALOGO = {};
     // Cada item vira {nome, id} -- id preenchido quando vinculado a um
-    // cadastro real (Fornecedores/Pessoas/Sistemas/Processos), null quando e
-    // so texto digitado (Fornecedores/Infraestrutura/Pessoas/Sistemas ainda
-    // aceitam isso; Processos, nao -- ver addManual).
-    const DEPS = { fornecedores: [], infraestrutura: [], pessoas: [], sistemas: [], processos: [] };
+    // cadastro real (Fornecedores/Pessoas/Processos, ou uma das 7 categorias
+    // tecnicas de Dependencia), null quando e so texto digitado (Processos e
+    // a unica que nunca aceita isso -- ver addManual).
+    const DEPS = {
+      fornecedores: [], pessoas: [], processos: [],
+      api: [], bancodedados: [], infraestrutura: [], 'segurança': [], servidor: [], sistemas: [], outros: [],
+    };
 
     function chaveDaCategoria(categoria) {
       const c = String(categoria || '').trim();
       if (c === 'Fornecedores' || c === 'Fornecedor') return 'fornecedores';
-      if (c === 'Infraestrutura') return 'infraestrutura';
       if (c === 'Pessoas' || c === 'Pessoa') return 'pessoas';
-      if (c === 'Sistemas' || c === 'Sistema') return 'sistemas';
       if (c === 'Processos Internos' || c === 'Processo Interno') return 'processos';
+      if (c === 'API') return 'api';
+      if (c === 'Banco de Dados') return 'bancodedados';
+      if (c === 'Infraestrutura') return 'infraestrutura';
+      if (c === 'Segurança') return 'segurança';
+      if (c === 'Servidor') return 'servidor';
+      if (c === 'Sistema' || c === 'Sistemas') return 'sistemas';
+      if (c === 'Outros') return 'outros';
       return null;
     }
 
@@ -194,13 +202,18 @@
         </div>
 
         ${renderCategoryCard('fornecedores', '2. Fornecedores e Parceiros', 'Quais empresas ou prestadores de serviço são essenciais para o seu processo funcionar?', 'Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado, empresa de telecom')}
-        ${renderCategoryCard('infraestrutura', '3. Infraestrutura e Utilidades', 'Quais recursos físicos ou de infraestrutura são indispensáveis?', 'Internet, energia elétrica (rede pública + UPS + gerador), climatização, switches e roteadores, servidor de banco de dados, cluster, telefonia, impressora fiscal')}
-        ${renderCategoryCard('pessoas', '4. Pessoas-chave', 'Quem são as pessoas sem as quais o processo não funciona?', 'DBA (administrador de banco de dados), analista financeiro responsável, gerente aprovador, operador do sistema, técnico de infraestrutura')}
-        ${renderCategoryCard('sistemas', '5. Sistemas e Aplicações', 'Quais softwares ou sistemas são necessários para executar o processo?', 'ERP Fortes, banco de dados PostgreSQL / SQL Server / Oracle, e-mail corporativo, Active Directory, sistema bancário, portal do cliente, Zabbix')}
-        ${renderCategoryCard('processos', '6. Processos Internos', 'O seu processo depende de algum outro processo da empresa funcionar antes?', 'Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente, emissão de NF')}
+        ${renderCategoryCard('pessoas', '3. Pessoas-chave', 'Quem são as pessoas sem as quais o processo não funciona?', 'DBA (administrador de banco de dados), analista financeiro responsável, gerente aprovador, operador do sistema, técnico de infraestrutura')}
+        ${renderCategoryCard('processos', '4. Processos Internos', 'O seu processo depende de algum outro processo da empresa funcionar antes?', 'Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente, emissão de NF')}
+        ${renderCategoryCard('api', '5. APIs e Integrações', 'Quais APIs ou integrações externas são essenciais para o processo?', 'API de pagamento (PIX/cartão), API de CEP, integração com Receita Federal, webhook de terceiros')}
+        ${renderCategoryCard('bancodedados', '6. Bancos de Dados', 'Quais bancos de dados o processo depende para funcionar?', 'PostgreSQL de produção, banco Oracle financeiro, réplica de leitura, data warehouse')}
+        ${renderCategoryCard('infraestrutura', '7. Infraestrutura e Utilidades', 'Quais recursos físicos ou de infraestrutura são indispensáveis?', 'Internet, energia elétrica (rede pública + UPS + gerador), climatização, switches e roteadores, cluster, telefonia, impressora fiscal')}
+        ${renderCategoryCard('segurança', '8. Segurança', 'Quais controles ou sistemas de segurança são indispensáveis?', 'Firewall, VPN, certificado digital, antivírus corporativo, controle de acesso')}
+        ${renderCategoryCard('servidor', '9. Servidores', 'Quais servidores físicos ou virtuais são essenciais para o processo?', 'Servidor de aplicação, servidor de arquivos, cluster de virtualização')}
+        ${renderCategoryCard('sistemas', '10. Sistemas e Aplicações', 'Quais softwares ou sistemas são necessários para executar o processo?', 'ERP Fortes, e-mail corporativo, Active Directory, sistema bancário, portal do cliente, Zabbix')}
+        ${renderCategoryCard('outros', '11. Outros', 'Algum outro recurso técnico essencial que não se encaixa nas categorias acima?', 'Qualquer recurso técnico não coberto pelas categorias anteriores')}
 
         <div class="card">
-          <h2>6. Observações (opcional)</h2>
+          <h2>12. Observações (opcional)</h2>
           <p class="desc">Algo mais que considere importante sobre as dependências do processo?</p>
           <div class="campo">
             <textarea id="fObs" rows="3" placeholder="Ex: O processo depende de aprovação manual do diretor financeiro em valores acima de R$50k..."></textarea>
@@ -333,10 +346,15 @@
         mtd: document.getElementById('fMTD').value,
         observacoes: document.getElementById('fObs').value.trim(),
         fornecedores: JSON.stringify(DEPS.fornecedores),
-        infraestrutura: JSON.stringify(DEPS.infraestrutura),
         pessoas: JSON.stringify(DEPS.pessoas),
-        sistemas: JSON.stringify(DEPS.sistemas),
-        processos: JSON.stringify(DEPS.processos)
+        processos: JSON.stringify(DEPS.processos),
+        api: JSON.stringify(DEPS.api),
+        bancoDados: JSON.stringify(DEPS.bancodedados),
+        infraestrutura: JSON.stringify(DEPS.infraestrutura),
+        seguranca: JSON.stringify(DEPS['segurança']),
+        servidor: JSON.stringify(DEPS.servidor),
+        sistema: JSON.stringify(DEPS.sistemas),
+        outros: JSON.stringify(DEPS.outros)
       };
 
       try {

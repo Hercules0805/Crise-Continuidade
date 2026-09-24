@@ -22,7 +22,6 @@ const COLLECTION = {
   tokens: 'tokens',
   respostas: 'respostas_bia',
   dependencias: 'dependencias',
-  componentes: 'componentes',
 };
 
 class AppError extends Error {}
@@ -42,12 +41,19 @@ function processoKey(area, processo) {
   return `${slug(area)}__${slug(processo)}`;
 }
 
-/** Prefixo por tipo de formulario, igual ao que o Apps Script gravava. */
+/**
+ * Prefixo por tipo de formulario, igual ao que o Apps Script gravava.
+ *
+ * 'drp' saiu (23/09/2026): "Componentes do Serviço" se fundiu em
+ * Dependencias, e o link de BIA (bia-dependencias.html) ja cobre as 7
+ * categorias tecnicas -- um link separado de DRP ficou redundante. Tokens
+ * '_DRP_' ja emitidos e ainda nao usados simplesmente param de validar
+ * (validarTokenDRP nao existe mais em tokenLogic.js).
+ */
 const PREFIXO = {
   avaliacao: '',
   area: '_AREA_',
   bia: '_BIA_',
-  drp: '_DRP_',
   levantamento: '_LEV_',
 };
 
@@ -56,7 +62,6 @@ const VALIDADE_DIAS = {
   avaliacao: 7,
   area: 7,
   bia: 14,
-  drp: 14,
   levantamento: 30,
 };
 
@@ -64,7 +69,6 @@ const PAGINA = {
   avaliacao: 'avaliar.html',
   area: 'avaliar-area.html',
   bia: 'bia-dependencias.html',
-  drp: 'drp-componentes.html',
   levantamento: 'pcn-levantamento.html',
 };
 
@@ -191,35 +195,29 @@ async function gerarPCN(db, data, ctx) {
   const score = await _scoreDoProcesso(db, p.area, p.processo);
   const tier = calcularTier(score);
 
-  const [depsSnap, compsSnap] = await Promise.all([
-    db.collection(COLLECTION.dependencias).get(),
-    db.collection(COLLECTION.componentes).get(),
-  ]);
+  const depsSnap = await db.collection(COLLECTION.dependencias).get();
   const dependencias = depsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-  const componentes = compsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
   // Processo ja migrado (dependenciaItens): busca pelo id real, sem depender
   // do nome bater com o catalogo (evita a mesma ambiguidade que motivou
   // vincular por id em primeiro lugar). Processo legado: mesma busca por nome
-  // de sempre.
+  // de sempre. rto/rpo/estrategia/responsavel (antes so em Componentes,
+  // fundido em Dependencias) entram na mesma linha -- sem secao separada.
   let depsDetalhadas;
   if (Array.isArray(p.dependenciaItens) && p.dependenciaItens.length) {
     depsDetalhadas = p.dependenciaItens.map((item) => {
       const dep = item.id ? dependencias.find((d) => d.id === item.id) : null;
       return dep
-        ? { nome: dep.nome, categoria: item.categoria || dep.categoria, setor: dep.setor, empresa: dep.empresa, telefone: dep.telefone, email: dep.email, papel: dep.detalhes }
+        ? { nome: dep.nome, categoria: item.categoria || dep.categoria, setor: dep.setor, empresa: dep.empresa, telefone: dep.telefone, email: dep.email, papel: dep.detalhes, rto: dep.rto, rpo: dep.rpo, estrategia: dep.estrategia, responsavel: dep.responsavel }
         : { nome: item.nome, categoria: item.categoria };
     });
   } else {
     const depsNomes = (p.dependencia || '').split(',').map((s) => s.trim()).filter(Boolean);
     depsDetalhadas = depsNomes.map((nome) => {
       const dep = dependencias.find((d) => d.nome === nome);
-      return dep ? { nome: dep.nome, categoria: dep.categoria, setor: dep.setor, empresa: dep.empresa, telefone: dep.telefone, email: dep.email, papel: dep.detalhes } : { nome };
+      return dep ? { nome: dep.nome, categoria: dep.categoria, setor: dep.setor, empresa: dep.empresa, telefone: dep.telefone, email: dep.email, papel: dep.detalhes, rto: dep.rto, rpo: dep.rpo, estrategia: dep.estrategia, responsavel: dep.responsavel } : { nome };
     });
   }
-
-  const compsIds = p.drpComponentes || [];
-  const compsDetalhados = compsIds.map((cid) => componentes.find((c) => c.id === cid)).filter(Boolean);
 
   const contatosIds = p.bcpContatos || [];
   const contatosDetalhados = contatosIds.map((cid) => {
@@ -255,7 +253,7 @@ Onde houver dados disponíveis, preencha com informações reais. Onde não houv
 **Descrição do Impacto:** ${p.descricao || 'Não informada'}
 
 ### Dependências Críticas
-${depsDetalhadas.length ? depsDetalhadas.map((d) => `- **${d.categoria || 'Outros'}:** ${d.nome}${d.empresa ? ' (' + d.empresa + ')' : ''}${d.papel ? ' — ' + d.papel : ''}`).join('\n') : 'Nenhuma dependência mapeada.'}
+${depsDetalhadas.length ? depsDetalhadas.map((d) => `- **${d.categoria || 'Outros'}:** ${d.nome}${d.empresa ? ' (' + d.empresa + ')' : ''}${d.papel ? ' — ' + d.papel : ''}${d.estrategia ? ' | Estratégia: ' + d.estrategia : ''}${d.rto ? ' | RTO: ' + d.rto : ''}${d.rpo ? ' | RPO: ' + d.rpo : ''}${d.responsavel ? ' | Responsável: ' + d.responsavel : ''}`).join('\n') : 'Nenhuma dependência mapeada.'}
 
 ### Equipe de Crise (Contatos)
 ${contatosDetalhados.length ? contatosDetalhados.map((d) => {
@@ -268,9 +266,6 @@ ${Object.keys(planoBData).length ? Object.entries(planoBData).map(([dep, cont]) 
 
 ### SLAs de Fornecedores
 ${Object.keys(slasData).length ? Object.entries(slasData).map(([dep, sla]) => `- **${dep}:** ${sla}`).join('\n') : 'Não definido.'}
-
-### Componentes de Serviço (DRP)
-${compsDetalhados.length ? compsDetalhados.map((c) => `- **${c.tipo}:** ${c.nome} | Estratégia: ${c.estrategia || 'Não definida'} | RTO: ${c.rto || '-'} | RPO: ${c.rpo || '-'} | Responsável: ${c.responsavel || '-'}`).join('\n') : 'Nenhum componente mapeado.'}
 
 ---
 ## TEMPLATE OBRIGATÓRIO DO PCN (siga esta estrutura exata)
@@ -371,6 +366,9 @@ ${compsDetalhados.length ? compsDetalhados.map((c) => `- **${c.tipo}:** ${c.nome
  * Substitui tres chamadas que iam ao Apps Script: getProcessos, getDependencias
  * e getComponentes. Devolve so o processo pedido, e nao a colecao inteira —
  * a pagina do PCN nao precisa do resto e nao deve receber.
+ *
+ * `componentes` saiu do retorno (23/09/2026): "Componentes do Serviço" se
+ * fundiu em Dependencias -- pcn-live.js agora le so `dependencias`.
  */
 async function dadosPCN(db, data) {
   const area = exigir(data.area, 'area');
@@ -380,14 +378,10 @@ async function dadosPCN(db, data) {
   if (!snap.exists) throw new AppError('Processo não encontrado.');
   const p = { id: snap.id, ...(snap.data() || {}) };
 
-  const [depsSnap, compsSnap] = await Promise.all([
-    db.collection('dependencias').get(),
-    db.collection('componentes').get(),
-  ]);
+  const depsSnap = await db.collection('dependencias').get();
   const dependencias = depsSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-  const componentes = compsSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
 
-  return { success: true, processo: p, dependencias, componentes };
+  return { success: true, processo: p, dependencias };
 }
 
 /**

@@ -19,7 +19,9 @@ async function initPCNLive() {
     var dados = JSON.parse(text);
     if (dados.error || !dados.processo) return;
 
-    PCN_LIVE_DATA = { processo: dados.processo, dependencias: dados.dependencias, componentes: dados.componentes };
+    // "componentes" saiu (23/09/2026): Componentes do Serviço se fundiu em
+    // Dependencias -- dadosPCN so devolve dependencias agora.
+    PCN_LIVE_DATA = { processo: dados.processo, dependencias: dados.dependencias };
     injectEditButtons();
   } catch(e) { console.warn('PCN Live init error:', e); }
 }
@@ -34,7 +36,10 @@ function injectEditButtons() {
     if (text.includes('contato') || text.includes('responsabilidade') || text.includes('equipe de crise')) sectionType = 'contatos';
     else if (text.includes('dependência') || text.includes('mapeamento de depend')) sectionType = 'dependencias';
     else if (text.includes('fornecedor') || text.includes('plano b') || text.includes('contingência')) sectionType = 'fornecedores';
-    else if (text.includes('componente') || text.includes('estratégia técnica') || text.includes('recuperação de desastre')) sectionType = 'componentes';
+    // "componente"/"recuperação de desastre" saiu daqui: Componentes do
+    // Serviço se fundiu em Dependencias, PCNs novos nao tem mais essa secao
+    // separada (PCNs antigos ja salvos continuam legiveis, so sem botao de
+    // edicao inline nessa parte).
 
     if (sectionType && !h.querySelector('.pcn-live-btn')) {
       var btn = document.createElement('button');
@@ -59,13 +64,12 @@ function openLiveEditor(type, heading) {
   panel.id = 'pcn-live-editor';
   panel.style.cssText = 'position:fixed;top:0;right:0;width:500px;height:100vh;background:white;box-shadow:-4px 0 20px rgba(0,0,0,0.2);z-index:1000;overflow-y:auto;padding:24px;font-family:Segoe UI,Arial,sans-serif;';
 
-  var titleMap = { contatos: 'Equipe de Crise', dependencias: 'Dependências Críticas', fornecedores: 'Fornecedores / Plano B', componentes: 'Componentes do Serviço' };
+  var titleMap = { contatos: 'Equipe de Crise', dependencias: 'Dependências Críticas', fornecedores: 'Fornecedores / Plano B' };
   var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #e8eaf6;padding-bottom:12px;"><h3 style="color:#1a237e;margin:0;">✏️ ' + (titleMap[type] || 'Editar') + '</h3><button onclick="closeLiveEditor()" style="background:none;border:none;font-size:1.5em;cursor:pointer;color:#666;">×</button></div>';
 
   if (type === 'contatos') html += buildContatosEditor(data);
   else if (type === 'dependencias') html += buildDependenciasEditor(data);
   else if (type === 'fornecedores') html += buildFornecedoresEditor(data);
-  else if (type === 'componentes') html += buildComponentesEditor(data);
 
   html += '<div style="margin-top:20px;text-align:right;border-top:1px solid #eee;padding-top:16px;"><button onclick="applyLiveEdit(\'' + type + '\')" style="padding:10px 24px;background:#2e7d32;color:white;border:none;border-radius:6px;font-weight:600;cursor:pointer;">✅ Aplicar ao PCN</button></div>';
 
@@ -143,15 +147,9 @@ function buildFornecedoresEditor(data) {
   return html;
 }
 
-function buildComponentesEditor(data) {
-  var compIds = data.processo.drpComponentes || [];
-  var comps = compIds.map(function(id) { return data.componentes.find(function(c) { return c.id === id; }); }).filter(Boolean);
-  var html = '<p style="font-size:0.85em;color:#666;margin-bottom:12px;">Componentes do serviço:</p>';
-  html += '<table style="width:100%;border-collapse:collapse;font-size:0.85em;"><thead><tr style="background:#f5f6fa;"><th style="padding:8px;text-align:left;">Tipo</th><th style="padding:8px;text-align:left;">Nome</th><th style="padding:8px;text-align:left;">Estratégia</th></tr></thead><tbody>';
-  comps.forEach(function(c) { html += '<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:8px;">' + (c.tipo || '-') + '</td><td style="padding:8px;font-weight:600;">' + c.nome + '</td><td style="padding:8px;">' + (c.estrategia || '-') + '</td></tr>'; });
-  html += '</tbody></table><p style="font-size:0.78em;color:#999;margin-top:8px;">Para editar, use a aba DRP do processo.</p>';
-  return html;
-}
+// buildComponentesEditor saiu (23/09/2026): Componentes do Serviço se fundiu
+// em Dependencias -- buildDependenciasEditor/applyLiveEdit ja cobrem RTO/RPO/
+// Estratégia pras categorias tecnicas (ver newTable do tipo 'dependencias').
 
 async function removeLiveContato(id) {
   if (!PCN_LIVE_DATA) return;
@@ -210,7 +208,6 @@ function applyLiveEdit(type) {
     if (type === 'contatos' && (t.includes('contato') || t.includes('responsabilidade'))) targetHeading = h;
     if (type === 'dependencias' && t.includes('dependência')) targetHeading = h;
     if (type === 'fornecedores' && (t.includes('fornecedor') || t.includes('plano b'))) targetHeading = h;
-    if (type === 'componentes' && (t.includes('componente') || t.includes('estratégia técnica'))) targetHeading = h;
   });
   if (!targetHeading) return alert('Seção não encontrada no PCN.');
 
@@ -226,21 +223,29 @@ function applyLiveEdit(type) {
     contatos.forEach(function(d) { var papel = papeis[d.nome] || papeis[String(d.id)] || d.detalhes || ''; newTable += '<tr><td>' + d.nome + '</td><td>' + papel + '</td><td>' + (d.setor || '-') + '</td><td>' + (d.telefone || '-') + '</td><td>' + (d.email || '-') + '</td></tr>'; });
     newTable += '</tbody></table>';
   } else if (type === 'dependencias') {
-    var grupos = {};
+    // Um item por linha (Categoria/Recurso/Detalhe) -- "Detalhe" (RTO/RPO/
+    // Estrategia) so aparece pras categorias tecnicas, que absorveram o
+    // antigo catalogo de Componentes do Servico.
+    var itens = [];
     if (Array.isArray(data.processo.dependenciaItens) && data.processo.dependenciaItens.length) {
-      data.processo.dependenciaItens.forEach(function(it) { var cat = it.categoria || 'Outros'; if (!grupos[cat]) grupos[cat] = []; grupos[cat].push(it.nome); });
+      itens = data.processo.dependenciaItens.map(function(it) {
+        var dep = it.id ? data.dependencias.find(function(d) { return d.id === it.id; }) : null;
+        return { categoria: it.categoria || 'Outros', nome: it.nome, dep: dep };
+      });
     } else {
       var depsList = (data.processo.dependencia || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-      depsList.forEach(function(nome) { var dep = data.dependencias.find(function(d) { return d.nome === nome; }); var cat = dep ? dep.categoria : 'Outros'; if (!grupos[cat]) grupos[cat] = []; grupos[cat].push(nome); });
+      itens = depsList.map(function(nome) {
+        var dep = data.dependencias.find(function(d) { return d.nome === nome; });
+        return { categoria: dep ? dep.categoria : 'Outros', nome: nome, dep: dep };
+      });
     }
-    newTable = '<table><thead><tr><th>Tipo</th><th>Recursos</th></tr></thead><tbody>';
-    Object.keys(grupos).sort().forEach(function(cat) { newTable += '<tr><td><strong>' + cat + '</strong></td><td>' + grupos[cat].join(', ') + '</td></tr>'; });
-    newTable += '</tbody></table>';
-  } else if (type === 'componentes') {
-    var compIds = data.processo.drpComponentes || [];
-    var comps = compIds.map(function(id) { return data.componentes.find(function(c) { return c.id === id; }); }).filter(Boolean);
-    newTable = '<table><thead><tr><th>Tipo</th><th>Nome</th><th>Estratégia</th><th>RTO</th><th>RPO</th><th>Responsável</th></tr></thead><tbody>';
-    comps.forEach(function(c) { newTable += '<tr><td>' + (c.tipo || '-') + '</td><td>' + c.nome + '</td><td>' + (c.estrategia || '-') + '</td><td>' + (c.rto || '-') + '</td><td>' + (c.rpo || '-') + '</td><td>' + (c.responsavel || '-') + '</td></tr>'; });
+    itens.sort(function(a, b) { return a.categoria.localeCompare(b.categoria) || a.nome.localeCompare(b.nome); });
+    newTable = '<table><thead><tr><th>Categoria</th><th>Recurso</th><th>Detalhe</th></tr></thead><tbody>';
+    itens.forEach(function(it) {
+      var d = it.dep;
+      var detalhe = d ? [d.estrategia, d.rto ? 'RTO: ' + d.rto : '', d.rpo ? 'RPO: ' + d.rpo : ''].filter(Boolean).join(' | ') : '';
+      newTable += '<tr><td><strong>' + it.categoria + '</strong></td><td>' + it.nome + '</td><td>' + (detalhe || '-') + '</td></tr>';
+    });
     newTable += '</tbody></table>';
   } else if (type === 'fornecedores') {
     var planoBData = {}; try { planoBData = data.processo.bcpPlanoBProvedores ? JSON.parse(data.processo.bcpPlanoBProvedores) : {}; } catch(e) {}

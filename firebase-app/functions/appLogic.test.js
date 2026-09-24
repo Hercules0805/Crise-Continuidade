@@ -92,9 +92,16 @@ test('gerarLink recusa tipo desconhecido e campo faltando', async () => {
 // este teste passa a ser o lugar de rever a decisao.
 test('gerarLink devolve o link e nao tenta enviar e-mail', async () => {
   const db = makeDb(seed());
-  const r = await WRITE_ACTIONS.gerarLink(db, { tipo: 'drp', area: 'TI', processo: 'Backup', email: 'x@y.com' }, ctx());
-  assert.ok(r.link.startsWith('https://bia-forte-2025.web.app/drp-componentes.html?token='));
+  const r = await WRITE_ACTIONS.gerarLink(db, { tipo: 'levantamento', area: 'TI', processo: 'Backup', email: 'x@y.com' }, ctx());
+  assert.ok(r.link.startsWith('https://bia-forte-2025.web.app/pcn-levantamento.html?token='));
   assert.strictEqual(r.enviadoPorEmail, undefined);
+});
+
+// 'drp' saiu do mapa de tipos (23/09/2026): "Componentes do Serviço" se
+// fundiu em Dependencias, o link separado de DRP ficou redundante.
+test('gerarLink recusa o tipo "drp", aposentado', async () => {
+  const db = makeDb(seed());
+  await assert.rejects(() => WRITE_ACTIONS.gerarLink(db, { tipo: 'drp', area: 'TI', processo: 'Backup' }, ctx()), AppError);
 });
 
 test('salvarPCN acrescenta versao sem apagar as anteriores', async () => {
@@ -257,10 +264,11 @@ test('processoKey e igual a de tokenLogic e api.js', () => {
 // Estas acoes substituem aquelas chamadas.
 const { CAMPOS_EDITAVEIS_PCN } = require('./appLogic');
 
-test('dadosPCN devolve o processo pedido com dependencias e componentes', async () => {
+test('dadosPCN devolve o processo pedido com dependencias', async () => {
   const s = seed();
-  s.dependencias = { d1: { nome: 'Fulano', categoria: 'Pessoa' } };
-  s.componentes = { c1: { nome: 'SRV-01', tipo: 'Servidor' } };
+  // Servidor/Banco de Dados/etc. sao categoria de Dependencia agora --
+  // "componentes" (colecao a parte) nao existe mais.
+  s.dependencias = { d1: { nome: 'Fulano', categoria: 'Pessoa' }, d2: { nome: 'SRV-01', categoria: 'Servidor' } };
   const db = makeDb(s);
   db.collection = ((orig) => (col) => {
     const api = orig(col);
@@ -272,8 +280,8 @@ test('dadosPCN devolve o processo pedido com dependencias e componentes', async 
 
   const r = await READ_ACTIONS.dadosPCN(db, { area: 'TI', processo: 'Backup' });
   assert.strictEqual(r.processo.processo, 'Backup');
-  assert.strictEqual(r.dependencias.length, 1);
-  assert.strictEqual(r.componentes.length, 1);
+  assert.strictEqual(r.dependencias.length, 2);
+  assert.strictEqual(r.componentes, undefined);
 });
 
 test('salvarCamposPCN grava os campos da edicao inline', async () => {

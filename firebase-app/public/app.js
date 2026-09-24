@@ -4,7 +4,7 @@
 
 const app = document.getElementById('app');
 const pages = {
-  processos, perguntas, areas, pessoas, admin, dependencias, componentes, pcns, riscos,
+  processos, perguntas, areas, pessoas, admin, dependencias, pcns, riscos,
   'indicadores-dashboard': indicadoresDashboard,
   'indicadores-cadastro': indicadoresCadastro,
   'indicadores-lancamento': indicadoresLancamento,
@@ -246,23 +246,6 @@ window.trocarAbaProcesso = (aba) => {
   }
   // Renderizar avaliação ao abrir aba
   if (aba === 'avaliacao') renderAvaliacaoInline();
-  // Auto-adicionar sistemas/infraestrutura da BIA como componentes DRP
-  if (aba === 'drp') {
-    const catalogo = window.dependenciasCatalogo || [];
-    const componentesCat = window.componentesCatalogo || [];
-    const selecionadas = window._dependenciaSelecionadas || [];
-    selecionadas.forEach(nome => {
-      const dep = catalogo.find(d => d.nome === nome);
-      if (dep && ['Sistemas', 'Sistema', 'Infraestrutura'].includes(dep.categoria)) {
-        // Buscar componente correspondente no catálogo de componentes (por nome)
-        const comp = componentesCat.find(c => c.nome === nome);
-        if (comp && !window._drpComponentes.includes(comp.id)) {
-          window._drpComponentes.push(comp.id);
-        }
-      }
-    });
-    renderComponentesDrp();
-  }
 };
 
 // ============================================================
@@ -1425,63 +1408,6 @@ async function processos() {
                 <option>DRP Realizado</option>
               </select>
             </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Componentes do Serviço</label>
-              <div id="drpComponentesTabela"></div>
-              <div class="modal-overlay" id="modalCompDrp"><div class="modal" onclick="event.stopPropagation()" style="max-width:540px;">
-                <h3 id="modalCompDrpTitulo">Novo Componente</h3>
-                <input type="hidden" id="compDrpId">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
-                  <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Tipo</label>
-                    <input type="text" id="compDrpTipo" list="compDrpTipoList" placeholder="Ex: Servidor, Banco de Dados" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                    <datalist id="compDrpTipoList"></datalist>
-                  </div>
-                  <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Nome</label>
-                    <input type="text" id="compDrpNome" placeholder="Ex: SQL Server Produção" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                  </div>
-                </div>
-                <div style="margin-bottom:12px;">
-                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Descrição</label>
-                  <input type="text" id="compDrpDescricao" placeholder="Descrição do componente" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
-                  <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">RTO</label>
-                    <input type="text" id="compDrpRto" placeholder="Ex: 4 horas" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                  </div>
-                  <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">RPO</label>
-                    <input type="text" id="compDrpRpo" placeholder="Ex: 1 hora" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                  </div>
-                </div>
-                <div style="margin-bottom:12px;">
-                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Estratégia de Backup</label>
-                  <select id="compDrpEstrategia" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;">
-                    <option value="">Selecione...</option>
-                    <option value="Backup & Restore">Backup & Restore (Restaurar ambiente a partir de backups)</option>
-                    <option value="Cold Site">Cold Site (Local alternativo sem infraestrutura ativa)</option>
-                    <option value="Warm Standby">Warm Standby (Infraestrutura parcialmente pronta)</option>
-                    <option value="Active-Passive">Active-Passive (Ambiente secundário pronto para assumir)</option>
-                    <option value="Active-Active">Active-Active (Dois ou mais ambientes ativos simultaneamente)</option>
-                  </select>
-                </div>
-                <div style="margin-bottom:12px;">
-                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Responsável</label>
-                  <input type="text" id="compDrpResponsavel" placeholder="Responsável pelo componente" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                </div>
-                <div class="modal-footer">
-                  <button class="btn btn-ghost" onclick="fecharModalCompDrp()">Cancelar</button>
-                  <button class="btn btn-primary" onclick="salvarCompDrp()">Salvar</button>
-                </div>
-              </div></div>
-              <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
-                <button class="btn btn-ghost" onclick="abrirModalCompDrp()" style="font-size:0.82em;color:#555;border-color:#ccc;padding:6px 14px;" title="Criar novo componente que não está no catálogo">+ Novo componente</button>
-                <button class="btn btn-ghost" onclick="copiarLinkDRP()" style="font-size:0.82em;color:#555;border-color:#ccc;padding:6px 14px;" title="Gera o link e copia para a área de transferência">🔗 Copiar link</button>
-                <button class="btn btn-ghost" onclick="enviarDRPComponentes()" style="font-size:0.82em;color:#1a237e;border-color:#1a237e;padding:6px 14px;" title="Envia formulário por e-mail para o dono do processo">📧 Enviar por e-mail</button>
-              </div>
-            </div>
           </div>
         </div>
       </div>
@@ -1498,8 +1424,7 @@ async function processos() {
   window.processosPerguntas = perguntas.filter(p => p.ativa);
   try { window.configRespostas = await API.getConfigRespostas(); } catch(e) { window.configRespostas = null; }
   try { window.dependenciasCatalogo = await API.getDependencias(); } catch(e) { window.dependenciasCatalogo = []; }
-  try { window.componentesCatalogo = await API.getComponentes(); } catch(e) { window.componentesCatalogo = []; }
-  
+
   // Preencher filtro de áreas
   const filtroArea = document.getElementById('filtroArea');
   const areasUnicas = [...new Set(areas.map(a => a.nome))].sort();
@@ -1777,17 +1702,24 @@ function renderDependenciaTabela() {
   // Ícones por categoria
   const catIcons = {
     'Fornecedores': '🏢', 'Fornecedor': '🏢',
-    'Infraestrutura': '⚡',
     'Pessoas': '👤', 'Pessoa': '👤',
-    'Sistemas': '💻', 'Sistema': '💻',
     'Processos Internos': '🔄', 'Processo Interno': '🔄',
+    'API': '🔌',
+    'Banco de Dados': '🗄️',
+    'Infraestrutura': '⚡',
+    'Segurança': '🔒',
+    'Servidor': '🖥️',
+    'Sistemas': '💻', 'Sistema': '💻',
     'Outros': '📦'
   };
-  
+
   // Obter categorias do catálogo
   const categoriasSet = new Set(catalogo.map(d => d.categoria));
-  // Garantir que categorias dos 5Ps sempre apareçam
-  ['Fornecedores', 'Infraestrutura', 'Pessoas', 'Sistemas', 'Processos Internos'].forEach(c => categoriasSet.add(c));
+  // Garantir que as categorias sempre apareçam, mesmo sem nenhum item ainda:
+  // Fornecedores/Pessoas/Processos Internos (outras entidades) + as 7
+  // categorias técnicas de Dependência (absorveram o antigo catálogo de
+  // Componentes do Serviço).
+  ['Fornecedores', 'Pessoas', 'Processos Internos', ...DEPENDENCIA_CATEGORIAS_TECNICAS].forEach(c => categoriasSet.add(c));
   // Cada item ja carrega sua propria categoria (dependenciaItens, ou adivinhada
   // uma unica vez por _adivinharDependenciaLegada) -- sem precisar comparar
   // nome com o catalogo de novo a cada render.
@@ -1828,13 +1760,20 @@ function renderDependenciaTabela() {
     const catExamples = {
       'Fornecedores': 'Ex: Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado',
       'Fornecedor': 'Ex: Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado',
-      'Infraestrutura': 'Ex: Internet, energia elétrica, climatização, switches/roteadores, servidor de banco de dados, telefonia',
       'Pessoas': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
       'Pessoa': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
-      'Sistemas': 'Ex: ERP Fortes, banco de dados PostgreSQL/Oracle, e-mail corporativo, Active Directory, sistema bancário',
-      'Sistema': 'Ex: ERP Fortes, banco de dados PostgreSQL/Oracle, e-mail corporativo, Active Directory, sistema bancário',
       'Processos Internos': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
-      'Processo Interno': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente'
+      'Processo Interno': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
+      // As 7 categorias tecnicas -- absorveram o antigo catalogo de
+      // Componentes do Servico (ver dependencias() e DEPENDENCIA_CATEGORIAS_TECNICAS).
+      'API': 'Ex: API de pagamento (PIX/cartão), API de CEP, integração com Receita Federal, webhook de terceiros',
+      'Banco de Dados': 'Ex: PostgreSQL de produção, banco Oracle financeiro, réplica de leitura, data warehouse',
+      'Infraestrutura': 'Ex: Internet, energia elétrica, climatização, switches/roteadores, telefonia',
+      'Segurança': 'Ex: Firewall, VPN, certificado digital, antivírus corporativo, controle de acesso',
+      'Servidor': 'Ex: Servidor de aplicação, servidor de arquivos, cluster de virtualização',
+      'Sistemas': 'Ex: ERP Fortes, e-mail corporativo, Active Directory, sistema bancário',
+      'Sistema': 'Ex: ERP Fortes, e-mail corporativo, Active Directory, sistema bancário',
+      'Outros': 'Ex: Qualquer recurso técnico que não se encaixa nas categorias acima',
     };
     const example = catExamples[cat] || '';
     
@@ -2269,7 +2208,6 @@ window.removerPreventivaBcp = (idx) => {
 window.abrirModalProcesso = (p) => {
   // Recarregar catálogos se foram invalidados
   API.getDependencias().then(deps => { window.dependenciasCatalogo = deps; }).catch(()=>{});
-  API.getComponentes().then(comps => { window.componentesCatalogo = comps; }).catch(()=>{});
 
   // Preencher dropdown de áreas
   const selectArea = document.getElementById('fArea');
@@ -2292,9 +2230,6 @@ window.abrirModalProcesso = (p) => {
 
   // Preencher campos DRP
   document.getElementById('fDrpStatus').value = p ? (p.drpStatus || '') : '';
-  // Preencher componentes DRP
-  window._drpComponentes = p && p.drpComponentes ? (typeof p.drpComponentes === 'string' ? JSON.parse(p.drpComponentes) : p.drpComponentes) : [];
-  renderComponentesDrp();
 
 
 
@@ -2401,7 +2336,6 @@ window.salvarProcesso = async () => {
     tierManual: document.getElementById('fTierManual').value,
     bcpContatos: window._bcpContatos || [],
     drpStatus: document.getElementById('fDrpStatus').value.trim(),
-    drpComponentes: window._drpComponentes || [],
     ...camposFornecedoresBcp,
   };
 
@@ -2752,6 +2686,14 @@ window.enviarConvite = async () => {
 let dependenciasData = [];
 let dependenciasOrdenacao = { coluna: 'categoria', direcao: 'asc' };
 
+// As 7 categorias tecnicas -- absorveram o antigo catalogo de Componentes do
+// Servico (Servidor/Banco de Dados/etc. eram um "tipo" livre de Componentes;
+// agora sao categoria fixa de Dependencia, o cadastro de um so). Reaproveitada
+// tambem na lista de categorias da aba BIA (Fornecedores/Pessoas/Processos
+// Internos sao as outras 3, cada uma sua propria entidade).
+const DEPENDENCIA_CATEGORIAS_TECNICAS = ['API', 'Banco de Dados', 'Infraestrutura', 'Segurança', 'Servidor', 'Sistema', 'Outros'];
+const DEPENDENCIA_ESTRATEGIAS_BACKUP = ['Backup & Restore', 'Cold Site', 'Warm Standby', 'Active-Passive', 'Active-Active'];
+
 async function dependencias() {
   app.innerHTML = `
     <div class="page-header">
@@ -2800,8 +2742,10 @@ async function dependencias() {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
         <div>
           <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria</label>
-          <input type="text" id="depCategoria" list="depCategoriaList" placeholder="Ex: Infraestrutura" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-          <datalist id="depCategoriaList"></datalist>
+          <select id="depCategoria" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+            <option value="">Selecione...</option>
+            ${DEPENDENCIA_CATEGORIAS_TECNICAS.map(c => `<option value="${c}">${c}</option>`).join('')}
+          </select>
         </div>
         <div>
           <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Nome</label>
@@ -2838,6 +2782,32 @@ async function dependencias() {
         <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Endereço</label>
         <input type="text" id="depEndereco" placeholder="Endereço ou localização" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
       </div>
+      <div style="border-top:1px solid #eee;margin:16px 0 14px;padding-top:14px;">
+        <div style="font-size:0.78em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Recuperação de Desastre (categorias técnicas)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
+            <input type="text" id="depRto" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+          </div>
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
+            <input type="text" id="depRpo" placeholder="Ex: 1 hora" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Estratégia de Backup</label>
+            <select id="depEstrategia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              <option value="">Selecione...</option>
+              ${DEPENDENCIA_ESTRATEGIAS_BACKUP.map(e => `<option value="${e}">${e}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Responsável</label>
+            <input type="text" id="depResponsavel" placeholder="Ex: Time de Infraestrutura" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+          </div>
+        </div>
+      </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalDependencia()">Cancelar</button>
         <button class="btn btn-primary" onclick="salvarDep()">Salvar</button>
@@ -2845,11 +2815,13 @@ async function dependencias() {
     </div></div>`;
 
   try {
-    // Fornecedor nao entra: a gestao dele migrou para o modulo de Fornecedores.
-    // O filtro e aqui, e nao no banco, para que o catalogo continue inteiro —
-    // e o mesmo de que os processos dependem.
+    // Fornecedor e Pessoa nao entram: a gestao das duas mora nas telas
+    // proprias delas. O filtro e aqui, e nao no banco, para que o catalogo
+    // continue inteiro -- e o mesmo de que os processos dependem. Sem tirar
+    // Pessoa, o <select> fixo de categoria (so as 7 tecnicas) nao teria como
+    // mostrar/editar uma linha de categoria "Pessoas" corretamente.
     const todas = await API.getDependencias();
-    dependenciasData = todas.filter(d => !Perfis.categoriaDeFornecedor(d.categoria));
+    dependenciasData = todas.filter(d => !Perfis.categoriaDeFornecedor(d.categoria) && !['Pessoas', 'Pessoa'].includes(d.categoria));
   } catch(e) { dependenciasData = []; }
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaDeps').style.display = 'block';
@@ -2938,10 +2910,11 @@ window.abrirModalDependencia = (d) => {
   document.getElementById('depTelefone').value = d ? (d.telefone || '') : '';
   document.getElementById('depEmail').value = d ? (d.email || '') : '';
   document.getElementById('depEndereco').value = d ? (d.endereco || '') : '';
+  document.getElementById('depRto').value = d ? (d.rto || '') : '';
+  document.getElementById('depRpo').value = d ? (d.rpo || '') : '';
+  document.getElementById('depEstrategia').value = d ? (d.estrategia || '') : '';
+  document.getElementById('depResponsavel').value = d ? (d.responsavel || '') : '';
   document.getElementById('modalDepTitulo').textContent = d ? 'Editar Dependência' : 'Nova Dependência';
-  // Preencher datalist de categorias
-  const cats = [...new Set(dependenciasData.map(x => x.categoria))].sort();
-  document.getElementById('depCategoriaList').innerHTML = cats.map(c => `<option value="${c}">`).join('');
   // Preencher datalist de setores existentes
   const setores = [...new Set(dependenciasData.map(x => x.setor).filter(Boolean))].sort();
   const setorList = document.getElementById('depSetorList');
@@ -2984,6 +2957,10 @@ window.salvarDep = async () => {
     telefone: document.getElementById('depTelefone').value.trim(),
     email: document.getElementById('depEmail').value.trim(),
     endereco: document.getElementById('depEndereco').value.trim(),
+    rto: document.getElementById('depRto').value.trim(),
+    rpo: document.getElementById('depRpo').value.trim(),
+    estrategia: document.getElementById('depEstrategia').value,
+    responsavel: document.getElementById('depResponsavel').value.trim(),
   };
   if (!d.categoria) return showToast('Informe a categoria.', '#e65100');
   if (!d.nome) return showToast('Informe o nome.', '#e65100');
@@ -3589,224 +3566,6 @@ window.salvarAvaliacaoProcesso = async () => {
   }
 };
 
-
-// ============================================================
-// PÁGINA: COMPONENTES DE SERVIÇO (Catálogo)
-// ============================================================
-let componentesData = [];
-let componentesOrdenacao = { coluna: 'tipo', direcao: 'asc' };
-
-async function componentes() {
-  app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Componentes de Serviço</h2><p class="page-sub">Gerencie os componentes de infraestrutura e serviços para o DRP</p></div>
-      <button class="btn btn-primary" onclick="abrirModalComponente()">+ Novo Componente</button>
-    </div>
-    <div style="margin-bottom:16px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Tipo:</label>
-        <select id="filtroCompTipo" onchange="filtrarComponentes()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
-          <option value="">Todos os tipos</option>
-        </select>
-      </div>
-      <div>
-        <input type="text" id="buscaComp" placeholder="🔍 Buscar componente..." oninput="filtrarComponentes()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:250px;">
-      </div>
-    </div>
-    <div class="loading">⏳ Carregando...</div>
-    <div class="data-table" id="listaComps" style="display:none;">
-      <table>
-        <thead>
-          <tr>
-            <th onclick="ordenarComponentes('tipo')" style="cursor:pointer;width:12%;">Tipo <span id="sort-comp-tipo"></span></th>
-            <th onclick="ordenarComponentes('nome')" style="cursor:pointer;width:15%;">Nome <span id="sort-comp-nome"></span></th>
-            <th style="width:18%;">Descrição</th>
-            <th style="width:8%;">RTO</th>
-            <th style="width:8%;">RPO</th>
-            <th style="width:16%;">Estratégia de Backup</th>
-            <th onclick="ordenarComponentes('responsavel')" style="cursor:pointer;width:12%;">Responsável <span id="sort-comp-responsavel"></span></th>
-            <th style="width:6%;text-align:center;">Ações</th>
-          </tr>
-        </thead>
-        <tbody id="compRows"></tbody>
-      </table>
-    </div>
-    <div class="modal-overlay" id="modalComp"><div class="modal" onclick="event.stopPropagation()" style="max-width:580px;">
-      <h3 id="modalCompTitulo">Novo Componente</h3>
-      <input type="hidden" id="compId">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Tipo</label>
-          <input type="text" id="compTipo" list="compTipoList" placeholder="Ex: Servidor, Banco de Dados" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-          <datalist id="compTipoList"></datalist>
-        </div>
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Nome</label>
-          <input type="text" id="compNome" placeholder="Ex: SQL Server Produção" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-        </div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição</label>
-        <input type="text" id="compDescricao" placeholder="Descrição do componente" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
-          <input type="text" id="compRto" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-        </div>
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
-          <input type="text" id="compRpo" placeholder="Ex: 1 hora" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-        </div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Estratégia de Backup</label>
-        <select id="compEstrategia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
-          <option value="">Selecione...</option>
-          <option value="Backup & Restore">Backup & Restore (Restaurar ambiente a partir de backups)</option>
-          <option value="Cold Site">Cold Site (Local alternativo sem infraestrutura ativa)</option>
-          <option value="Warm Standby">Warm Standby (Infraestrutura parcialmente pronta)</option>
-          <option value="Active-Passive">Active-Passive (Ambiente secundário pronto para assumir)</option>
-          <option value="Active-Active">Active-Active (Dois ou mais ambientes ativos simultaneamente)</option>
-        </select>
-      </div>
-      <div style="margin-bottom:14px;">
-        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Responsável</label>
-        <input type="text" id="compResponsavel" placeholder="Responsável pelo componente" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-      </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="fecharModalComponente()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarComp()">Salvar</button>
-      </div>
-    </div></div>`;
-
-  try {
-    componentesData = await API.getComponentes();
-  } catch(e) { componentesData = []; }
-  document.querySelector('.loading').style.display = 'none';
-  document.getElementById('listaComps').style.display = 'block';
-  const tipos = [...new Set(componentesData.map(d => d.tipo))].sort();
-  document.getElementById('filtroCompTipo').innerHTML = '<option value="">Todos os tipos</option>' +
-    tipos.map(c => `<option value="${c}">${c}</option>`).join('');
-  renderizarComponentes();
-}
-
-function renderizarComponentes() {
-  let data = [...componentesData];
-  const filtro = document.getElementById('filtroCompTipo');
-  if (filtro && filtro.value) data = data.filter(d => d.tipo === filtro.value);
-
-  // Filtrar por busca
-  const busca = (document.getElementById('buscaComp') || {}).value || '';
-  if (busca.trim()) {
-    const termo = busca.toLowerCase();
-    data = data.filter(d => 
-      (d.nome || '').toLowerCase().includes(termo) ||
-      (d.tipo || '').toLowerCase().includes(termo) ||
-      (d.descricao || '').toLowerCase().includes(termo) ||
-      (d.responsavel || '').toLowerCase().includes(termo)
-    );
-  }
-
-  data.sort((a, b) => {
-    const valA = (a[componentesOrdenacao.coluna] || '').toString().toLowerCase();
-    const valB = (b[componentesOrdenacao.coluna] || '').toString().toLowerCase();
-    const cmp = valA.localeCompare(valB);
-    return componentesOrdenacao.direcao === 'asc' ? cmp : -cmp;
-  });
-
-  ['tipo', 'nome', 'responsavel'].forEach(col => {
-    const el = document.getElementById(`sort-comp-${col}`);
-    if (el) el.textContent = col === componentesOrdenacao.coluna ? (componentesOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
-  });
-
-  document.getElementById('compRows').innerHTML = data.length
-    ? data.map(d => `<tr>
-        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(d.tipo)}</span></td>
-        <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(d.descricao || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${d.rto || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${d.rpo || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(d.estrategia || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(d.responsavel || '-')}</td>
-        <td style="text-align:center;white-space:nowrap;">
-          <button class="btn-icon" onclick="editarComp('${d.id}')" title="Editar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="btn-icon" onclick="excluirComp('${d.id}')" title="Excluir">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>
-        </td>
-      </tr>`).join('')
-    : '<tr><td colspan="8" style="text-align:center;color:#999;padding:40px;">Nenhum componente cadastrado.</td></tr>';
-}
-
-window.filtrarComponentes = () => renderizarComponentes();
-window.ordenarComponentes = (coluna) => {
-  if (componentesOrdenacao.coluna === coluna) {
-    componentesOrdenacao.direcao = componentesOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
-  } else {
-    componentesOrdenacao.coluna = coluna;
-    componentesOrdenacao.direcao = 'asc';
-  }
-  renderizarComponentes();
-};
-
-window.abrirModalComponente = (d) => {
-  document.getElementById('compId').value = d ? d.id : '';
-  document.getElementById('compTipo').value = d ? d.tipo : '';
-  document.getElementById('compNome').value = d ? d.nome : '';
-  document.getElementById('compDescricao').value = d ? (d.descricao || '') : '';
-  document.getElementById('compRto').value = d ? (d.rto || '') : '';
-  document.getElementById('compRpo').value = d ? (d.rpo || '') : '';
-  document.getElementById('compEstrategia').value = d ? (d.estrategia || '') : '';
-  document.getElementById('compResponsavel').value = d ? (d.responsavel || '') : '';
-  document.getElementById('modalCompTitulo').textContent = d ? 'Editar Componente' : 'Novo Componente';
-  const tipos = [...new Set(componentesData.map(x => x.tipo))].sort();
-  document.getElementById('compTipoList').innerHTML = tipos.map(c => `<option value="${c}">`).join('');
-  document.getElementById('modalComp').classList.add('open');
-};
-window.fecharModalComponente = () => document.getElementById('modalComp').classList.remove('open');
-window.editarComp = (id) => { const d = componentesData.find(x => x.id === id); if (d) abrirModalComponente(d); };
-window.excluirComp = async (id) => {
-  if (!confirm('Excluir este componente?')) return;
-  try {
-    await API.excluirComponente(id);
-    componentesData = componentesData.filter(x => x.id !== id);
-    renderizarComponentes();
-    showToast('✅ Excluído!', '#2e7d32');
-    API.invalidate('getComponentes');
-  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
-};
-window.salvarComp = async () => {
-  const d = {
-    id: document.getElementById('compId').value || null,
-    tipo: document.getElementById('compTipo').value.trim(),
-    nome: document.getElementById('compNome').value.trim(),
-    descricao: document.getElementById('compDescricao').value.trim(),
-    rto: document.getElementById('compRto').value.trim(),
-    rpo: document.getElementById('compRpo').value.trim(),
-    estrategia: document.getElementById('compEstrategia').value.trim(),
-    responsavel: document.getElementById('compResponsavel').value.trim(),
-  };
-  if (!d.tipo) return showToast('Informe o tipo.', '#e65100');
-  if (!d.nome) return showToast('Informe o nome.', '#e65100');
-  try {
-    const result = await API.salvarComponente(d);
-    fecharModalComponente();
-    showToast('✅ Salvo!', '#2e7d32');
-    if (d.id) {
-      const idx = componentesData.findIndex(x => x.id === d.id);
-      if (idx !== -1) componentesData[idx] = { ...d };
-    } else {
-      d.id = result.id;
-      componentesData.push(d);
-    }
-    renderizarComponentes();
-    API.invalidate('getComponentes');
-    window.componentesCatalogo = componentesData;
-  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
-};
 
 // ============================================================
 // PÁGINA: GESTÃO DE RISCOS
@@ -6772,306 +6531,6 @@ window.confirmarImportarIndicadoresCSV = async () => {
   } catch (e) { showToast('❌ Erro ao importar: ' + e.message, '#c62828'); }
 };
 
-// ============================================================
-// DRP - Componentes do Serviço (inline no drawer - modelo tags por tipo)
-// ============================================================
-window._drpComponentes = [];
-
-function renderComponentesDrp() {
-  const container = document.getElementById('drpComponentesTabela');
-  if (!container) return;
-  const catalogo = window.componentesCatalogo || [];
-  const selecionados = window._drpComponentes || [];
-  const comps = selecionados.map(id => catalogo.find(d => d.id === id)).filter(Boolean);
-
-  // Ícones por tipo
-  const tipoIcons = {
-    'Servidor': '🖥️', 'Servidores': '🖥️',
-    'Banco de Dados': '🗄️', 'Database': '🗄️',
-    'Aplicação': '📦', 'Aplicações': '📦', 'Software': '📦',
-    'Rede': '🌐', 'Network': '🌐',
-    'Storage': '💾', 'Armazenamento': '💾',
-    'Cloud': '☁️', 'Nuvem': '☁️',
-    'Segurança': '🔒',
-    'Comunicação': '📡',
-    'Outros': '⚙️'
-  };
-
-  // Exemplos por tipo
-  const tipoExamples = {
-    'Servidor': 'Ex: Servidor de aplicação, servidor web, VM de produção',
-    'Servidores': 'Ex: Servidor de aplicação, servidor web, VM de produção',
-    'Banco de Dados': 'Ex: PostgreSQL primário, SQL Server cluster, Redis cache',
-    'Database': 'Ex: PostgreSQL primário, SQL Server cluster, Redis cache',
-    'Aplicação': 'Ex: ERP Fortes, portal do cliente, API de integração',
-    'Aplicações': 'Ex: ERP Fortes, portal do cliente, API de integração',
-    'Software': 'Ex: ERP Fortes, portal do cliente, API de integração',
-    'Rede': 'Ex: Firewall, switch core, link dedicado, VPN site-to-site',
-    'Network': 'Ex: Firewall, switch core, link dedicado, VPN site-to-site',
-    'Storage': 'Ex: NAS, SAN, backup em nuvem, file server',
-    'Armazenamento': 'Ex: NAS, SAN, backup em nuvem, file server',
-    'Cloud': 'Ex: AWS EC2, Azure VM, Google Cloud Run, S3 bucket',
-    'Nuvem': 'Ex: AWS EC2, Azure VM, Google Cloud Run, S3 bucket',
-    'Segurança': 'Ex: WAF, antivírus endpoint, SIEM, cofre de senhas',
-    'Comunicação': 'Ex: E-mail corporativo, Teams/Slack, PABX, DNS'
-  };
-
-  // Obter tipos do catálogo (mesclar Certificados em Segurança)
-  const tiposMerge = { 'Certificados': 'Segurança' };
-  const tiposSet = new Set(catalogo.map(d => tiposMerge[d.tipo] || d.tipo).filter(Boolean));
-  comps.forEach(c => { if (c.tipo) tiposSet.add(tiposMerge[c.tipo] || c.tipo); });
-  const tipos = [...tiposSet].sort();
-
-  if (!tipos.length) {
-    container.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhum componente cadastrado no catálogo. Clique em "+ Novo" para criar.</p>';
-    return;
-  }
-
-  // Agrupar selecionados por tipo (com merge)
-  const grupos = {};
-  tipos.forEach(t => { grupos[t] = []; });
-  comps.forEach(c => {
-    const t = tiposMerge[c.tipo] || c.tipo || 'Outros';
-    if (!grupos[t]) grupos[t] = [];
-    if (!grupos[t].find(x => x.id === c.id)) grupos[t].push(c);
-  });
-
-  let html = `<p style="font-size:0.78em;color:#888;margin-bottom:10px;">Pense: <em>"Se esse componente falhar, o processo é afetado?"</em> — selecione ou crie os componentes técnicos necessários.</p>`;
-  html += `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
-    <thead>
-      <tr>
-        <th style="padding:12px 0;text-align:left;font-weight:600;color:#555;font-size:0.82em;border-bottom:1.5px solid #e0e0e0;width:28%;">Tipo</th>
-        <th style="padding:12px 0 12px 20px;text-align:left;font-weight:600;color:#555;font-size:0.82em;border-bottom:1.5px solid #e0e0e0;">Componentes Selecionados</th>
-      </tr>
-    </thead>
-    <tbody>`;
-
-  tipos.forEach(tipo => {
-    const itens = grupos[tipo] || [];
-    const icon = tipoIcons[tipo] || '⚙️';
-    const example = tipoExamples[tipo] || '';
-    const count = itens.length;
-    const disponiveisNoTipo = catalogo.filter(d => (tiposMerge[d.tipo] || d.tipo) === tipo && !selecionados.includes(d.id));
-
-    const tags = itens.map(c => {
-      const tooltip = [c.estrategia, c.responsavel, c.rto ? 'RTO:'+c.rto : ''].filter(Boolean).join(' • ');
-      return `<span style="display:inline-flex;align-items:center;gap:3px;background:#1a237e;color:white;padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;cursor:default;" title="${esc(tooltip)}">${esc(c.nome)}<button onclick="removerComponenteDrp('${c.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.7);line-height:1;padding:0 3px;" onmouseenter="this.style.color='white'" onmouseleave="this.style.color='rgba(255,255,255,0.7)'" title="Remover">&times;</button></span>`;
-    }).join(' ');
-
-    const chips = disponiveisNoTipo.map(d => {
-      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="adicionarComponenteDrpById('${d.id}')" title="${d.descricao || d.nome}">${esc(d.nome)}</span>`;
-    }).join(' ');
-
-    const emptyMsg = !count ? `<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum selecionado</span>` : '';
-
-    html += `
-      <tr>
-        <td style="padding:14px 0;color:#222;font-weight:600;font-size:0.92em;vertical-align:top;border-bottom:1px solid #f0f0f0;">
-          <span style="margin-right:4px;">${icon}</span>${tipo}${count ? ` <span style="font-size:0.75em;color:#888;font-weight:400;">(${count})</span>` : ''}
-          ${example ? `<div style="font-size:0.72em;font-weight:400;color:#999;margin-top:4px;line-height:1.4;font-style:italic;">${example}</div>` : ''}
-        </td>
-        <td style="padding:10px 0 10px 20px;color:#444;font-size:0.9em;line-height:2;border-bottom:1px solid #f0f0f0;vertical-align:middle;">
-          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
-            ${tags}
-            ${emptyMsg}
-            <div style="position:relative;flex:1;min-width:150px;">
-              <input type="text" class="drp-type-input" data-tipo="${esc(tipo)}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #e8eaf6;outline:none;font-size:0.85em;padding:4px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#1a237e';mostrarDropdownCompDrp(this,'${escJs(tipo)}')" oninput="mostrarDropdownCompDrp(this,'${escJs(tipo)}')" onblur="this.style.borderColor='#e8eaf6';setTimeout(()=>{const dd=this.parentElement.querySelector('.drp-type-dropdown');if(dd)dd.style.display='none';},200)">
-              <div class="drp-type-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:180px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.12);"></div>
-            </div>
-          </div>
-          ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px;padding-top:4px;border-top:1px dashed #f0f0f0;"><span style="font-size:0.7em;color:#999;margin-right:4px;">Disponíveis:</span>${chips}</div>` : ''}
-        </td>
-      </tr>`;
-  });
-
-  html += `</tbody></table>`;
-  container.innerHTML = html;
-
-  // Adicionar listeners de Enter nos inputs por tipo
-  container.querySelectorAll('.drp-type-input').forEach(input => {
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const val = input.value.trim();
-        const tipo = input.dataset.tipo;
-        if (val) {
-          // Se existe no catálogo, selecionar diretamente
-          const catalogo = window.componentesCatalogo || [];
-          const existe = catalogo.find(c => c.nome.toLowerCase() === val.toLowerCase() && (tiposMergeGlobal[c.tipo] || c.tipo) === tipo);
-          if (existe && !window._drpComponentes.includes(existe.id)) {
-            window._drpComponentes.push(existe.id);
-            renderComponentesDrp();
-            input.value = '';
-          }
-          // Se não existe, não criar automaticamente — o usuário deve usar o dropdown "+" ou modal
-        }
-      }
-    });
-  });
-}
-
-// Criar componente rápido (inline, sem modal)
-async function criarComponenteRapido(nome, tipo) {
-  const catalogo = window.componentesCatalogo || [];
-  // Verificar se já existe
-  const existe = catalogo.find(c => c.nome.toLowerCase() === nome.toLowerCase() && (tiposMergeGlobal[c.tipo] || c.tipo) === tipo);
-  if (existe) {
-    if (!window._drpComponentes.includes(existe.id)) {
-      window._drpComponentes.push(existe.id);
-      renderComponentesDrp();
-    }
-    return;
-  }
-  // Criar no backend
-  try {
-    const result = await API.salvarComponente({ tipo, nome });
-    const novComp = { id: result.id, tipo, nome };
-    window.componentesCatalogo.push(novComp);
-    window._drpComponentes.push(result.id);
-    renderComponentesDrp();
-    API.invalidate('getComponentes');
-  } catch(e) {
-    showToast('Erro ao criar: ' + e.message, '#c62828');
-  }
-}
-// Referência global para merge de tipos (usada em criarComponenteRapido)
-const tiposMergeGlobal = { 'Certificados': 'Segurança' };
-
-// Dropdown para input de componentes DRP por tipo
-window.mostrarDropdownCompDrp = (input, tipo) => {
-  const dropdown = input.parentElement.querySelector('.drp-type-dropdown');
-  if (!dropdown) return;
-  const catalogo = window.componentesCatalogo || [];
-  const selecionados = window._drpComponentes || [];
-  const filtro = input.value.toLowerCase();
-
-  const disponiveis = catalogo.filter(d =>
-    (tiposMergeGlobal[d.tipo] || d.tipo) === tipo &&
-    !selecionados.includes(d.id) &&
-    (filtro === '' || d.nome.toLowerCase().includes(filtro))
-  );
-
-  let html = '';
-  disponiveis.forEach(d => {
-    html += `<div class="drp-dd-option" onmousedown="adicionarComponenteDrpById('${d.id}')" style="padding:7px 12px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
-      <div style="font-weight:500;color:#222;">${esc(d.nome)}</div>
-      ${d.descricao ? `<div style="font-size:0.75em;color:#888;margin-top:1px;">${esc(d.descricao)}</div>` : ''}
-    </div>`;
-  });
-
-  if (input.value.trim() && !catalogo.some(d => d.nome.toLowerCase() === input.value.trim().toLowerCase() && (tiposMergeGlobal[d.tipo] || d.tipo) === tipo)) {
-    html += `<div class="drp-dd-option" onmousedown="criarComponenteRapido('${input.value.trim().replace(/'/g,"\\'")}','${tipo.replace(/'/g,"\\'")}')" style="padding:8px 12px;cursor:pointer;color:#1a237e;font-weight:600;border-top:1.5px solid #e8eaf6;background:#f8f9ff;">+ Criar "${input.value.trim()}"</div>`;
-  }
-
-  if (!html) { dropdown.style.display = 'none'; return; }
-  dropdown.innerHTML = html;
-  dropdown.style.display = 'block';
-  dropdown.querySelectorAll('.drp-dd-option').forEach(el => {
-    el.addEventListener('mouseenter', () => el.style.background = '#f0f4ff');
-    el.addEventListener('mouseleave', () => el.style.background = el.style.borderTop ? '#f8f9ff' : 'transparent');
-  });
-};
-
-window.mostrarDropdownComponenteDrp = () => {
-  const input = document.getElementById('drpComponenteBusca');
-  const dropdown = document.getElementById('drpComponenteDropdown');
-  if (!input || !dropdown) return;
-  const catalogo = window.componentesCatalogo || [];
-  const selecionados = window._drpComponentes || [];
-  const filtro = input.value.toLowerCase();
-  const disponiveis = catalogo.filter(d =>
-    !selecionados.includes(d.id) &&
-    (filtro === '' || d.nome.toLowerCase().includes(filtro) || (d.tipo || '').toLowerCase().includes(filtro) || (d.descricao || '').toLowerCase().includes(filtro))
-  );
-  if (!disponiveis.length) {
-    dropdown.innerHTML = '<div style="padding:10px 14px;font-size:0.88em;color:#999;">Nenhum resultado encontrado.</div>';
-    dropdown.style.display = 'block';
-    return;
-  }
-  const grupos = {};
-  disponiveis.forEach(d => { if (!grupos[d.tipo]) grupos[d.tipo] = []; grupos[d.tipo].push(d); });
-  let html = '';
-  Object.entries(grupos).sort((a,b) => a[0].localeCompare(b[0])).forEach(([tipo, itens]) => {
-    html += `<div style="padding:6px 12px 3px;font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;background:#fafafa;">${tipo}</div>`;
-    itens.forEach(d => {
-      html += `<div class="drp-comp-option" onmousedown="adicionarComponenteDrpById('${d.id}')" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
-        <div style="font-weight:600;color:#222;">${esc(d.nome)}</div>
-        ${d.descricao ? `<div style="font-size:0.82em;color:#888;margin-top:2px;">${esc(d.descricao)}</div>` : ''}
-      </div>`;
-    });
-  });
-  dropdown.innerHTML = html;
-  dropdown.style.display = 'block';
-  dropdown.querySelectorAll('.drp-comp-option').forEach(el => {
-    el.addEventListener('mouseenter', () => el.style.background = '#f0f4ff');
-    el.addEventListener('mouseleave', () => el.style.background = 'transparent');
-  });
-};
-
-window.adicionarComponenteDrpById = (id) => {
-  if (!window._drpComponentes.includes(id)) {
-    window._drpComponentes.push(id);
-    renderComponentesDrp();
-  }
-  const input = document.getElementById('drpComponenteBusca');
-  const dropdown = document.getElementById('drpComponenteDropdown');
-  if (input) input.value = '';
-  if (dropdown) dropdown.style.display = 'none';
-};
-
-window.removerComponenteDrp = (id) => {
-  window._drpComponentes = window._drpComponentes.filter(x => x !== id);
-  renderComponentesDrp();
-};
-
-window.abrirModalCompDrp = (d) => {
-  document.getElementById('compDrpId').value = d ? d.id : '';
-  document.getElementById('compDrpTipo').value = d ? d.tipo : '';
-  document.getElementById('compDrpNome').value = d ? d.nome : '';
-  document.getElementById('compDrpDescricao').value = d ? (d.descricao || '') : '';
-  document.getElementById('compDrpRto').value = d ? (d.rto || '') : '';
-  document.getElementById('compDrpRpo').value = d ? (d.rpo || '') : '';
-  document.getElementById('compDrpEstrategia').value = d ? (d.estrategia || '') : '';
-  document.getElementById('compDrpResponsavel').value = d ? (d.responsavel || '') : '';
-  document.getElementById('modalCompDrpTitulo').textContent = d ? 'Editar Componente' : 'Novo Componente';
-  const tipos = [...new Set((window.componentesCatalogo || []).map(x => x.tipo))].sort();
-  document.getElementById('compDrpTipoList').innerHTML = tipos.map(c => `<option value="${c}">`).join('');
-  document.getElementById('modalCompDrp').classList.add('open');
-};
-window.fecharModalCompDrp = () => document.getElementById('modalCompDrp').classList.remove('open');
-window.salvarCompDrp = async () => {
-  const d = {
-    id: document.getElementById('compDrpId').value || null,
-    tipo: document.getElementById('compDrpTipo').value.trim(),
-
-    nome: document.getElementById('compDrpNome').value.trim(),
-    descricao: document.getElementById('compDrpDescricao').value.trim(),
-    rto: document.getElementById('compDrpRto').value.trim(),
-    rpo: document.getElementById('compDrpRpo').value.trim(),
-    estrategia: document.getElementById('compDrpEstrategia').value.trim(),
-    responsavel: document.getElementById('compDrpResponsavel').value.trim(),
-  };
-  if (!d.tipo) return showToast('Informe o tipo.', '#e65100');
-  if (!d.nome) return showToast('Informe o nome.', '#e65100');
-  try {
-    const result = await API.salvarComponente(d);
-    fecharModalCompDrp();
-    showToast('✅ Salvo!', '#2e7d32');
-    if (d.id) {
-      const idx = (window.componentesCatalogo || []).findIndex(x => x.id === d.id);
-      if (idx !== -1) window.componentesCatalogo[idx] = { ...d };
-    } else {
-      d.id = result.id;
-      window.componentesCatalogo = window.componentesCatalogo || [];
-      window.componentesCatalogo.push(d);
-    }
-    if (!window._drpComponentes.includes(d.id)) {
-      window._drpComponentes.push(d.id);
-    }
-    renderComponentesDrp();
-    API.invalidate('getComponentes');
-  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
-};
 
 
 // ============================================================
@@ -7187,9 +6646,6 @@ function _buildLevantamentoView(lev, p) {
   </body></html>`;
 }
 
-// ============================================================
-// ENVIAR DRP COMPONENTES POR E-MAIL (formulário externo via token)
-// ============================================================
 window.abrirLevantamentoDireto = (id) => {
   const p = window.processosData.find(proc => proc.id === id);
   if (!p || !p.levantamentoPCN) return showToast('Nenhum levantamento preenchido.', '#e65100');
@@ -7202,47 +6658,10 @@ window.abrirLevantamentoDireto = (id) => {
     win.document.close();
   }).catch(e => showToast('❌ ' + e.message, '#c62828'));
 };
-window.enviarDRPComponentes = async () => {
-  const id = document.getElementById('fId').value || '';
-  const p = id ? window.processosData.find(proc => proc.id === id) : null;
-  if (!p) return showToast('Salve o processo antes de enviar.', '#e65100');
-
-  const areas = window.areasDisponiveis || [];
-  const area = areas.find(a => a.nome === p.area);
-  const emailPadrao = area ? area.email : '';
-
-  const email = prompt('E-mail do dono do processo:', emailPadrao);
-  if (!email) return;
-
-  try {
-    showToast('📧 Enviando...', '#1a237e');
-    const result = await API.post('gerarTokenDRP', { area: p.area, processo: p.processo, email, id: String(id) });
-    if (result.error) throw new Error(result.error);
-    showToast('✅ Formulário enviado para ' + email, '#2e7d32');
-  } catch(e) {
-    showToast('❌ ' + e.message, '#c62828');
-  }
-};
-
-// ============================================================
-// COPIAR LINK DRP (gerar token sem enviar email)
-// ============================================================
-window.copiarLinkDRP = async () => {
-  const id = document.getElementById('fId').value || '';
-  const p = id ? window.processosData.find(proc => proc.id === id) : null;
-  if (!p) return showToast('Salve o processo antes.', '#e65100');
-
-  try {
-    showToast('🔗 Gerando link...', '#1a237e');
-    const result = await API.post('gerarTokenDRP', { area: p.area, processo: p.processo, email: '_link_only_', id: String(id) });
-    if (result.error) throw new Error(result.error);
-    const link = result.link;
-    await navigator.clipboard.writeText(link);
-    showToast('✅ Link copiado! Cole no chat para enviar.', '#2e7d32');
-  } catch(e) {
-    showToast('❌ ' + e.message, '#c62828');
-  }
-};
+// enviarDRPComponentes/copiarLinkDRP (link _DRP_ por e-mail) foram removidos:
+// "Componentes do Serviço" se fundiu em Dependencias, e o link de BIA
+// (bia-dependencias.html) ja cobre as 7 categorias tecnicas -- o link
+// separado de DRP ficou redundante.
 
 // ============================================================
 // DOSSIÊ DO PROCESSO
@@ -7252,21 +6671,30 @@ window.gerarDossieProcesso = () => {
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p) return showToast('Salve o processo antes de gerar o dossiê.', '#e65100');
   const catalogo = window.dependenciasCatalogo || [];
-  const componentesCat = window.componentesCatalogo || [];
   const area = window.areasDisponiveis ? window.areasDisponiveis.find(a => a.nome === p.area) : null;
   const responsavel = area ? area.responsavel : '';
   const score = p.score || 0;
   const tier = Criticidade.tierDoProcesso(p);
-  const depGrupos = {};
+  // Um item por linha (Categoria/Nome/Detalhe) -- "Detalhe" so aparece pras
+  // categorias tecnicas (RTO/RPO/Estrategia), que absorveram o antigo
+  // catalogo de Componentes do Servico.
+  const _detalheDep = (dep) => dep ? [dep.estrategia, dep.rto ? 'RTO: ' + dep.rto : '', dep.rpo ? 'RPO: ' + dep.rpo : ''].filter(Boolean).join(' | ') : '';
+  let depItens = [];
   if (Array.isArray(p.dependenciaItens) && p.dependenciaItens.length) {
-    p.dependenciaItens.forEach(item => { const cat = item.categoria || 'Outros'; if (!depGrupos[cat]) depGrupos[cat] = []; depGrupos[cat].push(item.nome); });
+    depItens = p.dependenciaItens.map(item => {
+      const dep = item.id ? catalogo.find(d => d.id === item.id) : null;
+      return { categoria: item.categoria || 'Outros', nome: item.nome, detalhe: _detalheDep(dep) };
+    });
   } else {
     // Processo legado, sem dependenciaItens ainda -- mesma adivinhacao de sempre.
     const deps = (p.dependencia || '').split(',').map(s => s.trim()).filter(Boolean);
-    deps.forEach(nome => { const dep = catalogo.find(d => d.nome === nome); const cat = dep ? dep.categoria : 'Outros'; if (!depGrupos[cat]) depGrupos[cat] = []; depGrupos[cat].push(nome); });
+    depItens = deps.map(nome => {
+      const dep = catalogo.find(d => d.nome === nome);
+      return { categoria: dep ? dep.categoria : 'Outros', nome, detalhe: _detalheDep(dep) };
+    });
   }
+  depItens.sort((a, b) => a.categoria.localeCompare(b.categoria) || a.nome.localeCompare(b.nome));
   const contatos = (p.bcpContatos || []).map(cid => catalogo.find(d => d.id === cid)).filter(Boolean);
-  const comps = (p.drpComponentes || []).map(cid => componentesCat.find(d => d.id === cid)).filter(Boolean);
   const pergs = window.processosPerguntas || [];
   const respostas = p.respostas || {};
   const win = window.open('', '_blank');
@@ -7275,11 +6703,10 @@ window.gerarDossieProcesso = () => {
   win.document.write('<h1>' + p.processo + '</h1><p>' + p.area + ' — ' + responsavel + '</p><span class="badge">' + tier + ' • Score ' + score + '</span>');
   win.document.write('<h2>Identificação</h2><p><b>Descrição:</b> ' + (p.descricaoFuncional || '-') + '</p>');
   win.document.write('<h2>BIA</h2><p><b>Status:</b> ' + (p.biaHomologada || '-') + '</p><p><b>Impacto:</b> ' + (p.descricao || '-') + '</p><p><b>RTO:</b> ' + (p.rto || '-') + ' | <b>RPO:</b> ' + (p.rpo || '-') + ' | <b>MTD:</b> ' + (p.mtd || '-') + '</p>');
-  if (Object.keys(depGrupos).length) { win.document.write('<h3>Dependências</h3><table><tr><th>Tipo</th><th>Recursos</th></tr>'); Object.entries(depGrupos).sort().forEach(function(e) { win.document.write('<tr><td><b>' + e[0] + '</b></td><td>' + e[1].join(', ') + '</td></tr>'); }); win.document.write('</table>'); }
+  if (depItens.length) { win.document.write('<h3>Dependências</h3><table><tr><th>Categoria</th><th>Recurso</th><th>Detalhe</th></tr>'); depItens.forEach(function(d) { win.document.write('<tr><td><b>' + d.categoria + '</b></td><td>' + d.nome + '</td><td>' + (d.detalhe || '-') + '</td></tr>'); }); win.document.write('</table>'); }
   win.document.write('<h2>BCP</h2><p><b>Status:</b> ' + (p.bcpStatus || '-') + '</p>');
   if (contatos.length) { win.document.write('<table><tr><th>Nome</th><th>Empresa</th><th>Setor</th><th>Telefone</th><th>Email</th></tr>'); contatos.forEach(function(d) { win.document.write('<tr><td><b>' + d.nome + '</b></td><td>' + (d.empresa||'-') + '</td><td>' + (d.setor||'-') + '</td><td>' + (d.telefone||'-') + '</td><td>' + (d.email||'-') + '</td></tr>'); }); win.document.write('</table>'); }
-  win.document.write('<h2>DRP</h2><p><b>Status:</b> ' + (p.drpStatus || '-') + '</p>');
-  if (comps.length) { win.document.write('<table><tr><th>Tipo</th><th>Nome</th><th>Estratégia</th></tr>'); comps.forEach(function(c) { win.document.write('<tr><td>' + c.tipo + '</td><td><b>' + c.nome + '</b></td><td>' + (c.estrategia||'-') + '</td></tr>'); }); win.document.write('</table>'); }
+  win.document.write('<h2>DRP</h2><p><b>Status:</b> ' + (p.drpStatus || '-') + '</p><p style="color:#888;font-size:9pt;">Componentes técnicos do serviço aparecem na tabela de Dependências acima (categorias API, Banco de Dados, Infraestrutura, Segurança, Servidor, Sistema).</p>');
   win.document.write('<div style="margin-top:30px;border-top:1px solid #ddd;padding-top:10px;font-size:8pt;color:#999;text-align:center;">Dossiê gerado em ' + new Date().toLocaleDateString('pt-BR') + '</div></body></html>');
   win.document.close();
 };
@@ -7550,7 +6977,7 @@ async function salvarVersaoPCN(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
-<script src="https://bia-forte-2025.web.app/pcn-live.js?v=3"></script>
+<script src="https://bia-forte-2025.web.app/pcn-live.js?v=4"></script>
 </body>
 </html>`;
 }

@@ -9,8 +9,11 @@
 //   _AREA_         -> avaliação de área inteira        (avaliar-area.html)
 //   (sem prefixo)  -> avaliação de um processo         (avaliar.html)
 //   _BIA_<proc>    -> mapeamento de dependências       (bia-dependencias.html)
-//   _DRP_<proc>    -> mapeamento de componentes        (drp-componentes.html)
 //   _LEV_<proc>    -> levantamento PCN                 (pcn-levantamento.html)
+//
+// _DRP_ existiu ate 23/09/2026 (mapeamento de Componentes do Servico); saiu
+// quando Componentes se fundiu em Dependencias -- bia-dependencias.html ja
+// cobre as 7 categorias tecnicas que Componentes cobria.
 // ============================================================
 
 const COLLECTION = {
@@ -20,7 +23,6 @@ const COLLECTION = {
   respostas: 'respostas_bia',
   tokens: 'tokens',
   dependencias: 'dependencias',
-  componentes: 'componentes',
 };
 
 class TokenError extends Error {}
@@ -179,20 +181,9 @@ async function validarTokenBIA(db, token) {
   };
 }
 
-async function validarTokenDRP(db, token) {
-  const { data } = await _carregarToken(db, token, '_DRP_');
-  const area = data.area;
-  const processo = String(data.processo).replace('_DRP_', '');
-  const compSnap = await db.collection(COLLECTION.componentes).get();
-  const catalogoPorTipo = {};
-  compSnap.docs.forEach((d) => {
-    const c = d.data();
-    const tipo = c.tipo || 'Outros';
-    if (!catalogoPorTipo[tipo]) catalogoPorTipo[tipo] = [];
-    catalogoPorTipo[tipo].push(c.nome);
-  });
-  return { area, processo, catalogo: catalogoPorTipo };
-}
+// validarTokenDRP saiu (23/09/2026): "Componentes do Serviço" se fundiu em
+// Dependencias -- validarTokenBIA ja cobre as 7 categorias tecnicas, o link
+// separado de DRP ficou redundante.
 
 async function validarTokenLevantamento(db, token) {
   const { data } = await _carregarToken(db, token, '_LEV_');
@@ -327,12 +318,20 @@ async function salvarDependenciasBIA(db, data) {
 
   // Cada grupo agora chega como [{nome, id}] -- id preenchido quando o
   // stakeholder escolheu um chip existente, null quando digitou texto novo.
+  // As 7 categorias tecnicas (API/Banco de Dados/Infraestrutura/Segurança/
+  // Servidor/Sistema/Outros) absorveram o antigo catalogo de Componentes do
+  // Servico -- mesmas 7 opcoes que Cadastros > Dependencias usa.
   const grupos = {
     Fornecedores: parseMaybeJson(data.fornecedores, []),
-    Infraestrutura: parseMaybeJson(data.infraestrutura, []),
     Pessoas: parseMaybeJson(data.pessoas, []),
-    Sistemas: parseMaybeJson(data.sistemas, []),
     'Processos Internos': parseMaybeJson(data.processos, []),
+    API: parseMaybeJson(data.api, []),
+    'Banco de Dados': parseMaybeJson(data.bancoDados, []),
+    Infraestrutura: parseMaybeJson(data.infraestrutura, []),
+    'Segurança': parseMaybeJson(data.seguranca, []),
+    Servidor: parseMaybeJson(data.servidor, []),
+    Sistema: parseMaybeJson(data.sistema, []),
+    Outros: parseMaybeJson(data.outros, []),
   };
 
   const depSnap = await db.collection(COLLECTION.dependencias).get();
@@ -397,19 +396,7 @@ async function salvarDependenciasBIA(db, data) {
   return { success: true, area, processo, observacoes: data.observacoes || '' };
 }
 
-async function salvarComponentesDRP(db, data) {
-  const { ref, data: t } = await _carregarToken(db, data.token, '_DRP_');
-  const area = t.area;
-  const processo = String(t.processo).replace('_DRP_', '');
-  const componentes = parseMaybeJson(data.componentes, []);
-
-  const procId = await _acharProcessoId(db, area, processo);
-  if (procId) {
-    await db.collection(COLLECTION.processos).doc(procId).set({ drpComponentes: componentes }, { merge: true });
-  }
-  await ref.set({ usado: true }, { merge: true });
-  return { success: true, area, processo };
-}
+// salvarComponentesDRP saiu junto com validarTokenDRP -- ver comentario acima.
 
 async function salvarLevantamentoPCN(db, data) {
   const { ref, data: t } = await _carregarToken(db, data.token, '_LEV_');
@@ -441,7 +428,6 @@ const READ_ACTIONS = {
   validarToken,
   validarTokenArea,
   validarTokenBIA,
-  validarTokenDRP,
   validarTokenLevantamento,
   getConfigRespostas,
 };
@@ -450,7 +436,6 @@ const WRITE_ACTIONS = {
   salvarRespostasToken,
   salvarRespostasArea,
   salvarDependenciasBIA,
-  salvarComponentesDRP,
   salvarLevantamentoPCN,
 };
 

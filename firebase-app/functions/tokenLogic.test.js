@@ -145,7 +145,7 @@ test('salvarDependenciasBIA cria catálogo, vincula por id e atualiza processo',
   const res = await WRITE_ACTIONS.salvarDependenciasBIA(db, {
     token: 'b1',
     fornecedores: JSON.stringify([{ nome: 'AWS', id: null }]),
-    sistemas: JSON.stringify([{ nome: 'ERP', id: null }]),
+    sistema: JSON.stringify([{ nome: 'ERP', id: null }]),
     impacto: 'Parada total',
     rto: '2h',
   });
@@ -199,6 +199,34 @@ test('salvarDependenciasBIA: Processos Internos nunca cria entrada no catálogo,
   assert.strictEqual(item.id, null, 'sem processo real correspondente, fica sem vinculo -- nunca vira entrada solta');
 });
 
+test('salvarDependenciasBIA cria itens nas 7 categorias técnicas (Componentes fundido em Dependências)', async () => {
+  const seed = baseSeed();
+  seed.tokens['b6'] = { token: 'b6', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  const db = makeDb(seed);
+
+  await WRITE_ACTIONS.salvarDependenciasBIA(db, {
+    token: 'b6',
+    api: JSON.stringify([{ nome: 'API de Pagamentos', id: null }]),
+    bancoDados: JSON.stringify([{ nome: 'PostgreSQL Prod', id: null }]),
+    infraestrutura: JSON.stringify([{ nome: 'Link de Internet', id: null }]),
+    seguranca: JSON.stringify([{ nome: 'Firewall Perimetral', id: null }]),
+    servidor: JSON.stringify([{ nome: 'SRV-01', id: null }]),
+    sistema: JSON.stringify([{ nome: 'ERP Fortes', id: null }]),
+    outros: JSON.stringify([{ nome: 'Item Diverso', id: null }]),
+  });
+
+  const proc = db._store.processos['ti__backup'];
+  const porNome = Object.fromEntries(proc.dependenciaItens.map((it) => [it.nome, it.categoria]));
+  assert.strictEqual(porNome['API de Pagamentos'], 'API');
+  assert.strictEqual(porNome['PostgreSQL Prod'], 'Banco de Dados');
+  assert.strictEqual(porNome['Link de Internet'], 'Infraestrutura');
+  assert.strictEqual(porNome['Firewall Perimetral'], 'Segurança');
+  assert.strictEqual(porNome['SRV-01'], 'Servidor');
+  assert.strictEqual(porNome['ERP Fortes'], 'Sistema');
+  assert.strictEqual(porNome['Item Diverso'], 'Outros');
+  assert.strictEqual(Object.keys(db._store.dependencias).length, 7);
+});
+
 test('validarTokenBIA exige prefixo _BIA_', async () => {
   const seed = baseSeed();
   seed.tokens['x'] = { token: 'x', area: 'TI', processo: 'Backup', usado: false, expiraEm: '2999-01-01' };
@@ -231,15 +259,9 @@ test('validarTokenBIA devolve dependenciaItens ja gravados no processo', async (
   assert.deepStrictEqual(res.dependenciaItens, [{ categoria: 'Fornecedores', nome: 'AWS', id: 'dep-aws' }]);
 });
 
-test('salvarComponentesDRP grava drpComponentes no processo', async () => {
-  const seed = baseSeed();
-  seed.tokens['d1'] = { token: 'd1', area: 'TI', processo: '_DRP_Backup', usado: false, expiraEm: '2999-01-01' };
-  const db = makeDb(seed);
-  const res = await WRITE_ACTIONS.salvarComponentesDRP(db, { token: 'd1', componentes: JSON.stringify(['comp-1']) });
-  assert.strictEqual(res.success, true);
-  assert.deepStrictEqual(db._store.processos['ti__backup'].drpComponentes, ['comp-1']);
-  assert.strictEqual(db._store.tokens['d1'].usado, true);
-});
+// salvarComponentesDRP/validarTokenDRP saíram (23/09/2026): "Componentes do
+// Serviço" se fundiu em Dependencias -- ver testes de salvarDependenciasBIA
+// acima, que já cobrem as 7 categorias técnicas.
 
 test('processoKey estável', () => {
   assert.strictEqual(processoKey('TI', 'Backup'), 'ti__backup');
