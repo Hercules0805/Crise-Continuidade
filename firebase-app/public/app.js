@@ -1718,8 +1718,11 @@ function renderDependenciaTabela() {
   // Garantir que as categorias sempre apareçam, mesmo sem nenhum item ainda:
   // Fornecedores/Pessoas/Processos Internos (outras entidades) + as 7
   // categorias técnicas de Dependência (absorveram o antigo catálogo de
-  // Componentes do Serviço).
-  ['Fornecedores', 'Pessoas', 'Processos Internos', ...DEPENDENCIA_CATEGORIAS_TECNICAS].forEach(c => categoriasSet.add(c));
+  // Componentes do Serviço). "Outros" fica fora da lista fixa pra não virar
+  // uma seção vazia por padrão -- se algum processo já tiver algo nela, a
+  // linha abaixo (selecionadas.forEach) garante que ela aparece do mesmo
+  // jeito, nunca escondendo dado já selecionado.
+  ['Fornecedores', 'Pessoas', 'Processos Internos', ...DEPENDENCIA_CATEGORIAS_TECNICAS.filter(c => c !== 'Outros')].forEach(c => categoriasSet.add(c));
   // Cada item ja carrega sua propria categoria (dependenciaItens, ou adivinhada
   // uma unica vez por _adivinharDependenciaLegada) -- sem precisar comparar
   // nome com o catalogo de novo a cada render.
@@ -1824,7 +1827,10 @@ function renderDependenciaTabela() {
               <div class="dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:200px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
             </div>
           </div>
-          ${chips ? `<div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed #f0f0f0;"><span style="font-size:0.7em;color:#999;margin-right:4px;">Disponíveis:</span>${chips}</div>` : ''}
+          ${chips ? `<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #f0f0f0;">
+            <span style="font-size:0.7em;color:#999;">Disponíveis:</span>
+            <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;max-height:64px;overflow-y:auto;margin-top:4px;padding-right:2px;">${chips}</div>
+          </div>` : ''}
         </td>
       </tr>`;
   });
