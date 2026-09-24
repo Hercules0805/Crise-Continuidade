@@ -56,11 +56,14 @@ const MAPA_TIPO_CATEGORIA = {
   'segurança': 'Segurança',
   seguranca: 'Segurança',
   certificados: 'Segurança',
+  sistema: 'Sistema',
+  sistemas: 'Sistema',
   'aplicação': 'Sistema',
   aplicacao: 'Sistema',
   'aplicações': 'Sistema',
   aplicacoes: 'Sistema',
   software: 'Sistema',
+  infraestrutura: 'Infraestrutura',
   rede: 'Infraestrutura',
   network: 'Infraestrutura',
   storage: 'Infraestrutura',
@@ -70,11 +73,17 @@ const MAPA_TIPO_CATEGORIA = {
   'comunicação': 'Infraestrutura',
   comunicacao: 'Infraestrutura',
   api: 'API',
+  // "Servidor de Aplicação" e afins: tudo que comeca com "servidor" -- ver o
+  // fallback abaixo, alem das chaves exatas ja cobertas por servidor/servidores.
 };
 
 function categoriaDoTipo(tipo) {
   const chave = String(tipo || '').trim().toLowerCase();
-  return MAPA_TIPO_CATEGORIA[chave] || 'Outros';
+  if (MAPA_TIPO_CATEGORIA[chave]) return MAPA_TIPO_CATEGORIA[chave];
+  // Variações compostas ("Servidor de Aplicação", "Servidor de Banco de
+  // Dados" etc.) -- qualquer coisa comecando com "servidor" cai em Servidor.
+  if (chave.startsWith('servidor')) return 'Servidor';
+  return 'Outros';
 }
 
 async function main() {
