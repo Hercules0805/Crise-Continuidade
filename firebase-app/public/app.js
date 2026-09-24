@@ -1709,7 +1709,7 @@ function renderDependenciaTabela() {
     'Infraestrutura': '⚡',
     'Segurança': '🔒',
     'Servidor': '🖥️',
-    'Sistemas': '💻', 'Sistema': '💻',
+    'Sistemas': '💻',
     'Outros': '📦'
   };
 
@@ -1775,7 +1775,6 @@ function renderDependenciaTabela() {
       'Segurança': 'Ex: Firewall, VPN, certificado digital, antivírus corporativo, controle de acesso',
       'Servidor': 'Ex: Servidor de aplicação, servidor de arquivos, cluster de virtualização',
       'Sistemas': 'Ex: ERP Fortes, e-mail corporativo, Active Directory, sistema bancário',
-      'Sistema': 'Ex: ERP Fortes, e-mail corporativo, Active Directory, sistema bancário',
       'Outros': 'Ex: Qualquer recurso técnico que não se encaixa nas categorias acima',
     };
     const example = catExamples[cat] || '';
@@ -2697,7 +2696,7 @@ let dependenciasOrdenacao = { coluna: 'categoria', direcao: 'asc' };
 // agora sao categoria fixa de Dependencia, o cadastro de um so). Reaproveitada
 // tambem na lista de categorias da aba BIA (Fornecedores/Pessoas/Processos
 // Internos sao as outras 3, cada uma sua propria entidade).
-const DEPENDENCIA_CATEGORIAS_TECNICAS = ['API', 'Banco de Dados', 'Infraestrutura', 'Segurança', 'Servidor', 'Sistema', 'Outros'];
+const DEPENDENCIA_CATEGORIAS_TECNICAS = ['API', 'Banco de Dados', 'Infraestrutura', 'Segurança', 'Servidor', 'Sistemas', 'Outros'];
 const DEPENDENCIA_ESTRATEGIAS_BACKUP = ['Backup & Restore', 'Cold Site', 'Warm Standby', 'Active-Passive', 'Active-Active'];
 
 async function dependencias() {

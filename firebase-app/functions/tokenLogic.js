@@ -330,7 +330,7 @@ async function salvarDependenciasBIA(db, data) {
     Infraestrutura: parseMaybeJson(data.infraestrutura, []),
     'Segurança': parseMaybeJson(data.seguranca, []),
     Servidor: parseMaybeJson(data.servidor, []),
-    Sistema: parseMaybeJson(data.sistema, []),
+    Sistemas: parseMaybeJson(data.sistemas, []),
     Outros: parseMaybeJson(data.outros, []),
   };
 

@@ -145,7 +145,7 @@ test('salvarDependenciasBIA cria catálogo, vincula por id e atualiza processo',
   const res = await WRITE_ACTIONS.salvarDependenciasBIA(db, {
     token: 'b1',
     fornecedores: JSON.stringify([{ nome: 'AWS', id: null }]),
-    sistema: JSON.stringify([{ nome: 'ERP', id: null }]),
+    sistemas: JSON.stringify([{ nome: 'ERP', id: null }]),
     impacto: 'Parada total',
     rto: '2h',
   });
@@ -211,7 +211,7 @@ test('salvarDependenciasBIA cria itens nas 7 categorias técnicas (Componentes f
     infraestrutura: JSON.stringify([{ nome: 'Link de Internet', id: null }]),
     seguranca: JSON.stringify([{ nome: 'Firewall Perimetral', id: null }]),
     servidor: JSON.stringify([{ nome: 'SRV-01', id: null }]),
-    sistema: JSON.stringify([{ nome: 'ERP Fortes', id: null }]),
+    sistemas: JSON.stringify([{ nome: 'ERP Fortes', id: null }]),
     outros: JSON.stringify([{ nome: 'Item Diverso', id: null }]),
   });
 
@@ -222,7 +222,7 @@ test('salvarDependenciasBIA cria itens nas 7 categorias técnicas (Componentes f
   assert.strictEqual(porNome['Link de Internet'], 'Infraestrutura');
   assert.strictEqual(porNome['Firewall Perimetral'], 'Segurança');
   assert.strictEqual(porNome['SRV-01'], 'Servidor');
-  assert.strictEqual(porNome['ERP Fortes'], 'Sistema');
+  assert.strictEqual(porNome['ERP Fortes'], 'Sistemas');
   assert.strictEqual(porNome['Item Diverso'], 'Outros');
   assert.strictEqual(Object.keys(db._store.dependencias).length, 7);
 });

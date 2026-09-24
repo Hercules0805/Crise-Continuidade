@@ -30,7 +30,8 @@
  *   Servidor, Servidores                          -> Servidor
  *   Banco de Dados, Database                      -> Banco de Dados
  *   Segurança, Certificados                       -> Segurança
- *   Aplicação, Aplicações, Software                -> Sistema
+ *   Sistema, Sistemas, Aplicação, Aplicações,
+ *     Software                                     -> Sistemas
  *   Rede, Network, Storage, Armazenamento,
  *     Cloud, Nuvem, Comunicação                    -> Infraestrutura
  *   API                                            -> API
@@ -56,13 +57,13 @@ const MAPA_TIPO_CATEGORIA = {
   'segurança': 'Segurança',
   seguranca: 'Segurança',
   certificados: 'Segurança',
-  sistema: 'Sistema',
-  sistemas: 'Sistema',
-  'aplicação': 'Sistema',
-  aplicacao: 'Sistema',
-  'aplicações': 'Sistema',
-  aplicacoes: 'Sistema',
-  software: 'Sistema',
+  sistema: 'Sistemas',
+  sistemas: 'Sistemas',
+  'aplicação': 'Sistemas',
+  aplicacao: 'Sistemas',
+  'aplicações': 'Sistemas',
+  aplicacoes: 'Sistemas',
+  software: 'Sistemas',
   infraestrutura: 'Infraestrutura',
   rede: 'Infraestrutura',
   network: 'Infraestrutura',
