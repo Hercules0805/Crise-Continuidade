@@ -206,6 +206,48 @@ test('gerarPCN resolve dependencias e contatos do catalogo no prompt', async () 
   } finally { global.fetch = original; }
 });
 
+test('gerarPCN busca dependencia por id quando dependenciaItens existe, mesmo com nomes duplicados em categorias diferentes', async () => {
+  const s = seed();
+  // Duas entradas com o MESMO nome, em categorias diferentes -- exatamente o
+  // caso que buscar por nome nao consegue distinguir, e buscar por id sim.
+  s.dependencias = {
+    'dep-ti-pessoa': { nome: 'TI', categoria: 'Pessoas', empresa: 'Fulano de Tal' },
+    'dep-ti-sistema': { nome: 'TI', categoria: 'Sistemas', empresa: 'Sistema Interno' },
+  };
+  s.processos.ti__backup.dependenciaItens = [
+    { categoria: 'Sistemas', nome: 'TI', id: 'dep-ti-sistema' },
+  ];
+  const db = makeDb(s);
+  let promptEnviado = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<p>ok</p>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarPCN(db, { id: 'ti__backup' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.ok(promptEnviado.includes('Sistemas:** TI (Sistema Interno)'), 'deveria ter resolvido pelo id certo, nao pelo primeiro nome que bater');
+    assert.ok(!promptEnviado.includes('Fulano de Tal'));
+  } finally { global.fetch = original; }
+});
+
+test('gerarPCN cai na busca por nome (legado) quando o processo nao tem dependenciaItens', async () => {
+  const s = seed();
+  s.processos.ti__backup.dependencia = 'AWS';
+  s.dependencias = { 'dep-aws': { nome: 'AWS', categoria: 'Fornecedor', empresa: 'Amazon' } };
+  const db = makeDb(s);
+  let promptEnviado = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<p>ok</p>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarPCN(db, { id: 'ti__backup' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.ok(promptEnviado.includes('AWS (Amazon)'));
+  } finally { global.fetch = original; }
+});
+
 test('processoKey e igual a de tokenLogic e api.js', () => {
   assert.strictEqual(processoKey('Financeiro', 'Faturamento > Emissão de NFs'), 'financeiro__faturamento-emissao-de-nfs');
 });

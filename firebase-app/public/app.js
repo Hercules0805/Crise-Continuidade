@@ -1730,12 +1730,35 @@ window.ordenarProcessos = (coluna) => {
 // ============================================================
 window._dependenciaSelecionadas = [];
 
-function initDependenciaTags(valorAtual) {
-  // Parsear valor atual (string separada por vírgula) e remover duplicatas
-  window._dependenciaSelecionadas = valorAtual 
-    ? [...new Set(valorAtual.split(',').map(s => s.trim()).filter(Boolean))]
-    : [];
-  
+/**
+ * Adivinha categoria e id de uma dependencia LEGADA (so o nome, sem
+ * dependenciaItens ainda) -- mesma logica que renderDependenciaTabela ja usava
+ * pra agrupar por nome, so que agora decide UMA categoria por item (nao mais
+ * empurra o mesmo nome em duas categorias quando ha colisao -- efeito
+ * colateral bom da mudanca, nao so compatibilidade).
+ */
+function _adivinharDependenciaLegada(nome) {
+  const dep = (window.dependenciasCatalogo || []).find((d) => d.nome === nome);
+  if (dep) return { categoria: dep.categoria, nome, id: dep.id || null };
+  const processo = (window.processosData || []).find((p) => p.processo === nome);
+  if (processo) return { categoria: 'Processos Internos', nome, id: processo.id };
+  return { categoria: 'Outros', nome, id: null };
+}
+
+function initDependenciaTags(p) {
+  const itensNovos = p && Array.isArray(p.dependenciaItens) ? p.dependenciaItens : null;
+  if (itensNovos && itensNovos.length) {
+    window._dependenciaSelecionadas = itensNovos.map((it) => ({ categoria: it.categoria, nome: it.nome, id: it.id === undefined ? null : it.id }));
+  } else {
+    // Processo legado: so tem a string plana (dependencia). Adivinha categoria
+    // e tenta religar por nome -- sem vinculo nenhum so quando nao acha nada.
+    const valorAtual = p ? p.dependencia : '';
+    const nomes = valorAtual
+      ? [...new Set(valorAtual.split(',').map((s) => s.trim()).filter(Boolean))]
+      : [];
+    window._dependenciaSelecionadas = nomes.map(_adivinharDependenciaLegada);
+  }
+
   renderDependenciaTabela();
 }
 
@@ -1765,40 +1788,26 @@ function renderDependenciaTabela() {
   const categoriasSet = new Set(catalogo.map(d => d.categoria));
   // Garantir que categorias dos 5Ps sempre apareçam
   ['Fornecedores', 'Infraestrutura', 'Pessoas', 'Sistemas', 'Processos Internos'].forEach(c => categoriasSet.add(c));
-  selecionadas.forEach(nome => {
-    const dep = catalogo.find(d => d.nome === nome);
-    if (dep) categoriasSet.add(dep.categoria);
-  });
+  // Cada item ja carrega sua propria categoria (dependenciaItens, ou adivinhada
+  // uma unica vez por _adivinharDependenciaLegada) -- sem precisar comparar
+  // nome com o catalogo de novo a cada render.
+  selecionadas.forEach((item) => categoriasSet.add(item.categoria || 'Outros'));
   const categorias = [...categoriasSet].sort();
-  
+
   if (!categorias.length) {
     tabelaContainer.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhuma dependência cadastrada no catálogo.</p>';
     return;
   }
-  
-  // Agrupar selecionadas por categoria
+
+  // Agrupar selecionadas por categoria (ja vem explicita em cada item -- sem
+  // adivinhar por nome, e sem o bug de empurrar o mesmo nome em duas
+  // categorias quando ha colisao).
   const grupos = {};
   categorias.forEach(cat => { grupos[cat] = []; });
-  selecionadas.forEach(nome => {
-    // Buscar TODAS as categorias onde esse nome existe no catálogo
-    const deps = catalogo.filter(d => d.nome === nome);
-    if (deps.length > 1) {
-      deps.forEach(dep => {
-        if (grupos[dep.categoria] && !grupos[dep.categoria].includes(nome)) {
-          grupos[dep.categoria].push(nome);
-        }
-      });
-    } else if (deps.length === 1) {
-      const cat = deps[0].categoria;
-      if (!grupos[cat]) grupos[cat] = [];
-      if (!grupos[cat].includes(nome)) grupos[cat].push(nome);
-    } else {
-      // Não está no catálogo — verificar se é um processo interno
-      const isProcessoInterno = (window.processosData || []).some(p => p.processo === nome);
-      const cat = isProcessoInterno ? 'Processos Internos' : 'Outros';
-      if (!grupos[cat]) grupos[cat] = [];
-      if (!grupos[cat].includes(nome)) grupos[cat].push(nome);
-    }
+  selecionadas.forEach((item) => {
+    const cat = item.categoria || 'Outros';
+    if (!grupos[cat]) grupos[cat] = [];
+    grupos[cat].push(item);
   });
   
   let html = `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
@@ -1829,20 +1838,36 @@ function renderDependenciaTabela() {
     };
     const example = catExamples[cat] || '';
     
-    const tags = recursos.map((nome) => {
-      const globalIdx = selecionadas.indexOf(nome);
-      const dep = catalogo.find(d => d.nome === nome);
-      const tooltip = dep ? [dep.empresa, dep.detalhes, dep.telefone].filter(Boolean).join(' • ') : '';
-      return `<span class="dep-tag-item" style="display:inline-flex;align-items:center;gap:3px;background:#1a237e;color:white;padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;cursor:default;" title="${esc(tooltip || nome)}">${nome}<button onclick="removerDependenciaTag(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.7);line-height:1;padding:0 3px;" onmouseenter="this.style.color='white'" onmouseleave="this.style.color='rgba(255,255,255,0.7)'" title="Remover">&times;</button></span>`;
+    const tags = recursos.map((item) => {
+      const globalIdx = selecionadas.indexOf(item);
+      const dep = item.id ? catalogo.find(d => d.id === item.id) : null;
+      const semVinculo = item.id === null || item.id === undefined;
+      const isProcessoLink = item.categoria === 'Processos Internos' && item.id;
+      const tooltipBase = (dep ? [dep.empresa, dep.detalhes, dep.telefone].filter(Boolean).join(' • ') : '') || item.nome;
+      const tooltip = tooltipBase + (semVinculo ? ' (sem vínculo com o cadastro -- remova e adicione de novo pra linkar)' : isProcessoLink ? ' (clique para abrir o processo)' : '');
+      const corFundo = semVinculo ? '#fff' : '#1a237e';
+      const corTexto = semVinculo ? '#555' : 'white';
+      const borda = semVinculo ? '1.5px dashed #bbb' : '1.5px solid #1a237e';
+      const onclickTag = isProcessoLink ? ` onclick="editarProcesso('${item.id}')"` : '';
+      return `<span class="dep-tag-item"${onclickTag} style="display:inline-flex;align-items:center;gap:3px;background:${corFundo};color:${corTexto};border:${borda};${isProcessoLink ? 'cursor:pointer;' : 'cursor:default;'}padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;" title="${esc(tooltip)}">${esc(item.nome)}${semVinculo ? ' <span style="opacity:0.7;">⚠</span>' : ''}<button onclick="event.stopPropagation();removerDependenciaTag(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:${semVinculo ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.7)'};line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
     }).join(' ');
-    
+
     const emptyMsg = !count ? `<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum recurso mapeado</span>` : '';
-    
-    // Chips de itens disponíveis no catálogo (não selecionados)
-    const disponiveisNaCat = catalogo.filter(d => d.categoria === cat && !selecionadas.includes(d.nome));
+
+    // Chips de itens disponíveis (não selecionados nesta categoria). Processos
+    // Internos vem sempre de processosData (o cadastro real), nunca do
+    // catalogo de dependencias -- e ali que a "referencia fantasma" acontecia.
+    const isProcessosCat = (cat === 'Processos Internos' || cat === 'Processo Interno');
+    const currentId = (document.getElementById('fId') || {}).value || '';
+    const currentProcessoNome = (document.getElementById('fProcesso') || {}).value || '';
+    const disponiveisNaCat = isProcessosCat
+      ? (window.processosData || [])
+          .filter(p => String(p.id) !== String(currentId) && p.processo !== currentProcessoNome && !selecionadas.some(s => s.id && s.id === p.id))
+          .map(p => ({ id: p.id, nome: p.processo, categoria: cat, empresa: p.area, detalhes: '' }))
+      : catalogo.filter(d => d.categoria === cat && !selecionadas.some(s => s.id && s.id === d.id));
     const chips = disponiveisNaCat.map(d => {
       const label = d.empresa ? d.empresa + ' - ' + d.nome : d.nome;
-      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="selecionarDependenciaCategoria('${escJs(d.nome)}')" title="${[d.detalhes, d.telefone].filter(Boolean).join(' • ') || d.nome}">${label}</span>`;
+      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="selecionarDependenciaCategoria('${escJs(d.nome)}','${escJs(d.categoria)}','${escJs(d.id)}')" title="${[d.detalhes, d.telefone].filter(Boolean).join(' • ') || d.nome}">${label}</span>`;
     }).join(' ');
 
     html += `
@@ -1869,8 +1894,8 @@ function renderDependenciaTabela() {
   tabelaContainer.innerHTML = html;
   
   // Atualizar hidden input
-  document.getElementById('fDependencia').value = selecionadas.join(', ');
-  
+  document.getElementById('fDependencia').value = selecionadas.map(s => s.nome).join(', ');
+
   // Adicionar listeners nos inputs
   tabelaContainer.querySelectorAll('.dep-cat-input').forEach(input => {
     input.addEventListener('keydown', (e) => {
@@ -1884,12 +1909,19 @@ function renderDependenciaTabela() {
           const catalogo = window.dependenciasCatalogo || [];
           const existe = catalogo.find(d => d.nome.toLowerCase() === val.toLowerCase() && d.categoria === cat);
           const existeProcesso = isProcessos && (window.processosData || []).find(p => p.processo.toLowerCase() === val.toLowerCase());
-          
-          if ((existe || existeProcesso) && !window._dependenciaSelecionadas.includes(val)) {
-            selecionarDependenciaCategoria(existe ? existe.nome : existeProcesso.processo);
+          const encontrado = existe
+            ? { nome: existe.nome, categoria: existe.categoria, id: existe.id }
+            : existeProcesso
+              ? { nome: existeProcesso.processo, categoria: 'Processos Internos', id: existeProcesso.id }
+              : null;
+          const jaSelecionado = encontrado && window._dependenciaSelecionadas.some(s => s.id && s.id === encontrado.id);
+
+          if (encontrado && !jaSelecionado) {
+            selecionarDependenciaCategoria(encontrado.nome, encontrado.categoria, encontrado.id);
             input.value = '';
-          } else {
-            // Mostrar dropdown com opção de criar
+          } else if (!isProcessos) {
+            // Mostrar dropdown com opção de criar (Processos Internos nunca
+            // cria entrada solta -- so aparece o que ja existe de verdade).
             mostrarDropdownCategoria(input, cat);
           }
         }
@@ -1910,47 +1942,52 @@ window.mostrarDropdownCategoria = (input, categoria) => {
   
   let disponiveis;
   let isProcessos = (categoria === 'Processos Internos' || categoria === 'Processo Interno');
-  
+
   if (isProcessos) {
-    // Para Processos Internos, listar processos do sistema
+    // Para Processos Internos, listar SO processos ja cadastrados de verdade
+    // -- nunca cria entrada solta (era exatamente essa "referencia fantasma"
+    // que o vinculo por id veio resolver).
     const processos = window.processosData || [];
-    const currentId = Number((document.getElementById('fId') || {}).value || 0);
+    const currentId = (document.getElementById('fId') || {}).value || '';
     const currentProcesso = (document.getElementById('fProcesso') || {}).value || '';
     disponiveis = processos
-      .filter(p => p.id !== currentId && p.processo !== currentProcesso && !window._dependenciaSelecionadas.includes(p.processo) && (filtro === '' || p.processo.toLowerCase().includes(filtro) || p.area.toLowerCase().includes(filtro)))
-      .map(p => ({ nome: p.processo, empresa: p.area, detalhes: '' }));
+      .filter(p => String(p.id) !== String(currentId) && p.processo !== currentProcesso && !window._dependenciaSelecionadas.some(s => s.id && s.id === p.id) && (filtro === '' || p.processo.toLowerCase().includes(filtro) || p.area.toLowerCase().includes(filtro)))
+      .map(p => ({ nome: p.processo, empresa: p.area, detalhes: '', id: p.id, categoria: 'Processos Internos' }));
   } else {
-    disponiveis = catalogo.filter(d => 
+    disponiveis = catalogo.filter(d =>
       d.categoria === categoria &&
-      !window._dependenciaSelecionadas.includes(d.nome) &&
+      !window._dependenciaSelecionadas.some(s => s.id && s.id === d.id) &&
       (filtro === '' || d.nome.toLowerCase().includes(filtro))
     );
   }
-  
+
   if (!disponiveis.length && !input.value.trim()) {
     dropdown.style.display = 'none';
     return;
   }
-  
+
   let html = '';
   disponiveis.forEach(d => {
     const info = [d.empresa, d.detalhes].filter(Boolean).join(' • ');
     const encodedNome = encodeURIComponent(d.nome);
-    html += `<div class="dep-option" onmousedown="selecionarDependenciaCategoria(decodeURIComponent('${encodedNome}'))" style="padding:8px 12px;cursor:pointer;transition:background 0.1s;border-bottom:1px solid #f8f8f8;">
+    html += `<div class="dep-option" onmousedown="selecionarDependenciaCategoria(decodeURIComponent('${encodedNome}'),'${escJs(d.categoria || categoria)}','${escJs(d.id)}')" style="padding:8px 12px;cursor:pointer;transition:background 0.1s;border-bottom:1px solid #f8f8f8;">
       <div style="font-size:0.9em;font-weight:500;color:#222;">${esc(d.nome)}</div>
       ${info ? `<div style="font-size:0.75em;color:#888;margin-top:2px;">${info}</div>` : ''}
     </div>`;
   });
-  
-  if (input.value.trim()) {
+
+  // Processos Internos nunca ganha "+ Criar": so vincula processo que ja
+  // existe de verdade no cadastro.
+  if (!isProcessos && input.value.trim()) {
     const val = input.value.trim().toLowerCase();
-    const existeNoCatalogo = catalogo.some(d => d.nome.toLowerCase() === val);
-    const existeNosProcessos = isProcessos && (window.processosData || []).some(p => p.processo.toLowerCase() === val);
-    if (!existeNoCatalogo && !existeNosProcessos) {
+    const existeNoCatalogo = catalogo.some(d => d.categoria === categoria && d.nome.toLowerCase() === val);
+    if (!existeNoCatalogo) {
       html += `<div class="dep-option" onmousedown="adicionarDependenciaCategoria('${escJs(input.value.trim())}','${escJs(categoria)}')" style="padding:9px 12px;cursor:pointer;color:#1a237e;font-weight:600;border-top:1.5px solid #e8eaf6;background:#f8f9ff;">+ Criar "${input.value.trim()}"</div>`;
     }
+  } else if (isProcessos && input.value.trim() && !disponiveis.length) {
+    html += `<div style="padding:9px 12px;color:#999;font-size:0.85em;font-style:italic;">Nenhum processo encontrado -- cadastre primeiro em Continuidade de Negócio → Processos.</div>`;
   }
-  
+
   if (!html) {
     dropdown.style.display = 'none';
     return;
@@ -1965,43 +2002,57 @@ window.mostrarDropdownCategoria = (input, categoria) => {
   });
 };
 
-window.selecionarDependenciaCategoria = (nome) => {
-  if (!window._dependenciaSelecionadas.includes(nome)) {
-    window._dependenciaSelecionadas.push(nome);
+window.selecionarDependenciaCategoria = (nome, categoria, id) => {
+  const idReal = id || null;
+  const cat = categoria || 'Outros';
+  const jaSelecionado = idReal
+    ? window._dependenciaSelecionadas.some((s) => s.id === idReal)
+    : window._dependenciaSelecionadas.some((s) => s.nome === nome && s.categoria === cat);
+  if (!jaSelecionado) {
+    window._dependenciaSelecionadas.push({ categoria: cat, nome, id: idReal });
     renderDependenciaTabela();
   }
 };
 
+// So chamada agora pra Fornecedores/Infraestrutura/Pessoas/Sistemas -- o "+
+// Criar" de Processos Internos foi removido (mostrarDropdownCategoria), pra
+// nunca mais criar uma entrada solta no catalogo no lugar de um Processo de
+// verdade.
 window.adicionarDependenciaCategoria = (nome, categoria) => {
-  if (!window._dependenciaSelecionadas.includes(nome)) {
-    window._dependenciaSelecionadas.push(nome);
-  }
+  if (window._dependenciaSelecionadas.some((s) => s.nome === nome && s.categoria === categoria)) return;
+  const item = { categoria, nome, id: null };
+  window._dependenciaSelecionadas.push(item);
   // Verificar se existe no catálogo COM esta categoria específica
-  const existeNaCategoria = (window.dependenciasCatalogo || []).some(d => d.nome.toLowerCase() === nome.toLowerCase() && d.categoria === categoria);
-  if (!existeNaCategoria) {
-    // QUARTO caminho que cria dependencia — e o mais silencioso deles: digitar
-    // um nome novo aqui gravava no catalogo sem aviso nenhum, e a promessa nao
-    // tinha tratamento de erro. Se a gravacao falhasse, a tag aparecia na tela,
-    // o processo era salvo apontando para ela, e a dependencia nao existia no
-    // banco. Agora avisa, e avisa tambem quando falha.
-    const novaDep = { id: null, categoria, nome };
-    window.dependenciasCatalogo.push(novaDep);
-    API.invalidate('getDependencias');
-    API.salvarDependencia({ categoria, nome }).then(r => {
-      novaDep.id = r.id;
-      if (Perfis.categoriaDeFornecedor(categoria)) {
-        showToast(`✅ Fornecedor "${nome}" criado. Ele aparece em Fornecedores como "Não avaliado".`, '#2e7d32');
-      }
-    }).catch(err => {
-      console.error('Falha ao criar a dependência no catálogo', err);
-      const i = (window.dependenciasCatalogo || []).indexOf(novaDep);
-      if (i !== -1) window.dependenciasCatalogo.splice(i, 1);
-      const j = (window._dependenciaSelecionadas || []).indexOf(nome);
-      if (j !== -1) window._dependenciaSelecionadas.splice(j, 1);
-      renderDependenciaTabela();
-      showToast(`❌ Não foi possível criar "${nome}" no catálogo. Ela não foi vinculada ao processo.`, '#c62828');
-    });
+  const existeNaCategoria = (window.dependenciasCatalogo || []).find(d => d.nome.toLowerCase() === nome.toLowerCase() && d.categoria === categoria);
+  if (existeNaCategoria) {
+    item.id = existeNaCategoria.id || null;
+    renderDependenciaTabela();
+    return;
   }
+  // QUARTO caminho que cria dependencia — e o mais silencioso deles: digitar
+  // um nome novo aqui gravava no catalogo sem aviso nenhum, e a promessa nao
+  // tinha tratamento de erro. Se a gravacao falhasse, a tag aparecia na tela,
+  // o processo era salvo apontando para ela, e a dependencia nao existia no
+  // banco. Agora avisa, e avisa tambem quando falha.
+  const novaDep = { id: null, categoria, nome };
+  window.dependenciasCatalogo.push(novaDep);
+  API.invalidate('getDependencias');
+  API.salvarDependencia({ categoria, nome }).then(r => {
+    novaDep.id = r.id;
+    item.id = r.id;
+    renderDependenciaTabela();
+    if (Perfis.categoriaDeFornecedor(categoria)) {
+      showToast(`✅ Fornecedor "${nome}" criado. Ele aparece em Fornecedores como "Não avaliado".`, '#2e7d32');
+    }
+  }).catch(err => {
+    console.error('Falha ao criar a dependência no catálogo', err);
+    const i = (window.dependenciasCatalogo || []).indexOf(novaDep);
+    if (i !== -1) window.dependenciasCatalogo.splice(i, 1);
+    const j = window._dependenciaSelecionadas.indexOf(item);
+    if (j !== -1) window._dependenciaSelecionadas.splice(j, 1);
+    renderDependenciaTabela();
+    showToast(`❌ Não foi possível criar "${nome}" no catálogo. Ela não foi vinculada ao processo.`, '#c62828');
+  });
   renderDependenciaTabela();
 };
 
@@ -2232,7 +2283,7 @@ window.abrirModalProcesso = (p) => {
   document.getElementById('fDescricaoFuncional').value = p ? (p.descricaoFuncional || '') : '';
   document.getElementById('fTierManual').value = p ? (p.tierManual || '') : '';
   // Preencher tags de dependência
-  initDependenciaTags(p ? p.dependencia : '');
+  initDependenciaTags(p);
   document.getElementById('fBiaHomologada').value = p ? p.biaHomologada : '';
   const fBcpEl = document.getElementById('fBcpStatus'); if (fBcpEl) fBcpEl.value = p ? (p.bcpStatus || '') : '';
   // Preencher contatos BCP
@@ -2335,7 +2386,12 @@ window.salvarProcesso = async () => {
     area: document.getElementById('fArea').value.trim(),
     processo: document.getElementById('fProcesso').value.trim(),
     descricao: document.getElementById('fDescricao').value.trim(),
-    dependencia: (window._dependenciaSelecionadas || []).join(', '),
+    // dependencia (string) e mantida pro que ainda le so ela (tokenLogic.js,
+    // pcn-live.js, dossie, gerarPCN) -- dependenciaItens e a fonte nova, com
+    // categoria explicita e id real do cadastro (Fornecedores/Pessoas/
+    // Sistemas/Processos), sem precisar adivinhar por nome.
+    dependencia: (window._dependenciaSelecionadas || []).map((it) => it.nome).join(', '),
+    dependenciaItens: window._dependenciaSelecionadas || [],
     rto: (document.getElementById('fRTO') || {value:''}).value.trim(),
     rpo: (document.getElementById('fRPO') || {value:''}).value.trim(),
     mtd: (document.getElementById('fMTD') || {value:''}).value.trim(),
@@ -7201,9 +7257,14 @@ window.gerarDossieProcesso = () => {
   const responsavel = area ? area.responsavel : '';
   const score = p.score || 0;
   const tier = Criticidade.tierDoProcesso(p);
-  const deps = (p.dependencia || '').split(',').map(s => s.trim()).filter(Boolean);
   const depGrupos = {};
-  deps.forEach(nome => { const dep = catalogo.find(d => d.nome === nome); const cat = dep ? dep.categoria : 'Outros'; if (!depGrupos[cat]) depGrupos[cat] = []; depGrupos[cat].push(nome); });
+  if (Array.isArray(p.dependenciaItens) && p.dependenciaItens.length) {
+    p.dependenciaItens.forEach(item => { const cat = item.categoria || 'Outros'; if (!depGrupos[cat]) depGrupos[cat] = []; depGrupos[cat].push(item.nome); });
+  } else {
+    // Processo legado, sem dependenciaItens ainda -- mesma adivinhacao de sempre.
+    const deps = (p.dependencia || '').split(',').map(s => s.trim()).filter(Boolean);
+    deps.forEach(nome => { const dep = catalogo.find(d => d.nome === nome); const cat = dep ? dep.categoria : 'Outros'; if (!depGrupos[cat]) depGrupos[cat] = []; depGrupos[cat].push(nome); });
+  }
   const contatos = (p.bcpContatos || []).map(cid => catalogo.find(d => d.id === cid)).filter(Boolean);
   const comps = (p.drpComponentes || []).map(cid => componentesCat.find(d => d.id === cid)).filter(Boolean);
   const pergs = window.processosPerguntas || [];
@@ -7489,7 +7550,7 @@ async function salvarVersaoPCN(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
-<script src="https://bia-forte-2025.web.app/pcn-live.js?v=2"></script>
+<script src="https://bia-forte-2025.web.app/pcn-live.js?v=3"></script>
 </body>
 </html>`;
 }

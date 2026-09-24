@@ -692,6 +692,11 @@ async function _lerProcessos() {
       processo: d.processo || '',
       descricao: d.descricao || '',
       dependencia: d.dependencia || '',
+      // dependencia (string) e mantida por compatibilidade (tokenLogic.js,
+      // pcn-live.js, gerarPCN); dependenciaItens e a fonte nova, com categoria
+      // explicita e id real do cadastro (Fornecedores/Pessoas/Sistemas/
+      // Processos). Processo salvo antes desta mudanca simplesmente nao tem.
+      dependenciaItens: Array.isArray(d.dependenciaItens) ? d.dependenciaItens : [],
       rto: d.rto || '',
       rpo: d.rpo || '',
       mtpd: d.mtpd || '',
@@ -973,7 +978,7 @@ function _marcarTierManual(dados, anterior) {
 }
 
 const _CAMPOS_PROCESSO = [
-  'area', 'processo', 'descricao', 'dependencia', 'rto', 'rpo', 'mtpd', 'biaHomologada', 'tier',
+  'area', 'processo', 'descricao', 'dependencia', 'dependenciaItens', 'rto', 'rpo', 'mtpd', 'biaHomologada', 'tier',
   'bcpStatus', 'descricaoFuncional', 'impactoIndisponibilidade', 'bcpObjetivo', 'bcpEscopo', 'bcpContatos', 'bcpRiscos', 'bcpPreventivas',
   'drpStatus', 'drpObjetivo', 'drpEscopo', 'drpProcedimentos', 'drpCriterios', 'drpComponentes',
   'mtd', 'workaround', 'impactoJanela', 'bcpPlanoBProvedores', 'bcpSlas', 'bcpGatilhos', 'bcpReconstituicao', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual', 'tierManualPor', 'tierManualEm',

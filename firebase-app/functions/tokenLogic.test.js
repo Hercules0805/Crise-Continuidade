@@ -137,15 +137,15 @@ test('salvarRespostasToken grava resposta, tier e marca usado', async () => {
   await assert.rejects(() => WRITE_ACTIONS.salvarRespostasToken(db, { token: 'tk1', scores: '{}' }), /já foi utilizado/);
 });
 
-test('salvarDependenciasBIA cria catálogo e atualiza processo', async () => {
+test('salvarDependenciasBIA cria catálogo, vincula por id e atualiza processo', async () => {
   const seed = baseSeed();
   seed.tokens['b1'] = { token: 'b1', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
   const db = makeDb(seed);
 
   const res = await WRITE_ACTIONS.salvarDependenciasBIA(db, {
     token: 'b1',
-    fornecedores: JSON.stringify(['AWS']),
-    sistemas: JSON.stringify(['ERP']),
+    fornecedores: JSON.stringify([{ nome: 'AWS', id: null }]),
+    sistemas: JSON.stringify([{ nome: 'ERP', id: null }]),
     impacto: 'Parada total',
     rto: '2h',
   });
@@ -158,6 +158,45 @@ test('salvarDependenciasBIA cria catálogo e atualiza processo', async () => {
   assert.strictEqual(proc.descricao, 'Parada total');
   assert.strictEqual(proc.rto, '2h');
   assert.strictEqual(db._store.tokens['b1'].usado, true);
+
+  // dependenciaItens carrega o id real do catalogo recem-criado, nao so o nome.
+  assert.strictEqual(proc.dependenciaItens.length, 2);
+  const aws = proc.dependenciaItens.find((it) => it.nome === 'AWS');
+  assert.strictEqual(aws.categoria, 'Fornecedores');
+  assert.ok(aws.id, 'AWS deveria ter ganhado um id real do catalogo');
+  assert.strictEqual(db._store.dependencias[aws.id].nome, 'AWS');
+});
+
+test('salvarDependenciasBIA reaproveita id de item ja escolhido, sem criar duplicata', async () => {
+  const seed = baseSeed();
+  seed.dependencias['dep-aws'] = { categoria: 'Fornecedores', nome: 'AWS' };
+  seed.tokens['b2'] = { token: 'b2', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  const db = makeDb(seed);
+
+  await WRITE_ACTIONS.salvarDependenciasBIA(db, {
+    token: 'b2',
+    fornecedores: JSON.stringify([{ nome: 'AWS', id: 'dep-aws' }]),
+  });
+
+  assert.strictEqual(Object.keys(db._store.dependencias).length, 1, 'nao deveria ter criado uma segunda entrada pra AWS');
+  const proc = db._store.processos['ti__backup'];
+  assert.strictEqual(proc.dependenciaItens[0].id, 'dep-aws');
+});
+
+test('salvarDependenciasBIA: Processos Internos nunca cria entrada no catálogo, mesmo sem id', async () => {
+  const seed = baseSeed();
+  seed.tokens['b3'] = { token: 'b3', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  const db = makeDb(seed);
+
+  await WRITE_ACTIONS.salvarDependenciasBIA(db, {
+    token: 'b3',
+    processos: JSON.stringify([{ nome: 'Processo Fantasma', id: null }]),
+  });
+
+  assert.strictEqual(Object.keys(db._store.dependencias).length, 0, 'nao deveria ter criado nada no catalogo de dependencias');
+  const proc = db._store.processos['ti__backup'];
+  const item = proc.dependenciaItens.find((it) => it.nome === 'Processo Fantasma');
+  assert.strictEqual(item.id, null, 'sem processo real correspondente, fica sem vinculo -- nunca vira entrada solta');
 });
 
 test('validarTokenBIA exige prefixo _BIA_', async () => {
@@ -165,6 +204,31 @@ test('validarTokenBIA exige prefixo _BIA_', async () => {
   seed.tokens['x'] = { token: 'x', area: 'TI', processo: 'Backup', usado: false, expiraEm: '2999-01-01' };
   const db = makeDb(seed);
   await assert.rejects(() => READ_ACTIONS.validarTokenBIA(db, 'x'), /inválido/);
+});
+
+test('validarTokenBIA devolve catalogo com id por item e a lista real de processos', async () => {
+  const seed = baseSeed();
+  seed.dependencias['dep-aws'] = { categoria: 'Fornecedores', nome: 'AWS' };
+  seed.processos.rh__folha = { area: 'RH', processo: 'Folha' };
+  seed.tokens['b4'] = { token: 'b4', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  const db = makeDb(seed);
+
+  const res = await READ_ACTIONS.validarTokenBIA(db, 'b4');
+  assert.deepStrictEqual(res.catalogo.fornecedores, [{ id: 'dep-aws', nome: 'AWS' }]);
+  // O proprio processo (Backup) fica de fora da lista de processos disponiveis.
+  assert.strictEqual(res.catalogo.processos.length, 1);
+  assert.strictEqual(res.catalogo.processos[0].nome, 'Folha');
+  assert.deepStrictEqual(res.dependenciaItens, []);
+});
+
+test('validarTokenBIA devolve dependenciaItens ja gravados no processo', async () => {
+  const seed = baseSeed();
+  seed.processos.ti__backup.dependenciaItens = [{ categoria: 'Fornecedores', nome: 'AWS', id: 'dep-aws' }];
+  seed.tokens['b5'] = { token: 'b5', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  const db = makeDb(seed);
+
+  const res = await READ_ACTIONS.validarTokenBIA(db, 'b5');
+  assert.deepStrictEqual(res.dependenciaItens, [{ categoria: 'Fornecedores', nome: 'AWS', id: 'dep-aws' }]);
 });
 
 test('salvarComponentesDRP grava drpComponentes no processo', async () => {

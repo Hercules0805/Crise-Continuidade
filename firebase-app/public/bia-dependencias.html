@@ -69,7 +69,21 @@
     let TOKEN = '';
     let PROCESSO_INFO = {};
     let CATALOGO = {};
+    // Cada item vira {nome, id} -- id preenchido quando vinculado a um
+    // cadastro real (Fornecedores/Pessoas/Sistemas/Processos), null quando e
+    // so texto digitado (Fornecedores/Infraestrutura/Pessoas/Sistemas ainda
+    // aceitam isso; Processos, nao -- ver addManual).
     const DEPS = { fornecedores: [], infraestrutura: [], pessoas: [], sistemas: [], processos: [] };
+
+    function chaveDaCategoria(categoria) {
+      const c = String(categoria || '').trim();
+      if (c === 'Fornecedores' || c === 'Fornecedor') return 'fornecedores';
+      if (c === 'Infraestrutura') return 'infraestrutura';
+      if (c === 'Pessoas' || c === 'Pessoa') return 'pessoas';
+      if (c === 'Sistemas' || c === 'Sistema') return 'sistemas';
+      if (c === 'Processos Internos' || c === 'Processo Interno') return 'processos';
+      return null;
+    }
 
     async function init() {
       const params = new URLSearchParams(window.location.search);
@@ -85,13 +99,26 @@
         if (data.error) return showError(data.error);
         PROCESSO_INFO = data;
         CATALOGO = data.catalogo || {};
-        // Pré-carregar dependências existentes
-        if (data.dependencias) {
-          data.dependencias.split(',').map(s => s.trim()).filter(Boolean).forEach(nome => {
-            const cat = (data.depCategorias && data.depCategorias[nome]) || '';
-            const key = cat.toLowerCase().replace(/[^a-záéíóúãõç]/g, '');
-            const mapped = key === 'fornecedor' ? 'fornecedores' : key === 'pessoa' ? 'pessoas' : key === 'sistema' ? 'sistemas' : key;
-            if (DEPS[mapped]) DEPS[mapped].push(nome);
+        // Pré-carregar dependências existentes. Preferencia pro processo ja
+        // migrado (dependenciaItens, com categoria e id certos); sem isso, so
+        // a string antiga -- religa por nome contra o catalogo quando acha
+        // (antes disso, o pre-carregamento NUNCA funcionava: dependia de
+        // data.depCategorias, que o servidor nunca chegou a enviar).
+        if (Array.isArray(data.dependenciaItens) && data.dependenciaItens.length) {
+          data.dependenciaItens.forEach((it) => {
+            const key = chaveDaCategoria(it.categoria);
+            if (key && DEPS[key]) DEPS[key].push({ nome: it.nome, id: it.id || null });
+          });
+        } else if (data.dependencias) {
+          data.dependencias.split(',').map(s => s.trim()).filter(Boolean).forEach((nome) => {
+            for (const key of Object.keys(DEPS)) {
+              const achado = (CATALOGO[key] || []).find((d) => d.nome === nome);
+              if (achado) { DEPS[key].push({ nome: achado.nome, id: achado.id || null }); return; }
+            }
+            // Nao achou em nenhum catalogo -- nunca esconde o valor, so entra
+            // sem vinculo em Fornecedores (mesmo destino de sempre pra quem
+            // nao bate com nada).
+            DEPS.fornecedores.push({ nome, id: null });
           });
         }
         renderForm();
@@ -192,9 +219,33 @@
       if (PROCESSO_INFO.mtd) document.getElementById('fMTD').value = PROCESSO_INFO.mtd;
     }
 
+    // Escape minimo pra caber dentro de atributo onclick com aspas simples --
+    // mesmo padrao ja usado neste arquivo antes desta mudanca.
+    function q(v) { return String(v == null ? '' : v).replace(/'/g, "\\'"); }
+
+    function itemSelecionado(selected, item) {
+      return selected.some((s) => (s.id && item.id) ? s.id === item.id : s.nome === item.nome);
+    }
+
+    function renderTagsHtml(key, selected) {
+      if (!selected.length) return '<span class="tag-empty">Clique nas opções abaixo ou adicione manualmente</span>';
+      return selected.map((s, idx) => `<span class="tag">${s.nome}<button onclick="removeTagAt('${key}',${idx})">×</button></span>`).join('');
+    }
+
+    function renderChipsHtml(key, catalogItems, selected) {
+      return catalogItems.map((d) => {
+        const isSelected = itemSelecionado(selected, d);
+        return `<span class="chip${isSelected ? ' selected' : ''}" onclick="toggleChip('${key}','${q(d.id)}','${q(d.nome)}')">${d.nome}</span>`;
+      }).join('');
+    }
+
     function renderCategoryCard(key, title, desc, examples) {
-      const catalogItems = (CATALOGO[key] || []).sort();
+      const catalogItems = (CATALOGO[key] || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
       const selected = DEPS[key] || [];
+      // Processos Internos so aceita vincular um Processo que ja existe --
+      // sem campo de texto livre, pra nunca mais criar uma referencia
+      // fantasma (nome digitado que nao vira um Processo de verdade).
+      const podeAdicionarLivre = key !== 'processos';
 
       return `<div class="card" id="card-${key}">
         <h2>${title}</h2>
@@ -202,53 +253,56 @@
         <div class="section-examples"><strong>Exemplos:</strong> ${examples}</div>
 
         <div class="tags-area" id="tags-${key}">
-          ${selected.length ? selected.map(n => `<span class="tag">${n}<button onclick="removeTag('${key}','${n.replace(/'/g,"\\'")}')">×</button></span>`).join('') : '<span class="tag-empty">Clique nas opções abaixo ou adicione manualmente</span>'}
+          ${renderTagsHtml(key, selected)}
         </div>
 
         ${catalogItems.length ? `
           <div class="catalog-area">
             <div class="catalog-label">📂 Opções disponíveis (clique para adicionar):</div>
             <div class="catalog-chips" id="chips-${key}">
-              ${catalogItems.map(nome => {
-                const isSelected = selected.includes(nome);
-                return `<span class="chip${isSelected ? ' selected' : ''}" onclick="toggleChip('${key}','${nome.replace(/'/g,"\\'")}')" id="chip-${key}-${nome.replace(/[^a-zA-Z0-9]/g,'_')}">${nome}</span>`;
-              }).join('')}
+              ${renderChipsHtml(key, catalogItems, selected)}
             </div>
           </div>
-        ` : ''}
+        ` : (key === 'processos' ? '<p style="font-size:0.82em;color:#999;font-style:italic;">Nenhum outro processo cadastrado no sistema ainda.</p>' : '')}
 
+        ${podeAdicionarLivre ? `
         <div class="add-input-row">
           <input type="text" id="input-${key}" placeholder="Não encontrou? Digite o nome aqui..." onkeydown="if(event.key==='Enter'){event.preventDefault();addManual('${key}');}">
           <button onclick="addManual('${key}')">+ Adicionar</button>
-        </div>
+        </div>` : '<p style="font-size:0.78em;color:#999;margin-top:8px;">Só é possível vincular processos já cadastrados no sistema.</p>'}
       </div>`;
     }
 
-    function toggleChip(category, nome) {
-      if (DEPS[category].includes(nome)) {
-        // Remover
-        DEPS[category] = DEPS[category].filter(n => n !== nome);
+    function toggleChip(category, id, nome) {
+      const idReal = id || null;
+      const idx = DEPS[category].findIndex((s) => (idReal && s.id) ? s.id === idReal : s.nome === nome);
+      if (idx !== -1) {
+        DEPS[category].splice(idx, 1);
       } else {
-        // Adicionar
-        DEPS[category].push(nome);
+        DEPS[category].push({ nome, id: idReal });
       }
       refreshSection(category);
     }
 
-    function removeTag(category, nome) {
-      DEPS[category] = DEPS[category].filter(n => n !== nome);
+    function removeTagAt(category, idx) {
+      DEPS[category].splice(idx, 1);
       refreshSection(category);
     }
 
     function addManual(category) {
+      if (category === 'processos') return; // sem criacao livre pra Processos Internos
       const input = document.getElementById('input-' + category);
       const val = input.value.trim();
-      if (!val || DEPS[category].includes(val)) { input.value = ''; return; }
-      DEPS[category].push(val);
-      // Add to catalog chips if not already there
-      if (!(CATALOGO[category] || []).includes(val)) {
+      if (!val) return;
+      const jaTem = DEPS[category].some((s) => s.nome.toLowerCase() === val.toLowerCase());
+      if (jaTem) { input.value = ''; return; }
+      DEPS[category].push({ nome: val, id: null });
+      // Aparece como chip disponivel a partir de agora -- sem id ainda; o
+      // servidor cria ou reaproveita a entrada no catalogo quando o
+      // formulario for enviado (mesmo caminho de sempre).
+      if (!(CATALOGO[category] || []).some((d) => d.nome.toLowerCase() === val.toLowerCase())) {
         if (!CATALOGO[category]) CATALOGO[category] = [];
-        CATALOGO[category].push(val);
+        CATALOGO[category].push({ id: null, nome: val });
       }
       input.value = '';
       refreshSection(category);
@@ -256,22 +310,13 @@
 
     function refreshSection(category) {
       const selected = DEPS[category] || [];
-      const catalogItems = (CATALOGO[category] || []).sort();
+      const catalogItems = (CATALOGO[category] || []).slice().sort((a, b) => a.nome.localeCompare(b.nome));
 
-      // Update tags
       const tagsArea = document.getElementById('tags-' + category);
-      tagsArea.innerHTML = selected.length
-        ? selected.map(n => `<span class="tag">${n}<button onclick="removeTag('${category}','${n.replace(/'/g,"\\'")}')">×</button></span>`).join('')
-        : '<span class="tag-empty">Clique nas opções abaixo ou adicione manualmente</span>';
+      tagsArea.innerHTML = renderTagsHtml(category, selected);
 
-      // Update chips
       const chipsArea = document.getElementById('chips-' + category);
-      if (chipsArea) {
-        chipsArea.innerHTML = catalogItems.map(nome => {
-          const isSelected = selected.includes(nome);
-          return `<span class="chip${isSelected ? ' selected' : ''}" onclick="toggleChip('${category}','${nome.replace(/'/g,"\\'")}')">${nome}</span>`;
-        }).join('');
-      }
+      if (chipsArea) chipsArea.innerHTML = renderChipsHtml(category, catalogItems, selected);
     }
 
     async function enviar() {

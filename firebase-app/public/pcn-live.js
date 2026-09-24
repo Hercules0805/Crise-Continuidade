@@ -113,12 +113,21 @@ function buildContatosEditor(data) {
 }
 
 function buildDependenciasEditor(data) {
-  var deps = (data.processo.dependencia || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+  // Processo ja migrado (dependenciaItens): categoria vem explicita, sem
+  // adivinhar por nome. Processo legado: mesma adivinhacao de sempre.
+  var itens;
+  if (Array.isArray(data.processo.dependenciaItens) && data.processo.dependenciaItens.length) {
+    itens = data.processo.dependenciaItens.map(function(it) { return { nome: it.nome, categoria: it.categoria || 'Outros' }; });
+  } else {
+    var deps = (data.processo.dependencia || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+    itens = deps.map(function(nome) {
+      var dep = data.dependencias.find(function(d) { return d.nome === nome; });
+      return { nome: nome, categoria: dep ? dep.categoria : 'Outros' };
+    });
+  }
   var html = '<p style="font-size:0.85em;color:#666;margin-bottom:12px;">Dependências críticas do processo:</p><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">';
-  deps.forEach(function(nome) {
-    var dep = data.dependencias.find(function(d) { return d.nome === nome; });
-    var cat = dep ? dep.categoria : 'Outros';
-    html += '<span style="background:#e8eaf6;color:#1a237e;padding:4px 10px;border-radius:12px;font-size:0.82em;font-weight:500;">' + cat + ': ' + nome + '</span>';
+  itens.forEach(function(it) {
+    html += '<span style="background:#e8eaf6;color:#1a237e;padding:4px 10px;border-radius:12px;font-size:0.82em;font-weight:500;">' + it.categoria + ': ' + it.nome + '</span>';
   });
   html += '</div><p style="font-size:0.78em;color:#999;">Para editar, use a aba BIA do processo no sistema.</p>';
   return html;
@@ -217,9 +226,13 @@ function applyLiveEdit(type) {
     contatos.forEach(function(d) { var papel = papeis[d.nome] || papeis[String(d.id)] || d.detalhes || ''; newTable += '<tr><td>' + d.nome + '</td><td>' + papel + '</td><td>' + (d.setor || '-') + '</td><td>' + (d.telefone || '-') + '</td><td>' + (d.email || '-') + '</td></tr>'; });
     newTable += '</tbody></table>';
   } else if (type === 'dependencias') {
-    var depsList = (data.processo.dependencia || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
     var grupos = {};
-    depsList.forEach(function(nome) { var dep = data.dependencias.find(function(d) { return d.nome === nome; }); var cat = dep ? dep.categoria : 'Outros'; if (!grupos[cat]) grupos[cat] = []; grupos[cat].push(nome); });
+    if (Array.isArray(data.processo.dependenciaItens) && data.processo.dependenciaItens.length) {
+      data.processo.dependenciaItens.forEach(function(it) { var cat = it.categoria || 'Outros'; if (!grupos[cat]) grupos[cat] = []; grupos[cat].push(it.nome); });
+    } else {
+      var depsList = (data.processo.dependencia || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+      depsList.forEach(function(nome) { var dep = data.dependencias.find(function(d) { return d.nome === nome; }); var cat = dep ? dep.categoria : 'Outros'; if (!grupos[cat]) grupos[cat] = []; grupos[cat].push(nome); });
+    }
     newTable = '<table><thead><tr><th>Tipo</th><th>Recursos</th></tr></thead><tbody>';
     Object.keys(grupos).sort().forEach(function(cat) { newTable += '<tr><td><strong>' + cat + '</strong></td><td>' + grupos[cat].join(', ') + '</td></tr>'; });
     newTable += '</tbody></table>';

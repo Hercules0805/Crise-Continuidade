@@ -198,11 +198,25 @@ async function gerarPCN(db, data, ctx) {
   const dependencias = depsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
   const componentes = compsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-  const depsNomes = (p.dependencia || '').split(',').map((s) => s.trim()).filter(Boolean);
-  const depsDetalhadas = depsNomes.map((nome) => {
-    const dep = dependencias.find((d) => d.nome === nome);
-    return dep ? { nome: dep.nome, categoria: dep.categoria, setor: dep.setor, empresa: dep.empresa, telefone: dep.telefone, email: dep.email, papel: dep.detalhes } : { nome };
-  });
+  // Processo ja migrado (dependenciaItens): busca pelo id real, sem depender
+  // do nome bater com o catalogo (evita a mesma ambiguidade que motivou
+  // vincular por id em primeiro lugar). Processo legado: mesma busca por nome
+  // de sempre.
+  let depsDetalhadas;
+  if (Array.isArray(p.dependenciaItens) && p.dependenciaItens.length) {
+    depsDetalhadas = p.dependenciaItens.map((item) => {
+      const dep = item.id ? dependencias.find((d) => d.id === item.id) : null;
+      return dep
+        ? { nome: dep.nome, categoria: item.categoria || dep.categoria, setor: dep.setor, empresa: dep.empresa, telefone: dep.telefone, email: dep.email, papel: dep.detalhes }
+        : { nome: item.nome, categoria: item.categoria };
+    });
+  } else {
+    const depsNomes = (p.dependencia || '').split(',').map((s) => s.trim()).filter(Boolean);
+    depsDetalhadas = depsNomes.map((nome) => {
+      const dep = dependencias.find((d) => d.nome === nome);
+      return dep ? { nome: dep.nome, categoria: dep.categoria, setor: dep.setor, empresa: dep.empresa, telefone: dep.telefone, email: dep.email, papel: dep.detalhes } : { nome };
+    });
+  }
 
   const compsIds = p.drpComponentes || [];
   const compsDetalhados = compsIds.map((cid) => componentes.find((c) => c.id === cid)).filter(Boolean);

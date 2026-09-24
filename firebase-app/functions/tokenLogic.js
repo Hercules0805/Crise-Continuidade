@@ -143,20 +143,34 @@ async function validarTokenBIA(db, token) {
   const procSnap = procId ? await db.collection(COLLECTION.processos).doc(procId).get() : null;
   const p = procSnap && procSnap.exists ? procSnap.data() : {};
 
-  const depSnap = await db.collection(COLLECTION.dependencias).get();
+  const [depSnap, procsSnap] = await Promise.all([
+    db.collection(COLLECTION.dependencias).get(),
+    db.collection(COLLECTION.processos).get(),
+  ]);
   const catalogoPorCategoria = {};
   depSnap.docs.forEach((d) => {
     const c = d.data();
     const cat = (c.categoria || 'Outros').toLowerCase().replace(/[^a-záéíóúãõç]/g, '');
     const key = cat === 'fornecedor' ? 'fornecedores' : cat === 'pessoa' ? 'pessoas' : cat === 'sistema' ? 'sistemas' : cat;
     if (!catalogoPorCategoria[key]) catalogoPorCategoria[key] = [];
-    catalogoPorCategoria[key].push(c.nome);
+    catalogoPorCategoria[key].push({ id: d.id, nome: c.nome });
   });
+  // "Processos" vem do cadastro real de Processos, nunca da colecao generica
+  // de dependencias -- era essa mistura que criava a "referencia fantasma"
+  // (um nome digitado virava uma entrada solta, nunca um Processo de
+  // verdade). Exclui o proprio processo da lista de opcoes.
+  catalogoPorCategoria.processos = procsSnap.docs
+    .filter((d) => d.id !== procId)
+    .map((d) => ({ id: d.id, nome: d.data().processo || '', empresa: d.data().area || '' }));
 
   return {
     area,
     processo,
     dependencias: p.dependencia || '',
+    // dependenciaItens (novo): cada item ja com {categoria, nome, id} -- o
+    // formulario externo pre-marca certo em vez de depender do bug antigo
+    // (depCategorias, que nunca era enviado e nunca funcionou).
+    dependenciaItens: Array.isArray(p.dependenciaItens) ? p.dependenciaItens : [],
     catalogo: catalogoPorCategoria,
     descricao: p.descricao || '',
     rto: p.rto || '',
@@ -311,6 +325,8 @@ async function salvarDependenciasBIA(db, data) {
   const area = t.area;
   const processo = String(t.processo).replace('_BIA_', '');
 
+  // Cada grupo agora chega como [{nome, id}] -- id preenchido quando o
+  // stakeholder escolheu um chip existente, null quando digitou texto novo.
   const grupos = {
     Fornecedores: parseMaybeJson(data.fornecedores, []),
     Infraestrutura: parseMaybeJson(data.infraestrutura, []),
@@ -318,27 +334,56 @@ async function salvarDependenciasBIA(db, data) {
     Sistemas: parseMaybeJson(data.sistemas, []),
     'Processos Internos': parseMaybeJson(data.processos, []),
   };
-  const todasDeps = [...new Set(Object.values(grupos).flat())];
 
-  // Criar no catálogo as dependências que ainda não existem (por nome).
   const depSnap = await db.collection(COLLECTION.dependencias).get();
-  const existentes = new Set(depSnap.docs.map((d) => String(d.data().nome || '').toLowerCase()));
-  for (const [categoria, nomes] of Object.entries(grupos)) {
-    for (const nome of nomes) {
-      if (!existentes.has(String(nome).toLowerCase())) {
-        await db.collection(COLLECTION.dependencias).add({
+  const porNomeCategoria = new Map();
+  depSnap.docs.forEach((d) => {
+    const c = d.data() || {};
+    porNomeCategoria.set(`${String(c.nome || '').toLowerCase()}||${c.categoria}`, d.id);
+  });
+
+  const dependenciaItens = [];
+  for (const [categoria, itens] of Object.entries(grupos)) {
+    for (const item of (itens || [])) {
+      const nome = String((item && item.nome) || '').trim();
+      if (!nome) continue;
+      let id = item && item.id ? String(item.id) : null;
+      if (categoria === 'Processos Internos') {
+        // So aceita o id de um Processo que ja existe -- NUNCA cria uma
+        // entrada solta no catalogo de dependencias no lugar dele (era essa
+        // mistura que causava a "referencia fantasma" que motivou vincular
+        // Processos ao cadastro real).
+        dependenciaItens.push({ categoria, nome, id: id || null });
+        continue;
+      }
+      if (!id) {
+        id = porNomeCategoria.get(`${nome.toLowerCase()}||${categoria}`) || null;
+      }
+      if (!id) {
+        // Mesmo caminho de sempre: texto novo digitado no formulario externo
+        // cria uma entrada no catalogo (Fornecedores/Infraestrutura/Pessoas/
+        // Sistemas), agora capturando o id real criado.
+        const novo = await db.collection(COLLECTION.dependencias).add({
           categoria, nome, detalhes: '', setor: '', empresa: '', telefone: '', email: '', endereco: '',
         });
-        existentes.add(String(nome).toLowerCase());
+        id = novo.id;
+        porNomeCategoria.set(`${nome.toLowerCase()}||${categoria}`, id);
       }
+      dependenciaItens.push({ categoria, nome, id });
     }
   }
+  const todasDeps = [...new Set(dependenciaItens.map((it) => it.nome))];
 
   // Atualizar o processo (só campos presentes).
   const procId = await _acharProcessoId(db, area, processo);
   if (procId) {
     const patch = {};
-    if (todasDeps.length) patch.dependencia = todasDeps.join(', ');
+    if (todasDeps.length) {
+      // dependencia (string) mantida por compatibilidade com quem ainda le so
+      // ela; dependenciaItens e a fonte nova, com categoria e id reais.
+      patch.dependencia = todasDeps.join(', ');
+      patch.dependenciaItens = dependenciaItens;
+    }
     if (data.impacto) patch.descricao = data.impacto;
     if (data.rto) patch.rto = data.rto;
     if (data.rpo) patch.rpo = data.rpo;
