@@ -243,6 +243,7 @@ window.trocarAbaProcesso = (aba) => {
     popularSelectContatosBcp();
     renderContatosBcp();
     renderFornecedoresBcp();
+    renderPcnResumoBcp();
   }
   // Renderizar avaliação ao abrir aba
   if (aba === 'avaliacao') renderAvaliacaoInline();
@@ -1336,6 +1337,10 @@ async function processos() {
               </select>
             </div>
             <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">PCN Gerado</label>
+              <div id="bcpPcnResumo"></div>
+            </div>
+            <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Informações de Contato e Matriz de Responsabilidade</label>
               <div id="bcpContatosTabela"></div>
               <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
@@ -2275,6 +2280,11 @@ window.abrirModalProcesso = (p) => {
   // Mostrar botão Gerar PCN apenas para admin
   const btnGerarPcn = document.getElementById('btnGerarPcn');
   if (btnGerarPcn) btnGerarPcn.style.display = (window.USER_PERFIL === 'admin') ? 'inline-block' : 'none';
+  // Previa do PCN na aba BCP -- reseta pra mostrar a versao mais recente
+  // (processo pode ser outro, ou o mesmo com uma versao nova desde a ultima
+  // vez que o drawer foi aberto).
+  window._bcpPcnVersaoAtual = null;
+  renderPcnResumoBcp();
   // Mostrar status e botão do levantamento PCN
   const levStatus = document.getElementById('levantamentoStatus');
   const btnAbrirLev = document.getElementById('btnAbrirLev');
@@ -6756,6 +6766,10 @@ window.gerarPCNProcesso = async () => {
         const versoes = p.pcnSalvo ? _parsePCNVersoes(p.pcnSalvo) : [];
         versoes.push({ versao: versoes.length + 1, data: new Date().toISOString(), autor: window.USER_EMAIL || 'sistema', html: pcnContent });
         p.pcnSalvo = JSON.stringify(versoes.slice(-3));
+        // Previa da aba BCP reflete o PCN recem-gerado sem precisar fechar/
+        // reabrir o drawer.
+        window._bcpPcnVersaoAtual = null;
+        renderPcnResumoBcp();
       }
     } catch(saveErr) { console.warn('Auto-save PCN falhou:', saveErr); }
 
@@ -6809,6 +6823,76 @@ function _parsePCNVersoes(pcnSalvo) {
     // HTML legado
     return [{ versao: 1, data: new Date().toISOString(), autor: 'sistema', html: pcnSalvo }];
   }
+}
+
+// Indice da versao em previa na aba BCP (0-based, na mesma ordem de
+// _parsePCNVersoes -- nao e persistido, só controla o <select> da tela).
+window._bcpPcnVersaoAtual = null;
+
+/**
+ * Previa somente-leitura do PCN gerado, dentro da aba BCP -- mesmo conteudo
+ * sanitizado (sanitizarPCN) que ja vira popup em abrirPCNSalvo/
+ * gerarPCNProcesso, so que embutido na div em vez de document.write numa
+ * janela nova. Editar/trocar de versao "de verdade"/imprimir continuam so no
+ * popup (_buildPCNPage) -- isolar isso tudo num iframe exigiria reescrever
+ * pcn-live.js pra atravessar a fronteira (ver sanitizar-pcn.js), fora do
+ * escopo desta previa.
+ */
+function renderPcnResumoBcp() {
+  const container = document.getElementById('bcpPcnResumo');
+  if (!container) return;
+
+  if (!document.getElementById('bcpPcnPreviewStyle')) {
+    const style = document.createElement('style');
+    style.id = 'bcpPcnPreviewStyle';
+    style.textContent = `
+      .bcp-pcn-preview h1, .bcp-pcn-preview h2, .bcp-pcn-preview h3 { color:#1a237e; margin:14px 0 8px; }
+      .bcp-pcn-preview h1 { font-size:1.25em; }
+      .bcp-pcn-preview h2 { font-size:1.1em; }
+      .bcp-pcn-preview h3 { font-size:1em; }
+      .bcp-pcn-preview p, .bcp-pcn-preview li { font-size:0.95em; color:#333; }
+      .bcp-pcn-preview table { width:100%; border-collapse:collapse; margin:10px 0; font-size:0.85em; }
+      .bcp-pcn-preview th, .bcp-pcn-preview td { border:1px solid #e0e0e0; padding:6px 10px; text-align:left; }
+      .bcp-pcn-preview th { background:#f5f6fa; }
+    `;
+    document.head.appendChild(style);
+  }
+
+  const id = document.getElementById('fId').value || '';
+  const p = id ? (window.processosData || []).find(proc => proc.id === id) : null;
+  const versoes = p && p.pcnSalvo ? _parsePCNVersoes(p.pcnSalvo) : [];
+
+  if (!versoes.length) {
+    container.innerHTML = `
+      <div style="border:1px dashed #ddd;border-radius:8px;padding:20px;text-align:center;color:#888;background:#fafafa;">
+        <div style="margin-bottom:10px;">Nenhum PCN gerado ainda para este processo.</div>
+        <button class="btn btn-ghost" onclick="gerarPCNProcesso()" style="color:#2e7d32;border-color:#2e7d32;">🤖 Gerar PCN</button>
+      </div>`;
+    return;
+  }
+
+  const idx = Math.min(window._bcpPcnVersaoAtual === null ? versoes.length - 1 : window._bcpPcnVersaoAtual, versoes.length - 1);
+  const versao = versoes[idx];
+  const limpo = sanitizarPCN(versao.html || '');
+  const dataFmt = versao.data ? new Date(versao.data).toLocaleString('pt-BR') : '-';
+
+  const seletor = versoes.length > 1 ? `
+    <select onchange="window._bcpPcnVersaoAtual = Number(this.value); renderPcnResumoBcp();" style="padding:4px 8px;border:1px solid #ddd;border-radius:6px;font-size:0.82em;">
+      ${versoes.map((v, i) => `<option value="${i}" ${i === idx ? 'selected' : ''}>Versão ${v.versao || (i + 1)}</option>`).join('')}
+    </select>` : '';
+
+  container.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;font-size:0.82em;color:#666;">
+      <span>Versão ${versao.versao || (idx + 1)} · gerado em ${dataFmt}${versao.autor ? ' · ' + esc(versao.autor) : ''}</span>
+      ${seletor}
+    </div>
+    <div class="bcp-pcn-preview" style="max-height:420px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;background:#fff;line-height:1.55;">
+      ${limpo.html}
+    </div>
+    <div style="margin-top:10px;display:flex;gap:8px;">
+      <button class="btn btn-ghost" onclick="abrirPCNSalvo()" style="color:#2e7d32;border-color:#2e7d32;font-size:0.85em;">📂 Abrir PCN completo</button>
+      <button class="btn btn-ghost" onclick="gerarPCNProcesso()" style="color:#555;border-color:#ccc;font-size:0.85em;">🤖 Gerar novo PCN</button>
+    </div>`;
 }
 
 // ============================================================
