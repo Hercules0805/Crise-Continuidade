@@ -219,9 +219,12 @@ function buildEstrategiaTecnicaEditor(data) {
   });
 
   window._pcnEstrategiaTecnicaRows = rows;
+  var temAlgumaExportavel = rows.some(function(r) { return r.dependenciaId; });
 
   var html = '<p style="font-size:0.85em;color:#666;margin-bottom:12px;">Exporte a estratégia técnica de recuperação de volta para o cadastro de Dependências.</p>';
-  html += '<div style="margin-bottom:12px;"><button onclick="exportarTudoEstrategiaTecnica()" style="padding:8px 16px;background:#1a237e;color:white;border:none;border-radius:6px;font-size:0.85em;font-weight:600;cursor:pointer;">⭳ Exportar tudo</button></div>';
+  html += temAlgumaExportavel
+    ? '<div style="margin-bottom:12px;"><button onclick="exportarTudoEstrategiaTecnica()" style="padding:8px 16px;background:#1a237e;color:white;border:none;border-radius:6px;font-size:0.85em;font-weight:600;cursor:pointer;">⭳ Exportar tudo</button></div>'
+    : '<div style="border:1px solid #ffe0b2;background:#fff8e1;border-radius:8px;padding:10px 12px;margin-bottom:12px;color:#e65100;font-size:0.82em;">Nenhuma linha desta tabela está vinculada a uma Dependência do catálogo deste processo — por isso não há nada pra exportar. Isso acontece quando o processo não tem Dependências críticas marcadas na aba BIA (o Gemini preenche a tabela com recursos genéricos nesse caso), ou quando o nome do recurso na tabela não bate com o nome cadastrado. Vincule as dependências na aba BIA e gere um PCN novo pra poder exportar.</div>';
   rows.forEach(function(r) {
     html += '<div style="border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;margin-bottom:8px;">';
     html += '<div style="font-weight:700;color:#1a237e;margin-bottom:4px;">' + (r.nome || '(sem nome)') + '</div>';
@@ -258,6 +261,7 @@ async function exportLiveEstrategiaTecnica(idx) {
 // de cada vez em vez de todos sobrepostos.
 async function exportarTudoEstrategiaTecnica() {
   var rows = (window._pcnEstrategiaTecnicaRows || []).filter(function(r) { return r.dependenciaId; });
+  if (!rows.length) return alert('Nenhuma linha vinculada a uma Dependência do catálogo -- nada pra exportar.');
   for (var i = 0; i < rows.length; i++) { await exportLiveEstrategiaTecnica(rows[i].idx); }
 }
 

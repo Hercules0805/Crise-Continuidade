@@ -6816,7 +6816,7 @@ async function salvarVersaoPCN(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
-<script src="https://bia-forte-2025.web.app/pcn-live.js?v=6"></script>
+<script src="https://bia-forte-2025.web.app/pcn-live.js?v=7"></script>
 </body>
 </html>`;
 }
