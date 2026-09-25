@@ -6524,6 +6524,30 @@ function _parsePCNVersoes(pcnSalvo) {
   }
 }
 
+// Valores validos dos <select> de Probabilidade/Impacto que pcn-live.js
+// (enhanceRiskMatrix/buildRiskSelect) cria na Matriz de Riscos do PCN. Reabrir
+// o popup numa versao ja transformada faz enhanceRiskMatrix rodar de novo em
+// cima do <select> existente e ler currentVal via textContent -- que
+// concatena o texto de TODAS as <option>, tipo "AltaMédiaBaixa" -- e essa
+// string virava uma <option> extra marcada selected, ficando gravada assim
+// pra sempre. _limparOpcoesRiscoInvalidas remove essas opcoes-lixo antes de
+// mostrar; qual era o valor certo antes da corrupcao nao da pra recuperar (a
+// concatenacao apaga essa informacao), entao o <select> sem elas cai na
+// primeira opcao por padrao do proprio navegador, em vez de continuar
+// mostrando o texto ilegivel.
+const _VALORES_RISCO_VALIDOS = ['Alta', 'Média', 'Baixa', 'Crítico', 'Alto', 'Moderado', 'Baixo'];
+function _limparOpcoesRiscoInvalidas(html) {
+  if (!html || html.indexOf('updateRiskColor') === -1) return html;
+  const doc = document.implementation.createHTMLDocument('pcn-risco');
+  doc.body.innerHTML = html;
+  doc.body.querySelectorAll('select[onchange*="updateRiskColor"]').forEach(sel => {
+    Array.prototype.slice.call(sel.querySelectorAll('option')).forEach(opt => {
+      if (_VALORES_RISCO_VALIDOS.indexOf(opt.value) === -1) opt.remove();
+    });
+  });
+  return doc.body.innerHTML;
+}
+
 // Indice da versao em previa na aba BCP (0-based, na mesma ordem de
 // _parsePCNVersoes -- nao e persistido, só controla o <select> da tela).
 window._bcpPcnVersaoAtual = null;
@@ -6581,6 +6605,7 @@ function renderPcnResumoBcp() {
   const idx = Math.min(window._bcpPcnVersaoAtual === null ? versoes.length - 1 : window._bcpPcnVersaoAtual, versoes.length - 1);
   const versao = versoes[idx];
   const limpo = sanitizarPCN(versao.html || '');
+  limpo.html = _limparOpcoesRiscoInvalidas(limpo.html);
   const dataFmt = versao.data ? new Date(versao.data).toLocaleString('pt-BR') : '-';
   const isAdmin = window.USER_PERFIL === 'admin';
   const editando = !!window._bcpPcnEditando;
@@ -6825,7 +6850,7 @@ async function salvarVersaoPCN(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
-<script src="https://bia-forte-2025.web.app/pcn-live.js?v=4"></script>
+<script src="https://bia-forte-2025.web.app/pcn-live.js?v=5"></script>
 </body>
 </html>`;
 }

@@ -312,20 +312,34 @@ function enhanceRiskMatrix() {
   rows.forEach(function(row) {
     var cells = row.querySelectorAll('td');
     if (probCol >= 0 && cells[probCol]) {
-      var currentVal = cells[probCol].textContent.trim();
+      var currentVal = _currentRiskValue(cells[probCol], probOptions);
       cells[probCol].setAttribute('contenteditable', 'false');
       cells[probCol].style.background = 'white';
       cells[probCol].innerHTML = buildRiskSelect(currentVal, probOptions, colors, 'prob');
       cells[probCol].style.padding = '4px 8px';
     }
     if (impactCol >= 0 && cells[impactCol]) {
-      var currentVal = cells[impactCol].textContent.trim();
+      var currentVal = _currentRiskValue(cells[impactCol], impactOptions);
       cells[impactCol].setAttribute('contenteditable', 'false');
       cells[impactCol].style.background = 'white';
       cells[impactCol].innerHTML = buildRiskSelect(currentVal, impactOptions, colors, 'impact');
       cells[impactCol].style.padding = '4px 8px';
     }
   });
+}
+
+// Reabrir um PCN ja salvo roda enhanceRiskMatrix de novo em cima de uma
+// celula que ja tem <select> (de um enhance anterior, antes de salvar). Ler
+// cell.textContent nesse caso concatena o texto de TODAS as <option> (ex:
+// "AltaMédiaBaixa"), nao o valor selecionado -- e essa string virava uma
+// <option> nova marcada selected, gravada assim pra sempre no proximo save.
+// select.value reflete o que estava de fato selecionado, ignorando as demais
+// opções, entao é isso que usamos quando a célula já foi transformada antes.
+function _currentRiskValue(cell, options) {
+  var select = cell.querySelector('select');
+  if (!select) return cell.textContent.trim();
+  var valor = select.value || '';
+  return options.indexOf(valor) !== -1 ? valor : '';
 }
 
 function buildRiskSelect(currentValue, options, colors, prefix) {
