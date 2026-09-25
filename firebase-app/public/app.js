@@ -2375,7 +2375,7 @@ async function dependencias() {
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Catálogo de Dependências</h2><p class="page-sub">Gerencie as dependências críticas reutilizáveis nos processos</p></div>
-      <button class="btn btn-primary" onclick="abrirModalDependencia()">+ Nova Dependência</button>
+      <button class="btn btn-primary" onclick="abrirDrawerDependencia()">+ Nova Dependência</button>
     </div>
     <div style="border:1px solid #e0e0e0;background:#f8f9ff;border-radius:9px;padding:11px 14px;margin-bottom:16px;font-size:0.86em;color:#555;">
       Os <strong>fornecedores</strong> saíram desta tela e são gerenciados em
@@ -2413,83 +2413,98 @@ async function dependencias() {
         <tbody id="depRows"></tbody>
       </table>
     </div>
-    <div class="modal-overlay" id="modalDep"><div class="modal" onclick="event.stopPropagation()" style="max-width:580px;">
-      <h3 id="modalDepTitulo">Nova Dependência</h3>
-      <input type="hidden" id="depId">
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria</label>
-          <select id="depCategoria" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-            <option value="">Selecione...</option>
-            ${DEPENDENCIA_CATEGORIAS_TECNICAS.map(c => `<option value="${c}">${c}</option>`).join('')}
-          </select>
-        </div>
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Nome</label>
-          <input type="text" id="depNome" placeholder="Ex: Switches e roteadores" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-        </div>
+    <div class="drawer-overlay" id="drawerOverlayDependencia" onclick="fecharDrawerDependencia()"></div>
+    <div class="drawer" id="drawerDependencia">
+      <div class="drawer-header">
+        <h3 id="depDrawerTitulo">Nova Dependência</h3>
+        <button onclick="fecharDrawerDependencia()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Papel</label>
-          <input type="text" id="depDetalhes" placeholder="Papel ou função desta dependência" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
+        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
+          <button id="tab-dep-geral" onclick="trocarAbaDependencia('geral')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Dados Gerais</button>
+          <button id="tab-dep-drp" onclick="trocarAbaDependencia('drp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">DRP</button>
         </div>
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Setor</label>
-          <input type="text" id="depSetor" list="depSetorList" placeholder="Ex: TI, Facilities" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-          <datalist id="depSetorList"></datalist>
-        </div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Empresa</label>
-        <input type="text" id="depEmpresa" list="depEmpresaList" placeholder="Ex: Fortes Tecnologia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-        <datalist id="depEmpresaList"></datalist>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Telefone</label>
-          <input type="text" id="depTelefone" placeholder="(00) 0000-0000" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-        </div>
-        <div>
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Email</label>
-          <input type="email" id="depEmail" placeholder="contato@fornecedor.com" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-        </div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Endereço</label>
-        <input type="text" id="depEndereco" placeholder="Endereço ou localização" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-      </div>
-      <div style="border-top:1px solid #eee;margin:16px 0 14px;padding-top:14px;">
-        <div style="font-size:0.78em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Recuperação de Desastre (categorias técnicas)</div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-          <div>
-            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
-            <input type="text" id="depRto" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
+          <input type="hidden" id="depId">
+
+          <div id="painel-dep-geral">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria</label>
+                <select id="depCategoria" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                  <option value="">Selecione...</option>
+                  ${DEPENDENCIA_CATEGORIAS_TECNICAS.map(c => `<option value="${c}">${c}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Nome</label>
+                <input type="text" id="depNome" placeholder="Ex: Switches e roteadores" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Papel</label>
+                <input type="text" id="depDetalhes" placeholder="Papel ou função desta dependência" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Setor</label>
+                <input type="text" id="depSetor" list="depSetorList" placeholder="Ex: TI, Facilities" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                <datalist id="depSetorList"></datalist>
+              </div>
+            </div>
+            <div style="margin-bottom:14px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Empresa</label>
+              <input type="text" id="depEmpresa" list="depEmpresaList" placeholder="Ex: Fortes Tecnologia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              <datalist id="depEmpresaList"></datalist>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Telefone</label>
+                <input type="text" id="depTelefone" placeholder="(00) 0000-0000" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Email</label>
+                <input type="email" id="depEmail" placeholder="contato@fornecedor.com" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              </div>
+            </div>
+            <div style="margin-bottom:14px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Endereço</label>
+              <input type="text" id="depEndereco" placeholder="Endereço ou localização" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+            </div>
           </div>
-          <div>
-            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
-            <input type="text" id="depRpo" placeholder="Ex: 1 hora" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-          </div>
-        </div>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-          <div>
-            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Estratégia de Backup</label>
-            <select id="depEstrategia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-              <option value="">Selecione...</option>
-              ${DEPENDENCIA_ESTRATEGIAS_BACKUP.map(e => `<option value="${e}">${e}</option>`).join('')}
-            </select>
-          </div>
-          <div>
-            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Responsável</label>
-            <input type="text" id="depResponsavel" placeholder="Ex: Time de Infraestrutura" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+
+          <div id="painel-dep-drp" style="display:none;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
+                <input type="text" id="depRto" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
+                <input type="text" id="depRpo" placeholder="Ex: 1 hora" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Estratégia de Backup</label>
+                <select id="depEstrategia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                  <option value="">Selecione...</option>
+                  ${DEPENDENCIA_ESTRATEGIAS_BACKUP.map(e => `<option value="${e}">${e}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Responsável</label>
+                <input type="text" id="depResponsavel" placeholder="Ex: Time de Infraestrutura" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              </div>
+            </div>
           </div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="fecharModalDependencia()">Cancelar</button>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerDependencia()">Cancelar</button>
         <button class="btn btn-primary" id="btnSalvarDep" onclick="salvarDep()">Salvar</button>
       </div>
-    </div></div>`;
+    </div>`;
 
   try {
     // Fornecedor e Pessoa nao entram: a gestao das duas mora nas telas
@@ -2563,7 +2578,16 @@ window.ordenarDependencias = (coluna) => {
   renderizarDependencias();
 };
 
-window.abrirModalDependencia = (d) => {
+window.trocarAbaDependencia = (aba) => {
+  ['geral', 'drp'].forEach(a => {
+    document.getElementById('painel-dep-' + a).style.display = a === aba ? 'block' : 'none';
+    const btn = document.getElementById('tab-dep-' + a);
+    btn.style.color = a === aba ? '#1a237e' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
+  });
+};
+
+window.abrirDrawerDependencia = (d) => {
   document.getElementById('depId').value = d ? d.id : '';
   document.getElementById('depCategoria').value = d ? d.categoria : '';
   document.getElementById('depNome').value = d ? d.nome : '';
@@ -2577,7 +2601,7 @@ window.abrirModalDependencia = (d) => {
   document.getElementById('depRpo').value = d ? (d.rpo || '') : '';
   document.getElementById('depEstrategia').value = d ? (d.estrategia || '') : '';
   document.getElementById('depResponsavel').value = d ? (d.responsavel || '') : '';
-  document.getElementById('modalDepTitulo').textContent = d ? 'Editar Dependência' : 'Nova Dependência';
+  document.getElementById('depDrawerTitulo').textContent = d ? 'Editar Dependência' : 'Nova Dependência';
   // Preencher datalist de setores existentes
   const setores = [...new Set(dependenciasData.map(x => x.setor).filter(Boolean))].sort();
   const setorList = document.getElementById('depSetorList');
@@ -2586,16 +2610,19 @@ window.abrirModalDependencia = (d) => {
   const empresas = [...new Set(dependenciasData.map(x => x.empresa).filter(Boolean))].sort();
   const empresaList = document.getElementById('depEmpresaList');
   if (empresaList) empresaList.innerHTML = empresas.map(e => `<option value="${e}">`).join('');
-  document.getElementById('modalDep').classList.add('open');
+  trocarAbaDependencia('geral');
+  document.getElementById('drawerDependencia').classList.add('open');
+  document.getElementById('drawerOverlayDependencia').classList.add('open');
 };
 
-window.fecharModalDependencia = () => {
-  document.getElementById('modalDep').classList.remove('open');
+window.fecharDrawerDependencia = () => {
+  document.getElementById('drawerDependencia').classList.remove('open');
+  document.getElementById('drawerOverlayDependencia').classList.remove('open');
 };
 
 window.editarDep = (id) => {
   const d = dependenciasData.find(x => x.id === id);
-  if (d) abrirModalDependencia(d);
+  if (d) abrirDrawerDependencia(d);
 };
 
 window.excluirDep = async (id) => {
@@ -2634,8 +2661,8 @@ window.salvarDep = async () => {
     return showToast('Fornecedor é cadastrado em Fornecedores → Cadastro.', '#e65100');
   }
 
-  // Optimistic: fechar modal e atualizar UI imediatamente
-  fecharModalDependencia();
+  // Optimistic: fechar drawer e atualizar UI imediatamente
+  fecharDrawerDependencia();
   const isNew = !d.id;
   let tempId = null;
   if (d.id) {
@@ -6790,7 +6817,7 @@ async function salvarVersaoPCN(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
-<script src="https://bia-forte-2025.web.app/pcn-live.js?v=5"></script>
+<script src="https://bia-forte-2025.web.app/pcn-live.js?v=6"></script>
 </body>
 </html>`;
 }

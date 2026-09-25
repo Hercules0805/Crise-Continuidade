@@ -36,10 +36,13 @@ function injectEditButtons() {
     if (text.includes('contato') || text.includes('responsabilidade') || text.includes('equipe de crise')) sectionType = 'contatos';
     else if (text.includes('dependência') || text.includes('mapeamento de depend')) sectionType = 'dependencias';
     else if (text.includes('fornecedor') || text.includes('plano b') || text.includes('contingência')) sectionType = 'fornecedores';
-    // "componente"/"recuperação de desastre" saiu daqui: Componentes do
-    // Serviço se fundiu em Dependencias, PCNs novos nao tem mais essa secao
-    // separada (PCNs antigos ja salvos continuam legiveis, so sem botao de
-    // edicao inline nessa parte).
+    else if (text.includes('estratégia técnica de recuperação')) sectionType = 'estrategiaTecnica';
+    // "componente" (generico) saiu daqui: Componentes do Servico se fundiu em
+    // Dependencias, PCNs novos nao tem mais essa secao separada (PCNs antigos
+    // ja salvos continuam legiveis, so sem botao de edicao inline nessa
+    // parte). "Estrategia Tecnica de Recuperacao" agora tem editor proprio
+    // (buildEstrategiaTecnicaEditor) -- exporta linha a linha pro cadastro de
+    // Dependencias, ver mais abaixo.
 
     if (sectionType && !h.querySelector('.pcn-live-btn')) {
       var btn = document.createElement('button');
@@ -64,12 +67,13 @@ function openLiveEditor(type, heading) {
   panel.id = 'pcn-live-editor';
   panel.style.cssText = 'position:fixed;top:0;right:0;width:500px;height:100vh;background:white;box-shadow:-4px 0 20px rgba(0,0,0,0.2);z-index:1000;overflow-y:auto;padding:24px;font-family:Segoe UI,Arial,sans-serif;';
 
-  var titleMap = { contatos: 'Equipe de Crise', dependencias: 'Dependências Críticas', fornecedores: 'Fornecedores / Plano B' };
+  var titleMap = { contatos: 'Equipe de Crise', dependencias: 'Dependências Críticas', fornecedores: 'Fornecedores / Plano B', estrategiaTecnica: 'Estratégia Técnica de Recuperação' };
   var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #e8eaf6;padding-bottom:12px;"><h3 style="color:#1a237e;margin:0;">✏️ ' + (titleMap[type] || 'Editar') + '</h3><button onclick="closeLiveEditor()" style="background:none;border:none;font-size:1.5em;cursor:pointer;color:#666;">×</button></div>';
 
   if (type === 'contatos') html += buildContatosEditor(data);
   else if (type === 'dependencias') html += buildDependenciasEditor(data);
   else if (type === 'fornecedores') html += buildFornecedoresEditor(data);
+  else if (type === 'estrategiaTecnica') html += buildEstrategiaTecnicaEditor(data);
 
   html += '<div style="margin-top:20px;text-align:right;border-top:1px solid #eee;padding-top:16px;"><button onclick="applyLiveEdit(\'' + type + '\')" style="padding:10px 24px;background:#2e7d32;color:white;border:none;border-radius:6px;font-weight:600;cursor:pointer;">✅ Aplicar ao PCN</button></div>';
 
@@ -151,6 +155,112 @@ function buildFornecedoresEditor(data) {
 // em Dependencias -- buildDependenciasEditor/applyLiveEdit ja cobrem RTO/RPO/
 // Estratégia pras categorias tecnicas (ver newTable do tipo 'dependencias').
 
+// ============================================================
+// ESTRATÉGIA TÉCNICA DE RECUPERAÇÃO — exportação linha a linha pro cadastro
+// de Dependências (RTO/RPO/Estratégia/Responsável), a partir da tabela que o
+// Gemini gera na Parte 3 do PCN (uma linha por dependência crítica, ver
+// prompt em functions/appLogic.js). Diferente dos outros 3 editores, este
+// nao edita o conteudo do PCN -- ele LÊ a tabela ja renderizada e grava o
+// que estiver nela de volta no catalogo, por isso nao usa applyLiveEdit.
+// ============================================================
+function _tabelaEstrategiaTecnica(content) {
+  var headings = content.querySelectorAll('h1, h2, h3');
+  var heading = null;
+  headings.forEach(function(h) {
+    if (h.textContent.toLowerCase().includes('estratégia técnica de recuperação')) heading = h;
+  });
+  if (!heading) return null;
+  var next = heading.nextElementSibling;
+  while (next && next.tagName !== 'TABLE' && next.tagName !== 'H1' && next.tagName !== 'H2' && next.tagName !== 'H3') next = next.nextElementSibling;
+  return (next && next.tagName === 'TABLE') ? next : null;
+}
+
+// Deteccao por texto do cabecalho, nao por posicao fixa -- mesma logica que
+// enhanceRiskMatrix ja usa pra Probabilidade/Impacto: a ordem/grafia das
+// colunas pode variar entre geracoes mesmo pedindo uma ordem no prompt.
+function _colunasEstrategiaTecnica(table) {
+  var col = { recurso: -1, estrategia: -1, rto: -1, rpo: -1, responsavel: -1 };
+  table.querySelectorAll('thead th').forEach(function(th, i) {
+    var t = th.textContent.toLowerCase();
+    if (t.includes('recurso') || t.includes('dependênc') || t.includes('dependenc')) col.recurso = i;
+    else if (t.includes('estratégia') || t.includes('estrategia')) col.estrategia = i;
+    else if (t.includes('rto')) col.rto = i;
+    else if (t.includes('rpo')) col.rpo = i;
+    else if (t.includes('responsáv') || t.includes('responsav')) col.responsavel = i;
+  });
+  return col;
+}
+
+function buildEstrategiaTecnicaEditor(data) {
+  var content = document.getElementById('pcn-editavel');
+  var table = content ? _tabelaEstrategiaTecnica(content) : null;
+  if (!table) return '<p style="font-size:0.85em;color:#999;">Tabela de Estratégia Técnica não encontrada nesta versão do PCN.</p>';
+
+  var col = _colunasEstrategiaTecnica(table);
+  if (col.recurso === -1) return '<p style="font-size:0.85em;color:#999;">Não foi possível identificar a coluna de Recurso/Dependência nesta tabela.</p>';
+
+  // PCN antigo (tabela generica de 3 atributos, sem "Recurso"): nenhuma
+  // linha vai casar com dependenciaItens -- degradacao graciosa, tratada
+  // abaixo linha a linha (dependenciaId fica null, sem botao de exportar).
+  var itens = Array.isArray(data.processo.dependenciaItens) ? data.processo.dependenciaItens : [];
+  var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr')).map(function(tr, idx) {
+    var cells = tr.querySelectorAll('td');
+    var nomeCel = col.recurso >= 0 && cells[col.recurso] ? cells[col.recurso].textContent.trim() : '';
+    var item = itens.find(function(it) { return it.nome && nomeCel && it.nome.toLowerCase() === nomeCel.toLowerCase(); });
+    return {
+      idx: idx,
+      nome: nomeCel,
+      estrategia: col.estrategia >= 0 && cells[col.estrategia] ? cells[col.estrategia].textContent.trim() : '',
+      rto: col.rto >= 0 && cells[col.rto] ? cells[col.rto].textContent.trim() : '',
+      rpo: col.rpo >= 0 && cells[col.rpo] ? cells[col.rpo].textContent.trim() : '',
+      responsavel: col.responsavel >= 0 && cells[col.responsavel] ? cells[col.responsavel].textContent.trim() : '',
+      dependenciaId: item ? item.id : null,
+    };
+  });
+
+  window._pcnEstrategiaTecnicaRows = rows;
+
+  var html = '<p style="font-size:0.85em;color:#666;margin-bottom:12px;">Exporte a estratégia técnica de recuperação de volta para o cadastro de Dependências.</p>';
+  html += '<div style="margin-bottom:12px;"><button onclick="exportarTudoEstrategiaTecnica()" style="padding:8px 16px;background:#1a237e;color:white;border:none;border-radius:6px;font-size:0.85em;font-weight:600;cursor:pointer;">⭳ Exportar tudo</button></div>';
+  rows.forEach(function(r) {
+    html += '<div style="border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;margin-bottom:8px;">';
+    html += '<div style="font-weight:700;color:#1a237e;margin-bottom:4px;">' + (r.nome || '(sem nome)') + '</div>';
+    html += '<div style="font-size:0.8em;color:#666;margin-bottom:8px;">' + [r.estrategia, r.rto ? 'RTO: ' + r.rto : '', r.rpo ? 'RPO: ' + r.rpo : '', r.responsavel ? 'Resp.: ' + r.responsavel : ''].filter(Boolean).join(' | ') + '</div>';
+    if (r.dependenciaId) {
+      html += '<button onclick="exportLiveEstrategiaTecnica(' + r.idx + ')" style="padding:5px 12px;background:#2e7d32;color:white;border:none;border-radius:5px;font-size:0.8em;cursor:pointer;">Exportar</button>';
+    } else {
+      html += '<span style="font-size:0.78em;color:#999;">sem dependência vinculada — exportação indisponível</span>';
+    }
+    html += '</div>';
+  });
+  return html;
+}
+
+async function exportLiveEstrategiaTecnica(idx) {
+  var r = (window._pcnEstrategiaTecnicaRows || [])[idx];
+  if (!r || !r.dependenciaId) return;
+  var dep = (PCN_LIVE_DATA.dependencias || []).find(function(d) { return d.id === r.dependenciaId; });
+  var temDadoExistente = dep && (dep.estrategia || dep.rto || dep.rpo || dep.responsavel);
+  if (temDadoExistente && !confirm('Já existe uma estratégia salva para "' + r.nome + '" — sobrescrever?')) return;
+
+  try {
+    var payload = { action: 'salvarDrpDependencia', dependenciaId: r.dependenciaId, estrategia: r.estrategia, rto: r.rto, rpo: r.rpo, responsavel: r.responsavel };
+    var res = await fetch(PCN_API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8', 'Authorization': 'Bearer ' + PCN_TOKEN }, body: JSON.stringify(payload) });
+    if (res.status === 401) throw new Error('A sessão desta aba expirou. Feche, volte ao sistema e abra o PCN de novo.');
+    var data = JSON.parse(await res.text());
+    if (data.error) throw new Error(data.error);
+    if (dep) { dep.estrategia = r.estrategia; dep.rto = r.rto; dep.rpo = r.rpo; dep.responsavel = r.responsavel; }
+    alert('✅ Exportado para o cadastro de Dependências: ' + r.nome);
+  } catch(e) { alert('Erro ao exportar: ' + e.message); }
+}
+
+// Em sequencia (nao Promise.all), pra os confirm() de conflito aparecerem um
+// de cada vez em vez de todos sobrepostos.
+async function exportarTudoEstrategiaTecnica() {
+  var rows = (window._pcnEstrategiaTecnicaRows || []).filter(function(r) { return r.dependenciaId; });
+  for (var i = 0; i < rows.length; i++) { await exportLiveEstrategiaTecnica(rows[i].idx); }
+}
+
 async function removeLiveContato(id) {
   if (!PCN_LIVE_DATA) return;
   PCN_LIVE_DATA.processo.bcpContatos = (PCN_LIVE_DATA.processo.bcpContatos || []).filter(function(x) { return x !== id; });
@@ -198,6 +308,11 @@ async function saveLiveContatos() {
 function applyLiveEdit(type) {
   var data = PCN_LIVE_DATA;
   if (!data) return;
+  // Nao ha "tabela nova pra montar" aqui -- a exportacao ja aconteceu pelos
+  // botoes de cada linha (exportLiveEstrategiaTecnica), diferente dos outros
+  // 3 tipos, que reconstroem a tabela do PCN ao aplicar. O rodape do painel
+  // sempre chama applyLiveEdit(type), entao so fecha o painel pra este tipo.
+  if (type === 'estrategiaTecnica') { closeLiveEditor(); return; }
   if (type === 'contatos') saveLiveContatos();
 
   var content = document.getElementById('pcn-editavel');

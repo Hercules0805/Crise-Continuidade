@@ -297,7 +297,7 @@ ${Object.keys(slasData).length ? Object.entries(slasData).map(([dep, sla]) => `-
 
 ## PARTE 3: PLANO DE RECUPERAÇÃO DE DESASTRES (DRP)
 1. Objetivo e Escopo Técnico
-2. Estratégia Técnica de Recuperação (tabela: Atributo × Definição — Ambiente, Failover, Provisionamento)
+2. Estratégia Técnica de Recuperação (tabela: Recurso/Dependência × Estratégia × RTO × RPO × Responsável — uma linha para cada dependência crítica de categoria técnica do processo, listadas na seção "Dependências Críticas" acima)
 3. Checklists de Verificação e Diagnóstico (Health Check — lista com checkboxes)
 4. Fase Executiva de Recuperação / Runbook de Restore (8 passos sequenciais detalhados)
 5. Critérios de Retorno à Normalidade e Reconstituição (lista com checkboxes)
@@ -324,7 +324,8 @@ ${Object.keys(slasData).length ? Object.entries(slasData).map(([dep, sla]) => `-
 ## REGRAS ESPECÍFICAS
 
 - MATRIZ DE RESPONSABILIDADE: Se houver contatos fornecidos na seção "Equipe de Crise (Contatos)" acima, use os dados reais (nome, telefone, e-mail, setor) EXATAMENTE como fornecidos. Complete o "Papel na Crise" com sugestões adequadas ao contexto. Se NÃO houver contatos fornecidos, preencha apenas "Papel na Crise" e "Setor" com sugestões funcionais (ex: "Coordenador de Crise", "Líder Técnico"), deixando "Nome", "Telefone" e "E-mail" EM BRANCO — NÃO invente dados pessoais fictícios.
-- MATRIZ DE RISCOS: Analise CADA evento de risco individualmente e atribua Probabilidade (Alta, Média ou Baixa) e Impacto (Crítico, Alto, Moderado ou Baixo) de forma REALISTA e DIFERENCIADA — NÃO use o mesmo valor para todos os riscos. Considere o contexto do processo, setor e dependências para variar as classificações. Por exemplo: falha de energia pode ser "Baixa" probabilidade mas "Crítico" impacto; erro humano pode ser "Alta" probabilidade mas "Moderado" impacto.`;
+- MATRIZ DE RISCOS: Analise CADA evento de risco individualmente e atribua Probabilidade (Alta, Média ou Baixa) e Impacto (Crítico, Alto, Moderado ou Baixo) de forma REALISTA e DIFERENCIADA — NÃO use o mesmo valor para todos os riscos. Considere o contexto do processo, setor e dependências para variar as classificações. Por exemplo: falha de energia pode ser "Baixa" probabilidade mas "Crítico" impacto; erro humano pode ser "Alta" probabilidade mas "Moderado" impacto.
+- ESTRATÉGIA TÉCNICA DE RECUPERAÇÃO (Parte 3, item 2): monte uma linha por dependência crítica listada em "Dependências Críticas" que seja de categoria técnica (API, Banco de Dados, Infraestrutura, Segurança, Servidor, Sistemas, Outros — NÃO inclua Fornecedores/Pessoas nesta tabela). Colunas: Recurso/Dependência, Estratégia, RTO, RPO, Responsável. Onde a dependência já tiver Estratégia/RTO/RPO/Responsável informados acima, use ESSES VALORES EXATOS, palavra por palavra — não invente, não reformule. Onde faltar algum desses dados, infira um valor tecnicamente razoável a partir da categoria e do contexto do processo, do mesmo jeito que já faz pros demais campos sem dado informado.`;
 
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + ctx.geminiApiKey;
   const payload = {
@@ -415,6 +416,36 @@ async function salvarCamposPCN(db, data, ctx) {
   return { success: true, gravados: Object.keys(patch), recusados };
 }
 
+/**
+ * Grava RTO/RPO/Estrategia/Responsavel de UMA dependencia, a partir da
+ * tabela "Estrategia Tecnica de Recuperacao" de um PCN ja gerado.
+ *
+ * Diferente de salvarCamposPCN (que so mexe no processo): aqui o alvo e um
+ * doc do catalogo de Dependencias, identificado pelo id que dependenciaItens
+ * ja carrega -- a pagina do PCN (sem SDK do Firestore, so fetch autenticado)
+ * chega nele por aqui. Mesmo padrao de allowlist: so estes 4 campos, nunca
+ * categoria/nome/contato da dependencia.
+ */
+const CAMPOS_DRP_DEPENDENCIA = ['estrategia', 'rto', 'rpo', 'responsavel'];
+
+async function salvarDrpDependencia(db, data, ctx) {
+  const dependenciaId = exigir(data.dependenciaId, 'dependenciaId');
+  const ref = db.collection(COLLECTION.dependencias).doc(dependenciaId);
+  const snap = await ref.get();
+  if (!snap.exists) throw new AppError('Dependência não encontrada.');
+
+  const patch = {};
+  CAMPOS_DRP_DEPENDENCIA.forEach((campo) => {
+    if (data[campo] !== undefined) patch[campo] = String(data[campo] || '').trim();
+  });
+  if (!Object.keys(patch).length) throw new AppError('Nenhum campo informado.');
+
+  patch.atualizadoEm = new Date().toISOString();
+  patch.atualizadoPor = ctx.email;
+  await ref.set(patch, { merge: true });
+  return { success: true, dependenciaId, gravados: Object.keys(patch) };
+}
+
 const READ_ACTIONS = {
   getLevantamentoPCN,
   dadosPCN,
@@ -425,12 +456,14 @@ const WRITE_ACTIONS = {
   salvarPCN,
   excluirPCN,
   salvarCamposPCN,
+  salvarDrpDependencia,
   gerarPCN,
 };
 
 module.exports = {
   AppError,
   CAMPOS_EDITAVEIS_PCN,
+  CAMPOS_DRP_DEPENDENCIA,
   READ_ACTIONS,
   WRITE_ACTIONS,
   PREFIXO,

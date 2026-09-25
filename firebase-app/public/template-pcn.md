@@ -138,11 +138,11 @@ O Plano de Continuidade de Negócios será formalmente ativado sob as seguintes 
 * **Modelo Adotado:** [Ex: Backup & Restore em Nuvem / Ambiente Standby / Hot Site]
 * **SLA de Ativação:** O desastre operacional deve ser declarado em até [X] minutos após a confirmação da falha técnica crítica.
 
-| Atributo Técnico da Estratégia | Definição / Padrão Adotado |
-| :---- | :---- |
-| **Ambiente de Destino** | [Mesma cloud / Provedor secundário / Data Center Físico] |
-| **Failover Automático** | [Sim / Não] |
-| **Provisionamento da Infra** | [Sob Demanda (IaC) / Infraestrutura Standby permanente] |
+| Recurso / Dependência | Estratégia | RTO | RPO | Responsável |
+| :---- | :---- | :---- | :---- | :---- |
+| **[Nome do recurso técnico]** | [Backup & Restore / Cold Site / Warm Standby / Active-Passive / Active-Active] | [Ex: 4 horas] | [Ex: 1 hora] | [Ex: Time de Infraestrutura] |
+
+*Uma linha para cada dependência técnica crítica do processo (categorias API, Banco de Dados, Infraestrutura, Segurança, Servidor, Sistemas, Outros). Onde já houver RTO/RPO/Estratégia/Responsável definidos no cadastro da dependência, usar os valores exatos; caso contrário, inferir com base no contexto.*
 
 3. Checklists de Verificação e Diagnóstico (Health Check)
 

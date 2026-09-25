@@ -323,3 +323,50 @@ test('salvarCamposPCN recusa chamada sem nenhum campo editavel', async () => {
 test('a allowlist da edicao inline cobre so contatos e papeis', () => {
   assert.deepStrictEqual(CAMPOS_EDITAVEIS_PCN, ['bcpContatos', 'bcpPapeisCrise']);
 });
+
+// --- salvarDrpDependencia: exportacao da Estrategia Tecnica de Recuperacao
+// (tabela do PCN) de volta para o cadastro de Dependencias. A pagina do PCN
+// nao tem SDK do Firestore, so fetch autenticado -- e por aqui que ela chega
+// na colecao dependencias.
+const { CAMPOS_DRP_DEPENDENCIA } = require('./appLogic');
+
+test('salvarDrpDependencia grava RTO/RPO/Estrategia/Responsavel na dependencia', async () => {
+  const s = seed();
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  const db = makeDb(s);
+  const r = await WRITE_ACTIONS.salvarDrpDependencia(db, {
+    dependenciaId: 'd1', estrategia: 'Warm Standby', rto: '4 horas', rpo: '1 hora', responsavel: 'Time de Infraestrutura',
+  }, ctx());
+  assert.strictEqual(r.success, true);
+  const d = db._store.dependencias.d1;
+  assert.strictEqual(d.estrategia, 'Warm Standby');
+  assert.strictEqual(d.rto, '4 horas');
+  assert.strictEqual(d.rpo, '1 hora');
+  assert.strictEqual(d.responsavel, 'Time de Infraestrutura');
+  assert.strictEqual(d.atualizadoPor, 'analista@fortestecnologia.com.br');
+  // Nome/categoria da dependencia nao sao tocados por esta acao.
+  assert.strictEqual(d.nome, 'SRV-01');
+  assert.strictEqual(d.categoria, 'Servidor');
+});
+
+test('salvarDrpDependencia rejeita dependencia inexistente', async () => {
+  const db = makeDb(seed());
+  await assert.rejects(
+    () => WRITE_ACTIONS.salvarDrpDependencia(db, { dependenciaId: 'nao-existe', rto: '4 horas' }, ctx()),
+    AppError
+  );
+});
+
+test('salvarDrpDependencia recusa chamada sem nenhum campo informado', async () => {
+  const s = seed();
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  const db = makeDb(s);
+  await assert.rejects(
+    () => WRITE_ACTIONS.salvarDrpDependencia(db, { dependenciaId: 'd1' }, ctx()),
+    AppError
+  );
+});
+
+test('a allowlist do DRP cobre so os 4 campos de recuperacao', () => {
+  assert.deepStrictEqual(CAMPOS_DRP_DEPENDENCIA, ['estrategia', 'rto', 'rpo', 'responsavel']);
+});
