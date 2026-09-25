@@ -2496,6 +2496,10 @@ async function dependencias() {
                 <input type="text" id="depResponsavel" placeholder="Ex: Time de Infraestrutura" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
               </div>
             </div>
+            ${_htmlDrpLista('drpHealthCheck', 'Checklist de Verificação e Diagnóstico (Health Check)', 'Ex: Infraestrutura/Cloud: o ambiente está acessível?')}
+            ${_htmlDrpLista('drpRunbook', 'Fase Executiva de Recuperação (Runbook de Restore)', 'Ex: Restaurar o banco de dados a partir do último backup íntegro')}
+            ${_htmlDrpLista('drpCriteriosRetorno', 'Critérios de Retorno à Normalidade', 'Ex: Auditoria e conciliação manual (duplicidade ou erros)')}
+            ${_htmlDrpLista('drpLimitacoes', 'Limitações Conhecidas da Estratégia', 'Ex: Dependência direta de provedores de internet e nuvem de terceiros')}
           </div>
         </div>
       </div>
@@ -2577,6 +2581,127 @@ window.ordenarDependencias = (coluna) => {
   renderizarDependencias();
 };
 
+// ============================================================
+// Aba DRP da Dependência -- 4 listas guiadas (Health Check, Runbook,
+// Critérios de Retorno, Limitações), além dos 4 campos fixos (RTO/RPO/
+// Estratégia/Responsável) que já existiam. Item de checklist/runbook e uma
+// frase curta, sem sub-campo -- por isso e um array de string simples, nao o
+// objeto {categoria,...} que outras listas do app usam (Plano de Ação, KRIs,
+// Pessoas Associadas). Reordenar so faz sentido no Runbook (passos
+// sequenciais); nas outras 3 a ordem e so a de insercao, mas mover funciona
+// igual em todas -- nao ha necessidade de esconder o recurso onde nao e
+// essencial.
+// ============================================================
+window._depDrpListas = { drpHealthCheck: [], drpRunbook: [], drpCriteriosRetorno: [], drpLimitacoes: [] };
+window._depDrpEditando = { drpHealthCheck: null, drpRunbook: null, drpCriteriosRetorno: null, drpLimitacoes: null };
+
+// Sugestoes clicaveis por campo -- os mesmos exemplos que o template do PCN
+// (template-pcn.md, Parte 3) ja usa, pra nao ter um segundo texto de
+// referencia que precise ficar sincronizado com o primeiro.
+const DRP_SUGESTOES = {
+  drpHealthCheck: [
+    'Infraestrutura/Cloud: o ambiente/console está acessível?',
+    'Banco de Dados: a integridade dos arquivos de backup está preservada?',
+    'Segurança e Acessos: os certificados e tokens mTLS/OAuth continuam válidos?',
+    'Rede e Conectividade: links de internet e resolução de DNS externos estão ativos?',
+  ],
+  drpRunbook: [
+    'Reprovisionar/validar a infraestrutura (VMs, containers, storage)',
+    'Restaurar o banco de dados a partir do último backup íntegro',
+    'Subir a aplicação (reinstalar/reativar serviços)',
+    'Validar conectividade e segurança (firewall, DNS, certificados)',
+    'Restabelecer integrações (tokens, endpoints de APIs)',
+    'Limpar e processar filas (reprocessar backlog acumulado)',
+    'Teste de fumaça (execução fim a fim)',
+    'Liberação comercial (homologar com o dono do processo)',
+  ],
+  drpCriteriosRetorno: [
+    'Reprocessamento de dados ou cargas pendentes',
+    'Auditoria e conciliação manual (duplicidade ou erros)',
+    'Realização da Análise de Causa Raiz (RCA)',
+    'Registro de Lições Aprendidas e atualização do documento',
+  ],
+  drpLimitacoes: [
+    'Dependência direta de provedores de internet e nuvem de terceiros',
+    'Tempo de RTO elástico devido ao modelo de provisionamento manual/semi-automatizado',
+    'Risco atrelado à integridade da última janela de backup realizada',
+  ],
+};
+
+/** Bloco de uma lista guiada da aba DRP: label + lista renderizada + chips de sugestão + caixa de adicionar. */
+function _htmlDrpLista(campo, titulo, placeholder) {
+  const chips = DRP_SUGESTOES[campo].map((s) =>
+    `<button type="button" onclick="usarSugestaoDrp('${campo}', '${escJs(s)}')" style="padding:4px 10px;border:1px solid #c5cae9;background:#e8eaf6;color:#1a237e;border-radius:14px;font-size:0.76em;cursor:pointer;">${esc(s)}</button>`
+  ).join('');
+  return `
+    <div style="border-top:1px solid #eee;margin-top:18px;padding-top:14px;">
+      <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">${esc(titulo)}</label>
+      <div id="lista-${campo}"></div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;">${chips}</div>
+      <div style="display:flex;gap:8px;">
+        <input type="text" id="novoItem-${campo}" placeholder="${esc(placeholder)}" style="flex:1;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
+        <button class="btn btn-ghost" id="btnAdicionar-${campo}" onclick="adicionarDrpItem('${campo}')" style="white-space:nowrap;">+ Adicionar</button>
+      </div>
+    </div>`;
+}
+
+function renderDrpLista(campo) {
+  const container = document.getElementById('lista-' + campo);
+  if (!container) return;
+  const itens = window._depDrpListas[campo] || [];
+  const comOrdem = campo === 'drpRunbook';
+  container.innerHTML = itens.length ? itens.map((texto, i) => `
+    <div style="display:flex;align-items:center;gap:8px;border:1px solid #e0e0e0;border-radius:7px;padding:8px 10px;margin-bottom:6px;">
+      ${comOrdem ? `<span style="font-weight:700;color:#1a237e;min-width:20px;">${i + 1}.</span>` : ''}
+      <span style="flex:1;font-size:0.88em;color:#333;">${esc(texto)}</span>
+      ${comOrdem ? `
+        <button class="btn-icon" onclick="moverDrpItem('${campo}', ${i}, -1)" title="Mover para cima" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button class="btn-icon" onclick="moverDrpItem('${campo}', ${i}, 1)" title="Mover para baixo" ${i === itens.length - 1 ? 'disabled' : ''}>▼</button>` : ''}
+      <button class="btn-icon" onclick="editarDrpItem('${campo}', ${i})" title="Editar">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      </button>
+      <button class="btn-icon" onclick="removerDrpItem('${campo}', ${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
+    </div>`).join('') : '<p style="font-size:0.82em;color:#999;">Nenhum item adicionado ainda.</p>';
+}
+
+window.usarSugestaoDrp = (campo, texto) => { document.getElementById('novoItem-' + campo).value = texto; };
+
+window.adicionarDrpItem = (campo) => {
+  const input = document.getElementById('novoItem-' + campo);
+  const texto = input.value.trim();
+  if (!texto) return;
+  const idx = window._depDrpEditando[campo];
+  if (idx != null) {
+    window._depDrpListas[campo][idx] = texto;
+    window._depDrpEditando[campo] = null;
+    document.getElementById('btnAdicionar-' + campo).textContent = '+ Adicionar';
+  } else {
+    window._depDrpListas[campo].push(texto);
+  }
+  input.value = '';
+  renderDrpLista(campo);
+};
+
+window.editarDrpItem = (campo, idx) => {
+  window._depDrpEditando[campo] = idx;
+  document.getElementById('novoItem-' + campo).value = window._depDrpListas[campo][idx];
+  document.getElementById('btnAdicionar-' + campo).textContent = 'Salvar alteração';
+};
+
+window.removerDrpItem = (campo, idx) => {
+  window._depDrpListas[campo].splice(idx, 1);
+  if (window._depDrpEditando[campo] === idx) window._depDrpEditando[campo] = null;
+  renderDrpLista(campo);
+};
+
+window.moverDrpItem = (campo, idx, direcao) => {
+  const lista = window._depDrpListas[campo];
+  const alvo = idx + direcao;
+  if (alvo < 0 || alvo >= lista.length) return;
+  [lista[idx], lista[alvo]] = [lista[alvo], lista[idx]];
+  renderDrpLista(campo);
+};
+
 window.trocarAbaDependencia = (aba) => {
   ['geral', 'drp'].forEach(a => {
     document.getElementById('painel-dep-' + a).style.display = a === aba ? 'block' : 'none';
@@ -2600,6 +2725,18 @@ window.abrirDrawerDependencia = (d) => {
   document.getElementById('depRpo').value = d ? (d.rpo || '') : '';
   document.getElementById('depEstrategia').value = d ? (d.estrategia || '') : '';
   document.getElementById('depResponsavel').value = d ? (d.responsavel || '') : '';
+  window._depDrpListas = {
+    drpHealthCheck: d && Array.isArray(d.drpHealthCheck) ? [...d.drpHealthCheck] : [],
+    drpRunbook: d && Array.isArray(d.drpRunbook) ? [...d.drpRunbook] : [],
+    drpCriteriosRetorno: d && Array.isArray(d.drpCriteriosRetorno) ? [...d.drpCriteriosRetorno] : [],
+    drpLimitacoes: d && Array.isArray(d.drpLimitacoes) ? [...d.drpLimitacoes] : [],
+  };
+  window._depDrpEditando = { drpHealthCheck: null, drpRunbook: null, drpCriteriosRetorno: null, drpLimitacoes: null };
+  ['drpHealthCheck', 'drpRunbook', 'drpCriteriosRetorno', 'drpLimitacoes'].forEach((c) => {
+    document.getElementById('novoItem-' + c).value = '';
+    document.getElementById('btnAdicionar-' + c).textContent = '+ Adicionar';
+    renderDrpLista(c);
+  });
   document.getElementById('depDrawerTitulo').textContent = d ? 'Editar Dependência' : 'Nova Dependência';
   // Preencher datalist de setores existentes
   const setores = [...new Set(dependenciasData.map(x => x.setor).filter(Boolean))].sort();
@@ -2650,6 +2787,10 @@ window.salvarDep = async () => {
     rpo: document.getElementById('depRpo').value.trim(),
     estrategia: document.getElementById('depEstrategia').value,
     responsavel: document.getElementById('depResponsavel').value.trim(),
+    drpHealthCheck: window._depDrpListas.drpHealthCheck || [],
+    drpRunbook: window._depDrpListas.drpRunbook || [],
+    drpCriteriosRetorno: window._depDrpListas.drpCriteriosRetorno || [],
+    drpLimitacoes: window._depDrpListas.drpLimitacoes || [],
   };
   if (!d.categoria) return showToast('Informe a categoria.', '#e65100');
   if (!d.nome) return showToast('Informe o nome.', '#e65100');

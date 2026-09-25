@@ -309,6 +309,12 @@ async function _lerDependencias() {
     rpo: d.rpo || '',
     estrategia: d.estrategia || '',
     responsavel: d.responsavel || '',
+    // Aba DRP: 4 listas guiadas (Health Check, Runbook, Criterios de Retorno,
+    // Limitacoes) -- mesmo escopo das 7 categorias tecnicas acima.
+    drpHealthCheck: Array.isArray(d.drpHealthCheck) ? d.drpHealthCheck : [],
+    drpRunbook: Array.isArray(d.drpRunbook) ? d.drpRunbook : [],
+    drpCriteriosRetorno: Array.isArray(d.drpCriteriosRetorno) ? d.drpCriteriosRetorno : [],
+    drpLimitacoes: Array.isArray(d.drpLimitacoes) ? d.drpLimitacoes : [],
   }));
 }
 // _lerComponentes/_salvarComponente/COLLECTION.componentes foram removidos: o
@@ -863,6 +869,10 @@ async function _salvarDependencia(d) {
     rpo: d.rpo || '',
     estrategia: d.estrategia || '',
     responsavel: d.responsavel || '',
+    drpHealthCheck: Array.isArray(d.drpHealthCheck) ? d.drpHealthCheck : [],
+    drpRunbook: Array.isArray(d.drpRunbook) ? d.drpRunbook : [],
+    drpCriteriosRetorno: Array.isArray(d.drpCriteriosRetorno) ? d.drpCriteriosRetorno : [],
+    drpLimitacoes: Array.isArray(d.drpLimitacoes) ? d.drpLimitacoes : [],
   };
   if (d.id) {
     await _db.collection(COLLECTION.dependencias).doc(String(d.id)).set(data, { merge: true });

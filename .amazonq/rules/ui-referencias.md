@@ -119,6 +119,11 @@ input de busca: padding:8px 14px; border-radius:8px;
 ### Formulários em modal/drawer
 Convenção recomendada para telas novas (a mesma usada em Processo/Risco/Dependência/Componente): label uppercase (ver seção Tipografia) + input `border:1.5px solid #e0e0e0; border-radius:7px; padding:9px 12px; font-size:0.93em;`, foco com `border-color:#1a237e`.
 
+### Listas editáveis dentro de modal/drawer
+Duas famílias, conforme a forma do item:
+- **Item com várias colunas** (Plano de Ação/KRIs do drawer de Risco, "Pessoas associadas" do drawer de Fornecedor): mini-formulário com um campo por coluna + botão "+ Adicionar", que vira "Salvar alteração" ao clicar no ícone de editar de uma linha (mesmo array em `window._algumaCoisa`, adiciona ou sobrescreve por índice, hidratado do registro ao abrir e devolvido inteiro no payload de salvar).
+- **Item de texto livre, um campo só** (as 4 listas da aba DRP de Dependência — Health Check, Runbook, Critérios de Retorno, Limitações): mesma ideia acima, simplificada — uma caixa de texto + "+ Adicionar", sem mini-formulário de várias colunas. Ganha também **chips de sugestão** clicáveis acima da caixa (exemplos prontos que preenchem o campo pra revisar antes de adicionar, em vez de adicionar direto) sempre que a tela tiver uma referência natural de "exemplos de bom preenchimento" pra oferecer — é o padrão pra "guiar com opções" em vez de caixa de texto em branco. Ver `renderDrpLista`/`adicionarDrpItem`/`editarDrpItem`/`removerDrpItem`/`moverDrpItem` em `app.js` como implementação de referência, incluindo os botões ▲/▼ de reordenar (só fazem sentido quando a ordem dos itens importa, como no Runbook — não é obrigatório em toda lista deste tipo).
+
 ### Toasts (`showToast(mensagem, cor)`)
 Não existe uma API por nome de severidade — a cor é passada como hex literal em cada chamada. Use sempre uma destas (não invente uma nova):
 | Tipo de mensagem | Cor |
