@@ -92,8 +92,8 @@ Duas famílias coexistem, ambas válidas:
    usando as cores da seção 1 (nunca uma cor nova sem adicionar à paleta de status primeiro).
 
 ### Modal vs. Drawer
-- **Modal** (`.modal-overlay`/`.modal`, centralizado, `max-width` 480-580px conforme o formulário): para entidades de **tela única** (Perguntas, Áreas, Config. de Respostas, Dependências, Componentes, Indicadores).
-- **Drawer** (`.drawer-overlay`/`.drawer`, painel lateral de `70vw`): para entidades com **abas internas** (Processo, Risco), **ou** para um modal de formulário único que cresceu com uma sub-lista repetível embutida (mini-CRUD) — é o caso de Fornecedores (mini-CRUD de "Pessoas associadas"), que virou drawer mesmo sem abas, pelo espaço vertical extra que isso dá. Se uma tela nova precisar de mais de uma seção/aba de formulário, ou tiver um mini-CRUD embutido, use drawer; se for um formulário simples, use modal.
+- **Modal** (`.modal-overlay`/`.modal`, centralizado, `max-width` 480-580px conforme o formulário): para entidades de **tela única** (Perguntas, Áreas, Config. de Respostas, Componentes, Indicadores).
+- **Drawer** (`.drawer-overlay`/`.drawer`, painel lateral de `70vw`): para entidades com **abas internas** (Processo, Risco, Dependência — "Dados Gerais"/"DRP"), **ou** para um modal de formulário único que cresceu com uma sub-lista repetível embutida (mini-CRUD) — é o caso de Fornecedores (mini-CRUD de "Pessoas associadas"), que virou drawer mesmo sem abas, pelo espaço vertical extra que isso dá. Se uma tela nova precisar de mais de uma seção/aba de formulário, ou tiver um mini-CRUD embutido, use drawer; se for um formulário simples, use modal.
 
 ### Abas (tabs)
 Um único padrão de aba, usado (e que deve continuar sendo usado) em `trocarAbaProcesso`, `trocarAbaRisco` e `trocarAbaIndicadores`:
