@@ -8371,6 +8371,13 @@ function renderizarFornecedoresCadastro() {
  * HTML, mesmas funções de abrir/salvar/fechar.
  */
 function _htmlDrawerFornecedorCadastro() {
+  // Mesmo padrao visual do drawer de Risco (_htmlDrawerRisco): o drawer nao
+  // herda o estilo de label/input do .modal (nao existe ".drawer input"/
+  // ".drawer label" no CSS), entao label e input aqui precisam do mesmo
+  // estilo inline que o Risco ja usa -- sem isso, campo perde borda,
+  // espacamento e a label vira texto colado no input.
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
   return `
     <div class="drawer-overlay" id="drawerOverlayFornecedorCadastro" onclick="fecharDrawerFornecedorCadastro()"></div>
     <div class="drawer" id="drawerFornecedorCadastro">
@@ -8381,56 +8388,60 @@ function _htmlDrawerFornecedorCadastro() {
       <div class="drawer-body">
       <input type="hidden" id="fornCadId">
 
-      <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:8px;margin-top:4px;">Dados do fornecedor</label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div><label>Razão Social</label><input type="text" id="fornCadNome" placeholder="Ex: Alfa Tecnologia S.A."></div>
-        <div><label>Nome Fantasia</label><input type="text" id="fornCadNomeFantasia" placeholder="Ex: Alfa Tech"></div>
+      <label style="${lbl}margin-bottom:10px;">Dados do fornecedor</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+        <div><label style="${lbl}">Razão Social</label><input type="text" id="fornCadNome" placeholder="Ex: Alfa Tecnologia S.A." style="${inp}"></div>
+        <div><label style="${lbl}">Nome Fantasia</label><input type="text" id="fornCadNomeFantasia" placeholder="Ex: Alfa Tech" style="${inp}"></div>
       </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div><label>CNPJ</label><input type="text" id="fornCadCnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="this.value=formatarCNPJ(this.value)"></div>
-        <div><label>Categoria</label><select id="fornCadCategoria"><option value="">Selecione...</option></select></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+        <div><label style="${lbl}">CNPJ</label><input type="text" id="fornCadCnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="this.value=formatarCNPJ(this.value)" style="${inp}"></div>
+        <div><label style="${lbl}">Categoria</label><select id="fornCadCategoria" style="${inp}"><option value="">Selecione...</option></select></div>
       </div>
-      <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-weight:400;">
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;font-size:0.9em;color:#333;">
         <input type="checkbox" id="fornCadTic" checked>
         Fornecedor de TIC (Tecnologia da Informação e Comunicação)
       </label>
-      <label>Serviço prestado / o que fornece</label>
-      <input type="text" id="fornCadDetalhes" placeholder="Ex: hospedagem dos servidores de produção">
-      <label>Endereço</label>
-      <input type="text" id="fornCadEndereco" placeholder="Cidade ou endereço">
+      <div style="margin-bottom:16px;">
+        <label style="${lbl}">Serviço prestado / o que fornece</label>
+        <input type="text" id="fornCadDetalhes" placeholder="Ex: hospedagem dos servidores de produção" style="${inp}">
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="${lbl}">Endereço</label>
+        <input type="text" id="fornCadEndereco" placeholder="Cidade ou endereço" style="${inp}">
+      </div>
 
-      <label style="margin-top:14px;display:block;">Pessoas associadas</label>
-      <span style="font-size:0.75em;color:#888;display:block;margin-top:-6px;margin-bottom:8px;">Uma empresa pode ter mais de um contato.</span>
+      <label style="${lbl}">Pessoas associadas</label>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Uma empresa pode ter mais de um contato.</span>
       <div id="pessoasFornecedorTabela"></div>
-      <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:12px;margin-top:8px;">
+      <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:12px;margin-top:8px;margin-bottom:16px;">
         <div id="pessoaFornEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
           ✎ Editando pessoa — <a href="#" onclick="cancelarEdicaoPessoaFornecedor();return false;" style="color:#1565c0;">cancelar edição</a>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
-          <input type="text" id="pessoaFornNome" placeholder="Nome da pessoa">
-          <input type="text" id="pessoaFornCargo" placeholder="Cargo (ex: Comercial, Suporte)">
+          <input type="text" id="pessoaFornNome" placeholder="Nome da pessoa" style="${inp}">
+          <input type="text" id="pessoaFornCargo" placeholder="Cargo (ex: Comercial, Suporte)" style="${inp}">
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:center;">
-          <input type="email" id="pessoaFornEmail" placeholder="E-mail">
-          <input type="text" id="pessoaFornTelefone" placeholder="Telefone" maxlength="15" oninput="this.value=formatarTelefoneBR(this.value)">
+          <input type="email" id="pessoaFornEmail" placeholder="E-mail" style="${inp}">
+          <input type="text" id="pessoaFornTelefone" placeholder="Telefone" maxlength="15" oninput="this.value=formatarTelefoneBR(this.value)" style="${inp}">
           <button class="btn btn-ghost" id="btnAdicionarPessoaForn" onclick="adicionarPessoaFornecedor()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
         </div>
       </div>
 
-      <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:8px;margin-top:18px;border-top:1px solid #eee;padding-top:14px;">Dados do contratante</label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+      <label style="${lbl}margin-bottom:10px;border-top:1px solid #eee;padding-top:14px;">Dados do contratante</label>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
         <div>
-          <label>Gestor do Contrato</label>
+          <label style="${lbl}">Gestor do Contrato</label>
           <div style="display:flex;gap:6px;align-items:center;">
-            <select id="fornCadGestorContrato" style="flex:1;"><option value="">Selecione...</option></select>
+            <select id="fornCadGestorContrato" style="${inp}flex:1;"><option value="">Selecione...</option></select>
             <button type="button" class="btn-icon" onclick="_recarregarPessoasFornecedor()" title="Atualizar lista de pessoas">🔄</button>
           </div>
           <a href="#pessoas" target="_blank" style="font-size:0.74em;color:#1a237e;font-weight:600;">+ Cadastrar nova pessoa</a>
         </div>
         <div>
-          <label>Setor responsável pelo contrato</label>
+          <label style="${lbl}">Setor responsável pelo contrato</label>
           <div style="display:flex;gap:6px;align-items:center;">
-            <select id="fornCadSetor" style="flex:1;"><option value="">Selecione...</option></select>
+            <select id="fornCadSetor" style="${inp}flex:1;"><option value="">Selecione...</option></select>
             <button type="button" class="btn-icon" onclick="_recarregarAreasFornecedor()" title="Atualizar lista de áreas">🔄</button>
           </div>
           <a href="#areas" target="_blank" style="font-size:0.74em;color:#1a237e;font-weight:600;">+ Cadastrar nova área</a>
