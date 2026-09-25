@@ -276,6 +276,8 @@ async function _lerDependencias() {
     id: d.id,
     categoria: d.categoria || '',
     nome: d.nome || '',
+    // So usado por Fornecedores -- Razao Social e o campo "nome" acima.
+    nomeFantasia: d.nomeFantasia || '',
     detalhes: d.detalhes || '',
     setor: d.setor || '',
     empresa: d.empresa || '',
@@ -844,6 +846,7 @@ async function _salvarDependencia(d) {
   const data = {
     categoria: d.categoria || '',
     nome: d.nome || '',
+    nomeFantasia: d.nomeFantasia || '',
     detalhes: d.detalhes || '',
     setor: d.setor || '',
     empresa: d.empresa || '',
