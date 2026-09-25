@@ -62,7 +62,7 @@
     'admin',
   ];
   TELAS[PERFIL.FORNECEDORES] = [
-    'fornecedores', 'fornecedores-cadastro', 'fornecedores-categorias', 'fornecedores-criterios',
+    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
     // Gestor do Contrato (Pessoa) e Setor responsavel (Area) sao escolhidos no
     // cadastro de fornecedor -- sem estas duas telas, quem avalia fornecedor
     // dependeria do admin pra cadastrar toda pessoa/area nova.

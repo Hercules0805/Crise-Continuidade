@@ -152,7 +152,7 @@ const TODAS_AS_TELAS = [
   'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
   'dependencias', 'componentes', 'perguntas',
   'admin', 'perfis',
-  'fornecedores', 'fornecedores-cadastro', 'fornecedores-criterios',
+  'fornecedores', 'fornecedores-criterios',
 ];
 
 test('admin ve todas as telas', () => {
@@ -165,7 +165,7 @@ test('o perfil de fornecedores ve as telas de fornecedor mais Areas e Pessoas', 
   // Areas e Pessoas entraram porque Gestor do Contrato (Pessoa) e Setor
   // responsavel (Area) sao escolhidos no proprio cadastro de fornecedor.
   const vistas = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela(Perfis.PERFIL.FORNECEDORES, t));
-  assert.deepStrictEqual(vistas.sort(), ['areas', 'fornecedores', 'fornecedores-cadastro', 'fornecedores-criterios', 'pessoas']);
+  assert.deepStrictEqual(vistas.sort(), ['areas', 'fornecedores', 'fornecedores-criterios', 'pessoas']);
 });
 
 test('o perfil de fornecedores NAO ve processos, PCNs, riscos nem indicadores', () => {
@@ -178,7 +178,7 @@ test('o perfil de fornecedores NAO ve processos, PCNs, riscos nem indicadores', 
 
 test('gestor NAO ve as telas de cadastro nem as de fornecedor', () => {
   ['areas', 'pessoas', 'perguntas', 'dependencias', 'componentes', 'perfis',
-    'fornecedores', 'fornecedores-cadastro', 'fornecedores-criterios'].forEach((t) => {
+    'fornecedores', 'fornecedores-criterios'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, t), false, `nao deveria ver ${t}`);
   });
 });

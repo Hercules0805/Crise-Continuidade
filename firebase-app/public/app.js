@@ -12,7 +12,6 @@ const pages = {
   monitor,
   fornecedores,
   'fornecedores-criterios': fornecedoresCriterios,
-  'fornecedores-cadastro': fornecedoresCadastro,
   'fornecedores-categorias': fornecedoresCategorias,
   perfis,
 };
@@ -2379,7 +2378,7 @@ async function dependencias() {
     </div>
     <div style="border:1px solid #e0e0e0;background:#f8f9ff;border-radius:9px;padding:11px 14px;margin-bottom:16px;font-size:0.86em;color:#555;">
       Os <strong>fornecedores</strong> saíram desta tela e são gerenciados em
-      <a href="#fornecedores-cadastro" style="color:#1a237e;font-weight:700;">Fornecedores → Cadastro</a>,
+      <a href="#fornecedores" style="color:#1a237e;font-weight:700;">Fornecedores</a>,
       onde também são avaliados. Eles continuam no mesmo catálogo e continuam aparecendo para os processos
       declararem de quem dependem — só a edição mudou de lugar.
     </div>
@@ -7533,29 +7532,45 @@ function _resumoPessoasFornecedor(f) {
 }
 
 async function fornecedores() {
-  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Avaliação de Fornecedores</h2><p class="page-sub">Nota de conformidade de cada fornecedor — quanto maior, melhor</p></div>
-      <a href="#fornecedores-criterios" class="btn btn-ghost" id="btnIrCriterios" style="display:none;">Critérios</a>
+      <div><h2>Fornecedores</h2><p class="page-sub">Catálogo, avaliação e criticidade dos fornecedores da empresa</p></div>
+      <div style="display:flex;gap:10px;">
+        <a href="#fornecedores-criterios" class="btn btn-ghost" id="btnIrCriterios" style="display:none;">Critérios</a>
+        <button class="btn btn-primary" onclick="abrirDrawerFornecedorCadastro()" id="btnNovoFornecedor" style="display:none;">+ Novo Fornecedor</button>
+      </div>
     </div>
     <div id="fornResumo" style="margin-bottom:18px;"></div>
-    <div style="margin-bottom:16px;">
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end;">
       <input type="text" id="buscaFornecedor" placeholder="🔍 Buscar fornecedor..." oninput="renderizarFornecedores()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:280px;">
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Categoria</label>
+        <select id="filtroFornCadastroCategoria" onchange="renderizarFornecedores()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+          <option value="">Todas as categorias</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Setor</label>
+        <select id="filtroFornCadastroSetor" onchange="renderizarFornecedores()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+          <option value="">Todos os setores</option>
+        </select>
+      </div>
     </div>
     <div class="loading" id="loadingFornecedores">⏳ Carregando...</div>
     <div id="listaFornecedores"></div>
     ${_htmlDrawerAvaliacaoFornecedor()}
     ${_htmlDrawerFornecedorCadastro()}`;
 
-  document.getElementById('btnIrCriterios').style.display = isAdmin ? 'inline-block' : 'none';
+  document.getElementById('btnIrCriterios').style.display = podeMexer ? 'inline-block' : 'none';
+  document.getElementById('btnNovoFornecedor').style.display = podeMexer ? 'inline-block' : 'none';
 
   try {
     const [deps, crits, avals, cfg, cats, areasFornecedor] = await Promise.all([
       API.getDependencias(), API.getCriteriosFornecedor(), API.getAvaliacoesFornecedor(), API.getConfigFornecedor(),
       API.getCategoriasFornecedor(), API.getAreas(),
     ]);
-    fornecedoresData = deps.filter((d) => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
+    fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
     // Gestor do Contrato (select) e Setor responsavel (select), no modal de
     // fornecedor -- mesmo catalogo que as telas de Pessoas e Areas usam.
     pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
@@ -7564,6 +7579,15 @@ async function fornecedores() {
     avaliacoesFornecedorData = avals;
     configFornecedor = cfg;
     categoriasFornecedorData = cats;
+    // Montados uma vez so: renderizarFornecedores() roda a cada tecla da
+    // busca, e remontar as opcoes toda hora apagaria o filtro escolhido.
+    document.getElementById('filtroFornCadastroCategoria').innerHTML = '<option value="">Todas as categorias</option>' +
+      categoriasFornecedorData.filter((c) => c.ativo)
+        .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+        .map((c) => `<option value="${esc(c.nome)}">${esc(c.nome)}</option>`).join('');
+    document.getElementById('filtroFornCadastroSetor').innerHTML = '<option value="">Todos os setores</option>' +
+      [...window.areasData].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+        .map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
   } catch (e) {
     console.error('Fornecedores: falha ao carregar', e);
     document.getElementById('loadingFornecedores').style.display = 'none';
@@ -7578,7 +7602,7 @@ async function fornecedores() {
 }
 
 function renderizarFornecedores() {
-  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
   const lista = document.getElementById('listaFornecedores');
   const resumo = document.getElementById('fornResumo');
   if (!lista) return;
@@ -7603,7 +7627,7 @@ function renderizarFornecedores() {
     resumo.innerHTML = !ativos.length
       ? `<div style="border:1px solid #ffe0b2;background:#fff8e1;border-radius:10px;padding:14px 16px;color:#e65100;font-size:0.9em;">
            Nenhum critério ativo cadastrado. Sem critério não existe nota — todo fornecedor vai aparecer como "Não avaliado".
-           ${isAdmin ? ' <a href="#fornecedores-criterios" style="color:#e65100;font-weight:700;">Cadastrar critérios</a>' : ''}
+           ${podeMexer ? ' <a href="#fornecedores-criterios" style="color:#e65100;font-weight:700;">Cadastrar critérios</a>' : ''}
          </div>`
       : `<div style="display:flex;gap:12px;flex-wrap:wrap;">
            ${[
@@ -7618,6 +7642,8 @@ function renderizarFornecedores() {
   }
 
   const busca = (document.getElementById('buscaFornecedor')?.value || '').toLowerCase();
+  const filtroCategoria = document.getElementById('filtroFornCadastroCategoria')?.value || '';
+  const filtroSetor = document.getElementById('filtroFornCadastroSetor')?.value || '';
   const porResumo = (f) => {
     const av = _avaliacaoDoFornecedor(f.id);
     if (fornecedoresFiltroResumo === 'semAvaliacao') return !av || av.nota === null;
@@ -7632,16 +7658,12 @@ function renderizarFornecedores() {
   };
   let data = fornecedoresData.filter((f) => !busca
     || (f.nome || '').toLowerCase().includes(busca)
+    || (f.nomeFantasia || '').toLowerCase().includes(busca)
     || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)))
+    .filter((f) => !filtroCategoria || f.categoriaFornecedor === filtroCategoria)
+    .filter((f) => !filtroSetor || f.setor === filtroSetor)
     .filter(porResumo)
     .filter(porTic);
-
-  if (!fornecedoresData.length) {
-    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
-      Nenhum fornecedor no catálogo de Dependências.<br>
-      <span style="font-size:0.9em;">Cadastre em <a href="#fornecedores-cadastro" style="color:#1a237e;font-weight:700;">Fornecedores → Cadastro</a>.</span></div>`;
-    return;
-  }
 
   // Nulo sempre por ultimo, nas duas direcoes -- ausencia de avaliacao nao e
   // o pior nem o melhor caso, e "arrastar pro fim" nao deveria trocar de lado
@@ -7655,6 +7677,8 @@ function renderizarFornecedores() {
     return dir * (vA > vB ? 1 : vA < vB ? -1 : 0);
   };
   data = fornecedoresOrdenacao.aplicar(data, {
+    categoria: (a, b, dir) => dir * (a.categoriaFornecedor || '').localeCompare(b.categoriaFornecedor || '', 'pt-BR'),
+    setor: (a, b, dir) => dir * (a.setor || '').localeCompare(b.setor || '', 'pt-BR'),
     nota: comparadorNulavel((av) => (av && av.nota !== null ? av.nota : null)),
     criticidade: comparadorNulavel((av) => (av && av.completaCriticidade ? av.scoreCriticidade : null)),
     avaliadoEm: comparadorNulavel((av) => (av && av.avaliadoEm ? av.avaliadoEm : null)),
@@ -7667,13 +7691,15 @@ function renderizarFornecedores() {
       <table>
         <thead>
           <tr>
-            ${th('nome', 'Empresa', 'width:18%;')}
-            <th style="width:14%;">Pessoas</th>
-            ${th('nota', 'Nota de Conformidade', 'width:12%;text-align:center;')}
-            ${th('criticidade', 'Criticidade', 'width:10%;text-align:center;')}
-            <th style="width:13%;">Situação</th>
-            ${th('avaliadoEm', 'Última avaliação', 'width:12%;')}
-            <th style="width:17%;text-align:center;">Ações</th>
+            ${th('nome', 'Empresa', 'width:16%;')}
+            ${th('categoria', 'Categoria', 'width:11%;')}
+            ${th('setor', 'Setor', 'width:9%;')}
+            <th style="width:12%;">Pessoas</th>
+            ${th('nota', 'Nota de Conformidade', 'width:11%;text-align:center;')}
+            ${th('criticidade', 'Criticidade', 'width:9%;text-align:center;')}
+            <th style="width:11%;">Situação</th>
+            ${th('avaliadoEm', 'Última avaliação', 'width:10%;')}
+            <th style="width:11%;text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody>
@@ -7683,6 +7709,8 @@ function renderizarFornecedores() {
             return `
             <tr style="cursor:pointer;" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')">
               <td style="font-weight:600;">${esc(f.nome)}</td>
+              <td style="color:#666;font-size:0.88em;">${esc(f.categoriaFornecedor || '–')}</td>
+              <td style="color:#666;font-size:0.88em;">${esc(f.setor || '–')}</td>
               <td style="color:#666;font-size:0.88em;">${_resumoPessoasFornecedor(f)}</td>
               <td style="text-align:center;">
                 ${av && av.nota !== null
@@ -7698,18 +7726,19 @@ function renderizarFornecedores() {
                 ${av ? `${_dataCurtaForn(av.avaliadoEm)}<div style="font-size:0.8em;color:#aaa;">${esc(av.avaliadoPor || '')}</div>` : '–'}
               </td>
               <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
-                ${isAdmin
+                ${podeMexer
                   ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">${av ? 'Reavaliar' : 'Avaliar'}</button>
-                     <button class="btn-icon" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" title="Editar dados do fornecedor">✏️</button>`
+                     <button class="btn-icon" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" title="Editar dados do fornecedor">✏️</button>
+                     <button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>`
                   : (av ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">Ver</button>` : '–')}
               </td>
             </tr>`;
-          }).join('') : '<tr><td colspan="7" style="padding:20px;text-align:center;color:#888;">Nenhum fornecedor encontrado com esses filtros.</td></tr>'}
+          }).join('') : `<tr><td colspan="9" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
         </tbody>
       </table>
     </div>`;
 
-  fornecedoresOrdenacao.atualizarSetas('sort-forn-', ['nome', 'nota', 'criticidade', 'avaliadoEm']);
+  fornecedoresOrdenacao.atualizarSetas('sort-forn-', ['nome', 'categoria', 'setor', 'nota', 'criticidade', 'avaliadoEm']);
 }
 
 // ---- Drawer de avaliação do fornecedor ----
@@ -8244,158 +8273,21 @@ window.excluirPerfilAcesso = async (email) => {
 };
 
 // ============================================================
-// PÁGINA: FORNECEDORES — CADASTRO
+// FORNECEDORES — cadastro/edição (drawer compartilhado com a tela unica de
+// Fornecedores, ver fornecedores()/renderizarFornecedores() mais acima).
 //
-// O fornecedor e uma linha de /dependencias com categoria Fornecedores. Esta
-// tela existe para que o perfil de fornecedores cadastre, edite e apague
-// fornecedor SEM ver (nem poder apagar) as outras categorias do catalogo, que
-// sao do BIA: Infraestrutura, Pessoas, Sistemas e Processos Internos.
+// O fornecedor e uma linha de /dependencias com categoria Fornecedores.
+// fornecedoresData ja filtra so essa categoria (Perfis.categoriaDeFornecedor)
+// SEM tocar nem mostrar as outras categorias do catalogo, que sao do BIA:
+// Infraestrutura, Pessoas, Sistemas e Processos Internos.
 // ============================================================
 
 const CATEGORIA_FORNECEDOR_PADRAO = 'Fornecedores';
 
-async function fornecedoresCadastro() {
-  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
-  app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Cadastro de Fornecedores</h2><p class="page-sub">Os fornecedores do catálogo de dependências da empresa</p></div>
-      <button class="btn btn-primary" onclick="abrirDrawerFornecedorCadastro()" id="btnNovoFornecedor" style="display:none;">+ Novo Fornecedor</button>
-    </div>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end;">
-      <input type="text" id="buscaFornecedorCadastro" placeholder="🔍 Buscar fornecedor..." oninput="renderizarFornecedoresCadastro()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:280px;">
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Categoria</label>
-        <select id="filtroFornCadastroCategoria" onchange="renderizarFornecedoresCadastro()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
-          <option value="">Todas as categorias</option>
-        </select>
-      </div>
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Setor</label>
-        <select id="filtroFornCadastroSetor" onchange="renderizarFornecedoresCadastro()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
-          <option value="">Todos os setores</option>
-        </select>
-      </div>
-    </div>
-    <div class="loading" id="loadingFornCadastro">⏳ Carregando...</div>
-    <div id="listaFornCadastro"></div>
-    ${_htmlDrawerFornecedorCadastro()}`;
-
-  document.getElementById('btnNovoFornecedor').style.display = podeMexer ? 'inline-block' : 'none';
-
-  try {
-    const [deps, avals, cats, areasFornecedor] = await Promise.all([
-      API.getDependencias(), API.getAvaliacoesFornecedor(), API.getCategoriasFornecedor(), API.getAreas(),
-    ]);
-    fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
-    pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
-    window.areasData = areasFornecedor;
-    avaliacoesFornecedorData = avals;
-    categoriasFornecedorData = cats;
-    // Montados uma vez so: renderizarFornecedoresCadastro() roda a cada tecla
-    // da busca, e remontar as opcoes toda hora apagaria o filtro escolhido.
-    document.getElementById('filtroFornCadastroCategoria').innerHTML = '<option value="">Todas as categorias</option>' +
-      categoriasFornecedorData.filter((c) => c.ativo)
-        .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
-        .map((c) => `<option value="${esc(c.nome)}">${esc(c.nome)}</option>`).join('');
-    document.getElementById('filtroFornCadastroSetor').innerHTML = '<option value="">Todos os setores</option>' +
-      [...window.areasData].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
-        .map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
-  } catch (e) {
-    console.error('Cadastro de fornecedores: falha ao carregar', e);
-    document.getElementById('loadingFornCadastro').style.display = 'none';
-    document.getElementById('listaFornCadastro').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
-      Não foi possível carregar os fornecedores.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="fornecedoresCadastro()" style="margin-top:12px;">Tentar de novo</button></div>`;
-    return;
-  }
-  document.getElementById('loadingFornCadastro').style.display = 'none';
-  renderizarFornecedoresCadastro();
-}
-
-let fornCadOrdenacao = criarOrdenacao('nome', 'asc');
-window.ordenarFornCad = (coluna) => { fornCadOrdenacao.ordenar(coluna); renderizarFornecedoresCadastro(); };
-
-function renderizarFornecedoresCadastro() {
-  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
-  const lista = document.getElementById('listaFornCadastro');
-  if (!lista) return;
-
-  const busca = (document.getElementById('buscaFornecedorCadastro')?.value || '').toLowerCase();
-  const filtroCategoria = document.getElementById('filtroFornCadastroCategoria')?.value || '';
-  const filtroSetor = document.getElementById('filtroFornCadastroSetor')?.value || '';
-  let data = fornecedoresData.filter((f) => !busca
-    || (f.nome || '').toLowerCase().includes(busca)
-    || (f.nomeFantasia || '').toLowerCase().includes(busca)
-    || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)))
-    .filter((f) => !filtroCategoria || f.categoriaFornecedor === filtroCategoria)
-    .filter((f) => !filtroSetor || f.setor === filtroSetor);
-
-  data = fornCadOrdenacao.aplicar(data, {
-    categoria: (a, b, dir) => dir * (a.categoriaFornecedor || '').localeCompare(b.categoriaFornecedor || '', 'pt-BR'),
-    setor: (a, b, dir) => dir * (a.setor || '').localeCompare(b.setor || '', 'pt-BR'),
-    // Nulo (sem avaliacao de criticidade) sempre por ultimo, nas duas direcoes
-    // -- mesmo padrao ja usado em fornecedoresOrdenacao/valorOrdenacao.
-    criticidade: (a, b, dir) => {
-      const score = (f) => { const av = _avaliacaoDoFornecedor(f.id); return av && av.completaCriticidade ? av.scoreCriticidade : null; };
-      const nA = score(a), nB = score(b);
-      if (nA === null && nB === null) return 0;
-      if (nA === null) return 1;
-      if (nB === null) return -1;
-      return dir * (nA - nB);
-    },
-  });
-
-  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarFornCad('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-forncad-${coluna}"></span></th>`;
-
-  lista.innerHTML = `
-    <div class="data-table">
-      <table>
-        <thead>
-          <tr>
-            ${th('nome', 'Empresa', 'width:20%;')}
-            ${th('categoria', 'Categoria', 'width:14%;')}
-            <th style="width:18%;">Serviço prestado</th>
-            ${th('setor', 'Setor', 'width:9%;')}
-            <th style="width:16%;">Pessoas</th>
-            ${th('criticidade', 'Criticidade', 'width:9%;text-align:center;')}
-            <th style="width:14%;text-align:center;">Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.length ? data.map((f) => { const av = _avaliacaoDoFornecedor(f.id); return `
-            <tr style="cursor:pointer;" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')">
-              <td style="font-weight:600;">${esc(f.nome)}</td>
-              <td style="color:#666;font-size:0.88em;">${esc(f.categoriaFornecedor || '–')}</td>
-              <td style="color:#666;font-size:0.9em;">${esc(f.detalhes || '–')}</td>
-              <td style="color:#666;font-size:0.88em;">${esc(f.setor || '–')}</td>
-              <td style="color:#666;font-size:0.88em;">${_resumoPessoasFornecedor(f)}</td>
-              <td style="text-align:center;">${_badgeCriticidadeFornecedor(av)}</td>
-              <td style="text-align:center;" onclick="event.stopPropagation();">
-                ${podeMexer ? `
-                  <button class="btn-icon" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" title="Editar">✏️</button>
-                  <button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
-              </td>
-            </tr>`; }).join('')
-            : `<tr><td colspan="7" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
-        </tbody>
-      </table>
-    </div>
-    <div style="font-size:0.75em;color:#999;margin-top:10px;line-height:1.5;">
-      Os fornecedores daqui são os mesmos do catálogo de Dependências, categoria Fornecedores — é a lista que os processos usam
-      para dizer de quem dependem. As outras categorias do catálogo (Infraestrutura, Pessoas, Sistemas, Processos Internos)
-      pertencem ao BIA e não são alteradas por esta tela.
-    </div>`;
-
-  fornCadOrdenacao.atualizarSetas('sort-forncad-', ['nome', 'categoria', 'setor', 'criticidade']);
-}
-
 /**
- * Modal de cadastro/edição de fornecedor.
- *
- * Compartilhado entre Cadastro (onde nasce) e Avaliação (onde também precisa
- * corrigir dado do fornecedor sem trocar de tela no meio da avaliação) — mesmo
- * HTML, mesmas funções de abrir/salvar/fechar.
+ * Drawer de cadastro/edição de fornecedor -- clique na linha ou "✏️ Editar"
+ * na tela de Fornecedores abrem este mesmo drawer; "Avaliar/Reavaliar" abre
+ * o outro (_htmlDrawerAvaliacaoFornecedor).
  */
 function _htmlDrawerFornecedorCadastro() {
   // Mesmo padrao visual do drawer de Risco (_htmlDrawerRisco): o drawer nao
@@ -8638,9 +8530,9 @@ window.abrirDrawerFornecedorCadastro = (id) => {
   window.cancelarEdicaoPessoaFornecedor();
   renderPessoasFornecedor();
   // Sem gate de perfil aqui, clicar numa linha da grade (qualquer usuario,
-  // ver renderizarFornecedoresCadastro/renderizarFornecedores) abriria um
-  // drawer totalmente editavel pra quem so pode ver -- mesmo tratamento que
-  // o drawer de Risco ja da (abrirDrawerRisco).
+  // ver renderizarFornecedores) abriria um drawer totalmente editavel pra
+  // quem so pode ver -- mesmo tratamento que o drawer de Risco ja da
+  // (abrirDrawerRisco).
   document.querySelectorAll('#drawerFornecedorCadastro input, #drawerFornecedorCadastro select').forEach((el) => { el.disabled = !podeMexer; });
   document.getElementById('btnAdicionarPessoaForn').style.display = podeMexer ? 'inline-block' : 'none';
   document.getElementById('btnSalvarFornecedorCadastro').style.display = podeMexer ? 'inline-block' : 'none';
@@ -8693,10 +8585,6 @@ window.salvarFornecedorCadastro = async () => {
     const item = { ...r.dado, id: r.id, criteriosAplicaveis: existente ? existente.criteriosAplicaveis : null };
     const idx = fornecedoresData.findIndex((x) => String(x.id) === String(r.id));
     if (idx >= 0) fornecedoresData[idx] = item; else fornecedoresData.push(item);
-    // O drawer e compartilhado entre Cadastro e Avaliação — cada renderizador só
-    // desenha se o próprio container estiver na página, então chamar os dois é
-    // seguro e atualiza qualquer uma das telas de onde o drawer foi aberto.
-    renderizarFornecedoresCadastro();
     renderizarFornecedores();
     showToast('✅ Salvo!', '#2e7d32');
   } catch (e) {
@@ -8739,7 +8627,7 @@ window.excluirFornecedorCadastro = async (id) => {
     API.invalidate('getDependencias');
     const deps = await API.getDependencias();
     fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
-    renderizarFornecedoresCadastro();
+    renderizarFornecedores();
     showToast('✅ Fornecedor excluído.', '#2e7d32');
   } catch (e) {
     showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
