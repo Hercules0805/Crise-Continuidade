@@ -49,6 +49,31 @@ const COLLECTION = {
 const _cache = {};
 
 // ------------------------------------------------------------
+// Sincronizacao de cache entre abas (BroadcastChannel)
+// ------------------------------------------------------------
+// Cada aba tem seu proprio _cache em memoria; sem isto, salvar numa aba deixa
+// outra aba do mesmo navegador com dado velho ate fechar/reabrir. Propaga so
+// o NOME DA ACAO invalidada (nunca o dado) -- cada aba busca de novo do jeito
+// que ja sabe. So quem ORIGINOU a invalidacao envia mensagem; quem recebe
+// invalida local e nunca reenvia, senao duas abas ecoariam pra sempre.
+const _canalCache = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('bia-cache-sync') : null;
+
+function _invalidateLocal(...actions) {
+  actions.forEach((a) => {
+    Object.keys(_cache)
+      .filter((k) => k.startsWith(a))
+      .forEach((k) => delete _cache[k]);
+  });
+}
+
+if (_canalCache) {
+  _canalCache.onmessage = (ev) => {
+    const actions = (ev && ev.data && ev.data.actions) || [];
+    if (actions.length) _invalidateLocal(...actions);
+  };
+}
+
+// ------------------------------------------------------------
 // Helpers de domínio (espelham bia-app/Code.gs)
 // ------------------------------------------------------------
 // A regra de criticidade mora em criticidade.js (carregado antes deste arquivo
@@ -1207,11 +1232,10 @@ const API = {
   },
 
   invalidate(...actions) {
-    actions.forEach((a) => {
-      Object.keys(_cache)
-        .filter((k) => k.startsWith(a))
-        .forEach((k) => delete _cache[k]);
-    });
+    _invalidateLocal(...actions);
+    if (_canalCache) {
+      try { _canalCache.postMessage({ actions }); } catch (e) { /* aba fechando, etc -- silencioso */ }
+    }
   },
 
   async post(action, body, options = {}) {

@@ -123,7 +123,7 @@ async function perguntas() {
       <label class="check-label"><input type="checkbox" id="fAtiva" checked> Pergunta ativa</label>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarPergunta()">Salvar</button>
+        <button class="btn btn-primary" id="btnSalvarPergunta" onclick="salvarPergunta()">Salvar</button>
       </div>
     </div></div>`;
 
@@ -450,7 +450,7 @@ function renderizarConfigRespostas(config) {
       <input type="hidden" id="crBackground" value="#ffebee">
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalConfigResposta()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarConfigResposta()">Salvar</button>
+        <button class="btn btn-primary" id="btnSalvarConfigResposta" onclick="salvarConfigResposta()">Salvar</button>
       </div>
     </div></div>
   `;
@@ -497,13 +497,19 @@ window.salvarConfigResposta = async () => {
   };
   if (!d.valor || !d.label) return showToast('Preencha pontuação e rótulo.', '#e65100');
   if (rowIndex) d.rowIndex = rowIndex;
-  await API.salvarConfigResposta(d);
-  API.invalidate('getConfigRespostas');
-  fecharModalConfigResposta();
-  showToast('✅ Salvo!', '#2e7d32');
-  const config = await API.getConfigRespostas();
-  window.configRespostasData = config;
-  renderizarConfigRespostas(config);
+  await comBotaoCarregando('btnSalvarConfigResposta', async () => {
+    try {
+      await API.salvarConfigResposta(d);
+      API.invalidate('getConfigRespostas');
+      fecharModalConfigResposta();
+      showToast('✅ Salvo!', '#2e7d32');
+      const config = await API.getConfigRespostas();
+      window.configRespostasData = config;
+      renderizarConfigRespostas(config);
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
 };
 
 window.excluirConfigResposta = async (cat, idx) => {
@@ -527,10 +533,16 @@ window.salvarPergunta = async () => {
     ativa: document.getElementById('fAtiva').checked,
   };
   if (!p.pergunta) return showToast('Informe a pergunta.', '#e65100');
-  await API.salvarPergunta(p);
-  fecharModal();
-  showToast('✅ Salvo!', '#2e7d32');
-  perguntas();
+  await comBotaoCarregando('btnSalvarPergunta', async () => {
+    try {
+      await API.salvarPergunta(p);
+      fecharModal();
+      showToast('✅ Salvo!', '#2e7d32');
+      perguntas();
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
 };
 
 window.excluirPergunta = async (id) => {
@@ -543,7 +555,7 @@ window.excluirPergunta = async (id) => {
 // ============================================================
 // PÁGINA: ÁREAS (Tabela com ordenação)
 // ============================================================
-let areasOrdenacao = { coluna: 'nome', direcao: 'asc' };
+let areasOrdenacao = criarOrdenacao('nome', 'asc');
 // Compartilhado com Pessoas (Cadastros) e com o modal de Fornecedor: e o
 // mesmo catalogo de dependencias, categoria Pessoas.
 let pessoasData = [];
@@ -595,7 +607,7 @@ async function areas() {
       </select>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarArea()">Salvar</button>
+        <button class="btn btn-primary" id="btnSalvarArea" onclick="salvarArea()">Salvar</button>
       </div>
     </div></div>`;
 
@@ -622,33 +634,16 @@ function renderizarAreas() {
     );
   }
   
-  // Ordenar
-  data.sort((a, b) => {
-    const valA = (a[areasOrdenacao.coluna] || '').toString().toLowerCase();
-    const valB = (b[areasOrdenacao.coluna] || '').toString().toLowerCase();
-    const comparacao = valA.localeCompare(valB);
-    return areasOrdenacao.direcao === 'asc' ? comparacao : -comparacao;
-  });
-  
-  // Atualizar indicadores de ordenação
-  ['nome', 'responsavel', 'email', 'solucao'].forEach(col => {
-    const el = document.getElementById(`sort-${col}`);
-    if (el) {
-      if (col === areasOrdenacao.coluna) {
-        el.textContent = areasOrdenacao.direcao === 'asc' ? '▲' : '▼';
-      } else {
-        el.textContent = '';
-      }
-    }
-  });
-  
+  data = areasOrdenacao.aplicar(data);
+  areasOrdenacao.atualizarSetas('sort-', ['nome', 'responsavel', 'email', 'solucao']);
+
   document.getElementById('rows').innerHTML = data.length
-    ? data.map(a => `<tr>
+    ? data.map(a => `<tr style="cursor:pointer;" onclick="editarArea('${a.id}')">
         <td>${esc(a.nome)}</td>
         <td>${esc(a.responsavel || '')}</td>
         <td>${esc(a.email || '')}</td>
         <td>${esc(a.solucao || '')}</td>
-        <td style="text-align:center;">
+        <td style="text-align:center;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarArea('${a.id}')" title="Editar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -667,12 +662,7 @@ function renderizarAreas() {
 }
 
 window.ordenarAreas = (coluna) => {
-  if (areasOrdenacao.coluna === coluna) {
-    areasOrdenacao.direcao = areasOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
-  } else {
-    areasOrdenacao.coluna = coluna;
-    areasOrdenacao.direcao = 'asc';
-  }
+  areasOrdenacao.ordenar(coluna);
   renderizarAreas();
 };
 
@@ -705,16 +695,22 @@ window.salvarArea = async () => {
     solucao: document.getElementById('fSolucao').value.trim(),
   };
   if (!a.nome) return showToast('Informe o nome da área.', '#e65100');
-  const r = await API.salvarArea(a);
-  // Ja sabemos exatamente o que foi gravado (r.dado) -- so atualiza esta area
-  // no array ja carregado, sem reconstruir a pagina inteira nem buscar Areas
-  // e Dependencias de novo (o que areas() fazia).
-  const item = { ...r.dado, id: r.id };
-  const idx = window.areasData.findIndex((x) => String(x.id) === String(r.id));
-  if (idx >= 0) window.areasData[idx] = item; else window.areasData.push(item);
-  fecharModal();
-  showToast('✅ Salvo!', '#2e7d32');
-  renderizarAreas();
+  await comBotaoCarregando('btnSalvarArea', async () => {
+    try {
+      const r = await API.salvarArea(a);
+      // Ja sabemos exatamente o que foi gravado (r.dado) -- so atualiza esta area
+      // no array ja carregado, sem reconstruir a pagina inteira nem buscar Areas
+      // e Dependencias de novo (o que areas() fazia).
+      const item = { ...r.dado, id: r.id };
+      const idx = window.areasData.findIndex((x) => String(x.id) === String(r.id));
+      if (idx >= 0) window.areasData[idx] = item; else window.areasData.push(item);
+      fecharModal();
+      showToast('✅ Salvo!', '#2e7d32');
+      renderizarAreas();
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
 };
 
 window.excluirArea = async (id) => {
@@ -735,7 +731,7 @@ window.excluirArea = async (id) => {
 // precisa de uma lista limpa pra escolher, sem os campos que so fazem
 // sentido pras outras 4 categorias.
 // ============================================================
-let pessoasOrdenacao = { coluna: 'nome', direcao: 'asc' };
+let pessoasOrdenacao = criarOrdenacao('nome', 'asc');
 
 async function pessoas() {
   app.innerHTML = `
@@ -774,7 +770,7 @@ async function pessoas() {
       <input type="email" id="pessoaEmail" placeholder="email@empresa.com">
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalPessoa()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarPessoaCadastro()">Salvar</button>
+        <button class="btn btn-primary" id="btnSalvarPessoaCadastro" onclick="salvarPessoaCadastro()">Salvar</button>
       </div>
     </div></div>`;
 
@@ -797,25 +793,16 @@ function renderizarPessoas() {
       (p.email || '').toLowerCase().includes(termo));
   }
 
-  data.sort((a, b) => {
-    const valA = (a[pessoasOrdenacao.coluna] || '').toString().toLowerCase();
-    const valB = (b[pessoasOrdenacao.coluna] || '').toString().toLowerCase();
-    const comparacao = valA.localeCompare(valB);
-    return pessoasOrdenacao.direcao === 'asc' ? comparacao : -comparacao;
-  });
-
-  ['nome', 'detalhes', 'telefone', 'email'].forEach((col) => {
-    const el = document.getElementById(`sort-pessoa-${col}`);
-    if (el) el.textContent = col === pessoasOrdenacao.coluna ? (pessoasOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
-  });
+  data = pessoasOrdenacao.aplicar(data);
+  pessoasOrdenacao.atualizarSetas('sort-pessoa-', ['nome', 'detalhes', 'telefone', 'email']);
 
   document.getElementById('rowsPessoas').innerHTML = data.length
-    ? data.map((p) => `<tr>
+    ? data.map((p) => `<tr style="cursor:pointer;" onclick="abrirModalPessoa('${esc(p.id)}')">
         <td style="font-weight:600;">${esc(p.nome)}</td>
         <td>${esc(p.detalhes || '')}</td>
         <td>${esc(p.telefone || '')}</td>
         <td>${esc(p.email || '')}</td>
-        <td style="text-align:center;">
+        <td style="text-align:center;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="abrirModalPessoa('${esc(p.id)}')" title="Editar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -834,12 +821,7 @@ function renderizarPessoas() {
 }
 
 window.ordenarPessoas = (coluna) => {
-  if (pessoasOrdenacao.coluna === coluna) {
-    pessoasOrdenacao.direcao = pessoasOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
-  } else {
-    pessoasOrdenacao.coluna = coluna;
-    pessoasOrdenacao.direcao = 'asc';
-  }
+  pessoasOrdenacao.ordenar(coluna);
   renderizarPessoas();
 };
 
@@ -861,27 +843,29 @@ window.salvarPessoaCadastro = async () => {
   if (!nome) return showToast('Informe o nome da pessoa.', '#e65100');
   const id = document.getElementById('pessoaId').value || null;
 
-  try {
-    const r = await API.salvarDependencia({
-      id,
-      categoria: 'Pessoas',
-      nome,
-      detalhes: document.getElementById('pessoaDetalhes').value.trim(),
-      telefone: document.getElementById('pessoaTelefone').value.trim(),
-      email: document.getElementById('pessoaEmail').value.trim(),
-    });
-    fecharModalPessoa();
-    API.invalidate('getDependencias');
-    // Ja sabemos exatamente o que foi gravado (r.dado) -- so atualiza esta
-    // pessoa no array ja carregado, sem buscar o catalogo inteiro de novo.
-    const item = { ...r.dado, id: r.id };
-    const idx = pessoasData.findIndex((x) => String(x.id) === String(r.id));
-    if (idx >= 0) pessoasData[idx] = item; else pessoasData.push(item);
-    renderizarPessoas();
-    showToast('✅ Salvo!', '#2e7d32');
-  } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
-  }
+  await comBotaoCarregando('btnSalvarPessoaCadastro', async () => {
+    try {
+      const r = await API.salvarDependencia({
+        id,
+        categoria: 'Pessoas',
+        nome,
+        detalhes: document.getElementById('pessoaDetalhes').value.trim(),
+        telefone: document.getElementById('pessoaTelefone').value.trim(),
+        email: document.getElementById('pessoaEmail').value.trim(),
+      });
+      fecharModalPessoa();
+      API.invalidate('getDependencias');
+      // Ja sabemos exatamente o que foi gravado (r.dado) -- so atualiza esta
+      // pessoa no array ja carregado, sem buscar o catalogo inteiro de novo.
+      const item = { ...r.dado, id: r.id };
+      const idx = pessoasData.findIndex((x) => String(x.id) === String(r.id));
+      if (idx >= 0) pessoasData[idx] = item; else pessoasData.push(item);
+      renderizarPessoas();
+      showToast('✅ Salvo!', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
 };
 
 window.excluirPessoaCadastro = async (id) => {
@@ -905,7 +889,7 @@ window.excluirPessoaCadastro = async (id) => {
 // ============================================================
 // PÁGINA: PROCESSOS (Tabela com ordenação e filtro)
 // ============================================================
-let processosOrdenacao = { coluna: 'score', direcao: 'desc' };
+let processosOrdenacao = criarOrdenacao('score', 'desc');
 let processosFiltroArea = '';
 let processosFiltroTier = '';
 
@@ -1298,29 +1282,13 @@ function renderizarProcessos() {
   if (filtroPCN === 'com') data = data.filter(p => p.pcnSalvo);
   else if (filtroPCN === 'sem') data = data.filter(p => !p.pcnSalvo);
   
-  // Ordenar
-  data.sort((a, b) => {
-    if (processosOrdenacao.coluna === 'score' || processosOrdenacao.coluna === 'status') {
-      const diff = (a.score || 0) - (b.score || 0);
-      return processosOrdenacao.direcao === 'asc' ? diff : -diff;
-    }
-    const valA = (a[processosOrdenacao.coluna] || '').toString().toLowerCase();
-    const valB = (b[processosOrdenacao.coluna] || '').toString().toLowerCase();
-    const comparacao = valA.localeCompare(valB);
-    return processosOrdenacao.direcao === 'asc' ? comparacao : -comparacao;
-  });
-  
+  // Ordenar -- "status" ordena por score (peculiaridade ja existente,
+  // preservada de proposito: mudar isso e fora de escopo desta rodada).
+  const comparadorPorScore = (a, b, dir) => dir * ((a.score || 0) - (b.score || 0));
+  data = processosOrdenacao.aplicar(data, { score: comparadorPorScore, status: comparadorPorScore });
+
   // Atualizar indicadores de ordenação
-  ['area', 'processo', 'status', 'score', 'responsavel', 'solucao', 'biaHomologada', 'bcpStatus', 'drpStatus'].forEach(col => {
-    const el = document.getElementById(`sort-${col}`);
-    if (el) {
-      if (col === processosOrdenacao.coluna) {
-        el.textContent = processosOrdenacao.direcao === 'asc' ? '▲' : '▼';
-      } else {
-        el.textContent = '';
-      }
-    }
-  });
+  processosOrdenacao.atualizarSetas('sort-', ['area', 'processo', 'status', 'score', 'responsavel', 'solucao', 'biaHomologada', 'bcpStatus', 'drpStatus']);
 
   // Atualizar contador de processos
   const contadorEl = document.getElementById('contadorProcessos');
@@ -1431,12 +1399,7 @@ window.enviarParaArea = async () => {
 };
 
 window.ordenarProcessos = (coluna) => {
-  if (processosOrdenacao.coluna === coluna) {
-    processosOrdenacao.direcao = processosOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
-  } else {
-    processosOrdenacao.coluna = coluna;
-    processosOrdenacao.direcao = 'asc';
-  }
+  processosOrdenacao.ordenar(coluna);
   renderizarProcessos();
 };
 
@@ -2398,7 +2361,7 @@ window.enviarConvite = async () => {
 // PÁGINA: DEPENDÊNCIAS (Catálogo)
 // ============================================================
 let dependenciasData = [];
-let dependenciasOrdenacao = { coluna: 'categoria', direcao: 'asc' };
+let dependenciasOrdenacao = criarOrdenacao('categoria', 'asc');
 
 // As 7 categorias tecnicas -- absorveram o antigo catalogo de Componentes do
 // Servico (Servidor/Banco de Dados/etc. eram um "tipo" livre de Componentes;
@@ -2524,7 +2487,7 @@ async function dependencias() {
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalDependencia()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarDep()">Salvar</button>
+        <button class="btn btn-primary" id="btnSalvarDep" onclick="salvarDep()">Salvar</button>
       </div>
     </div></div>`;
 
@@ -2568,20 +2531,11 @@ function renderizarDependencias() {
     );
   }
 
-  data.sort((a, b) => {
-    const valA = (a[dependenciasOrdenacao.coluna] || '').toString().toLowerCase();
-    const valB = (b[dependenciasOrdenacao.coluna] || '').toString().toLowerCase();
-    const cmp = valA.localeCompare(valB);
-    return dependenciasOrdenacao.direcao === 'asc' ? cmp : -cmp;
-  });
-
-  ['categoria', 'nome', 'empresa'].forEach(col => {
-    const el = document.getElementById(`sort-dep-${col}`);
-    if (el) el.textContent = col === dependenciasOrdenacao.coluna ? (dependenciasOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
-  });
+  data = dependenciasOrdenacao.aplicar(data);
+  dependenciasOrdenacao.atualizarSetas('sort-dep-', ['categoria', 'nome', 'empresa']);
 
   document.getElementById('depRows').innerHTML = data.length
-    ? data.map(d => `<tr>
+    ? data.map(d => `<tr style="cursor:pointer;" onclick="editarDep('${d.id}')">
         <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(d.categoria)}</span></td>
         <td style="font-size:0.85em;color:#555;">${esc(d.empresa || '-')}</td>
         <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
@@ -2590,7 +2544,7 @@ function renderizarDependencias() {
         <td style="font-size:0.85em;color:#555;">${esc(d.telefone || '-')}</td>
         <td style="font-size:0.85em;color:#555;">${esc(d.email || '-')}</td>
         <td style="font-size:0.85em;color:#555;">${esc(d.endereco || '-')}</td>
-        <td style="text-align:center;white-space:nowrap;">
+        <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarDep('${d.id}')" title="Editar">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
@@ -2605,12 +2559,7 @@ function renderizarDependencias() {
 window.filtrarDependencias = () => renderizarDependencias();
 
 window.ordenarDependencias = (coluna) => {
-  if (dependenciasOrdenacao.coluna === coluna) {
-    dependenciasOrdenacao.direcao = dependenciasOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
-  } else {
-    dependenciasOrdenacao.coluna = coluna;
-    dependenciasOrdenacao.direcao = 'asc';
-  }
+  dependenciasOrdenacao.ordenar(coluna);
   renderizarDependencias();
 };
 
@@ -3286,7 +3235,7 @@ window.salvarAvaliacaoProcesso = async () => {
 // ============================================================
 let riscosData = [];
 // Abre pelo maior risco: e a pergunta que a tela responde.
-let riscosOrdenacao = { coluna: 'score', direcao: 'desc' };
+let riscosOrdenacao = criarOrdenacao('score', 'desc');
 let riscosAreasCache = [];
 let riscosProcessosCache = [];
 let riscosFornecedoresCache = [];
@@ -3854,28 +3803,21 @@ function renderizarRiscos() {
     );
   }
 
-  data.sort((a, b) => {
-    // Score ordena por numero, nao por texto: "10" vem depois de "9".
-    if (riscosOrdenacao.coluna === 'score') {
+  data = riscosOrdenacao.aplicar(data, {
+    // Score ordena por numero, nao por texto: "10" vem depois de "9". Sem
+    // score vai sempre para o fim, independente da direcao: e ausencia de
+    // avaliacao, nao risco baixo.
+    score: (a, b, dir) => {
       const nA = _scoreDoRisco(a);
       const nB = _scoreDoRisco(b);
-      // Sem score vai sempre para o fim, independente da direcao: e ausencia
-      // de avaliacao, nao risco baixo.
       if (nA === null && nB === null) return 0;
       if (nA === null) return 1;
       if (nB === null) return -1;
-      return riscosOrdenacao.direcao === 'asc' ? nA - nB : nB - nA;
-    }
-    const valA = (a[riscosOrdenacao.coluna] || '').toString().toLowerCase();
-    const valB = (b[riscosOrdenacao.coluna] || '').toString().toLowerCase();
-    const cmp = valA.localeCompare(valB);
-    return riscosOrdenacao.direcao === 'asc' ? cmp : -cmp;
+      return dir * (nA - nB);
+    },
   });
 
-  ['area', 'titulo', 'score'].forEach(col => {
-    const el = document.getElementById(`sort-risco-${col}`);
-    if (el) el.textContent = col === riscosOrdenacao.coluna ? (riscosOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
-  });
+  riscosOrdenacao.atualizarSetas('sort-risco-', ['area', 'titulo', 'score']);
 
   const processosPorId = RiscoConsolidado.indexarProcessos(riscosProcessosCache);
 
@@ -3928,12 +3870,7 @@ window.clonarRisco = (id) => {
 
 window.filtrarRiscos = () => renderizarRiscos();
 window.ordenarRiscos = (coluna) => {
-  if (riscosOrdenacao.coluna === coluna) {
-    riscosOrdenacao.direcao = riscosOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
-  } else {
-    riscosOrdenacao.coluna = coluna;
-    riscosOrdenacao.direcao = 'asc';
-  }
+  riscosOrdenacao.ordenar(coluna);
   renderizarRiscos();
 };
 
@@ -4411,22 +4348,24 @@ window.salvarRisco = async () => {
   const isNew = !r.id;
   if (isNew) r.origem = 'Manual';
 
-  try {
-    const result = await API.salvarRisco(r);
-    if (isNew) {
-      r.id = result.id;
-      // Sem fechar o drawer, o proximo "Salvar" precisa gravar no MESMO
-      // registro em vez de criar um segundo risco identico.
-      document.getElementById('rId').value = r.id;
-    }
-    const idx = riscosData.findIndex(x => x.id === r.id);
-    if (idx !== -1) riscosData[idx] = { ...riscosData[idx], ...r };
-    else riscosData.push({ origem: 'Manual', ...r });
-    renderizarRiscos();
-    _atualizarTituloDrawerRisco(r);
-    showToast('✅ Salvo!', '#2e7d32');
-    API.invalidate('getRiscos');
-  } catch (e) { showToast('❌ Erro: ' + e.message, '#c62828'); }
+  await comBotaoCarregando('btnSalvarRisco', async () => {
+    try {
+      const result = await API.salvarRisco(r);
+      if (isNew) {
+        r.id = result.id;
+        // Sem fechar o drawer, o proximo "Salvar" precisa gravar no MESMO
+        // registro em vez de criar um segundo risco identico.
+        document.getElementById('rId').value = r.id;
+      }
+      const idx = riscosData.findIndex(x => x.id === r.id);
+      if (idx !== -1) riscosData[idx] = { ...riscosData[idx], ...r };
+      else riscosData.push({ origem: 'Manual', ...r });
+      renderizarRiscos();
+      _atualizarTituloDrawerRisco(r);
+      showToast('✅ Salvo!', '#2e7d32');
+      API.invalidate('getRiscos');
+    } catch (e) { showToast('❌ Erro: ' + e.message, '#c62828'); }
+  });
 };
 
 /**
@@ -5970,7 +5909,7 @@ function _htmlModalIndicador() {
       </label>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalIndicador()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarIndicador()">Salvar</button>
+        <button class="btn btn-primary" id="btnSalvarIndicador" onclick="salvarIndicador()">Salvar</button>
       </div>
     </div></div>`;
 }
@@ -6025,24 +5964,26 @@ window.salvarIndicador = async () => {
     const atual = indicadoresData.find(x => x.id === d.id);
     d.foraDaMeta = _indicadorForaDaMeta({ metaMinima: d.metaMinima }, atual ? atual.ultimoDesempenho : null);
   }
-  try {
-    const result = await API.salvarIndicadorSeguranca(d);
-    fecharModalIndicador();
-    showToast('✅ Salvo!', '#2e7d32');
-    if (d.id) {
-      const idx = indicadoresData.findIndex(x => x.id === d.id);
-      if (idx !== -1) indicadoresData[idx] = { ...indicadoresData[idx], ...d };
-    } else {
-      d.id = result.id;
-      d.historico = [];
-      d.ultimoDesempenho = null;
-      d.ultimoMes = null;
-      d.foraDaMeta = false;
-      indicadoresData.push(d);
-    }
-    _atualizarTelaIndicadorAtual();
-    API.invalidate('getIndicadoresSeguranca');
-  } catch (e) { showToast('Erro: ' + e.message, '#c62828'); }
+  await comBotaoCarregando('btnSalvarIndicador', async () => {
+    try {
+      const result = await API.salvarIndicadorSeguranca(d);
+      fecharModalIndicador();
+      showToast('✅ Salvo!', '#2e7d32');
+      if (d.id) {
+        const idx = indicadoresData.findIndex(x => x.id === d.id);
+        if (idx !== -1) indicadoresData[idx] = { ...indicadoresData[idx], ...d };
+      } else {
+        d.id = result.id;
+        d.historico = [];
+        d.ultimoDesempenho = null;
+        d.ultimoMes = null;
+        d.foraDaMeta = false;
+        indicadoresData.push(d);
+      }
+      _atualizarTelaIndicadorAtual();
+      API.invalidate('getIndicadoresSeguranca');
+    } catch (e) { showToast('Erro: ' + e.message, '#c62828'); }
+  });
 };
 
 // ------------------------------------------------------------
@@ -6659,8 +6600,7 @@ window.salvarEdicaoPcnBcp = async () => {
   if (!p) return;
 
   const btn = container.querySelector('button[onclick="salvarEdicaoPcnBcp()"]');
-  const textoOriginal = btn ? btn.innerHTML : '';
-  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Salvando...'; }
+  await comBotaoCarregando(btn, async () => {
   try {
     // Mesma acao que gerarPCNProcesso ja usa pra auto-salvar -- aqui e o
     // usuario quem decide salvar, mas o caminho no backend e identico.
@@ -6675,8 +6615,8 @@ window.salvarEdicaoPcnBcp = async () => {
     showToast('✅ PCN atualizado!', '#2e7d32');
   } catch (e) {
     showToast('❌ ' + e.message, '#c62828');
-    if (btn) { btn.disabled = false; btn.innerHTML = textoOriginal; }
   }
+  });
 };
 
 // ============================================================
@@ -7172,7 +7112,7 @@ async function fornecedoresCriterios() {
       <span style="font-size:0.75em;color:#888;display:block;">Desativar tira o critério das avaliações novas. As avaliações antigas continuam guardadas como foram feitas.</span>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalCriterio()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarCriterio()">Salvar</button>
+        <button class="btn btn-primary" id="btnSalvarCriterio" onclick="salvarCriterio()">Salvar</button>
       </div>
     </div></div>`;
 
@@ -7231,6 +7171,9 @@ window.salvarLimiarFornecedor = async () => {
   }
 };
 
+let criteriosOrdenacao = criarOrdenacao('nome', 'asc');
+window.ordenarCriterios = (coluna) => { criteriosOrdenacao.ordenar(coluna); renderizarCriterios(); };
+
 function renderizarCriterios() {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
   const lista = document.getElementById('listaCriterios');
@@ -7245,27 +7188,30 @@ function renderizarCriterios() {
 
   const ativos = criteriosFornecedorData.filter((c) => c.ativo);
   const pesoTotal = ativos.reduce((t, c) => t + c.peso, 0);
+  const comparadorPeso = (a, b, dir) => dir * ((a.peso || 0) - (b.peso || 0));
+  const data = criteriosOrdenacao.aplicar(criteriosFornecedorData, { peso: comparadorPeso, valeNaNota: comparadorPeso });
+  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarCriterios('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-crit-${coluna}"></span></th>`;
 
   lista.innerHTML = `
     <div class="data-table">
       <table>
         <thead>
           <tr>
-            <th style="width:32%;">Critério</th>
+            ${th('nome', 'Critério', 'width:32%;')}
             <th style="width:38%;">Descrição</th>
-            <th style="width:8%;text-align:center;">Peso</th>
-            <th style="width:12%;text-align:center;">Vale na nota</th>
+            ${th('peso', 'Peso', 'width:8%;text-align:center;')}
+            ${th('valeNaNota', 'Vale na nota', 'width:12%;text-align:center;')}
             <th style="width:10%;text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody>
-          ${criteriosFornecedorData.map((c) => `
-            <tr style="${c.ativo ? '' : 'opacity:0.5;'}">
+          ${data.map((c) => `
+            <tr style="cursor:pointer;${c.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalCriterio('${c.id}')">
               <td style="font-weight:600;">${esc(c.nome)}${c.ativo ? '' : ' <span style="font-size:0.78em;color:#888;font-weight:400;">(desativado)</span>'}</td>
               <td style="color:#666;font-size:0.9em;">${esc(c.descricao)}</td>
               <td style="text-align:center;font-weight:700;">${c.peso}</td>
               <td style="text-align:center;color:#666;font-size:0.9em;">${c.ativo && pesoTotal ? Math.round((c.peso / pesoTotal) * 100) + '%' : '–'}</td>
-              <td style="text-align:center;">
+              <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${isAdmin ? `
                   <button class="btn-icon" onclick="abrirModalCriterio('${c.id}')" title="Editar">✏️</button>
                   <button class="btn-icon" onclick="excluirCriterio('${c.id}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
@@ -7280,6 +7226,8 @@ function renderizarCriterios() {
       "Não se aplica" tira o critério da conta, sem dar nem tirar ponto.
       Mudar peso ou ativar critério sobe a versão da régua — as avaliações antigas guardam a versão que as pontuou e não mudam de nota sozinhas.
     </div>`;
+
+  criteriosOrdenacao.atualizarSetas('sort-crit-', ['nome', 'peso', 'valeNaNota']);
 }
 
 window.abrirModalCriterio = (id) => {
@@ -7301,21 +7249,23 @@ window.salvarCriterio = async () => {
   const peso = Number(document.getElementById('critPeso').value);
   if (!Number.isFinite(peso) || peso < 1) return showToast('O peso tem que ser 1 ou mais.', '#e65100');
 
-  try {
-    await API.salvarCriterioFornecedor({
-      id: document.getElementById('critId').value || null,
-      nome,
-      descricao: document.getElementById('critDescricao').value.trim(),
-      peso,
-      ativo: document.getElementById('critAtivo').checked,
-    });
-    fecharModalCriterio();
-    criteriosFornecedorData = await API.getCriteriosFornecedor();
-    renderizarCriterios();
-    showToast('✅ Salvo!', '#2e7d32');
-  } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
-  }
+  await comBotaoCarregando('btnSalvarCriterio', async () => {
+    try {
+      await API.salvarCriterioFornecedor({
+        id: document.getElementById('critId').value || null,
+        nome,
+        descricao: document.getElementById('critDescricao').value.trim(),
+        peso,
+        ativo: document.getElementById('critAtivo').checked,
+      });
+      fecharModalCriterio();
+      criteriosFornecedorData = await API.getCriteriosFornecedor();
+      renderizarCriterios();
+      showToast('✅ Salvo!', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
 };
 
 window.excluirCriterio = async (id) => {
@@ -7361,7 +7311,7 @@ async function fornecedoresCategorias() {
       <span style="font-size:0.75em;color:#888;display:block;">Desativar tira a categoria do cadastro de fornecedores novos. Fornecedores já classificados nela continuam mostrando o nome dela.</span>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalCategoriaFornecedor()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarCategoriaFornecedor()">Salvar</button>
+        <button class="btn btn-primary" id="btnSalvarCategoriaFornecedor" onclick="salvarCategoriaFornecedor()">Salvar</button>
       </div>
     </div></div>`;
 
@@ -7382,6 +7332,9 @@ async function fornecedoresCategorias() {
   renderizarCategoriasFornecedor();
 }
 
+let categoriasFornOrdenacao = criarOrdenacao('nome', 'asc');
+window.ordenarCategoriasForn = (coluna) => { categoriasFornOrdenacao.ordenar(coluna); renderizarCategoriasFornecedor(); };
+
 function renderizarCategoriasFornecedor() {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
   const lista = document.getElementById('listaCategoriasForn');
@@ -7394,24 +7347,29 @@ function renderizarCategoriasFornecedor() {
     return;
   }
 
+  const data = categoriasFornOrdenacao.aplicar(categoriasFornecedorData, {
+    status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
+  });
+  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarCategoriasForn('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-catforn-${coluna}"></span></th>`;
+
   lista.innerHTML = `
     <div class="data-table">
       <table>
         <thead>
           <tr>
-            <th style="width:70%;">Categoria</th>
-            <th style="width:15%;text-align:center;">Status</th>
+            ${th('nome', 'Categoria', 'width:70%;')}
+            ${th('status', 'Status', 'width:15%;text-align:center;')}
             <th style="width:15%;text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody>
-          ${categoriasFornecedorData.map((c) => `
-            <tr style="${c.ativo ? '' : 'opacity:0.5;'}">
+          ${data.map((c) => `
+            <tr style="cursor:pointer;${c.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalCategoriaFornecedor('${c.id}')">
               <td style="font-weight:600;">${esc(c.nome)}</td>
               <td style="text-align:center;">${c.ativo
                 ? '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#e8f5e9;color:#2e7d32;">Ativa</span>'
                 : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativa</span>'}</td>
-              <td style="text-align:center;">
+              <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${isAdmin ? `
                   <button class="btn-icon" onclick="abrirModalCategoriaFornecedor('${c.id}')" title="Editar">✏️</button>
                   <button class="btn-icon" onclick="excluirCategoriaFornecedor('${c.id}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
@@ -7420,6 +7378,8 @@ function renderizarCategoriasFornecedor() {
         </tbody>
       </table>
     </div>`;
+
+  categoriasFornOrdenacao.atualizarSetas('sort-catforn-', ['nome', 'status']);
 }
 
 window.abrirModalCategoriaFornecedor = (id) => {
@@ -7437,19 +7397,21 @@ window.salvarCategoriaFornecedor = async () => {
   const nome = document.getElementById('catFornNome').value.trim();
   if (!nome) return showToast('Informe a categoria.', '#e65100');
 
-  try {
-    await API.salvarCategoriaFornecedor({
-      id: document.getElementById('catFornId').value || null,
-      nome,
-      ativo: document.getElementById('catFornAtivo').checked,
-    });
-    fecharModalCategoriaFornecedor();
-    categoriasFornecedorData = await API.getCategoriasFornecedor();
-    renderizarCategoriasFornecedor();
-    showToast('✅ Salvo!', '#2e7d32');
-  } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
-  }
+  await comBotaoCarregando('btnSalvarCategoriaFornecedor', async () => {
+    try {
+      await API.salvarCategoriaFornecedor({
+        id: document.getElementById('catFornId').value || null,
+        nome,
+        ativo: document.getElementById('catFornAtivo').checked,
+      });
+      fecharModalCategoriaFornecedor();
+      categoriasFornecedorData = await API.getCategoriasFornecedor();
+      renderizarCategoriasFornecedor();
+      showToast('✅ Salvo!', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
 };
 
 window.excluirCategoriaFornecedor = async (id) => {
@@ -7481,7 +7443,7 @@ let fornecedoresFiltroResumo = 'todos'; // 'todos' | 'semAvaliacao' | 'vencida' 
 // Filtro independente do de resumo -- combina com E, nao substitui. Da pra
 // ver "TIC" e "sem avaliacao" ativos ao mesmo tempo.
 let fornecedoresFiltroTic = 'todos'; // 'todos' | 'tic' | 'naoTic'
-let fornecedoresOrdenacao = { coluna: 'nome', direcao: 'asc' };
+let fornecedoresOrdenacao = criarOrdenacao('nome', 'asc');
 
 window.filtrarFornecedoresResumo = (modo) => {
   fornecedoresFiltroResumo = fornecedoresFiltroResumo === modo ? 'todos' : modo;
@@ -7494,12 +7456,7 @@ window.filtrarFornecedoresTic = (modo) => {
 };
 
 window.ordenarFornecedores = (coluna) => {
-  if (fornecedoresOrdenacao.coluna === coluna) {
-    fornecedoresOrdenacao.direcao = fornecedoresOrdenacao.direcao === 'asc' ? 'desc' : 'asc';
-  } else {
-    fornecedoresOrdenacao.coluna = coluna;
-    fornecedoresOrdenacao.direcao = 'asc';
-  }
+  fornecedoresOrdenacao.ordenar(coluna);
   renderizarFornecedores();
 };
 
@@ -7562,7 +7519,7 @@ async function fornecedores() {
     <div class="loading" id="loadingFornecedores">⏳ Carregando...</div>
     <div id="listaFornecedores"></div>
     ${_htmlDrawerAvaliacaoFornecedor()}
-    ${_htmlModalFornecedorCadastro()}`;
+    ${_htmlDrawerFornecedorCadastro()}`;
 
   document.getElementById('btnIrCriterios').style.display = isAdmin ? 'inline-block' : 'none';
 
@@ -7646,7 +7603,7 @@ function renderizarFornecedores() {
     if (fornecedoresFiltroTic === 'naoTic') return f.tic === false;
     return true;
   };
-  const data = fornecedoresData.filter((f) => !busca
+  let data = fornecedoresData.filter((f) => !busca
     || (f.nome || '').toLowerCase().includes(busca)
     || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)))
     .filter(porResumo)
@@ -7662,21 +7619,18 @@ function renderizarFornecedores() {
   // Nulo sempre por ultimo, nas duas direcoes -- ausencia de avaliacao nao e
   // o pior nem o melhor caso, e "arrastar pro fim" nao deveria trocar de lado
   // so porque a pessoa inverteu a seta.
-  const valorOrdenacao = (av) => {
-    if (fornecedoresOrdenacao.coluna === 'nota') return av && av.nota !== null ? av.nota : null;
-    if (fornecedoresOrdenacao.coluna === 'criticidade') return av && av.completaCriticidade ? av.scoreCriticidade : null;
-    if (fornecedoresOrdenacao.coluna === 'avaliadoEm') return av && av.avaliadoEm ? av.avaliadoEm : null;
-    return null;
-  };
-  data.sort((a, b) => {
-    const dir = fornecedoresOrdenacao.direcao === 'asc' ? 1 : -1;
-    if (fornecedoresOrdenacao.coluna === 'nome') return dir * (a.nome || '').localeCompare(b.nome || '', 'pt-BR');
-    const vA = valorOrdenacao(_avaliacaoDoFornecedor(a.id));
-    const vB = valorOrdenacao(_avaliacaoDoFornecedor(b.id));
+  const comparadorNulavel = (valorDe) => (a, b, dir) => {
+    const vA = valorDe(_avaliacaoDoFornecedor(a.id));
+    const vB = valorDe(_avaliacaoDoFornecedor(b.id));
     if (vA === null && vB === null) return 0;
     if (vA === null) return 1;
     if (vB === null) return -1;
     return dir * (vA > vB ? 1 : vA < vB ? -1 : 0);
+  };
+  data = fornecedoresOrdenacao.aplicar(data, {
+    nota: comparadorNulavel((av) => (av && av.nota !== null ? av.nota : null)),
+    criticidade: comparadorNulavel((av) => (av && av.completaCriticidade ? av.scoreCriticidade : null)),
+    avaliadoEm: comparadorNulavel((av) => (av && av.avaliadoEm ? av.avaliadoEm : null)),
   });
 
   const th = (coluna, rotulo, estilo) => `<th onclick="ordenarFornecedores('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-forn-${coluna}"></span></th>`;
@@ -7700,7 +7654,7 @@ function renderizarFornecedores() {
             const av = _avaliacaoDoFornecedor(f.id);
             const sit = _situacaoFornecedor(av);
             return `
-            <tr>
+            <tr style="cursor:pointer;" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')">
               <td style="font-weight:600;">${esc(f.nome)}</td>
               <td style="color:#666;font-size:0.88em;">${_resumoPessoasFornecedor(f)}</td>
               <td style="text-align:center;">
@@ -7716,10 +7670,10 @@ function renderizarFornecedores() {
               <td style="color:#666;font-size:0.9em;">
                 ${av ? `${_dataCurtaForn(av.avaliadoEm)}<div style="font-size:0.8em;color:#aaa;">${esc(av.avaliadoPor || '')}</div>` : '–'}
               </td>
-              <td style="text-align:center;white-space:nowrap;">
+              <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
                 ${isAdmin
                   ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">${av ? 'Reavaliar' : 'Avaliar'}</button>
-                     <button class="btn-icon" onclick="abrirModalFornecedor('${esc(f.id)}')" title="Editar dados do fornecedor">✏️</button>`
+                     <button class="btn-icon" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" title="Editar dados do fornecedor">✏️</button>`
                   : (av ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">Ver</button>` : '–')}
               </td>
             </tr>`;
@@ -7728,10 +7682,7 @@ function renderizarFornecedores() {
       </table>
     </div>`;
 
-  ['nome', 'nota', 'criticidade', 'avaliadoEm'].forEach((col) => {
-    const el = document.getElementById(`sort-forn-${col}`);
-    if (el) el.textContent = col === fornecedoresOrdenacao.coluna ? (fornecedoresOrdenacao.direcao === 'asc' ? '▲' : '▼') : '';
-  });
+  fornecedoresOrdenacao.atualizarSetas('sort-forn-', ['nome', 'nota', 'criticidade', 'avaliadoEm']);
 }
 
 // ---- Drawer de avaliação do fornecedor ----
@@ -8123,7 +8074,7 @@ async function perfis() {
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalPerfil()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarPerfilAcesso()">Salvar</button>
+        <button class="btn btn-primary" id="btnSalvarPerfilAcesso" onclick="salvarPerfilAcesso()">Salvar</button>
       </div>
     </div></div>`;
 
@@ -8146,6 +8097,9 @@ async function perfis() {
   renderizarPerfis();
 }
 
+let perfisOrdenacao = criarOrdenacao('email', 'asc');
+window.ordenarPerfis = (coluna) => { perfisOrdenacao.ordenar(coluna); renderizarPerfis(); };
+
 function renderizarPerfis() {
   const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIL);
   const lista = document.getElementById('listaPerfis');
@@ -8153,6 +8107,8 @@ function renderizarPerfis() {
 
   const admins = perfisData.filter((p) => p.perfil === Perfis.PERFIL.ADMIN);
   const meuEmail = String(window.USER_EMAIL || '').toLowerCase();
+  const data = perfisOrdenacao.aplicar(perfisData);
+  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarPerfis('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-perfil-${coluna}"></span></th>`;
 
   lista.innerHTML = `
     ${admins.length === 1 ? `<div style="border:1px solid #ffe0b2;background:#fff8e1;border-radius:9px;padding:12px 14px;color:#e65100;font-size:0.86em;margin-bottom:14px;">
@@ -8162,19 +8118,19 @@ function renderizarPerfis() {
       <table>
         <thead>
           <tr>
-            <th style="width:34%;">E-mail</th>
-            <th style="width:20%;">Perfil</th>
-            <th style="width:20%;">Área</th>
-            <th style="width:16%;">Alterado em</th>
+            ${th('email', 'E-mail', 'width:34%;')}
+            ${th('perfil', 'Perfil', 'width:20%;')}
+            ${th('area', 'Área', 'width:20%;')}
+            ${th('atualizadoEm', 'Alterado em', 'width:16%;')}
             <th style="width:10%;text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody>
-          ${perfisData.length ? perfisData.map((p) => {
+          ${data.length ? data.map((p) => {
             const euMesmo = p.email === meuEmail;
             const desconhecido = p.perfilGravado && !Perfis.conhecido(p.perfilGravado);
             return `
-            <tr>
+            <tr${podeGerenciar ? ` style="cursor:pointer;" onclick="abrirModalPerfil('${esc(p.email)}')"` : ''}>
               <td style="font-weight:600;">${esc(p.email)}${euMesmo ? ' <span style="font-size:0.75em;color:#888;font-weight:400;">(você)</span>' : ''}</td>
               <td>
                 <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:${p.perfil === Perfis.PERFIL.ADMIN ? '#e8eaf6' : '#f5f5f5'};color:${p.perfil === Perfis.PERFIL.ADMIN ? '#1a237e' : '#555'};">${esc(Perfis.rotulo(p.perfil))}</span>
@@ -8182,7 +8138,7 @@ function renderizarPerfis() {
               </td>
               <td style="color:#666;">${esc(p.area || (Perfis.exigeArea(p.perfil) ? '— sem área, não altera nada' : '–'))}</td>
               <td style="color:#666;font-size:0.88em;">${p.atualizadoEm ? new Date(p.atualizadoEm).toLocaleDateString('pt-BR') : '–'}</td>
-              <td style="text-align:center;">
+              <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${podeGerenciar ? `
                   <button class="btn-icon" onclick="abrirModalPerfil('${esc(p.email)}')" title="Alterar">✏️</button>
                   ${euMesmo ? '' : `<button class="btn-icon" onclick="excluirPerfilAcesso('${esc(p.email)}')" title="Remover acesso" style="color:#c62828;">🗑️</button>`}` : '–'}
@@ -8196,6 +8152,8 @@ function renderizarPerfis() {
       Remover alguém desta lista não bloqueia o acesso ao sistema: a pessoa volta ao menor acesso (Gestor de área) e,
       sem área, não consegue alterar nada. Para impedir a entrada, o acesso tem que ser retirado na conta Google dela.
     </div>`;
+
+  perfisOrdenacao.atualizarSetas('sort-perfil-', ['email', 'perfil', 'area', 'atualizadoEm']);
 }
 
 window.ajustarCampoAreaPerfil = () => {
@@ -8233,15 +8191,17 @@ window.salvarPerfilAcesso = async () => {
   if (email === meuEmail && !Perfis.ehAdmin(perfil)
     && !confirm('Você está retirando o seu próprio acesso de administrador.\n\nSe não houver outro administrador, ninguém mais consegue dar acesso a ninguém sem entrar no console do Firebase. Continuar?')) return;
 
-  try {
-    await API.salvarPerfilAcesso({ email, perfil, area });
-    fecharModalPerfil();
-    perfisData = await API.getPerfis();
-    renderizarPerfis();
-    showToast('✅ Acesso salvo!', '#2e7d32');
-  } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
-  }
+  await comBotaoCarregando('btnSalvarPerfilAcesso', async () => {
+    try {
+      await API.salvarPerfilAcesso({ email, perfil, area });
+      fecharModalPerfil();
+      perfisData = await API.getPerfis();
+      renderizarPerfis();
+      showToast('✅ Acesso salvo!', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
 };
 
 window.excluirPerfilAcesso = async (email) => {
@@ -8272,7 +8232,7 @@ async function fornecedoresCadastro() {
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Cadastro de Fornecedores</h2><p class="page-sub">Os fornecedores do catálogo de dependências da empresa</p></div>
-      <button class="btn btn-primary" onclick="abrirModalFornecedor()" id="btnNovoFornecedor" style="display:none;">+ Novo Fornecedor</button>
+      <button class="btn btn-primary" onclick="abrirDrawerFornecedorCadastro()" id="btnNovoFornecedor" style="display:none;">+ Novo Fornecedor</button>
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end;">
       <input type="text" id="buscaFornecedorCadastro" placeholder="🔍 Buscar fornecedor..." oninput="renderizarFornecedoresCadastro()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:280px;">
@@ -8291,7 +8251,7 @@ async function fornecedoresCadastro() {
     </div>
     <div class="loading" id="loadingFornCadastro">⏳ Carregando...</div>
     <div id="listaFornCadastro"></div>
-    ${_htmlModalFornecedorCadastro()}`;
+    ${_htmlDrawerFornecedorCadastro()}`;
 
   document.getElementById('btnNovoFornecedor').style.display = podeMexer ? 'inline-block' : 'none';
 
@@ -8326,6 +8286,9 @@ async function fornecedoresCadastro() {
   renderizarFornecedoresCadastro();
 }
 
+let fornCadOrdenacao = criarOrdenacao('nome', 'asc');
+window.ordenarFornCad = (coluna) => { fornCadOrdenacao.ordenar(coluna); renderizarFornecedoresCadastro(); };
+
 function renderizarFornecedoresCadastro() {
   const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
   const lista = document.getElementById('listaFornCadastro');
@@ -8334,38 +8297,56 @@ function renderizarFornecedoresCadastro() {
   const busca = (document.getElementById('buscaFornecedorCadastro')?.value || '').toLowerCase();
   const filtroCategoria = document.getElementById('filtroFornCadastroCategoria')?.value || '';
   const filtroSetor = document.getElementById('filtroFornCadastroSetor')?.value || '';
-  const data = fornecedoresData.filter((f) => !busca
+  let data = fornecedoresData.filter((f) => !busca
     || (f.nome || '').toLowerCase().includes(busca)
+    || (f.nomeFantasia || '').toLowerCase().includes(busca)
     || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)))
     .filter((f) => !filtroCategoria || f.categoriaFornecedor === filtroCategoria)
     .filter((f) => !filtroSetor || f.setor === filtroSetor);
+
+  data = fornCadOrdenacao.aplicar(data, {
+    categoria: (a, b, dir) => dir * (a.categoriaFornecedor || '').localeCompare(b.categoriaFornecedor || '', 'pt-BR'),
+    setor: (a, b, dir) => dir * (a.setor || '').localeCompare(b.setor || '', 'pt-BR'),
+    // Nulo (sem avaliacao de criticidade) sempre por ultimo, nas duas direcoes
+    // -- mesmo padrao ja usado em fornecedoresOrdenacao/valorOrdenacao.
+    criticidade: (a, b, dir) => {
+      const score = (f) => { const av = _avaliacaoDoFornecedor(f.id); return av && av.completaCriticidade ? av.scoreCriticidade : null; };
+      const nA = score(a), nB = score(b);
+      if (nA === null && nB === null) return 0;
+      if (nA === null) return 1;
+      if (nB === null) return -1;
+      return dir * (nA - nB);
+    },
+  });
+
+  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarFornCad('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-forncad-${coluna}"></span></th>`;
 
   lista.innerHTML = `
     <div class="data-table">
       <table>
         <thead>
           <tr>
-            <th style="width:20%;">Empresa</th>
-            <th style="width:14%;">Categoria</th>
+            ${th('nome', 'Empresa', 'width:20%;')}
+            ${th('categoria', 'Categoria', 'width:14%;')}
             <th style="width:18%;">Serviço prestado</th>
-            <th style="width:9%;">Setor</th>
+            ${th('setor', 'Setor', 'width:9%;')}
             <th style="width:16%;">Pessoas</th>
-            <th style="width:9%;text-align:center;">Criticidade</th>
+            ${th('criticidade', 'Criticidade', 'width:9%;text-align:center;')}
             <th style="width:14%;text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody>
           ${data.length ? data.map((f) => { const av = _avaliacaoDoFornecedor(f.id); return `
-            <tr>
+            <tr style="cursor:pointer;" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')">
               <td style="font-weight:600;">${esc(f.nome)}</td>
               <td style="color:#666;font-size:0.88em;">${esc(f.categoriaFornecedor || '–')}</td>
               <td style="color:#666;font-size:0.9em;">${esc(f.detalhes || '–')}</td>
               <td style="color:#666;font-size:0.88em;">${esc(f.setor || '–')}</td>
               <td style="color:#666;font-size:0.88em;">${_resumoPessoasFornecedor(f)}</td>
               <td style="text-align:center;">${_badgeCriticidadeFornecedor(av)}</td>
-              <td style="text-align:center;">
+              <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${podeMexer ? `
-                  <button class="btn-icon" onclick="abrirModalFornecedor('${esc(f.id)}')" title="Editar">✏️</button>
+                  <button class="btn-icon" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" title="Editar">✏️</button>
                   <button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
               </td>
             </tr>`; }).join('')
@@ -8378,6 +8359,8 @@ function renderizarFornecedoresCadastro() {
       para dizer de quem dependem. As outras categorias do catálogo (Infraestrutura, Pessoas, Sistemas, Processos Internos)
       pertencem ao BIA e não são alteradas por esta tela.
     </div>`;
+
+  fornCadOrdenacao.atualizarSetas('sort-forncad-', ['nome', 'categoria', 'setor', 'criticidade']);
 }
 
 /**
@@ -8387,17 +8370,24 @@ function renderizarFornecedoresCadastro() {
  * corrigir dado do fornecedor sem trocar de tela no meio da avaliação) — mesmo
  * HTML, mesmas funções de abrir/salvar/fechar.
  */
-function _htmlModalFornecedorCadastro() {
+function _htmlDrawerFornecedorCadastro() {
   return `
-    <div class="modal-overlay" id="modalFornecedor"><div class="modal" onclick="event.stopPropagation()" style="max-width:640px;">
-      <h3 id="modalFornecedorTitulo">Novo Fornecedor</h3>
+    <div class="drawer-overlay" id="drawerOverlayFornecedorCadastro" onclick="fecharDrawerFornecedorCadastro()"></div>
+    <div class="drawer" id="drawerFornecedorCadastro">
+      <div class="drawer-header">
+        <h3 id="fornCadastroDrawerTitulo">Novo Fornecedor</h3>
+        <button onclick="fecharDrawerFornecedorCadastro()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
       <input type="hidden" id="fornCadId">
 
       <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:8px;margin-top:4px;">Dados do fornecedor</label>
-      <label>Nome da empresa</label>
-      <input type="text" id="fornCadNome" placeholder="Ex: Alfa Tecnologia S.A.">
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div><label>CNPJ</label><input type="text" id="fornCadCnpj" placeholder="00.000.000/0000-00"></div>
+        <div><label>Razão Social</label><input type="text" id="fornCadNome" placeholder="Ex: Alfa Tecnologia S.A."></div>
+        <div><label>Nome Fantasia</label><input type="text" id="fornCadNomeFantasia" placeholder="Ex: Alfa Tech"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+        <div><label>CNPJ</label><input type="text" id="fornCadCnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="this.value=formatarCNPJ(this.value)"></div>
         <div><label>Categoria</label><select id="fornCadCategoria"><option value="">Selecione...</option></select></div>
       </div>
       <label style="display:flex;align-items:center;gap:8px;margin-top:12px;font-weight:400;">
@@ -8422,7 +8412,7 @@ function _htmlModalFornecedorCadastro() {
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:center;">
           <input type="email" id="pessoaFornEmail" placeholder="E-mail">
-          <input type="text" id="pessoaFornTelefone" placeholder="Telefone">
+          <input type="text" id="pessoaFornTelefone" placeholder="Telefone" maxlength="15" oninput="this.value=formatarTelefoneBR(this.value)">
           <button class="btn btn-ghost" id="btnAdicionarPessoaForn" onclick="adicionarPessoaFornecedor()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
         </div>
       </div>
@@ -8446,12 +8436,12 @@ function _htmlModalFornecedorCadastro() {
           <a href="#areas" target="_blank" style="font-size:0.74em;color:#1a237e;font-weight:600;">+ Cadastrar nova área</a>
         </div>
       </div>
-
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="fecharModalFornecedor()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarFornecedorCadastro()">Salvar</button>
       </div>
-    </div></div>`;
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerFornecedorCadastro()">Cancelar</button>
+        <button class="btn btn-primary" id="btnSalvarFornecedorCadastro" onclick="salvarFornecedorCadastro()">Salvar</button>
+      </div>
+    </div>`;
 }
 
 window._fornecedorPessoas = [];
@@ -8512,7 +8502,7 @@ window.editarPessoaFornecedor = (idx) => {
   document.getElementById('pessoaFornNome').value = p.nome || '';
   document.getElementById('pessoaFornCargo').value = p.cargo || '';
   document.getElementById('pessoaFornEmail').value = p.email || '';
-  document.getElementById('pessoaFornTelefone').value = p.telefone || '';
+  document.getElementById('pessoaFornTelefone').value = formatarTelefoneBR(p.telefone || '');
   document.getElementById('pessoaFornEdicaoAviso').style.display = 'block';
   document.getElementById('btnAdicionarPessoaForn').textContent = 'Salvar alteração';
 };
@@ -8583,12 +8573,14 @@ window._recarregarAreasFornecedor = async () => {
   showToast('Lista de áreas atualizada.', '#2e7d32');
 };
 
-window.abrirModalFornecedor = (id) => {
+window.abrirDrawerFornecedorCadastro = (id) => {
+  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
   const f = id ? fornecedoresData.find((x) => String(x.id) === String(id)) : null;
-  document.getElementById('modalFornecedorTitulo').textContent = f ? 'Editar Fornecedor' : 'Novo Fornecedor';
+  document.getElementById('fornCadastroDrawerTitulo').textContent = f ? 'Editar Fornecedor' : 'Novo Fornecedor';
   document.getElementById('fornCadId').value = f ? f.id : '';
   document.getElementById('fornCadNome').value = f ? (f.nome || '') : '';
-  document.getElementById('fornCadCnpj').value = f ? (f.cnpj || '') : '';
+  document.getElementById('fornCadNomeFantasia').value = f ? (f.nomeFantasia || '') : '';
+  document.getElementById('fornCadCnpj').value = formatarCNPJ(f ? (f.cnpj || '') : '');
   const categoriasAtivas = (categoriasFornecedorData || []).filter((c) => c.ativo);
   // Se o fornecedor ja tem uma categoria desativada/apagada, mantem ela como
   // opcao extra selecionada — senao editar o cadastro trocaria a categoria em
@@ -8607,16 +8599,28 @@ window.abrirModalFornecedor = (id) => {
   window._fornecedorPessoas = f && Array.isArray(f.pessoas) ? [...f.pessoas] : [];
   window.cancelarEdicaoPessoaFornecedor();
   renderPessoasFornecedor();
-  document.getElementById('modalFornecedor').classList.add('open');
+  // Sem gate de perfil aqui, clicar numa linha da grade (qualquer usuario,
+  // ver renderizarFornecedoresCadastro/renderizarFornecedores) abriria um
+  // drawer totalmente editavel pra quem so pode ver -- mesmo tratamento que
+  // o drawer de Risco ja da (abrirDrawerRisco).
+  document.querySelectorAll('#drawerFornecedorCadastro input, #drawerFornecedorCadastro select').forEach((el) => { el.disabled = !podeMexer; });
+  document.getElementById('btnAdicionarPessoaForn').style.display = podeMexer ? 'inline-block' : 'none';
+  document.getElementById('btnSalvarFornecedorCadastro').style.display = podeMexer ? 'inline-block' : 'none';
+  document.getElementById('drawerFornecedorCadastro').classList.add('open');
+  document.getElementById('drawerOverlayFornecedorCadastro').classList.add('open');
 };
 
-window.fecharModalFornecedor = () => document.getElementById('modalFornecedor').classList.remove('open');
+window.fecharDrawerFornecedorCadastro = () => {
+  document.getElementById('drawerFornecedorCadastro').classList.remove('open');
+  document.getElementById('drawerOverlayFornecedorCadastro').classList.remove('open');
+};
 
 window.salvarFornecedorCadastro = async () => {
   const nome = document.getElementById('fornCadNome').value.trim();
-  if (!nome) return showToast('Informe o nome do fornecedor.', '#e65100');
+  if (!nome) return showToast('Informe a razão social do fornecedor.', '#e65100');
   const id = document.getElementById('fornCadId').value || null;
 
+  await comBotaoCarregando('btnSalvarFornecedorCadastro', async () => {
   try {
     const r = await API.salvarDependencia({
       id,
@@ -8625,6 +8629,7 @@ window.salvarFornecedorCadastro = async () => {
       // regra do banco exige para este perfil poder gravar.
       categoria: CATEGORIA_FORNECEDOR_PADRAO,
       nome,
+      nomeFantasia: document.getElementById('fornCadNomeFantasia').value.trim(),
       cnpj: document.getElementById('fornCadCnpj').value.trim(),
       categoriaFornecedor: document.getElementById('fornCadCategoria').value,
       gestorContrato: document.getElementById('fornCadGestorContrato').value.trim(),
@@ -8639,7 +8644,7 @@ window.salvarFornecedorCadastro = async () => {
       // N pessoas, cada uma com seu proprio contato.
       pessoas: window._fornecedorPessoas || [],
     });
-    fecharModalFornecedor();
+    fecharDrawerFornecedorCadastro();
     API.invalidate('getDependencias');
     // Ja sabemos exatamente o que foi gravado (r.dado) -- em vez de buscar o
     // catalogo de dependencias inteiro de novo, so atualiza este fornecedor
@@ -8650,15 +8655,16 @@ window.salvarFornecedorCadastro = async () => {
     const item = { ...r.dado, id: r.id, criteriosAplicaveis: existente ? existente.criteriosAplicaveis : null };
     const idx = fornecedoresData.findIndex((x) => String(x.id) === String(r.id));
     if (idx >= 0) fornecedoresData[idx] = item; else fornecedoresData.push(item);
-    // O modal e compartilhado entre Cadastro e Avaliação — cada renderizador só
+    // O drawer e compartilhado entre Cadastro e Avaliação — cada renderizador só
     // desenha se o próprio container estiver na página, então chamar os dois é
-    // seguro e atualiza qualquer uma das telas de onde o modal foi aberto.
+    // seguro e atualiza qualquer uma das telas de onde o drawer foi aberto.
     renderizarFornecedoresCadastro();
     renderizarFornecedores();
     showToast('✅ Salvo!', '#2e7d32');
   } catch (e) {
     showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
   }
+  });
 };
 
 /**

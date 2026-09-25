@@ -75,5 +75,93 @@
       .replace(/</g, '\\x3c');
   }
 
-  return { esc: esc, escJs: escJs, escScript: escScript };
+  /**
+   * Desabilita o botao, liga o spinner (classe .btn-loading, ja existe em
+   * styles.css), roda fnAsync, e SEMPRE restaura o botao no finally --
+   * inclusive se fnAsync jogar erro. Quem chama continua dono do try/catch e
+   * do toast de sucesso/erro; o helper so cuida do estado visual do botao.
+   */
+  async function comBotaoCarregando(botao, fnAsync) {
+    var btn = typeof botao === 'string' ? document.getElementById(botao) : botao;
+    if (!btn) return fnAsync();
+    var disabledOriginal = btn.disabled;
+    btn.disabled = true;
+    btn.classList.add('btn-loading');
+    try {
+      return await fnAsync();
+    } finally {
+      btn.disabled = disabledOriginal;
+      btn.classList.remove('btn-loading');
+    }
+  }
+
+  /**
+   * Fabrica do estado de ordenacao de uma tabela -- substitui os pares
+   * `xOrdenacao = {coluna, direcao}` / `ordenarX()` que cada tela repetia na
+   * mao. comparadores[coluna], se existir, recebe (a, b, dir) com dir ja em
+   * +1/-1 e e DONO de aplica-lo -- e assim que "nulo sempre por ultimo"
+   * (score de Risco, nota de Fornecedor) nao inverte de lado ao clicar de
+   * novo pra inverter a seta. Sem comparador pra coluna, cai no default:
+   * string minuscula, pt-BR.
+   */
+  function criarOrdenacao(colunaInicial, direcaoInicial) {
+    var estado = { coluna: colunaInicial, direcao: direcaoInicial || 'asc' };
+    return {
+      estado: estado,
+      ordenar: function (coluna) {
+        if (estado.coluna === coluna) estado.direcao = estado.direcao === 'asc' ? 'desc' : 'asc';
+        else { estado.coluna = coluna; estado.direcao = 'asc'; }
+      },
+      aplicar: function (lista, comparadores) {
+        comparadores = comparadores || {};
+        var dir = estado.direcao === 'asc' ? 1 : -1;
+        var cmp = comparadores[estado.coluna];
+        return lista.slice().sort(function (a, b) {
+          if (cmp) return cmp(a, b, dir);
+          return dir * (a[estado.coluna] || '').toString().toLowerCase()
+            .localeCompare((b[estado.coluna] || '').toString().toLowerCase(), 'pt-BR');
+        });
+      },
+      atualizarSetas: function (prefixo, colunas) {
+        colunas.forEach(function (col) {
+          var el = document.getElementById(prefixo + col);
+          if (el) el.textContent = col === estado.coluna ? (estado.direcao === 'asc' ? '▲' : '▼') : '';
+        });
+      },
+    };
+  }
+
+  /** '12345678000190' | '12.345.678/0001-90' -> '12.345.678/0001-90'. Trunca em 14 digitos. */
+  function formatarCNPJ(valor) {
+    var d = String(valor || '').replace(/\D/g, '').slice(0, 14);
+    var out = d.slice(0, 2);
+    if (d.length > 2) out += '.' + d.slice(2, 5);
+    if (d.length > 5) out += '.' + d.slice(5, 8);
+    if (d.length > 8) out += '/' + d.slice(8, 12);
+    if (d.length > 12) out += '-' + d.slice(12, 14);
+    return out;
+  }
+
+  /**
+   * Detecta fixo (10 digitos) vs celular (11) enquanto digita. Sem
+   * preservacao de cursor no meio do texto -- primeira mascara do sistema,
+   * sem precedente a manter; aceitavel pra campo curto digitado do inicio
+   * pro fim.
+   */
+  function formatarTelefoneBR(valor) {
+    var d = String(valor || '').replace(/\D/g, '').slice(0, 11);
+    var fixo = d.length <= 10;
+    var meio = fixo ? d.slice(2, 6) : d.slice(2, 7);
+    var fim = fixo ? d.slice(6, 10) : d.slice(7, 11);
+    var out = d.slice(0, 2) ? '(' + d.slice(0, 2) : '';
+    if (d.length > 2) out += ') ' + meio;
+    if (d.length > (fixo ? 6 : 7)) out += '-' + fim;
+    return out;
+  }
+
+  return {
+    esc: esc, escJs: escJs, escScript: escScript,
+    comBotaoCarregando: comBotaoCarregando, criarOrdenacao: criarOrdenacao,
+    formatarCNPJ: formatarCNPJ, formatarTelefoneBR: formatarTelefoneBR,
+  };
 });

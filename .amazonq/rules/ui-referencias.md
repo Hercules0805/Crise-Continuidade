@@ -93,7 +93,7 @@ Duas famílias coexistem, ambas válidas:
 
 ### Modal vs. Drawer
 - **Modal** (`.modal-overlay`/`.modal`, centralizado, `max-width` 480-580px conforme o formulário): para entidades de **tela única** (Perguntas, Áreas, Config. de Respostas, Dependências, Componentes, Indicadores).
-- **Drawer** (`.drawer-overlay`/`.drawer`, painel lateral de `70vw`): para entidades com **abas internas** (Processo, Risco). Se uma tela nova precisar de mais de uma seção/aba de formulário, use drawer; se for um formulário só, use modal.
+- **Drawer** (`.drawer-overlay`/`.drawer`, painel lateral de `70vw`): para entidades com **abas internas** (Processo, Risco), **ou** para um modal de formulário único que cresceu com uma sub-lista repetível embutida (mini-CRUD) — é o caso de Fornecedores (mini-CRUD de "Pessoas associadas"), que virou drawer mesmo sem abas, pelo espaço vertical extra que isso dá. Se uma tela nova precisar de mais de uma seção/aba de formulário, ou tiver um mini-CRUD embutido, use drawer; se for um formulário simples, use modal.
 
 ### Abas (tabs)
 Um único padrão de aba, usado (e que deve continuar sendo usado) em `trocarAbaProcesso`, `trocarAbaRisco` e `trocarAbaIndicadores`:
@@ -104,7 +104,8 @@ Um único padrão de aba, usado (e que deve continuar sendo usado) em `trocarAba
 
 ### Tabela + paginação
 - `.data-table`: cabeçalho `#1a237e`/branco/uppercase, linha com hover `#f8f9fa`, 1ª coluna em negrito `#1a237e`.
-- Cabeçalho ordenável: `onclick="ordenarX('campo')"` + `<span id="sort-...">` preenchido com `▲`/`▼`.
+- **Ordenação**: use `criarOrdenacao(colunaInicial, direcaoInicial)` (`util.js`) em vez de montar `{coluna, direcao}` + `ordenarX()` na mão — é a fábrica que toda tela de grade usa hoje (Áreas, Pessoas, Dependências, Processos, Riscos, Fornecedores, Perfis, Categorias/Critérios de Fornecedor). Cabeçalho: `<th onclick="ordenarX('campo')">Rótulo <span id="sort-prefixo-campo"></span></th>`; depois de montar a lista, chame `estado.atualizarSetas('sort-prefixo-', ['campo1', 'campo2', ...])`. Para ordenar por um valor calculado ou com "nulo sempre por último" (score de Risco, nota de Fornecedor), passe um comparador em `aplicar(lista, {campo: (a, b, dir) => ...})` — `dir` já vem em `+1`/`-1`, o comparador só precisa aplicá-lo.
+- **Clique na linha para editar**: `<tr style="cursor:pointer;" onclick="editarX(id)">`, com a célula de Ações usando `onclick="event.stopPropagation();"` ao redor dos botões, pra clicar num ícone não também disparar o clique da linha. Padrão obrigatório em toda grade nova com uma tela de edição 1-para-1 (ver Riscos como referência). Exceções conhecidas, não copiar sem entender o motivo: **Indicadores-Cadastro** (célula de Meta Mínima é editável inline e a coluna de checkbox de seleção em massa não tem `stopPropagation` — adicionar clique-na-linha ali sem tratar essas duas células primeiro abriria o modal por engano), **Indicadores-Matriz** (somente leitura, sem função de editar) e **Perguntas** (não é uma `<table>`, filtra escondendo/mostrando cards agrupados por categoria).
 - **Paginação**: obrigatória para qualquer lista que possa passar de ~20-30 registros (ver implementação em Indicadores: `INDICADORES_POR_PAGINA`, rodapé "Mostrando X–Y de Z" + botões `‹ Anterior`/`Próxima ›` com `.btn-ghost`). Ao criar uma tela nova com potencial de crescer, adicione paginação desde o início nesse mesmo padrão — não espere virar um problema.
 
 ### Barra de filtros
@@ -128,6 +129,27 @@ Não existe uma API por nome de severidade — a cor é passada como hex literal
 | Em andamento ("Salvando...", "Gerando...") | `#1a237e` ou `#1565c0` |
 | Confirmação neutra (ex. exclusão já efetivada) | `#555` |
 
+### Botão com estado de carregando (`comBotaoCarregando(botao, fnAsync)`)
+Toda ação "Salvar" assíncrona usa este helper (`util.js`) em vez de desabilitar o botão na mão: ele desabilita o botão, liga a classe `.btn-loading` (spinner via `::after`, já existe em `styles.css`), roda `fnAsync`, e SEMPRE restaura o botão no final — inclusive se `fnAsync` jogar erro. Quem chama continua dono do próprio try/catch e do toast de sucesso/erro:
+```js
+window.salvarX = async () => {
+  // ...validação síncrona antes...
+  await comBotaoCarregando('btnSalvarX', async () => {
+    try {
+      await API.salvarX(...);
+      showToast('✅ Salvo!', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
+};
+```
+O botão precisa de um `id` estável (ou passe o próprio elemento em vez do id). Não usar mais o padrão antigo de trocar `innerHTML` para "⏳ Salvando..." — o spinner já é feedback suficiente, e o texto do botão não deveria mudar de largura no meio do fluxo.
+**Exceção conhecida, não copiar sem entender o motivo**: os saves de Processo e de Dependências (`salvarProcesso`/`salvarDep`) usam um padrão **otimista** (fecham o drawer/modal e atualizam a grade imediatamente, antes do `await` terminar, com toast "Salvando..." e reversão em caso de erro) — isso já resolve o problema de feedback de um jeito diferente e não deve ser forçado para `comBotaoCarregando`, que pressupõe manter o formulário aberto até o fim do save.
+
+### Máscaras de entrada (`formatarCNPJ(valor)` / `formatarTelefoneBR(valor)`)
+Primeiras máscaras do sistema (`util.js`), usadas em Fornecedores (CNPJ e Telefone). Convenção: `oninput="this.value=formatarX(this.value)"` no próprio `<input>`, e formatar **também ao abrir o formulário** (não só ao digitar), pra dado antigo sem máscara mostrar formatado assim que a tela abre — ex. `document.getElementById('fornCadCnpj').value = formatarCNPJ(f ? (f.cnpj || '') : '');`. Sem preservação de cursor no meio do texto (aceitável pra campo curto digitado do início pro fim); se surgir uma nova máscara (CPF, moeda), siga o mesmo formato de função pura em `util.js`.
+
 ### Skeleton loading
 `.skeleton`/`.skeleton-row` (efeito shimmer) — usado hoje só em Perguntas e no carregamento de PCN. Para telas novas, o padrão mais simples e já dominante é o texto `<div class="loading">⏳ Carregando...</div>`; use skeleton só se a tela tiver uma tabela grande onde o "pulo" de conteúdo incomodaria.
 
@@ -146,3 +168,4 @@ Estas inconsistências existem hoje no código e são conhecidas; normalizar aos
 - **Páginas públicas standalone** (`bia-dependencias.html`, `drp-componentes.html`, `pcn-levantamento.html`, `cadastrar-areas.html`, `login.html`, `pcn-viewer.html`) **não carregam `styles.css`** — têm CSS 100% próprio, incluindo uma classe `.btn-primary` com valores diferentes da do app principal. Elas concordam no essencial (cores de marca, verde/vermelho de sucesso/erro), mas os componentes (botões, cards, chips) são implementações paralelas. Não migrar isso "de graça" — é um projeto à parte.
 - **Badges/pills com padding/radius levemente diferentes entre telas** (ex. `padding:4px 10px` vs `4px 12px` para o mesmo tipo de badge de tier/status). Ao criar um badge novo, use o template da seção 4 (Badges/Pills).
 - **Perguntas e Config. de Respostas** ainda usam emoji (✏️/🗑️) em vez de SVG para editar/excluir — telas mais antigas, pré-datam a convenção de ícone SVG. Não é para ser copiado em telas novas.
+- **Colisão de `id="modal"`** entre Perguntas e Áreas — as duas telas usam literalmente o mesmo id pro modal (e `#modalTitulo`/`#fId`/`fecharModal()` em comum). Inofensivo hoje porque a navegação recria `app.innerHTML` inteiro a cada troca de tela (só uma delas fica montada no DOM por vez), mas frágil pra qualquer mudança futura que monte mais de um painel ao mesmo tempo. Não copiar esse padrão em tela nova — dê um id próprio ao modal.
