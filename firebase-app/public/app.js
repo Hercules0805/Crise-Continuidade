@@ -230,18 +230,7 @@ window.trocarAbaProcesso = (aba) => {
     btn.style.color = a === aba ? '#1a237e' : '#999';
     btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
   });
-  // Popular contatos ao abrir aba BCP - auto-adicionar pessoas da BIA
   if (aba === 'bcp') {
-    const catalogo = window.dependenciasCatalogo || [];
-    const selecionadas = window._dependenciaSelecionadas || [];
-    selecionadas.forEach(nome => {
-      const dep = catalogo.find(d => d.nome === nome);
-      if (dep && ['Pessoa', 'Pessoas'].includes(dep.categoria) && !window._bcpContatos.includes(dep.id)) {
-        window._bcpContatos.push(dep.id);
-      }
-    });
-    popularSelectContatosBcp();
-    renderContatosBcp();
     renderFornecedoresBcp();
     renderPcnResumoBcp();
   }
@@ -393,154 +382,6 @@ window.calcularScoreInline = () => {
   });
   window._avaliacaoScore = total;
 };
-
-// ============================================================
-// BCP - Contatos e Responsabilidades
-// ============================================================
-window._bcpContatos = []; // IDs das dependências selecionadas
-
-function popularSelectContatosBcp() {
-  // Mantido para compatibilidade, mas agora usamos busca
-  const select = document.getElementById('bcpContatoSelect');
-  if (!select) return;
-  const catalogo = window.dependenciasCatalogo || [];
-  const selecionados = window._bcpContatos || [];
-  const disponiveis = catalogo.filter(d => !selecionados.includes(d.id));
-  select.innerHTML = '<option value=""></option>' +
-    disponiveis.map(d => `<option value="${d.id}">${esc(d.nome)} (${esc(d.categoria)})</option>`).join('');
-}
-
-window.mostrarDropdownContatoBcp = () => {
-  const input = document.getElementById('bcpContatoBusca');
-  const dropdown = document.getElementById('bcpContatoDropdown');
-  if (!input || !dropdown) return;
-  
-  const catalogo = window.dependenciasCatalogo || [];
-  const selecionados = window._bcpContatos || [];
-  const filtro = input.value.toLowerCase();
-  
-  const disponiveis = catalogo.filter(d => 
-    !selecionados.includes(d.id) &&
-    (filtro === '' || 
-     d.nome.toLowerCase().includes(filtro) || 
-     (d.categoria || '').toLowerCase().includes(filtro) ||
-     (d.setor || '').toLowerCase().includes(filtro) ||
-     (d.empresa || '').toLowerCase().includes(filtro) ||
-     (d.detalhes || '').toLowerCase().includes(filtro))
-  );
-  
-  if (!disponiveis.length) {
-    dropdown.innerHTML = '<div style="padding:10px 14px;font-size:0.88em;color:#999;">Nenhum resultado encontrado.</div>';
-    dropdown.style.display = 'block';
-    return;
-  }
-  
-  // Agrupar por categoria
-  const grupos = {};
-  disponiveis.forEach(d => {
-    if (!grupos[d.categoria]) grupos[d.categoria] = [];
-    grupos[d.categoria].push(d);
-  });
-  
-  let html = '';
-  Object.entries(grupos).sort((a,b) => a[0].localeCompare(b[0])).forEach(([cat, itens]) => {
-    html += `<div style="padding:6px 12px 3px;font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;background:#fafafa;">${cat}</div>`;
-    itens.forEach(d => {
-      const info = [d.setor, d.empresa].filter(Boolean).join(' • ');
-      html += `<div class="bcp-contato-option" onmousedown="adicionarContatoBcpById('${d.id}')" style="padding:8px 12px 8px 20px;font-size:0.88em;cursor:pointer;transition:background 0.1s;">
-        <div style="font-weight:600;color:#222;">${esc(d.nome)}</div>
-        ${info ? `<div style="font-size:0.82em;color:#888;margin-top:2px;">${info}</div>` : ''}
-      </div>`;
-    });
-  });
-  
-  dropdown.innerHTML = html;
-  dropdown.style.display = 'block';
-  
-  dropdown.querySelectorAll('.bcp-contato-option').forEach(el => {
-    el.addEventListener('mouseenter', () => el.style.background = '#f0f4ff');
-    el.addEventListener('mouseleave', () => el.style.background = 'transparent');
-  });
-};
-
-window.adicionarContatoBcpById = (id) => {
-  if (!window._bcpContatos.includes(id)) {
-    window._bcpContatos.push(id);
-    renderContatosBcp();
-    popularSelectContatosBcp();
-  }
-  const input = document.getElementById('bcpContatoBusca');
-  const dropdown = document.getElementById('bcpContatoDropdown');
-  if (input) input.value = '';
-  if (dropdown) dropdown.style.display = 'none';
-};
-
-// Fechar dropdown ao clicar fora
-document.addEventListener('click', (e) => {
-  const dropdown = document.getElementById('bcpContatoDropdown');
-  const input = document.getElementById('bcpContatoBusca');
-  if (dropdown && input && !input.contains(e.target) && !dropdown.contains(e.target)) {
-    dropdown.style.display = 'none';
-  }
-});
-
-window.adicionarContatoBcp = () => {
-  const select = document.getElementById('bcpContatoSelect');
-  const id = Number(select.value);
-  if (!id) return;
-  if (!window._bcpContatos.includes(id)) {
-    window._bcpContatos.push(id);
-    renderContatosBcp();
-    popularSelectContatosBcp();
-  }
-};
-
-window.removerContatoBcp = (id) => {
-  window._bcpContatos = window._bcpContatos.filter(x => x !== id);
-  renderContatosBcp();
-  popularSelectContatosBcp();
-};
-
-function renderContatosBcp() {
-  const container = document.getElementById('bcpContatosTabela');
-  const catalogo = window.dependenciasCatalogo || [];
-  const contatos = window._bcpContatos.map(id => catalogo.find(d => d.id === id)).filter(Boolean);
-
-  let rows = '';
-  if (contatos.length) {
-    rows = contatos.map(d => `<tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:12px 14px;font-weight:600;color:#222;">${esc(d.nome || '-')}</td>
-          <td style="padding:12px 14px;color:#555;">${esc(d.empresa || '-')}</td>
-          <td style="padding:12px 14px;color:#555;">${esc(d.setor || '-')}</td>
-          <td style="padding:6px 8px;"><input type="text" class="papel-crise-input" data-id="${d.id}" value="${esc(d.detalhes || '')}" placeholder="Papel neste processo..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.88em;box-sizing:border-box;"></td>
-          <td style="padding:12px 14px;color:#555;">${esc(d.telefone || '-')}</td>
-          <td style="padding:12px 14px;color:#555;">${esc(d.email || '-')}</td>
-          <td style="padding:12px 6px;text-align:center;">
-            <button onclick="removerContatoBcp('${d.id}')" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
-          </td>
-        </tr>`).join('');
-  } else {
-    rows = `<tr><td colspan="7" style="padding:16px 14px;color:#999;font-size:0.9em;text-align:center;">Nenhum contato adicionado. Use o campo abaixo para buscar e adicionar.</td></tr>`;
-  }
-
-  container.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;font-size:0.88em;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;">
-      <thead>
-        <tr style="background:#f5f6fa;">
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Nome</th>
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Empresa</th>
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Setor</th>
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Papel na Crise</th>
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Telefone</th>
-          <th style="padding:11px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">E-mail</th>
-          <th style="padding:11px 6px;text-align:center;border-bottom:1.5px solid #e0e0e0;width:50px;"></th>
-        </tr>
-      </thead>
-      <tbody>
-        ${rows}
-      </tbody>
-    </table>`;
-}
 
 window.fecharModal = () => {
   document.getElementById('drawerProcesso').classList.remove('open');
@@ -1341,62 +1182,6 @@ async function processos() {
               <div id="bcpPcnResumo"></div>
             </div>
             <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Informações de Contato e Matriz de Responsabilidade</label>
-              <div id="bcpContatosTabela"></div>
-              <div style="display:flex;gap:8px;margin-top:10px;align-items:center;">
-                <div style="flex:1;position:relative;">
-                  <input type="text" id="bcpContatoBusca" placeholder="Buscar contato por nome, setor ou categoria..." autocomplete="off" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;" onfocus="mostrarDropdownContatoBcp()" oninput="mostrarDropdownContatoBcp()">
-                  <div id="bcpContatoDropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 7px 7px;max-height:220px;overflow-y:auto;z-index:50;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
-                </div>
-                <button class="btn btn-ghost" onclick="abrirModalDepBcp()" style="padding:8px 14px;font-size:0.85em;white-space:nowrap;" title="Criar nova dependência">+ Novo</button>
-              </div>
-              <select id="bcpContatoSelect" style="display:none;"><option value=""></option></select>
-              <div class="modal-overlay" id="modalDepBcp"><div class="modal" onclick="event.stopPropagation()" style="max-width:540px;">
-                <h3 id="modalDepBcpTitulo">Nova Dependência</h3>
-                <input type="hidden" id="depBcpId">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
-                  <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Categoria</label>
-                    <input type="text" id="depBcpCategoria" list="depBcpCatList" placeholder="Ex: Pessoas" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                    <datalist id="depBcpCatList"></datalist>
-                  </div>
-                  <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Nome</label>
-                    <input type="text" id="depBcpNome" placeholder="Ex: João Silva" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                  </div>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
-                  <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Papel na Crise</label>
-                    <input type="text" id="depBcpDetalhes" placeholder="Ex: Coordenador do Plano" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                  </div>
-                  <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Setor</label>
-                    <input type="text" id="depBcpSetor" placeholder="Ex: TI" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                  </div>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px;">
-                  <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Telefone</label>
-                    <input type="text" id="depBcpTelefone" placeholder="(00) 0000-0000" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                  </div>
-                  <div>
-                    <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">E-mail</label>
-                    <input type="email" id="depBcpEmail" placeholder="email@empresa.com" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                  </div>
-                </div>
-                <div style="margin-bottom:12px;">
-                  <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Empresa</label>
-                  <input type="text" id="depBcpEmpresa" placeholder="Ex: Fortes Tecnologia" style="width:100%;padding:8px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
-                </div>
-                <input type="hidden" id="depBcpEndereco">
-                <div class="modal-footer">
-                  <button class="btn btn-ghost" onclick="fecharModalDepBcp()">Cancelar</button>
-                  <button class="btn btn-primary" onclick="salvarDepBcp()">Salvar</button>
-                </div>
-              </div></div>
-            </div>
-            <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Fornecedores</label>
               <div id="bcpFornecedoresTabela"></div>
             </div>
@@ -2011,94 +1796,6 @@ window.removerDependenciaTag = (idx) => {
 };
 
 // ============================================================
-// BCP - Modal de Criar/Editar Dependência inline
-// ============================================================
-window.abrirModalDepBcp = (d) => {
-  document.getElementById('depBcpId').value = d ? d.id : '';
-  document.getElementById('depBcpCategoria').value = d ? d.categoria : '';
-  document.getElementById('depBcpNome').value = d ? d.nome : '';
-  document.getElementById('depBcpDetalhes').value = d ? (d.detalhes || '') : '';
-  document.getElementById('depBcpSetor').value = d ? (d.setor || '') : '';
-  document.getElementById('depBcpEmpresa').value = d ? (d.empresa || '') : '';
-  document.getElementById('depBcpTelefone').value = d ? (d.telefone || '') : '';
-  document.getElementById('depBcpEmail').value = d ? (d.email || '') : '';
-  document.getElementById('depBcpEndereco').value = d ? (d.endereco || '') : '';
-  document.getElementById('modalDepBcpTitulo').textContent = d ? 'Editar Dependência' : 'Nova Dependência';
-  // Preencher datalist de categorias
-  const cats = [...new Set((window.dependenciasCatalogo || []).map(x => x.categoria))].sort();
-  document.getElementById('depBcpCatList').innerHTML = cats.map(c => `<option value="${c}">`).join('');
-  document.getElementById('modalDepBcp').classList.add('open');
-};
-
-window.fecharModalDepBcp = () => {
-  document.getElementById('modalDepBcp').classList.remove('open');
-};
-
-window.editarContatoBcp = (id) => {
-  const d = (window.dependenciasCatalogo || []).find(x => x.id === id);
-  if (d) abrirModalDepBcp(d);
-};
-
-window.salvarDepBcp = async () => {
-  const d = {
-    id: document.getElementById('depBcpId').value || null,
-    categoria: document.getElementById('depBcpCategoria').value.trim(),
-    nome: document.getElementById('depBcpNome').value.trim(),
-    detalhes: document.getElementById('depBcpDetalhes').value.trim(),
-    setor: document.getElementById('depBcpSetor').value.trim(),
-    empresa: document.getElementById('depBcpEmpresa').value.trim(),
-    telefone: document.getElementById('depBcpTelefone').value.trim(),
-    email: document.getElementById('depBcpEmail').value.trim(),
-    endereco: document.getElementById('depBcpEndereco').value.trim(),
-  };
-  if (!d.categoria) return showToast('Informe a categoria.', '#e65100');
-  if (!d.nome) return showToast('Informe o nome.', '#e65100');
-
-  // Este e um TERCEIRO caminho que cria fornecedor: o cadastro rapido de
-  // dependencia de dentro do processo. Nao foi bloqueado de proposito — obrigar
-  // a sair do PCN no meio do preenchimento para cadastrar o fornecedor em outra
-  // tela e pior. Mas fornecedor criado por aqui nasce SEM avaliacao, e ficaria
-  // invisivel: o aviso abaixo existe para isso nao passar em silencio.
-  const ehFornecedor = Perfis.categoriaDeFornecedor(d.categoria);
-  // Empresa agora pode ter N pessoas (nome/e-mail/telefone por pessoa), e este
-  // formulario generico so tem um nome (o da empresa) e um e-mail/telefone
-  // soltos, sem como dizer de quem e o contato. Em vez de gravar um contato sem
-  // nome que a tela de Fornecedores nao consegue mostrar, este caminho so grava
-  // o nome da empresa quando a categoria e Fornecedor — o aviso abaixo diz isso.
-  let contatoIgnorado = false;
-  if (ehFornecedor) {
-    if (d.empresa || d.email || d.telefone) contatoIgnorado = true;
-    d.empresa = '';
-    d.email = '';
-    d.telefone = '';
-  }
-
-  try {
-    const result = await API.salvarDependencia(d);
-    fecharModalDepBcp();
-    showToast(ehFornecedor && !d.id
-      ? `✅ Fornecedor criado! Ele aparece em Fornecedores como "Não avaliado" — avalie para ele entrar na conta de risco.${contatoIgnorado ? ' Contato não foi salvo: cadastre a pessoa em Fornecedores → Cadastro.' : ''}`
-      : '✅ Dependência salva!', '#2e7d32');
-    // Atualizar catálogo local
-    if (d.id) {
-      const idx = (window.dependenciasCatalogo || []).findIndex(x => x.id === d.id);
-      if (idx !== -1) window.dependenciasCatalogo[idx] = { ...d };
-    } else {
-      d.id = result.id;
-      window.dependenciasCatalogo = window.dependenciasCatalogo || [];
-      window.dependenciasCatalogo.push(d);
-      // Adicionar automaticamente à tabela de contatos
-      if (!window._bcpContatos.includes(d.id)) {
-        window._bcpContatos.push(d.id);
-      }
-    }
-    API.invalidate('getDependencias');
-    renderContatosBcp();
-    popularSelectContatosBcp();
-  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
-};
-
-// ============================================================
 // BCP - Avaliação de Riscos
 // ============================================================
 window._bcpRiscos = [];
@@ -2234,9 +1931,10 @@ window.abrirModalProcesso = (p) => {
   initDependenciaTags(p);
   document.getElementById('fBiaHomologada').value = p ? p.biaHomologada : '';
   const fBcpEl = document.getElementById('fBcpStatus'); if (fBcpEl) fBcpEl.value = p ? (p.bcpStatus || '') : '';
-  // Preencher contatos BCP
+  // bcpContatos nao tem mais UI propria no drawer (removida -- quem edita
+  // agora e o editor de Equipe de Crise dentro do proprio PCN). So hidrata
+  // pra nao perder o dado no proximo salvarProcesso().
   window._bcpContatos = p && p.bcpContatos ? (typeof p.bcpContatos === 'string' ? JSON.parse(p.bcpContatos) : p.bcpContatos) : [];
-  renderContatosBcp();
 
   // Preencher campos DRP
   document.getElementById('fDrpStatus').value = p ? (p.drpStatus || '') : '';
@@ -2280,10 +1978,11 @@ window.abrirModalProcesso = (p) => {
   // Mostrar botão Gerar PCN apenas para admin
   const btnGerarPcn = document.getElementById('btnGerarPcn');
   if (btnGerarPcn) btnGerarPcn.style.display = (window.USER_PERFIL === 'admin') ? 'inline-block' : 'none';
-  // Previa do PCN na aba BCP -- reseta pra mostrar a versao mais recente
-  // (processo pode ser outro, ou o mesmo com uma versao nova desde a ultima
-  // vez que o drawer foi aberto).
+  // Previa do PCN na aba BCP -- reseta pra mostrar a versao mais recente,
+  // sem edicao pendente (processo pode ser outro, ou o mesmo com uma versao
+  // nova desde a ultima vez que o drawer foi aberto).
   window._bcpPcnVersaoAtual = null;
+  window._bcpPcnEditando = false;
   renderPcnResumoBcp();
   // Mostrar status e botão do levantamento PCN
   const levStatus = document.getElementById('levantamentoStatus');
@@ -6828,15 +6527,23 @@ function _parsePCNVersoes(pcnSalvo) {
 // Indice da versao em previa na aba BCP (0-based, na mesma ordem de
 // _parsePCNVersoes -- nao e persistido, só controla o <select> da tela).
 window._bcpPcnVersaoAtual = null;
+// Liga o modo edicao (contenteditable) na propria previa -- ver editarPcnBcp/
+// cancelarEdicaoPcnBcp/salvarEdicaoPcnBcp, logo abaixo.
+window._bcpPcnEditando = false;
 
 /**
- * Previa somente-leitura do PCN gerado, dentro da aba BCP -- mesmo conteudo
- * sanitizado (sanitizarPCN) que ja vira popup em abrirPCNSalvo/
- * gerarPCNProcesso, so que embutido na div em vez de document.write numa
- * janela nova. Editar/trocar de versao "de verdade"/imprimir continuam so no
- * popup (_buildPCNPage) -- isolar isso tudo num iframe exigiria reescrever
- * pcn-live.js pra atravessar a fronteira (ver sanitizar-pcn.js), fora do
- * escopo desta previa.
+ * Previa do PCN gerado, dentro da aba BCP -- mesmo conteudo sanitizado
+ * (sanitizarPCN) que ja vira popup em abrirPCNSalvo/gerarPCNProcesso, so que
+ * embutido na div em vez de document.write numa janela nova. Fora do modo
+ * edicao e so leitura; em modo edicao, a propria div vira contenteditable e
+ * "Salvar" grava direto via API.post('salvarPCN', ...) -- a MESMA acao que o
+ * popup ja usa pra auto-salvar, so chamada sem precisar do token/script de
+ * outra origem que o popup precisa (ali e uma janela separada, sem sessao;
+ * aqui ja estamos autenticados). Edicao por secao estruturada (Contatos/
+ * Dependencias/Fornecedores) e indice lateral continuam so no popup
+ * (_buildPCNPage/pcn-live.js) -- isolar isso tudo num iframe embutido exigiria
+ * reescrever pcn-live.js pra atravessar a fronteira (ver sanitizar-pcn.js),
+ * fora do escopo desta previa.
  */
 function renderPcnResumoBcp() {
   const container = document.getElementById('bcpPcnResumo');
@@ -6875,25 +6582,77 @@ function renderPcnResumoBcp() {
   const versao = versoes[idx];
   const limpo = sanitizarPCN(versao.html || '');
   const dataFmt = versao.data ? new Date(versao.data).toLocaleString('pt-BR') : '-';
+  const isAdmin = window.USER_PERFIL === 'admin';
+  const editando = !!window._bcpPcnEditando;
 
   const seletor = versoes.length > 1 ? `
-    <select onchange="window._bcpPcnVersaoAtual = Number(this.value); renderPcnResumoBcp();" style="padding:4px 8px;border:1px solid #ddd;border-radius:6px;font-size:0.82em;">
+    <select onchange="window._bcpPcnVersaoAtual = Number(this.value); renderPcnResumoBcp();" ${editando ? 'disabled' : ''} style="padding:4px 8px;border:1px solid #ddd;border-radius:6px;font-size:0.82em;">
       ${versoes.map((v, i) => `<option value="${i}" ${i === idx ? 'selected' : ''}>Versão ${v.versao || (i + 1)}</option>`).join('')}
     </select>` : '';
 
+  const botoes = editando
+    ? `<button class="btn btn-primary" onclick="salvarEdicaoPcnBcp()" style="font-size:0.85em;">💾 Salvar alterações</button>
+       <button class="btn btn-ghost" onclick="cancelarEdicaoPcnBcp()" style="font-size:0.85em;">✖ Cancelar</button>`
+    : `<button class="btn btn-ghost" onclick="abrirPCNSalvo()" style="color:#2e7d32;border-color:#2e7d32;font-size:0.85em;">📂 Abrir PCN completo</button>
+       ${isAdmin ? `<button class="btn btn-ghost" onclick="editarPcnBcp()" style="color:#1565c0;border-color:#1565c0;font-size:0.85em;">✏️ Editar</button>
+       <button class="btn btn-ghost" onclick="gerarPCNProcesso()" style="color:#555;border-color:#ccc;font-size:0.85em;">🤖 Gerar novo PCN</button>` : ''}`;
+
   container.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;font-size:0.82em;color:#666;">
-      <span>Versão ${versao.versao || (idx + 1)} · gerado em ${dataFmt}${versao.autor ? ' · ' + esc(versao.autor) : ''}</span>
+      <span>Versão ${versao.versao || (idx + 1)} · gerado em ${dataFmt}${versao.autor ? ' · ' + esc(versao.autor) : ''}${editando ? ' · <strong style="color:#e65100;">editando</strong>' : ''}</span>
       ${seletor}
     </div>
-    <div class="bcp-pcn-preview" style="max-height:420px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;background:#fff;line-height:1.55;">
+    <div class="bcp-pcn-preview" ${editando ? 'contenteditable="true"' : ''} style="max-height:${editando ? '520px' : '420px'};overflow-y:auto;border:1px solid ${editando ? '#1565c0' : '#e0e0e0'};border-radius:8px;padding:16px 20px;background:#fff;line-height:1.55;outline:none;">
       ${limpo.html}
     </div>
     <div style="margin-top:10px;display:flex;gap:8px;">
-      <button class="btn btn-ghost" onclick="abrirPCNSalvo()" style="color:#2e7d32;border-color:#2e7d32;font-size:0.85em;">📂 Abrir PCN completo</button>
-      <button class="btn btn-ghost" onclick="gerarPCNProcesso()" style="color:#555;border-color:#ccc;font-size:0.85em;">🤖 Gerar novo PCN</button>
+      ${botoes}
     </div>`;
 }
+
+window.editarPcnBcp = () => {
+  window._bcpPcnEditando = true;
+  renderPcnResumoBcp();
+};
+
+window.cancelarEdicaoPcnBcp = () => {
+  // O HTML editado so existia no DOM, nunca foi salvo -- re-renderizar a
+  // partir de p.pcnSalvo (intocado) descarta a edicao sozinho.
+  window._bcpPcnEditando = false;
+  renderPcnResumoBcp();
+};
+
+window.salvarEdicaoPcnBcp = async () => {
+  const container = document.getElementById('bcpPcnResumo');
+  const preview = container ? container.querySelector('.bcp-pcn-preview') : null;
+  if (!preview) return;
+  const htmlEditado = preview.innerHTML.trim();
+  if (!htmlEditado) return showToast('O conteúdo não pode ficar vazio.', '#e65100');
+
+  const id = document.getElementById('fId').value || '';
+  const p = id ? (window.processosData || []).find(proc => proc.id === id) : null;
+  if (!p) return;
+
+  const btn = container.querySelector('button[onclick="salvarEdicaoPcnBcp()"]');
+  const textoOriginal = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Salvando...'; }
+  try {
+    // Mesma acao que gerarPCNProcesso ja usa pra auto-salvar -- aqui e o
+    // usuario quem decide salvar, mas o caminho no backend e identico.
+    await API.post('salvarPCN', { id: String(id), area: p.area, processo: p.processo, pcnHtml: htmlEditado });
+    API.invalidate('getProcessos');
+    const versoes = p.pcnSalvo ? _parsePCNVersoes(p.pcnSalvo) : [];
+    versoes.push({ versao: versoes.length + 1, data: new Date().toISOString(), autor: window.USER_EMAIL || 'sistema', html: htmlEditado });
+    p.pcnSalvo = JSON.stringify(versoes.slice(-3));
+    window._bcpPcnEditando = false;
+    window._bcpPcnVersaoAtual = null;
+    renderPcnResumoBcp();
+    showToast('✅ PCN atualizado!', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + e.message, '#c62828');
+    if (btn) { btn.disabled = false; btn.innerHTML = textoOriginal; }
+  }
+};
 
 // ============================================================
 // TEMPLATE HTML DO PCN (compartilhado)
