@@ -159,7 +159,7 @@ Primeiras máscaras do sistema (`util.js`), usadas em Fornecedores (CNPJ e Telef
 `.skeleton`/`.skeleton-row` (efeito shimmer) — usado hoje só em Perguntas e no carregamento de PCN. Para telas novas, o padrão mais simples e já dominante é o texto `<div class="loading">⏳ Carregando...</div>`; use skeleton só se a tela tiver uma tabela grande onde o "pulo" de conteúdo incomodaria.
 
 ### Navegação
-`.nav`/`.nav-group`/`.nav-dropdown` (definidos em `styles.css`, markup em `index.html`). Uma tela nova entra como item dentro de um dos 4 grupos existentes (Continuidade de Negócio, Riscos, Cadastros, Administração) — evite criar um 5º grupo sem necessidade clara.
+`.nav`/`.nav-group`/`.nav-dropdown` (definidos em `styles.css`, markup em `index.html`). Uma tela nova entra como item dentro de um dos 5 grupos existentes (Continuidade de Negócio, Riscos, Indicadores, Fornecedores, Administração) — evite criar um 6º grupo sem necessidade clara. O grupo "Cadastros" foi extinto: Perguntas/Áreas/Pessoas/Dependências entraram em Continuidade de Negócio. Os subitens de cada grupo ficam em **ordem alfabética** (exceto quando uma ordem diferente for pedida explicitamente) — ao adicionar um item novo, insira na posição alfabética certa, não no fim da lista.
 
 ### Ícones
 **Convenção para telas novas: SVG inline, não emoji**, para ações de linha de tabela (editar/excluir) — copie o par de ícones já usado em Áreas/Processos/Dependências/Componentes/Riscos/Indicadores (lápis laranja `#ff6b35` + lixeira cinza `#999`). Emoji continuam aceitáveis em: texto de botão/cabeçalho (📥 Importar, 📁 pasta, 🔍 placeholder de busca) e prefixo de toast (✅/❌/⏳) — isso já é consistente em toda a base.
