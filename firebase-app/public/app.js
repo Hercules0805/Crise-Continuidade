@@ -2368,7 +2368,13 @@ let dependenciasOrdenacao = criarOrdenacao('categoria', 'asc');
 // tambem na lista de categorias da aba BIA (Fornecedores/Pessoas/Processos
 // Internos sao as outras 3, cada uma sua propria entidade).
 const DEPENDENCIA_CATEGORIAS_TECNICAS = ['API', 'Banco de Dados', 'Infraestrutura', 'Segurança', 'Servidor', 'Sistemas', 'Outros'];
-const DEPENDENCIA_ESTRATEGIAS_BACKUP = ['Backup & Restore', 'Cold Site', 'Warm Standby', 'Active-Passive', 'Active-Active'];
+const DEPENDENCIA_ESTRATEGIAS_BACKUP = [
+  { valor: 'Backup & Restore', descricao: 'Recupera a partir de backups armazenados. RTO/RPO mais altos, custo mais baixo.' },
+  { valor: 'Cold Site', descricao: 'Ambiente de recuperação sem infraestrutura ativa, provisionado sob demanda. RTO alto, custo baixo.' },
+  { valor: 'Warm Standby', descricao: 'Ambiente parcialmente ativo, pronto pra escalar rapidamente. RTO/RPO intermediários.' },
+  { valor: 'Active-Passive', descricao: 'Ambiente secundário pronto assume a operação se o primário falhar. RTO baixo.' },
+  { valor: 'Active-Active', descricao: 'Dois ambientes operando ao mesmo tempo, com balanceamento de carga. RTO/RPO praticamente zero, custo mais alto.' },
+];
 
 async function dependencias() {
   app.innerHTML = `
@@ -2398,15 +2404,10 @@ async function dependencias() {
       <table>
         <thead>
           <tr>
-            <th onclick="ordenarDependencias('categoria')" style="cursor:pointer;width:12%;">Categoria <span id="sort-dep-categoria"></span></th>
-            <th onclick="ordenarDependencias('empresa')" style="cursor:pointer;width:13%;">Empresa <span id="sort-dep-empresa"></span></th>
-            <th onclick="ordenarDependencias('nome')" style="cursor:pointer;width:15%;">Nome <span id="sort-dep-nome"></span></th>
-            <th style="width:12%;">Papel</th>
-            <th style="width:10%;">Setor</th>
-            <th style="width:10%;">Telefone</th>
-            <th style="width:13%;">Email</th>
-            <th style="width:10%;">Endereço</th>
-            <th style="width:6%;text-align:center;">Ações</th>
+            <th onclick="ordenarDependencias('categoria')" style="cursor:pointer;width:18%;">Categoria <span id="sort-dep-categoria"></span></th>
+            <th onclick="ordenarDependencias('nome')" style="cursor:pointer;width:25%;">Nome <span id="sort-dep-nome"></span></th>
+            <th style="width:45%;">Papel</th>
+            <th style="width:12%;text-align:center;">Ações</th>
           </tr>
         </thead>
         <tbody id="depRows"></tbody>
@@ -2440,35 +2441,9 @@ async function dependencias() {
                 <input type="text" id="depNome" placeholder="Ex: Switches e roteadores" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Papel</label>
-                <input type="text" id="depDetalhes" placeholder="Papel ou função desta dependência" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-              </div>
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Setor</label>
-                <input type="text" id="depSetor" list="depSetorList" placeholder="Ex: TI, Facilities" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-                <datalist id="depSetorList"></datalist>
-              </div>
-            </div>
             <div style="margin-bottom:14px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Empresa</label>
-              <input type="text" id="depEmpresa" list="depEmpresaList" placeholder="Ex: Fortes Tecnologia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-              <datalist id="depEmpresaList"></datalist>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Telefone</label>
-                <input type="text" id="depTelefone" placeholder="(00) 0000-0000" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-              </div>
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Email</label>
-                <input type="email" id="depEmail" placeholder="contato@fornecedor.com" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-              </div>
-            </div>
-            <div style="margin-bottom:14px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Endereço</label>
-              <input type="text" id="depEndereco" placeholder="Endereço ou localização" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Papel</label>
+              <textarea id="depDetalhes" rows="3" placeholder="Papel ou função desta dependência" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
             </div>
           </div>
 
@@ -2483,18 +2458,16 @@ async function dependencias() {
                 <input type="text" id="depRpo" placeholder="Ex: 1 hora" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Estratégia de Backup</label>
-                <select id="depEstrategia" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-                  <option value="">Selecione...</option>
-                  ${DEPENDENCIA_ESTRATEGIAS_BACKUP.map(e => `<option value="${e}">${e}</option>`).join('')}
-                </select>
-              </div>
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Responsável</label>
-                <input type="text" id="depResponsavel" placeholder="Ex: Time de Infraestrutura" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-              </div>
+            <div style="margin-bottom:14px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Estratégia de Backup</label>
+              <input type="hidden" id="depEstrategia" value="">
+              <div id="chips-depEstrategia" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            </div>
+            <div style="margin-bottom:14px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área Responsável</label>
+              <select id="depResponsavel" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                <option value="">Selecione...</option>
+              </select>
             </div>
             ${_htmlDrpLista('drpHealthCheck', 'Checklist de Verificação e Diagnóstico (Health Check)', 'Ex: Infraestrutura/Cloud: o ambiente está acessível?')}
             ${_htmlDrpLista('drpRunbook', 'Fase Executiva de Recuperação (Runbook de Restore)', 'Ex: Restaurar o banco de dados a partir do último backup íntegro')}
@@ -2515,8 +2488,11 @@ async function dependencias() {
     // continue inteiro -- e o mesmo de que os processos dependem. Sem tirar
     // Pessoa, o <select> fixo de categoria (so as 7 tecnicas) nao teria como
     // mostrar/editar uma linha de categoria "Pessoas" corretamente.
-    const todas = await API.getDependencias();
+    const [todas, areas] = await Promise.all([API.getDependencias(), API.getAreas()]);
     dependenciasData = todas.filter(d => !Perfis.categoriaDeFornecedor(d.categoria) && !['Pessoas', 'Pessoa'].includes(d.categoria));
+    // Fonte do select "Area Responsavel" na aba DRP -- mesmo catalogo que
+    // Areas/Fornecedor ja usam.
+    window.areasData = areas;
   } catch(e) { dependenciasData = []; }
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaDeps').style.display = 'block';
@@ -2540,28 +2516,21 @@ function renderizarDependencias() {
   const busca = (document.getElementById('buscaDep') || {}).value || '';
   if (busca.trim()) {
     const termo = busca.toLowerCase();
-    data = data.filter(d => 
+    data = data.filter(d =>
       (d.nome || '').toLowerCase().includes(termo) ||
-      (d.empresa || '').toLowerCase().includes(termo) ||
       (d.categoria || '').toLowerCase().includes(termo) ||
-      (d.setor || '').toLowerCase().includes(termo) ||
       (d.detalhes || '').toLowerCase().includes(termo)
     );
   }
 
   data = dependenciasOrdenacao.aplicar(data);
-  dependenciasOrdenacao.atualizarSetas('sort-dep-', ['categoria', 'nome', 'empresa']);
+  dependenciasOrdenacao.atualizarSetas('sort-dep-', ['categoria', 'nome']);
 
   document.getElementById('depRows').innerHTML = data.length
     ? data.map(d => `<tr style="cursor:pointer;" onclick="editarDep('${d.id}')">
         <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(d.categoria)}</span></td>
-        <td style="font-size:0.85em;color:#555;">${esc(d.empresa || '-')}</td>
         <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
         <td style="font-size:0.85em;color:#555;">${esc(d.detalhes || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(d.setor || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(d.telefone || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(d.email || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(d.endereco || '-')}</td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarDep('${d.id}')" title="Editar">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -2571,7 +2540,7 @@ function renderizarDependencias() {
           </button>
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="9" style="text-align:center;color:#999;padding:40px;">Nenhuma dependência cadastrada.</td></tr>';
+    : '<tr><td colspan="4" style="text-align:center;color:#999;padding:40px;">Nenhuma dependência cadastrada.</td></tr>';
 }
 
 window.filtrarDependencias = () => renderizarDependencias();
@@ -2711,20 +2680,54 @@ window.trocarAbaDependencia = (aba) => {
   });
 };
 
+/**
+ * Cartão único selecionável (nunca lista) -- clicar destaca/desmarca um valor
+ * só, ao contrário dos chips de sugestão da aba DRP (_htmlDrpLista), que só
+ * preenchem uma caixa de texto pra adicionar à lista. Cada estratégia vem
+ * com uma descrição curta, pro usuário não precisar adivinhar o que cada uma
+ * significa.
+ */
+function renderEstrategiaChips() {
+  const container = document.getElementById('chips-depEstrategia');
+  if (!container) return;
+  const atual = document.getElementById('depEstrategia').value;
+  container.innerHTML = DEPENDENCIA_ESTRATEGIAS_BACKUP.map((e) => {
+    const sel = e.valor === atual;
+    return `<button type="button" onclick="selecionarEstrategiaDep('${escJs(e.valor)}')" style="text-align:left;padding:8px 12px;border-radius:10px;cursor:pointer;min-width:160px;max-width:220px;border:1.5px solid ${sel ? '#1a237e' : '#c5cae9'};background:${sel ? '#e8eaf6' : '#fff'};">
+      <div style="font-weight:700;color:#1a237e;font-size:0.86em;">${esc(e.valor)}${sel ? ' ✓' : ''}</div>
+      <div style="font-size:0.76em;color:#666;margin-top:3px;">${esc(e.descricao)}</div>
+    </button>`;
+  }).join('');
+}
+
+window.selecionarEstrategiaDep = (valor) => {
+  const campo = document.getElementById('depEstrategia');
+  campo.value = campo.value === valor ? '' : valor; // clicar de novo desmarca
+  renderEstrategiaChips();
+};
+
+/** Mesma ideia de _popularSelectAreasFornecedor, pro Área Responsável da Dependência. */
+function _popularSelectAreaResponsavelDep(valorAtual) {
+  const sel = document.getElementById('depResponsavel');
+  if (!sel) return;
+  const lista = window.areasData || [];
+  const temNaLista = lista.some((a) => a.nome === valorAtual);
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    lista.map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('') +
+    (valorAtual && !temNaLista ? `<option value="${esc(valorAtual)}">${esc(valorAtual)} (não cadastrada como área)</option>` : '');
+  sel.value = valorAtual || '';
+}
+
 window.abrirDrawerDependencia = (d) => {
   document.getElementById('depId').value = d ? d.id : '';
   document.getElementById('depCategoria').value = d ? d.categoria : '';
   document.getElementById('depNome').value = d ? d.nome : '';
   document.getElementById('depDetalhes').value = d ? (d.detalhes || '') : '';
-  document.getElementById('depSetor').value = d ? (d.setor || '') : '';
-  document.getElementById('depEmpresa').value = d ? (d.empresa || '') : '';
-  document.getElementById('depTelefone').value = d ? (d.telefone || '') : '';
-  document.getElementById('depEmail').value = d ? (d.email || '') : '';
-  document.getElementById('depEndereco').value = d ? (d.endereco || '') : '';
   document.getElementById('depRto').value = d ? (d.rto || '') : '';
   document.getElementById('depRpo').value = d ? (d.rpo || '') : '';
   document.getElementById('depEstrategia').value = d ? (d.estrategia || '') : '';
-  document.getElementById('depResponsavel').value = d ? (d.responsavel || '') : '';
+  renderEstrategiaChips();
+  _popularSelectAreaResponsavelDep(d ? (d.responsavel || '') : '');
   window._depDrpListas = {
     drpHealthCheck: d && Array.isArray(d.drpHealthCheck) ? [...d.drpHealthCheck] : [],
     drpRunbook: d && Array.isArray(d.drpRunbook) ? [...d.drpRunbook] : [],
@@ -2738,14 +2741,6 @@ window.abrirDrawerDependencia = (d) => {
     renderDrpLista(c);
   });
   document.getElementById('depDrawerTitulo').textContent = d ? 'Editar Dependência' : 'Nova Dependência';
-  // Preencher datalist de setores existentes
-  const setores = [...new Set(dependenciasData.map(x => x.setor).filter(Boolean))].sort();
-  const setorList = document.getElementById('depSetorList');
-  if (setorList) setorList.innerHTML = setores.map(s => `<option value="${s}">`).join('');
-  // Preencher datalist de empresas existentes
-  const empresas = [...new Set(dependenciasData.map(x => x.empresa).filter(Boolean))].sort();
-  const empresaList = document.getElementById('depEmpresaList');
-  if (empresaList) empresaList.innerHTML = empresas.map(e => `<option value="${e}">`).join('');
   trocarAbaDependencia('geral');
   document.getElementById('drawerDependencia').classList.add('open');
   document.getElementById('drawerOverlayDependencia').classList.add('open');
@@ -2773,20 +2768,27 @@ window.excluirDep = async (id) => {
 };
 
 window.salvarDep = async () => {
+  const idAtual = document.getElementById('depId').value || null;
+  // Setor/Empresa/Telefone/Email/Endereco sairam do formulario (so fazem
+  // sentido pra Fornecedor, que tem tela propria pra eles) -- preserva o que
+  // ja estava gravado no registro em vez de reenviar vazio, que apagaria em
+  // silencio um dado antigo no proximo merge:true (_salvarDependencia grava
+  // esses campos sempre, e e a mesma funcao compartilhada com Fornecedor).
+  const existente = idAtual ? dependenciasData.find((x) => x.id === idAtual) : null;
   const d = {
-    id: document.getElementById('depId').value || null,
+    id: idAtual,
     categoria: document.getElementById('depCategoria').value.trim(),
     nome: document.getElementById('depNome').value.trim(),
     detalhes: document.getElementById('depDetalhes').value.trim(),
-    setor: document.getElementById('depSetor').value.trim(),
-    empresa: document.getElementById('depEmpresa').value.trim(),
-    telefone: document.getElementById('depTelefone').value.trim(),
-    email: document.getElementById('depEmail').value.trim(),
-    endereco: document.getElementById('depEndereco').value.trim(),
+    setor: existente ? (existente.setor || '') : '',
+    empresa: existente ? (existente.empresa || '') : '',
+    telefone: existente ? (existente.telefone || '') : '',
+    email: existente ? (existente.email || '') : '',
+    endereco: existente ? (existente.endereco || '') : '',
     rto: document.getElementById('depRto').value.trim(),
     rpo: document.getElementById('depRpo').value.trim(),
     estrategia: document.getElementById('depEstrategia').value,
-    responsavel: document.getElementById('depResponsavel').value.trim(),
+    responsavel: document.getElementById('depResponsavel').value,
     drpHealthCheck: window._depDrpListas.drpHealthCheck || [],
     drpRunbook: window._depDrpListas.drpRunbook || [],
     drpCriteriosRetorno: window._depDrpListas.drpCriteriosRetorno || [],
