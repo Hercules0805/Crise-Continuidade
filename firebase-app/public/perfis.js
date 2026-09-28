@@ -32,10 +32,15 @@
 }(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
+  // DECISAO 28/09/2026: RBAC cumulativo. Uma pessoa pode ter VARIOS perfis
+  // (ex.: TI + Gestor). O poder e a UNIAO dos perfis: pode se QUALQUER perfil
+  // conceder. Toda funcao aqui aceita string OU array (compat com o campo
+  // antigo `perfil` string e com o novo `perfis[]`).
   var PERFIL = {
     ADMIN: 'admin',
+    SEGURANCA: 'seguranca',
+    TI: 'ti',
     GESTOR: 'gestor',
-    FORNECEDORES: 'fornecedores',
   };
 
   /** O perfil de quem nao esta cadastrado. O menor acesso possivel. */
@@ -54,26 +59,46 @@
    * nao aparece nem abre. Tela nova nasce invisivel ate alguem decidir de quem
    * ela e — que e o lado certo para errar.
    */
+  // Telas de cada perfil (allowlist). SEGURANCA faz tudo menos as 3 telas
+  // proprias do Admin (perfis, perguntas, config de respostas/regua). TI opera
+  // o DRP (ve DRP e o Catalogo de Dependencias, que e onde os parametros DRP
+  // sao editados). GESTOR mantem o de sempre.
+  var TELAS_ADMIN_EXCLUSIVAS = ['perfis', 'perguntas'];
   var TELAS = {};
   TELAS[PERFIL.ADMIN] = '*';
-  TELAS[PERFIL.GESTOR] = [
-    'processos', 'pcns', 'riscos',
+  TELAS[PERFIL.SEGURANCA] = [
+    'processos', 'pcns', 'drp', 'riscos',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
+    'dependencias', 'areas', 'pessoas',
+    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
     'admin',
   ];
-  TELAS[PERFIL.FORNECEDORES] = [
-    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
-    // Gestor do Contrato (Pessoa) e Setor responsavel (Area) sao escolhidos no
-    // cadastro de fornecedor -- sem estas duas telas, quem avalia fornecedor
-    // dependeria do admin pra cadastrar toda pessoa/area nova.
-    'areas', 'pessoas',
+  TELAS[PERFIL.TI] = [
+    'drp', 'dependencias',
+  ];
+  TELAS[PERFIL.GESTOR] = [
+    'processos', 'pcns', 'drp', 'riscos',
+    'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
+    'admin',
   ];
 
   var CATALOGO = [
     {
       valor: PERFIL.ADMIN,
       rotulo: 'Administrador',
-      descricao: 'Acesso total: catálogos, régua do BIA, processos, riscos, indicadores e fornecedores.',
+      descricao: 'Acesso total, incluindo perfis de acesso, perguntas do BIA e a régua de criticidade.',
+      exigeArea: false,
+    },
+    {
+      valor: PERFIL.SEGURANCA,
+      rotulo: 'Segurança da Informação',
+      descricao: 'Opera todos os módulos; só não faz atividades próprias do Admin (perfis de acesso, perguntas e régua do BIA).',
+      exigeArea: false,
+    },
+    {
+      valor: PERFIL.TI,
+      rotulo: 'TI',
+      descricao: 'Opera o DRP: parâmetros e conteúdo do plano de recuperação das dependências.',
       exigeArea: false,
     },
     {
@@ -82,76 +107,139 @@
       descricao: 'Vê tudo, mas só altera os processos e riscos da própria área.',
       exigeArea: true,
     },
-    {
-      valor: PERFIL.FORNECEDORES,
-      rotulo: 'Fornecedores',
-      descricao: 'Avalia fornecedores e gerencia os critérios de avaliação. Vê o resto sem poder alterar.',
-      exigeArea: false,
-    },
   ];
 
+  /** Um perfil conhecido, ou null. Tolera maiuscula/espaco -- e so isso. */
+  function _um(valor) {
+    var v = String(valor || '').trim().toLowerCase();
+    return CATALOGO.some(function (p) { return p.valor === v; }) ? v : null;
+  }
+
   /**
-   * Normaliza o que veio do banco.
-   *
-   * Perfil desconhecido NAO virou admin por acidente: cai no padrao, que e o
-   * menor acesso. Um erro de digitacao no console do Firebase nao pode promover
-   * ninguem.
+   * Resolve string OU array num array de perfis conhecidos (sem duplicatas).
+   * Vazio/tudo-desconhecido -> [PERFIL_PADRAO], o menor acesso. E o que impede
+   * um erro de digitacao no console do Firebase de promover ninguem.
+   */
+  function _perfisDe(valor) {
+    var bruto = Array.isArray(valor) ? valor : [valor];
+    var out = [];
+    bruto.forEach(function (v) {
+      var p = _um(v);
+      if (p && out.indexOf(p) === -1) out.push(p);
+    });
+    return out.length ? out : [PERFIL_PADRAO];
+  }
+
+  function _tem(valor, perfil) {
+    return _perfisDe(valor).indexOf(perfil) !== -1;
+  }
+
+  /**
+   * Normaliza para UMA string (o perfil "principal" = o primeiro conhecido).
+   * Mantido por compat com o campo antigo `perfil` string e com USER_PERFIL.
    */
   function normalizar(valor) {
-    var v = String(valor || '').trim().toLowerCase();
-    var achado = CATALOGO.find(function (p) { return p.valor === v; });
-    return achado ? achado.valor : PERFIL_PADRAO;
+    return _perfisDe(valor)[0];
+  }
+
+  /** Lista normalizada de perfis (sem duplicatas, sem desconhecidos). */
+  function normalizarLista(valor) {
+    return _perfisDe(valor).slice();
   }
 
   function conhecido(valor) {
-    var v = String(valor || '').trim().toLowerCase();
-    return CATALOGO.some(function (p) { return p.valor === v; });
+    return _um(valor) !== null;
   }
 
   function rotulo(valor) {
-    var achado = CATALOGO.find(function (p) { return p.valor === normalizar(valor); });
-    return achado ? achado.rotulo : '';
+    var p = _um(valor);
+    if (p) { var a = CATALOGO.find(function (x) { return x.valor === p; }); return a ? a.rotulo : ''; }
+    // Lista de perfis -> junta os rotulos.
+    var lista = _perfisDe(valor);
+    return lista.map(function (v) { var a = CATALOGO.find(function (x) { return x.valor === v; }); return a ? a.rotulo : v; }).join(', ');
   }
 
-  /** So o perfil de gestor esta amarrado a uma area. */
+  /** Exige area se QUALQUER perfil for Gestor. */
   function exigeArea(valor) {
-    var achado = CATALOGO.find(function (p) { return p.valor === normalizar(valor); });
-    return !!achado && achado.exigeArea;
+    return _tem(valor, PERFIL.GESTOR);
   }
 
   function ehAdmin(valor) {
-    return normalizar(valor) === PERFIL.ADMIN;
+    return _tem(valor, PERFIL.ADMIN);
+  }
+
+  function ehSeguranca(valor) {
+    return _tem(valor, PERFIL.SEGURANCA);
+  }
+
+  function ehTI(valor) {
+    return _tem(valor, PERFIL.TI);
+  }
+
+  /** Uniao das telas de todos os perfis do usuario. Admin ve tudo. */
+  function telasDoPerfil(valor) {
+    var lista = _perfisDe(valor);
+    if (lista.indexOf(PERFIL.ADMIN) !== -1) return '*';
+    var set = {};
+    lista.forEach(function (p) {
+      (TELAS[p] || []).forEach(function (t) { set[t] = true; });
+    });
+    return Object.keys(set);
   }
 
   /**
-   * Ve esta tela.
-   *
-   * Tela desconhecida devolve false, sempre: a resposta para "essa tela e sua?"
-   * nunca e "deve ser".
+   * Ve esta tela. Uniao dos perfis; tela desconhecida devolve false, sempre.
    */
   function podeVerTela(valor, pagina) {
-    var permitidas = TELAS[normalizar(valor)];
-    if (permitidas === '*') return true;
-    if (!permitidas) return false;
-    return permitidas.indexOf(String(pagina || '')) !== -1;
+    var telas = telasDoPerfil(valor);
+    if (telas === '*') return true;
+    return telas.indexOf(String(pagina || '')) !== -1;
   }
 
-  function telasDoPerfil(valor) {
-    var permitidas = TELAS[normalizar(valor)];
-    return permitidas === '*' ? '*' : (permitidas || []).slice();
+  // ---- Poderes por modulo (uniao dos perfis) ----
+
+  /** Gerar PCN: Admin ou Seguranca (PCN e do processo/BIA; TI nao gera). */
+  function podeGerarPCN(valor) {
+    return ehAdmin(valor) || ehSeguranca(valor);
+  }
+
+  /** Gerar DRP (via IA): Admin ou Seguranca (TI opera, mas nao gera). */
+  function podeGerarDRP(valor) {
+    return ehAdmin(valor) || ehSeguranca(valor);
+  }
+
+  /** Operar o DRP (editar parametros/conteudo, abrir, gerenciar): Admin, Seguranca ou TI. */
+  function podeOperarDRP(valor) {
+    return ehAdmin(valor) || ehSeguranca(valor) || ehTI(valor);
+  }
+
+  /** Editar Riscos: Admin ou Seguranca (gestor edita os da propria area, tratado por area). */
+  function podeEditarRiscos(valor) {
+    return ehAdmin(valor) || ehSeguranca(valor);
+  }
+
+  /** Editar Indicadores de Seguranca: Admin ou Seguranca. */
+  function podeEditarIndicadores(valor) {
+    return ehAdmin(valor) || ehSeguranca(valor);
+  }
+
+  /** Perguntas do BIA: atividade propria do Admin (SI nao mexe). */
+  function podeEditarPerguntas(valor) {
+    return ehAdmin(valor);
+  }
+
+  /** Regua de criticidade / config de respostas: atividade propria do Admin. */
+  function podeEditarRegua(valor) {
+    return ehAdmin(valor);
   }
 
   /**
-   * Manda no modulo de fornecedores: cadastrar, editar e apagar fornecedor,
-   * cadastrar criterio e avaliar.
-   *
-   * O fornecedor mora em /dependencias, junto com Infraestrutura, Pessoas,
-   * Sistemas e Processos Internos, que sao do BIA. Este perfil manda SO na
-   * categoria Fornecedores — ver categoriaDeFornecedor e a regra do banco.
+   * Modulo de fornecedores (cadastrar, editar, apagar, criterio, avaliar).
+   * Antes existia um perfil 'fornecedores' so pra isso; agora e Admin ou
+   * Seguranca da Informacao.
    */
   function podeGerenciarFornecedores(valor) {
-    var p = normalizar(valor);
-    return p === PERFIL.ADMIN || p === PERFIL.FORNECEDORES;
+    return ehAdmin(valor) || ehSeguranca(valor);
   }
 
   /** As categorias de /dependencias que sao "fornecedor". */
@@ -162,47 +250,23 @@
   }
 
   /**
-   * DECISAO 22/09/2026: alem de Fornecedores/Fornecedor, o perfil de
-   * fornecedores passa a mexer tambem na categoria Pessoas -- e de onde vem
-   * o Gestor do Contrato do proprio fornecedor. Continua SEM acesso a
-   * Infraestrutura/Sistemas/Processos Internos, que sao do BIA. Funcao
-   * separada de categoriaDeFornecedor de proposito: o resto do sistema usa
-   * categoriaDeFornecedor com o sentido restrito de "e um fornecedor" (ex.:
-   * o filtro que monta a lista de fornecedores), e isso nao pode mudar.
-   */
-  function categoriaGerenciavelPorFornecedores(categoria) {
-    return categoriaDeFornecedor(categoria) || String(categoria || '').trim() === 'Pessoas';
-  }
-
-  /**
    * Pode mexer nesta linha de /dependencias.
    *
-   * Admin mexe em qualquer categoria. O perfil de fornecedores mexe em
-   * fornecedor e em pessoas: sem esta guarda, quem avalia fornecedor poderia
-   * apagar as dependencias de infraestrutura e sistemas que o BIA inteiro usa.
+   * Admin e Seguranca mexem em qualquer categoria. TI mexe no catalogo de
+   * dependencias porque e ali que os Parametros DRP sao editados (operar o DRP).
    */
   function podeMexerNaDependencia(valor, categoria) {
-    if (ehAdmin(valor)) return true;
-    return podeGerenciarFornecedores(valor) && categoriaGerenciavelPorFornecedores(categoria);
+    return ehAdmin(valor) || ehSeguranca(valor) || ehTI(valor);
   }
 
-  /**
-   * Pode mexer no cadastro de Areas.
-   *
-   * Areas nao e dividida por categoria como /dependencias -- quem pode mexer,
-   * mexe em qualquer area. O perfil de fornecedores precisa disso pra
-   * cadastrar a area que vira Setor responsavel do proprio fornecedor.
-   */
+  /** Pode mexer no cadastro de Areas: Admin ou Seguranca. */
   function podeMexerNaArea(valor) {
-    return ehAdmin(valor) || podeGerenciarFornecedores(valor);
+    return ehAdmin(valor) || ehSeguranca(valor);
   }
 
   /**
-   * Quem mexe em perfil de outras pessoas.
-   *
-   * So admin, e de proposito: se o perfil de fornecedores pudesse editar
-   * perfis, ele se promoveria a admin em dois cliques e o limite nao seria
-   * limite nenhum.
+   * Quem mexe em perfil de outras pessoas. SO admin -- se outro perfil
+   * pudesse, se promoveria a admin e o limite nao seria limite nenhum.
    */
   function podeGerenciarPerfis(valor) {
     return ehAdmin(valor);
@@ -212,20 +276,30 @@
     PERFIL: PERFIL,
     PERFIL_PADRAO: PERFIL_PADRAO,
     CATALOGO: CATALOGO,
+    TELAS: TELAS,
+    TELAS_ADMIN_EXCLUSIVAS: TELAS_ADMIN_EXCLUSIVAS,
+    CATEGORIAS_FORNECEDOR: CATEGORIAS_FORNECEDOR,
     normalizar: normalizar,
+    normalizarLista: normalizarLista,
     conhecido: conhecido,
     rotulo: rotulo,
     exigeArea: exigeArea,
     ehAdmin: ehAdmin,
-    TELAS: TELAS,
-    CATEGORIAS_FORNECEDOR: CATEGORIAS_FORNECEDOR,
+    ehSeguranca: ehSeguranca,
+    ehTI: ehTI,
     podeVerTela: podeVerTela,
     telasDoPerfil: telasDoPerfil,
     categoriaDeFornecedor: categoriaDeFornecedor,
-    categoriaGerenciavelPorFornecedores: categoriaGerenciavelPorFornecedores,
     podeMexerNaDependencia: podeMexerNaDependencia,
     podeMexerNaArea: podeMexerNaArea,
     podeGerenciarFornecedores: podeGerenciarFornecedores,
     podeGerenciarPerfis: podeGerenciarPerfis,
+    podeGerarPCN: podeGerarPCN,
+    podeGerarDRP: podeGerarDRP,
+    podeOperarDRP: podeOperarDRP,
+    podeEditarRiscos: podeEditarRiscos,
+    podeEditarIndicadores: podeEditarIndicadores,
+    podeEditarPerguntas: podeEditarPerguntas,
+    podeEditarRegua: podeEditarRegua,
   };
 }));

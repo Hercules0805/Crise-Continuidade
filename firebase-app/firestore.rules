@@ -2,16 +2,22 @@ rules_version = '2';
 
 // Regras de segurança do Firestore — projeto bia-forte-2025.
 //
-// Modelo de perfis (espelha o controle atual do sistema):
+// Modelo de perfis — RBAC cumulativo (28/09/2026). Espelha public/perfis.js.
 //   - Acesso exige usuário autenticado com e-mail @fortestecnologia.com.br.
-//   - Leitura de todas as coleções de dados: qualquer usuário do domínio.
-//   - Escrita em catálogos e configurações (perguntas, areas, dependencias,
-//     componentes, riscos, indicadores_seguranca, config_respostas,
-//     config_perfis): somente admin.
-//   - Escrita em processos e respostas_bia: admin, ou gestor da própria área.
-//   - Perfil (admin/gestor) vem de config_perfis/{email}.
-//   - tokens de avaliação externa (sem login) são tratados na Task 8; por ora
-//     só admin escreve e usuários do domínio leem.
+//   - Perfis vêm de config_perfis/{email}, no array `perfis` (o campo `perfil`
+//     string fica por compat com documentos antigos). Uma pessoa pode ter mais
+//     de um perfil; o poder é a UNIÃO deles.
+//   - admin: acesso total, inclusive perfis, perguntas do BIA e régua.
+//   - seguranca (Segurança da Informação): opera todos os módulos MENOS o que é
+//     próprio do Admin (perfis, perguntas, config_respostas/config_regua).
+//   - ti: opera o DRP — escreve no catálogo de dependencias (parâmetros DRP) e
+//     NADA além disso; não gera PCN/DRP (isso é do cliente), não mexe em áreas,
+//     fornecedores, riscos, perguntas nem perfis.
+//   - gestor: lê tudo; escreve processos/respostas/riscos só da PRÓPRIA área.
+//   - Leitura das coleções de dados: qualquer usuário do domínio (exceto tokens
+//     e historico_risco, mais restritos).
+//   - O perfil 'fornecedores' foi extinto; migra para 'seguranca' no cliente.
+//   - tokens de avaliação externa: fechados aqui (só as Cloud Functions leem).
 service cloud.firestore {
   match /databases/{database}/documents {
 
@@ -34,36 +40,80 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/config_perfis/$(emailKey()));
     }
 
+    // RBAC cumulativo (28/09/2026): uma pessoa pode ter mais de um perfil.
+    // A verdade e o array `perfis`; o campo `perfil` (string) fica so por
+    // compatibilidade com documentos antigos ainda nao regravados, e vale como
+    // um perfil unico. temPerfil() cobre os dois — se um dia todo documento
+    // tiver `perfis`, o segundo termo simplesmente nunca casa.
+    //
+    // Os nomes ('admin','seguranca','ti','gestor') espelham public/perfis.js;
+    // um teste falha se as duas listas divergirem. O perfil 'fornecedores' foi
+    // extinto: quem o tinha passa a Seguranca da Informacao (migracao no
+    // cliente, em api.js _lerPerfil).
+    function temPerfil(p) {
+      return isCorpUser() && hasPerfil()
+        && ( ('perfis' in perfilDoc().data && perfilDoc().data.perfis is list
+              && perfilDoc().data.perfis.hasAny([p]))
+             || perfilDoc().data.perfil == p );
+    }
+
     function isAdmin() {
-      return isCorpUser() && hasPerfil() && perfilDoc().data.perfil == 'admin';
+      return temPerfil('admin');
     }
 
-    // Perfil de fornecedores: avalia fornecedor e cadastra criterio, e nada
-    // mais. NAO edita config_perfis — se editasse, se promoveria a admin em
-    // dois cliques e o limite nao seria limite. Os nomes dos perfis espelham
-    // public/perfis.js; um teste falha se as duas listas divergirem.
-    function isGestorFornecedores() {
-      return isCorpUser() && hasPerfil() && perfilDoc().data.perfil == 'fornecedores';
+    // Seguranca da Informacao: opera todos os modulos, MENOS o que e proprio do
+    // Admin — Perfis de Acesso, Perguntas do BIA e a Regua de criticidade
+    // (config_respostas/config_regua). Se pudesse mexer em perfis, se promoveria
+    // a admin, e o limite nao seria limite.
+    function isSeguranca() {
+      return temPerfil('seguranca');
     }
 
+    // TI: opera o DRP. Edita parametros de dependencia (necessarios ao DRP), mas
+    // NAO gera PCN nem DRP (isso e Admin+SI) e nao mexe em perguntas/regua/perfis.
+    function isTI() {
+      return temPerfil('ti');
+    }
+
+    // Modulo de fornecedores: antes tinha perfil proprio; agora e Admin ou
+    // Seguranca da Informacao. (Espelha Perfis.podeGerenciarFornecedores.)
     function podeGerenciarFornecedores() {
-      return isAdmin() || isGestorFornecedores();
+      return isAdmin() || isSeguranca();
     }
 
-    // Área vinculada ao gestor: em config_perfis (campo area) OU, se ausente,
-    // pela área cujo e-mail de responsável é o do usuário (resolvido no cliente
-    // e replicado aqui via config_perfis.area quando disponível).
+    // Quem mexe no catalogo de dependencias: Admin, SI e TI. TI precisa editar
+    // dependencias para montar o DRP. (Espelha Perfis.podeMexerNaDependencia.)
+    function podeMexerNaDependencia() {
+      return isAdmin() || isSeguranca() || isTI();
+    }
+
+    // Quem mexe em Areas: Admin e SI. (Espelha Perfis.podeMexerNaArea.)
+    function podeMexerNaArea() {
+      return isAdmin() || isSeguranca();
+    }
+
+    // Área que dá PODER DE GESTOR ao usuário: o campo `area` do config_perfis,
+    // mas SÓ quando a pessoa realmente tem o perfil 'gestor'.
+    //
     // ATENCAO: area VAZIA nao e area.
     //
-    // A regra original so testava se o campo `area` existia. Com dois perfis
-    // isso passava. Ao entrar um terceiro perfil (fornecedores), um documento
-    // com `area: ''` — que e o que se grava para perfil que nao precisa de area
-    // — passava a valer como "gestor da area vazia". E os riscos corporativos
-    // (os gerados por desvio de indicador e por nota de fornecedor) nascem
-    // justamente com area vazia: qualquer pessoa com `area: ''` no perfil
-    // leria e escreveria neles. Dai a comparacao com '' aqui.
+    // Duas armadilhas que esta função fecha, nesta ordem:
+    //
+    // 1) area vazia. A regra original só testava se o campo `area` existia. Um
+    //    documento com `area: ''` passava a valer como "gestor da area vazia".
+    //    E os riscos corporativos (os gerados por desvio de indicador e por nota
+    //    de fornecedor) nascem justamente com area vazia: qualquer pessoa com
+    //    `area: ''` leria e escreveria neles. Daí a comparação com ''.
+    //
+    // 2) area sem ser gestor (28/09/2026). Agora a Área aparece na tela para
+    //    QUALQUER perfil e é gravada mesmo para quem não é gestor (ex.: mostrar
+    //    a área do pessoal de Segurança da Informação). Sem o teste de perfil
+    //    aqui, gravar a área de um SI o tornaria gestor daquela área — leria
+    //    riscos e escreveria processos dela pela rota de gestor, sem ser gestor.
+    //    Por isso: só é "gestor da área" quem TEM o perfil gestor. Admin e SI já
+    //    têm o que precisam pelas próprias permissões, não por esta rota.
     function gestorArea() {
-      return hasPerfil()
+      return temPerfil('gestor')
         && ('area' in perfilDoc().data)
         && perfilDoc().data.area != null
         && perfilDoc().data.area != ''
@@ -75,6 +125,8 @@ service cloud.firestore {
     }
 
     // ---- Catálogos e configurações: leitura p/ domínio, escrita p/ admin ----
+    // Perguntas do BIA: proprio do Admin. SI NAO edita perguntas (fronteira do
+    // que e "atividade propria do Admin", decisao 28/09/2026).
     match /perguntas/{id} {
       allow read: if isCorpUser();
       allow write: if isAdmin();
@@ -82,46 +134,23 @@ service cloud.firestore {
 
     match /areas/{id} {
       allow read: if isCorpUser();
-      // Areas nao e dividida por categoria: o perfil de fornecedores precisa
-      // disso pra cadastrar a area que vira Setor responsavel do proprio
-      // fornecedor (ver public/perfis.js, podeMexerNaArea).
-      allow write: if isAdmin() || isGestorFornecedores();
+      // Areas: Admin e Seguranca da Informacao. (ver public/perfis.js,
+      // podeMexerNaArea.)
+      allow write: if podeMexerNaArea();
     }
 
     // /dependencias guarda o catalogo dos 5 Ps do BIA (Fornecedores,
-    // Infraestrutura, Pessoas, Sistemas, Processos Internos). O perfil de
-    // fornecedores manda nas categorias Fornecedores e Pessoas (ver decisao
-    // abaixo) e em NENHUMA outra: sem a guarda de categoria, quem avalia
-    // fornecedor poderia apagar as dependencias de infraestrutura e sistemas
-    // que o BIA inteiro usa.
+    // Infraestrutura, Pessoas, Sistemas, Processos Internos) e os parametros de
+    // DRP de cada dependencia.
     //
-    // As duas pontas sao checadas de proposito: a linha como esta hoje
-    // (resource) e como vai ficar (request.resource). Checar so uma deixaria
-    // mover uma dependencia de Sistemas para Fornecedores, ou o contrario.
-    function categoriaDeFornecedor(cat) {
-      return cat == 'Fornecedores' || cat == 'Fornecedor';
-    }
-
-    // DECISAO 22/09/2026: alem de Fornecedores/Fornecedor, o perfil de
-    // fornecedores passa a mexer tambem na categoria Pessoas -- e de onde
-    // vem o Gestor do Contrato do proprio fornecedor. Funcao separada de
-    // categoriaDeFornecedor de proposito: essa continua com o sentido restrito
-    // de "e um fornecedor", usado em outras partes do sistema (ver
-    // public/perfis.js).
-    function categoriaGerenciavelPorFornecedores(cat) {
-      return categoriaDeFornecedor(cat) || cat == 'Pessoas';
-    }
-
+    // DECISAO 28/09/2026: com o fim do perfil 'fornecedores' cai a guarda por
+    // categoria. Quem escreve aqui e Admin, Seguranca da Informacao (opera todos
+    // os modulos) e TI (precisa editar dependencias para montar o DRP). Nenhum
+    // deles fica preso a uma categoria — o recorte por categoria existia so para
+    // conter o antigo perfil de fornecedores, que nao existe mais.
     match /dependencias/{id} {
       allow read: if isCorpUser();
-      allow create: if isAdmin()
-        || (isGestorFornecedores() && categoriaGerenciavelPorFornecedores(request.resource.data.categoria));
-      allow update: if isAdmin()
-        || (isGestorFornecedores()
-            && categoriaGerenciavelPorFornecedores(resource.data.categoria)
-            && categoriaGerenciavelPorFornecedores(request.resource.data.categoria));
-      allow delete: if isAdmin()
-        || (isGestorFornecedores() && categoriaGerenciavelPorFornecedores(resource.data.categoria));
+      allow write: if podeMexerNaDependencia();
     }
 
     match /componentes/{id} {
@@ -177,21 +206,24 @@ service cloud.firestore {
       // Qualquer usuário do domínio lê (necessário para resolver o próprio perfil).
       allow read: if isCorpUser();
 
-      // Só admin mexe em perfil. Nem o perfil de fornecedores: se pudesse, ele
-      // se promoveria a admin e o limite não seria limite nenhum.
+      // Só admin mexe em perfil de acesso. Nem SI nem TI: se qualquer um
+      // pudesse editar config_perfis, se promoveria a admin e o limite não
+      // seria limite nenhum.
       //
       // A exceção é estreita de propósito: o gestor pode gravar a PRÓPRIA área
       // resolvida pelo e-mail responsável (o cliente faz isso no primeiro
       // login, porque as regras do gestor dependem do campo area). Ele não
-      // pode tocar no campo perfil nem no documento de outra pessoa.
+      // pode tocar em perfis/perfil (a lista de acessos) nem no documento de
+      // outra pessoa.
       allow update: if isAdmin()
         || (isCorpUser()
             && email == emailKey()
-            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['perfil']));
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['perfil', 'perfis']));
       allow create: if isAdmin()
         || (isCorpUser()
             && email == emailKey()
-            && !('perfil' in request.resource.data));
+            && !('perfil' in request.resource.data)
+            && !('perfis' in request.resource.data));
       allow delete: if isAdmin();
     }
 

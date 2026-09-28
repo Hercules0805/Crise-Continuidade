@@ -4,7 +4,14 @@
       "Bash(git status *)",
       "Bash(git diff *)",
       "Bash(git log *)",
-      "Bash(node --check *)"
+      "Bash(node --check *)",
+      "Bash(node --check historicoRisco.test.js)",
+      "Bash(GOOGLE_CLOUD_PROJECT=bia-forte-2025 node _tmp_ver_retrato.js)",
+      "Bash(GOOGLE_CLOUD_PROJECT=bia-forte-2025 node _tmp_diag_area.js)",
+      "Bash(rm _tmp_diag_area.js)",
+      "Bash(node --test tests/)",
+      "Bash(node --test tests/*.test.js)",
+      "Bash(node --test tests/firestore.rules.test.js)"
     ]
   }
 }

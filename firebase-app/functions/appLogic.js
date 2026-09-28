@@ -360,6 +360,299 @@ ${Object.keys(slasData).length ? Object.entries(slasData).map(([dep, sla]) => `-
   return { success: true, pcn: pcnHtml, processo: p.processo, area: p.area, tier, score };
 }
 
+// ============================================================
+// DRP por Dependência (aba "Plano de Recuperação").
+//
+// Mesmo mecanismo do PCN, mas a entidade e uma Dependencia (nao um processo):
+// o artefato e gerado pelo Gemini a partir de um TEMPLATE (importado pelo
+// usuario em Markdown, ou o padrao abaixo) + os Parametros DRP daquela
+// dependencia, e versionado no proprio doc da dependencia (campo drpSalvo,
+// mesmo formato de versoes do pcnSalvo).
+// ============================================================
+
+// Template padrao, usado quando a dependencia nao tem drpTemplate importado.
+// Baseado na PARTE 3 (DRP) do template de PCN.
+const TEMPLATE_DRP_PADRAO = `# PLANO DE RECUPERAÇÃO DE DESASTRES (DRP): [Nome da Dependência]
+
+## 1. Objetivo e Escopo Técnico
+- Objetivo do plano e componentes técnicos cobertos.
+
+## 2. Estratégia de Contingência
+- Modelo adotado (Backup & Restore / Cold Site / Warm Standby / Active-Passive / Active-Active), RTO, RPO e responsável.
+
+## 3. Critérios de Acionamento do DRP
+- Condições que disparam a ativação do plano.
+
+## 4. Pré-requisitos
+- O que precisa estar disponível/validado antes de iniciar a recuperação.
+
+## 5. Checklist de Verificação e Diagnóstico (Health Check)
+- Lista de verificações com checkboxes.
+
+## 6. Fase Executiva de Recuperação (Runbook de Restore)
+- Passos sequenciais numerados.
+
+## 7. Critérios de Retorno à Normalidade
+- Lista com checkboxes.
+
+## 8. Limitações Conhecidas da Estratégia
+- Restrições e riscos residuais.
+
+## 9. Dependências
+- Outras dependências das quais esta depende para se recuperar.
+
+## 10. Testes do Procedimento
+- Estratégia (tipo/cenário e frequência) e registro do último teste (data, resultado, evidência, pendências).`;
+
+/**
+ * Gera um DRP completo via Gemini a partir do template + os Parametros DRP de
+ * UMA dependencia. Espelha gerarPCN (mesmo boilerplate/contrato de saida HTML),
+ * so muda a entidade de origem e o prompt.
+ */
+async function gerarDRP(db, data, ctx) {
+  const id = exigir(data.id, 'id');
+  if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
+
+  const snap = await db.collection(COLLECTION.dependencias).doc(String(id)).get();
+  if (!snap.exists) throw new AppError('Dependência não encontrada.');
+  const dep = snap.data() || {};
+
+  const template = String(data.template || dep.drpTemplate || TEMPLATE_DRP_PADRAO);
+
+  const lista = (arr) => (Array.isArray(arr) && arr.length)
+    ? arr.map((x, i) => `${i + 1}. ${x}`).join('\n')
+    : 'Não informado.';
+  const t = (dep.drpTestes && typeof dep.drpTestes === 'object') ? dep.drpTestes : {};
+  const deps = Array.isArray(dep.drpDependencias) ? dep.drpDependencias : [];
+
+  // ---- Contatos reais para a seção "Contatos de Contingência" ----
+  // Antes, o prompt não mandava nenhum contato, então a IA inventava a coluna
+  // Canal/Informação. Aqui reunimos contatos de TODAS as fontes disponíveis:
+  // a própria dependência, a Área responsável (email/telefone) e cada
+  // dependência vinculada (telefone/email + pessoas/contatos + gestores do
+  // contrato, quando for fornecedor).
+  const contatos = [];
+  const _pushContato = (c) => {
+    if (!c) return;
+    const temAlgo = c.telefone || c.email;
+    if (!temAlgo) return; // só entra quem tem canal real (telefone/e-mail)
+    contatos.push({
+      nome: c.nome || '',
+      origem: c.origem || '',
+      finalidade: c.finalidade || '',
+      telefone: c.telefone || '',
+      email: c.email || '',
+    });
+  };
+
+  // Catálogo de dependências (uma leitura) para resolver as vinculadas.
+  let catalogo = [];
+  try {
+    const catSnap = await db.collection(COLLECTION.dependencias).get();
+    catalogo = catSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  } catch (e) { catalogo = []; }
+  const acharDep = (item) => {
+    if (item && item.id) { const byId = catalogo.find((d) => String(d.id) === String(item.id)); if (byId) return byId; }
+    return catalogo.find((d) => (d.nome || '') === (item && item.nome));
+  };
+
+  // Contato da própria dependência (ex.: fornecedor com telefone/e-mail).
+  _pushContato({ nome: dep.nome, origem: dep.categoria, finalidade: 'Contato direto desta dependência', telefone: dep.telefone, email: dep.email });
+  (Array.isArray(dep.pessoas) ? dep.pessoas : []).forEach((p) =>
+    _pushContato({ nome: p.nome, origem: dep.nome, finalidade: p.cargo || 'Contato', telefone: p.telefone, email: p.email }));
+  (Array.isArray(dep.gestoresContrato) ? dep.gestoresContrato : []).forEach((g) =>
+    _pushContato({ nome: g.nome, origem: g.area || dep.nome, finalidade: 'Gestor do Contrato' + (g.cargo ? ' — ' + g.cargo : ''), telefone: g.telefone, email: g.email }));
+
+  // Área responsável -> email/telefone (que vêm da Pessoa responsável).
+  if (dep.responsavel) {
+    try {
+      const areasSnap = await db.collection('areas').get();
+      const area = areasSnap.docs.map((d) => d.data() || {}).find((a) => (a.nome || '') === dep.responsavel);
+      if (area) _pushContato({ nome: area.responsavel || area.nome, origem: area.nome || dep.responsavel, finalidade: 'Área responsável', telefone: area.telefone, email: area.email });
+    } catch (e) { /* área é best-effort */ }
+  }
+
+  // Dependências vinculadas -> contato próprio + pessoas + gestores.
+  deps.forEach((item) => {
+    const d = acharDep(item);
+    if (!d) return;
+    _pushContato({ nome: d.nome, origem: d.categoria, finalidade: 'Dependência vinculada', telefone: d.telefone, email: d.email });
+    (Array.isArray(d.pessoas) ? d.pessoas : []).forEach((p) =>
+      _pushContato({ nome: p.nome, origem: d.nome, finalidade: p.cargo || 'Contato', telefone: p.telefone, email: p.email }));
+    (Array.isArray(d.gestoresContrato) ? d.gestoresContrato : []).forEach((g) =>
+      _pushContato({ nome: g.nome, origem: g.area || d.nome, finalidade: 'Gestor do Contrato' + (g.cargo ? ' — ' + g.cargo : ''), telefone: g.telefone, email: g.email }));
+  });
+
+  // Deduplica por nome+telefone+email.
+  const vistos = new Set();
+  const contatosUnicos = contatos.filter((c) => {
+    const chave = `${c.nome}|${c.telefone}|${c.email}`;
+    if (vistos.has(chave)) return false;
+    vistos.add(chave);
+    return true;
+  });
+  const contatosTexto = contatosUnicos.length
+    ? contatosUnicos.map((c) => `- ${c.nome || 'Contato'}${c.origem ? ' (' + c.origem + ')' : ''}${c.finalidade ? ' — ' + c.finalidade : ''} | Telefone: ${c.telefone || '—'} | E-mail: ${c.email || '—'}`).join('\n')
+    : 'Nenhum contato com telefone/e-mail cadastrado na base para esta dependência.';
+
+  // Estratégias de teste (lista nova) com fallback ao drpTestes antigo.
+  let estrategiasTeste = Array.isArray(dep.drpEstrategiasTeste) ? dep.drpEstrategiasTeste : [];
+  if (!estrategiasTeste.length && (t.cenarioTestado || t.frequenciaEsperada)) {
+    estrategiasTeste = [{ cenario: t.cenarioTestado || '', frequencia: t.frequenciaEsperada || '' }];
+  }
+  const estrategiasTexto = estrategiasTeste.length
+    ? estrategiasTeste.map((e, i) => `${i + 1}. Cenário: ${e.cenario || 'Não informado'} | Frequência: ${e.frequencia || 'Não informada'}`).join('\n')
+    : 'Não informado.';
+
+  // Histórico de registros de teste (lista nova) com fallback ao drpTestes antigo.
+  let registrosTeste = Array.isArray(dep.drpRegistrosTeste) ? dep.drpRegistrosTeste : [];
+  if (!registrosTeste.length && (t.dataUltimoTeste || t.resultado || t.evidencia || t.pendencias)) {
+    registrosTeste = [{ data: t.dataUltimoTeste || '', resultado: t.resultado || '', evidencia: t.evidencia || '', pendencias: t.pendencias || '' }];
+  }
+  const registrosTexto = registrosTeste.length
+    ? registrosTeste.map((r) => `- Data: ${r.data || 'Não informada'} | Resultado: ${r.resultado || 'Não informado'} | Evidência: ${r.evidencia || 'Não informada'} | Pendências: ${r.pendencias || 'Não informadas'}`).join('\n')
+    : 'Nenhum registro de teste.';
+
+  const prompt = `Você é o "Fortes Resiliente", um arquiteto sênior de Continuidade de Negócios e Resiliência Organizacional, com profundo conhecimento das normas ISO 22301, ISO 27031 e NIST SP 800-34.
+
+Com base nos dados coletados abaixo, gere um Plano de Recuperação de Desastres (DRP) COMPLETO, técnico e executável para a dependência informada, seguindo EXATAMENTE a estrutura do TEMPLATE fornecido.
+
+REGRA CRÍTICA: NÃO anonimize, mascare ou oculte NENHUM dado fornecido. Reproduza nomes, responsáveis e valores EXATAMENTE como fornecidos. Este é um documento interno corporativo. Nunca use "[REDACTED]", "XXX" ou máscaras.
+
+Onde houver dados disponíveis, preencha com informações reais. Onde não houver dados suficientes, faça inferências técnicas inteligentes com base no contexto da dependência (nunca deixe "[Inserir...]" — sempre preencha com conteúdo real ou recomendado).
+
+---
+## DADOS COLETADOS DA DEPENDÊNCIA
+
+**Dependência:** ${dep.nome || 'Não informada'}
+**Categoria:** ${dep.categoria || 'Não informada'}
+**Papel / Função:** ${dep.detalhes || 'Não informado'}
+**RTO:** ${dep.rto || 'Não definido'}
+**RPO:** ${dep.rpo || 'Não definido'}
+**Estratégia de Contingência:** ${dep.estrategia || 'Não definida'}
+**Responsável:** ${dep.responsavel || 'Não definido'}
+
+### Critérios de Acionamento do DRP
+${lista(dep.drpCriteriosAcionamento)}
+
+### Pré-requisitos
+${lista(dep.drpPreRequisitos)}
+
+### Checklist de Verificação e Diagnóstico (Health Check)
+${lista(dep.drpHealthCheck)}
+
+### Fase Executiva de Recuperação (Runbook de Restore)
+${lista(dep.drpRunbook)}
+
+### Critérios de Retorno à Normalidade
+${lista(dep.drpCriteriosRetorno)}
+
+### Limitações Conhecidas da Estratégia
+${lista(dep.drpLimitacoes)}
+
+### Dependências
+${deps.length ? deps.map((x) => `- ${x.categoria || 'Outros'}: ${x.nome}`).join('\n') : 'Não informado.'}
+
+### Testes do Procedimento — Estratégias de Teste
+${estrategiasTexto}
+
+### Testes do Procedimento — Histórico de Registros
+${registrosTexto}
+
+### Contatos disponíveis (dados reais da base)
+${contatosTexto}
+
+---
+## TEMPLATE OBRIGATÓRIO DO DRP (siga esta estrutura exata)
+
+${template}
+
+---
+## INSTRUÇÕES DE FORMATAÇÃO
+
+- Gere o DRP em formato HTML bem estruturado e formatado para impressão.
+- Use tabelas HTML com bordas para as matrizes.
+- Use headings (h1, h2, h3) para as seções.
+- Use listas (ul/ol) para itens sequenciais e checkboxes (☐ ou ☑) para checklists.
+- NÃO inclua tags <html>, <head> ou <body> — retorne apenas o conteúdo interno.
+- NÃO inclua texto introdutório, explicações ou comentários fora do HTML. Comece DIRETAMENTE com a primeira tag HTML (<h1> ou <div>).
+- NÃO use code fences. Retorne HTML puro sem marcação markdown.
+- NÃO use sintaxe markdown como **negrito** ou *itálico*. Use SOMENTE tags HTML: <strong> para negrito, <em> para itálico.
+- Linguagem: Português do Brasil, técnica e direta.
+- Onde a dependência já tiver dados (RTO/RPO/Estratégia/Responsável/listas), use ESSES VALORES EXATOS; onde faltar, infira valores tecnicamente razoáveis a partir da categoria e do contexto.
+- CONTATOS DE CONTINGÊNCIA: se o template tiver uma seção/tabela de contatos (colunas como Contato, Organização/Área, Finalidade, Canal, Informação), preencha com os itens de "Contatos disponíveis (dados reais da base)" acima. A coluna "Canal" deve conter os dados REAIS de contato (telefone e/ou e-mail exatamente como fornecidos), NÃO rótulos genéricos como "Telefone" ou "Portal". NÃO invente contatos, telefones ou e-mails: use somente os que estão na lista. Se a lista disser que não há contatos cadastrados, deixe a tabela com uma única linha indicando "Contato não cadastrado na base" em vez de inventar nomes/canais.`;
+
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + ctx.geminiApiKey;
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 32768,
+      thinkingConfig: { thinkingBudget: 0 },
+    },
+  };
+
+  let body;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    body = await response.json();
+    if (!response.ok) {
+      throw new AppError('Erro na API do Gemini: ' + (body.error ? body.error.message : 'Status ' + response.status));
+    }
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw new AppError('Erro ao gerar DRP: ' + err.message);
+  }
+
+  const content = body.candidates && body.candidates[0] && body.candidates[0].content;
+  const drpHtml = content && content.parts && content.parts[0] && content.parts[0].text;
+  if (!drpHtml) throw new AppError('Resposta vazia do Gemini.');
+
+  return { success: true, drp: drpHtml, nome: dep.nome || '', categoria: dep.categoria || '' };
+}
+
+/** Grava uma nova versao do DRP no doc da dependencia (mesmo formato do pcnSalvo). */
+async function salvarDRP(db, data, ctx) {
+  const id = exigir(data.id, 'id');
+  const html = exigir(data.html, 'html');
+  const ref = db.collection(COLLECTION.dependencias).doc(String(id));
+  const snap = await ref.get();
+  if (!snap.exists) throw new AppError('Dependência não encontrada.');
+
+  const atual = snap.data() || {};
+  let versoes = [];
+  try {
+    versoes = atual.drpSalvo ? JSON.parse(atual.drpSalvo) : [];
+  } catch {
+    versoes = [];
+  }
+  if (!Array.isArray(versoes)) versoes = [];
+
+  versoes.push({
+    versao: versoes.length + 1,
+    data: new Date().toISOString(),
+    autor: ctx.email,
+    html,
+  });
+
+  await ref.set({ drpSalvo: JSON.stringify(versoes) }, { merge: true });
+  return { success: true, versao: versoes.length, totalVersoes: versoes.length };
+}
+
+/** Apaga todas as versoes do DRP da dependencia. */
+async function excluirDRP(db, data) {
+  const id = exigir(data.id, 'id');
+  const ref = db.collection(COLLECTION.dependencias).doc(String(id));
+  const snap = await ref.get();
+  if (!snap.exists) throw new AppError('Dependência não encontrada.');
+  await ref.set({ drpSalvo: '' }, { merge: true });
+  return { success: true };
+}
+
 
 /**
  * Dados que a pagina do PCN usa para a edicao inline (pcn-live.js).
@@ -458,6 +751,9 @@ const WRITE_ACTIONS = {
   salvarCamposPCN,
   salvarDrpDependencia,
   gerarPCN,
+  gerarDRP,
+  salvarDRP,
+  excluirDRP,
 };
 
 module.exports = {

@@ -4,7 +4,7 @@
 
 const app = document.getElementById('app');
 const pages = {
-  processos, perguntas, areas, pessoas, admin, dependencias, pcns, riscos,
+  processos, perguntas, areas, pessoas, admin, dependencias, pcns, drp, riscos,
   'indicadores-dashboard': indicadoresDashboard,
   'indicadores-cadastro': indicadoresCadastro,
   'indicadores-lancamento': indicadoresLancamento,
@@ -42,7 +42,7 @@ function route() {
   // Menu escondido nao e permissao. Sem esta guarda, digitar #processos na barra
   // de endereco abria a tela para quem nao deveria ve-la — as regras do banco
   // protegiam os dados, mas a tela abria e parecia um sistema quebrado.
-  if (!Perfis.podeVerTela(window.USER_PERFIL, page)) {
+  if (!Perfis.podeVerTela(window.USER_PERFIS, page)) {
     _telaSemAcesso(page);
     return;
   }
@@ -65,11 +65,41 @@ function route() {
     }
     setTimeout(tryOpenProcess, 800);
   }
+  // Deep link: abrir o modal de uma Pessoa específica (vindo da seção Gestor
+  // do Contrato do fornecedor, em nova aba).
+  if (page === 'pessoas' && params.get('editPessoa')) {
+    const pid = params.get('editPessoa');
+    function tryOpenPessoa() {
+      if (pessoasData && pessoasData.length && window.abrirModalPessoa) {
+        window.abrirModalPessoa(pid);
+      } else {
+        setTimeout(tryOpenPessoa, 400);
+      }
+    }
+    setTimeout(tryOpenPessoa, 600);
+  }
+}
+
+/**
+ * Área à qual a visão do usuário fica restrita (Processos/PCNs/Painel), ou
+ * null quando ele vê tudo. Admin e Segurança da Informação veem todas as
+ * áreas; só o Gestor (sem esses perfis mais amplos) fica preso à própria área.
+ */
+function _recorteAreaGestor() {
+  if (Perfis.ehAdmin(window.USER_PERFIS) || Perfis.ehSeguranca(window.USER_PERFIS)) return null;
+  return window.USER_AREA || null;
+}
+
+/** true quando a visão do usuário é limitada à própria área (gestor puro). */
+function _limitadoAArea() {
+  return Perfis.exigeArea(window.USER_PERFIS)
+    && !Perfis.ehAdmin(window.USER_PERFIS)
+    && !Perfis.ehSeguranca(window.USER_PERFIS);
 }
 
 /** Primeira tela que este perfil ve — e onde ele cai quando nao pede nada. */
 function _paginaInicialDoPerfil() {
-  const telas = Perfis.telasDoPerfil(window.USER_PERFIL);
+  const telas = Perfis.telasDoPerfil(window.USER_PERFIS);
   if (telas === '*') return 'processos';
   return telas[0] || 'processos';
 }
@@ -81,7 +111,7 @@ function _telaSemAcesso(pagina) {
       <div style="font-size:2.4em;margin-bottom:10px;">🔒</div>
       <h2 style="color:#1a237e;margin-bottom:8px;">Esta tela não é do seu perfil</h2>
       <p style="color:#666;font-size:0.95em;line-height:1.6;">
-        O seu acesso é <strong>${esc(Perfis.rotulo(window.USER_PERFIL))}</strong>, que não inclui esta tela.
+        O seu acesso é <strong>${esc((window.USER_PERFIS || [window.USER_PERFIL]).map(Perfis.rotulo).join(', '))}</strong>, que não inclui esta tela.
         Se você precisa dela, peça ao administrador do sistema.
       </p>
       <a href="#${esc(inicial)}" class="btn btn-primary" style="margin-top:16px;display:inline-block;">Voltar para o início</a>
@@ -576,7 +606,7 @@ async function areas() {
             <th onclick="ordenarAreas('nome')" style="cursor:pointer;">Área <span id="sort-nome"></span></th>
             <th onclick="ordenarAreas('responsavel')" style="cursor:pointer;">Responsável <span id="sort-responsavel"></span></th>
             <th onclick="ordenarAreas('email')" style="cursor:pointer;">Email <span id="sort-email"></span></th>
-            <th onclick="ordenarAreas('solucao')" style="cursor:pointer;">Solução <span id="sort-solucao"></span></th>
+            <th onclick="ordenarAreas('telefone')" style="cursor:pointer;">Telefone <span id="sort-telefone"></span></th>
             <th style="width:100px;text-align:center;">Ações</th>
           </tr>
         </thead>
@@ -589,23 +619,18 @@ async function areas() {
       <label>Nome da Área</label>
       <input type="text" id="fNome" placeholder="Ex: Segurança da Informação">
       <label>Responsável</label>
-      <select id="fResponsavel"><option value="">Selecione...</option></select>
-      <span style="font-size:0.75em;color:#888;display:block;margin-top:-6px;margin-bottom:8px;">Vem do cadastro de Pessoas (Cadastros → Pessoas).</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <select id="fResponsavel" onchange="_preencherContatoResponsavelArea()" style="flex:1;"><option value="">Selecione...</option></select>
+        <button type="button" class="btn-icon" onclick="_recarregarPessoasArea()" title="Atualizar lista de pessoas">🔄</button>
+        <button type="button" class="btn-icon" id="btnEditarPessoaArea" onclick="_editarPessoaResponsavelArea()" title="Editar esta pessoa" style="display:none;">✏️</button>
+      </div>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:2px;margin-bottom:8px;">Vem do cadastro de Pessoas. <a href="#pessoas" target="_blank" style="color:#1a237e;font-weight:600;">👤 Gerenciar Pessoas</a></span>
       <label>Email</label>
-      <input type="email" id="fEmail" placeholder="email@empresa.com">
-      <label>Solução</label>
-      <select id="fSolucao">
-        <option value="">Selecione...</option>
-        <option>Gestão Contábil</option>
-        <option>Gestão de Pessoal</option>
-        <option>Gestão Financeira</option>
-        <option>Gestão Fiscal</option>
-        <option>Gestão de Pessoas</option>
-        <option>Gestão de TI</option>
-        <option>Outras</option>
-      </select>
+      <input type="email" id="fEmail" placeholder="Preenchido pela Pessoa" readonly style="background:#f5f6fa;color:#555;">
+      <label>Telefone</label>
+      <input type="text" id="fTelefone" placeholder="Preenchido pela Pessoa" readonly style="background:#f5f6fa;color:#555;">
       <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+        <button class="btn btn-ghost" onclick="fecharModalArea()">Cancelar</button>
         <button class="btn btn-primary" id="btnSalvarArea" onclick="salvarArea()">Salvar</button>
       </div>
     </div></div>`;
@@ -634,14 +659,14 @@ function renderizarAreas() {
   }
   
   data = areasOrdenacao.aplicar(data);
-  areasOrdenacao.atualizarSetas('sort-', ['nome', 'responsavel', 'email', 'solucao']);
+  areasOrdenacao.atualizarSetas('sort-', ['nome', 'responsavel', 'email', 'telefone']);
 
   document.getElementById('rows').innerHTML = data.length
     ? data.map(a => `<tr style="cursor:pointer;" onclick="editarArea('${a.id}')">
         <td>${esc(a.nome)}</td>
         <td>${esc(a.responsavel || '')}</td>
         <td>${esc(a.email || '')}</td>
-        <td>${esc(a.solucao || '')}</td>
+        <td>${esc(a.telefone || '')}</td>
         <td style="text-align:center;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarArea('${a.id}')" title="Editar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
@@ -677,21 +702,77 @@ window.abrirModalArea = (a) => {
     pessoasData.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
     (responsavelAtual && !temNaLista ? `<option value="${esc(responsavelAtual)}">${esc(responsavelAtual)} (não cadastrado como pessoa)</option>` : '');
   document.getElementById('fResponsavel').value = responsavelAtual;
-  document.getElementById('fEmail').value = a ? a.email : '';
-  document.getElementById('fSolucao').value = a ? a.solucao : '';
+  // Email/Telefone vêm da Pessoa (read-only). Usa o que já está gravado na
+  // área; se vazio e houver responsável cadastrado como Pessoa, puxa dela.
+  document.getElementById('fEmail').value = a ? (a.email || '') : '';
+  document.getElementById('fTelefone').value = a ? (a.telefone || '') : '';
+  if (responsavelAtual && (!a || !a.email || !a.telefone)) {
+    _preencherContatoResponsavelArea();
+  }
+  _atualizarBotaoEditarPessoaArea();
   document.getElementById('modalTitulo').textContent = a ? 'Editar Área' : 'Nova Área';
   document.getElementById('modal').classList.add('open');
+};
+
+/** Fecha o modal de Área. Própria (não a fecharModal global, que Processos sobrescreveu para o drawer). */
+window.fecharModalArea = () => document.getElementById('modal').classList.remove('open');
+
+/** Acha a Pessoa (por nome) selecionada como Responsável. */
+function _pessoaResponsavelArea() {
+  const nome = (document.getElementById('fResponsavel') || {}).value || '';
+  return nome ? (pessoasData || []).find((p) => p.nome === nome) : null;
+}
+
+/** Preenche Email/Telefone (read-only) a partir da Pessoa escolhida como Responsável. */
+window._preencherContatoResponsavelArea = () => {
+  const p = _pessoaResponsavelArea();
+  document.getElementById('fEmail').value = p ? (p.email || '') : '';
+  document.getElementById('fTelefone').value = p ? (p.telefone || '') : '';
+  _atualizarBotaoEditarPessoaArea();
+};
+
+/** Mostra o "✏️" só quando o Responsável existe como Pessoa cadastrada. */
+function _atualizarBotaoEditarPessoaArea() {
+  const btn = document.getElementById('btnEditarPessoaArea');
+  if (btn) btn.style.display = _pessoaResponsavelArea() ? 'inline-block' : 'none';
+}
+
+/** Abre a Pessoa responsável na tela de Pessoas (nova aba). */
+window._editarPessoaResponsavelArea = () => {
+  const p = _pessoaResponsavelArea();
+  if (!p) return showToast('Selecione um responsável cadastrado como Pessoa.', '#e65100');
+  window.open('#pessoas?editPessoa=' + encodeURIComponent(p.id), '_blank');
+};
+
+/** Recarrega pessoasData e repopula o select de Responsável, preservando a seleção. */
+window._recarregarPessoasArea = async () => {
+  const atual = (document.getElementById('fResponsavel') || {}).value || '';
+  API.invalidate('getDependencias');
+  const deps = await API.getDependencias();
+  pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+  const temNaLista = pessoasData.some((p) => p.nome === atual);
+  document.getElementById('fResponsavel').innerHTML = '<option value="">Selecione...</option>' +
+    pessoasData.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
+    (atual && !temNaLista ? `<option value="${esc(atual)}">${esc(atual)} (não cadastrado como pessoa)</option>` : '');
+  document.getElementById('fResponsavel').value = atual;
+  _preencherContatoResponsavelArea();
+  showToast('Lista de pessoas atualizada.', '#2e7d32');
 };
 
 window.editarArea = (id) => abrirModalArea(window.areasData.find(a => a.id === id));
 
 window.salvarArea = async () => {
+  const idAtual = document.getElementById('fId').value || null;
+  const existente = idAtual ? (window.areasData || []).find((x) => String(x.id) === String(idAtual)) : null;
   const a = {
-    id: document.getElementById('fId').value || null,
+    id: idAtual,
     nome: document.getElementById('fNome').value.trim(),
     responsavel: document.getElementById('fResponsavel').value.trim(),
     email: document.getElementById('fEmail').value.trim(),
-    solucao: document.getElementById('fSolucao').value.trim(),
+    telefone: document.getElementById('fTelefone').value.trim(),
+    // "Solução" saiu da tela mas o dado antigo é preservado (não-destrutivo):
+    // reenvia o que já estava gravado em vez de apagar no próximo merge.
+    solucao: existente ? (existente.solucao || '') : '',
   };
   if (!a.nome) return showToast('Informe o nome da área.', '#e65100');
   await comBotaoCarregando('btnSalvarArea', async () => {
@@ -703,7 +784,7 @@ window.salvarArea = async () => {
       const item = { ...r.dado, id: r.id };
       const idx = window.areasData.findIndex((x) => String(x.id) === String(r.id));
       if (idx >= 0) window.areasData[idx] = item; else window.areasData.push(item);
-      fecharModal();
+      fecharModalArea();
       showToast('✅ Salvo!', '#2e7d32');
       renderizarAreas();
     } catch (e) {
@@ -736,10 +817,15 @@ async function pessoas() {
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Pessoas</h2><p class="page-sub">Usadas como Gestor do Contrato (Fornecedores) e Responsável (Áreas)</p></div>
-      <button class="btn btn-primary" onclick="abrirModalPessoa()">+ Nova Pessoa</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="abrirModalOrganograma()" style="color:#1a237e;border-color:#1a237e;">🗂️ Gerar organograma</button>
+        <button class="btn btn-primary" onclick="abrirModalPessoa()">+ Nova Pessoa</button>
+      </div>
     </div>
-    <div style="margin-bottom:16px;">
-      <input type="text" id="buscaPessoa" placeholder="🔍 Buscar pessoa..." oninput="renderizarPessoas()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:300px;">
+    <div style="margin-bottom:16px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+      <input type="text" id="buscaPessoa" placeholder="🔍 Buscar pessoa..." oninput="renderizarPessoas()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;flex:1;">
+      <select id="filtroPessoaArea" onchange="renderizarPessoas()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:180px;"><option value="">Todas as áreas</option></select>
+      <select id="filtroPessoaLider" onchange="renderizarPessoas()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:200px;"><option value="">Todos os líderes</option></select>
     </div>
     <div class="loading" id="loadingPessoas">⏳ Carregando...</div>
     <div class="data-table" id="listaPessoas" style="display:none;">
@@ -748,6 +834,7 @@ async function pessoas() {
           <tr>
             <th onclick="ordenarPessoas('nome')" style="cursor:pointer;">Nome <span id="sort-pessoa-nome"></span></th>
             <th onclick="ordenarPessoas('detalhes')" style="cursor:pointer;">Cargo <span id="sort-pessoa-detalhes"></span></th>
+            <th onclick="ordenarPessoas('setor')" style="cursor:pointer;">Área <span id="sort-pessoa-setor"></span></th>
             <th onclick="ordenarPessoas('telefone')" style="cursor:pointer;">Telefone <span id="sort-pessoa-telefone"></span></th>
             <th onclick="ordenarPessoas('email')" style="cursor:pointer;">Email <span id="sort-pessoa-email"></span></th>
             <th style="width:100px;text-align:center;">Ações</th>
@@ -763,6 +850,15 @@ async function pessoas() {
       <input type="text" id="pessoaNome" placeholder="Nome da pessoa">
       <label>Cargo / Papel</label>
       <input type="text" id="pessoaDetalhes" placeholder="Ex: Gerente de TI">
+      <label>Áreas</label>
+      <div id="pessoaAreasTabela"></div>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
+        <select id="pessoaAreaAdd" style="flex:1;"><option value="">Selecione...</option></select>
+        <button type="button" class="btn btn-ghost" onclick="adicionarPessoaArea()" style="padding:8px 12px;white-space:nowrap;">+ Adicionar</button>
+      </div>
+      <span style="font-size:0.72em;color:#888;display:block;margin-top:2px;margin-bottom:6px;">Uma pessoa pode pertencer a mais de uma área. A primeira é a principal.</span>
+      <label>Líder Imediato</label>
+      <select id="pessoaLider"><option value="">Selecione...</option></select>
       <label>Telefone</label>
       <input type="text" id="pessoaTelefone" placeholder="Telefone">
       <label>Email</label>
@@ -771,13 +867,62 @@ async function pessoas() {
         <button class="btn btn-ghost" onclick="fecharModalPessoa()">Cancelar</button>
         <button class="btn btn-primary" id="btnSalvarPessoaCadastro" onclick="salvarPessoaCadastro()">Salvar</button>
       </div>
+    </div></div>
+    <div class="modal-overlay" id="modalOrganograma"><div class="modal" onclick="event.stopPropagation()">
+      <h3>Gerar Organograma</h3>
+      <p style="font-size:0.85em;color:#666;margin-bottom:12px;">Monta a hierarquia a partir do "Líder Imediato" de cada pessoa.</p>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;">
+        <input type="radio" name="orgModo" value="geral" checked onchange="_atualizarModoOrganograma()"> Organograma Geral (todas as áreas)
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;">
+        <input type="radio" name="orgModo" value="area" onchange="_atualizarModoOrganograma()"> Por Área específica
+      </label>
+      <select id="orgArea" disabled style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;margin-top:4px;"><option value="">Selecione a área...</option></select>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalOrganograma()">Cancelar</button>
+        <button class="btn btn-primary" onclick="gerarOrganograma()">Gerar</button>
+      </div>
     </div></div>`;
 
-  const deps = await API.getDependencias();
+  const [deps, areas] = await Promise.all([API.getDependencias(), API.getAreas()]);
   pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+  // Fonte do dropdown "Área" no modal de Pessoa -- mesmo catálogo de Áreas.
+  window.areasData = areas;
+  // Área do chooser de organograma.
+  const orgAreaSel = document.getElementById('orgArea');
+  if (orgAreaSel) {
+    orgAreaSel.innerHTML = '<option value="">Selecione a área...</option>' +
+      [...areas].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+        .map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
+  }
+  // Filtro por Área -- une todas as áreas de todas as pessoas (multi + setor).
+  const filtroAreaSel = document.getElementById('filtroPessoaArea');
+  if (filtroAreaSel) {
+    const todas = [];
+    pessoasData.forEach((p) => _areasDaPessoa(p).forEach((a) => todas.push(a)));
+    const areasUsadas = [...new Set(todas.filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    filtroAreaSel.innerHTML = '<option value="">Todas as áreas</option>' +
+      areasUsadas.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+  }
+  // Filtro por Líder Imediato -- só as pessoas que são líder de alguém.
+  const filtroLiderSel = document.getElementById('filtroPessoaLider');
+  if (filtroLiderSel) {
+    const idsLideres = new Set(pessoasData.map((p) => p.liderImediato).filter(Boolean).map(String));
+    const lideres = pessoasData.filter((p) => idsLideres.has(String(p.id)))
+      .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+    filtroLiderSel.innerHTML = '<option value="">Todos os líderes</option>' +
+      lideres.map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('');
+  }
   document.getElementById('loadingPessoas').style.display = 'none';
   document.getElementById('listaPessoas').style.display = 'block';
   renderizarPessoas();
+}
+
+/** Áreas de uma Pessoa: usa o array `areas` (multi) e cai no `setor` (legado/principal). */
+function _areasDaPessoa(p) {
+  if (p && Array.isArray(p.areas) && p.areas.length) return p.areas.filter(Boolean);
+  return p && p.setor ? [p.setor] : [];
 }
 
 function renderizarPessoas() {
@@ -792,13 +937,22 @@ function renderizarPessoas() {
       (p.email || '').toLowerCase().includes(termo));
   }
 
+  // Filtro por Área: casa se a pessoa tiver a área em qualquer posição.
+  const filtroArea = (document.getElementById('filtroPessoaArea') || {}).value || '';
+  if (filtroArea) data = data.filter((p) => _areasDaPessoa(p).includes(filtroArea));
+
+  // Filtro por Líder Imediato: mostra os liderados diretos daquele líder.
+  const filtroLider = (document.getElementById('filtroPessoaLider') || {}).value || '';
+  if (filtroLider) data = data.filter((p) => String(p.liderImediato || '') === String(filtroLider));
+
   data = pessoasOrdenacao.aplicar(data);
-  pessoasOrdenacao.atualizarSetas('sort-pessoa-', ['nome', 'detalhes', 'telefone', 'email']);
+  pessoasOrdenacao.atualizarSetas('sort-pessoa-', ['nome', 'detalhes', 'setor', 'telefone', 'email']);
 
   document.getElementById('rowsPessoas').innerHTML = data.length
     ? data.map((p) => `<tr style="cursor:pointer;" onclick="abrirModalPessoa('${esc(p.id)}')">
         <td style="font-weight:600;">${esc(p.nome)}</td>
         <td>${esc(p.detalhes || '')}</td>
+        <td>${esc(_areasDaPessoa(p).join(', '))}</td>
         <td>${esc(p.telefone || '')}</td>
         <td>${esc(p.email || '')}</td>
         <td style="text-align:center;" onclick="event.stopPropagation();">
@@ -816,7 +970,7 @@ function renderizarPessoas() {
           </button>
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">Nenhuma pessoa cadastrada.</td></tr>';
+    : '<tr><td colspan="6" style="text-align:center;color:#999;padding:20px;">Nenhuma pessoa cadastrada.</td></tr>';
 }
 
 window.ordenarPessoas = (coluna) => {
@@ -824,11 +978,73 @@ window.ordenarPessoas = (coluna) => {
   renderizarPessoas();
 };
 
+// Áreas da Pessoa -- lista (multi). A 1ª é a "principal" (gravada também em
+// setor, por compat). Estado em window._pessoaAreas.
+window._pessoaAreas = [];
+
+/** Popula o <select> de adicionar Área com as áreas ainda não escolhidas (preserva legado fora da lista). */
+function _popularSelectAreaPessoaAdd() {
+  const sel = document.getElementById('pessoaAreaAdd');
+  if (!sel) return;
+  const lista = window.areasData || [];
+  const ja = new Set(window._pessoaAreas || []);
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    lista.filter((a) => !ja.has(a.nome)).map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
+  sel.value = '';
+}
+
+function renderPessoaAreas() {
+  const cont = document.getElementById('pessoaAreasTabela');
+  if (!cont) return;
+  const itens = window._pessoaAreas || [];
+  if (!itens.length) { cont.innerHTML = '<p style="font-size:0.83em;color:#999;margin:4px 0;">Nenhuma área vinculada.</p>'; _popularSelectAreaPessoaAdd(); return; }
+  cont.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;">` +
+    itens.map((a, i) => `<span style="display:inline-flex;align-items:center;gap:6px;background:${i === 0 ? '#1a237e' : '#e8eaf6'};color:${i === 0 ? '#fff' : '#1a237e'};padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(a)}${i === 0 ? ' <span style="opacity:0.8;font-size:0.85em;">(principal)</span>' : ''}<button onclick="removerPessoaArea(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:${i === 0 ? 'rgba(255,255,255,0.75)' : '#c62828'};line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`).join('') +
+    `</div>`;
+  _popularSelectAreaPessoaAdd();
+}
+
+window.adicionarPessoaArea = () => {
+  const sel = document.getElementById('pessoaAreaAdd');
+  const nome = sel ? sel.value : '';
+  if (!nome) return showToast('Selecione uma área.', '#e65100');
+  window._pessoaAreas = window._pessoaAreas || [];
+  if (window._pessoaAreas.includes(nome)) return showToast('Essa área já foi adicionada.', '#e65100');
+  window._pessoaAreas.push(nome);
+  renderPessoaAreas();
+};
+
+window.removerPessoaArea = (idx) => {
+  window._pessoaAreas.splice(idx, 1);
+  renderPessoaAreas();
+};
+
+/** Popula o <select> de Líder Imediato (outras Pessoas, value=id); preserva id legado fora da lista. */
+function _popularSelectLiderPessoa(valorAtualId, excluirId) {
+  const sel = document.getElementById('pessoaLider');
+  if (!sel) return;
+  const disponiveis = (pessoasData || [])
+    .filter((p) => !excluirId || String(p.id) !== String(excluirId))
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  const temNaLista = disponiveis.some((p) => String(p.id) === String(valorAtualId));
+  const legado = valorAtualId && !temNaLista;
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    disponiveis.map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}${p.setor ? ' — ' + esc(p.setor) : ''}</option>`).join('') +
+    (legado ? `<option value="${esc(valorAtualId)}">(líder não encontrado)</option>` : '');
+  sel.value = valorAtualId || '';
+}
+
 window.abrirModalPessoa = (id) => {
   const p = id ? pessoasData.find((x) => String(x.id) === String(id)) : null;
   document.getElementById('pessoaId').value = p ? p.id : '';
   document.getElementById('pessoaNome').value = p ? (p.nome || '') : '';
   document.getElementById('pessoaDetalhes').value = p ? (p.detalhes || '') : '';
+  // Áreas (multi): usa o array; migra do setor único (não-destrutivo) quando vazio.
+  window._pessoaAreas = p && Array.isArray(p.areas) && p.areas.length
+    ? [...p.areas]
+    : (p && p.setor ? [p.setor] : []);
+  renderPessoaAreas();
+  _popularSelectLiderPessoa(p ? (p.liderImediato || '') : '', p ? p.id : null);
   document.getElementById('pessoaTelefone').value = p ? (p.telefone || '') : '';
   document.getElementById('pessoaEmail').value = p ? (p.email || '') : '';
   document.getElementById('modalPessoaTitulo').textContent = p ? 'Editar Pessoa' : 'Nova Pessoa';
@@ -836,6 +1052,152 @@ window.abrirModalPessoa = (id) => {
 };
 
 window.fecharModalPessoa = () => document.getElementById('modalPessoa').classList.remove('open');
+
+// ============================================================
+// ORGANOGRAMA -- hierarquia de Pessoas pelo Líder Imediato, com Área no nó.
+// Dois modos: Geral (todas) e Por Área (só pessoas da área, floresta pelo
+// encadeamento restrito). Guardas: líder ausente vira raiz; ciclo não trava.
+// Saída: HTML standalone em nova aba (read-only, montado do pessoasData).
+// ============================================================
+window.abrirModalOrganograma = () => {
+  _atualizarModoOrganograma();
+  document.getElementById('modalOrganograma').classList.add('open');
+};
+window.fecharModalOrganograma = () => document.getElementById('modalOrganograma').classList.remove('open');
+
+window._atualizarModoOrganograma = () => {
+  const modo = (document.querySelector('input[name="orgModo"]:checked') || {}).value || 'geral';
+  const sel = document.getElementById('orgArea');
+  if (sel) sel.disabled = modo !== 'area';
+};
+
+/**
+ * Monta a floresta de nós a partir de uma lista de pessoas.
+ * Cada nó: { pessoa, filhos: [] }. Raiz = sem líder, ou líder fora do conjunto.
+ * Ciclos são cortados (um nó nunca é filho de um descendente dele).
+ */
+function _montarArvoreOrganograma(pessoas) {
+  const porId = new Map();
+  pessoas.forEach((p) => porId.set(String(p.id), { pessoa: p, filhos: [] }));
+  const raizes = [];
+  porId.forEach((no) => {
+    const liderId = no.pessoa.liderImediato ? String(no.pessoa.liderImediato) : '';
+    const noLider = liderId ? porId.get(liderId) : null;
+    // Sem líder, ou líder fora do conjunto (apagado / outra área no modo Área) => raiz.
+    if (!noLider || liderId === String(no.pessoa.id)) { raizes.push(no); return; }
+    // Guarda de ciclo: se o suposto líder já é descendente deste nó, não liga
+    // (evita A->B->A travar); o nó vira raiz.
+    let cursor = noLider;
+    let ciclo = false;
+    const visitados = new Set([String(no.pessoa.id)]);
+    while (cursor) {
+      const cid = String(cursor.pessoa.id);
+      if (visitados.has(cid)) { ciclo = true; break; }
+      visitados.add(cid);
+      const paiId = cursor.pessoa.liderImediato ? String(cursor.pessoa.liderImediato) : '';
+      cursor = paiId ? porId.get(paiId) : null;
+    }
+    if (ciclo) { raizes.push(no); return; }
+    noLider.filhos.push(no);
+  });
+  const ordenar = (lista) => {
+    lista.sort((a, b) => (a.pessoa.nome || '').localeCompare(b.pessoa.nome || '', 'pt-BR'));
+    lista.forEach((n) => ordenar(n.filhos));
+  };
+  ordenar(raizes);
+  return raizes;
+}
+
+window.gerarOrganograma = () => {
+  const modo = (document.querySelector('input[name="orgModo"]:checked') || {}).value || 'geral';
+  let pessoas = (pessoasData || []).slice();
+  let titulo = 'Organograma Geral';
+  if (modo === 'area') {
+    const area = document.getElementById('orgArea').value;
+    if (!area) return showToast('Selecione a área.', '#e65100');
+    pessoas = pessoas.filter((p) => _areasDaPessoa(p).includes(area));
+    titulo = 'Organograma — ' + area;
+  }
+  const raizes = _montarArvoreOrganograma(pessoas);
+  const html = _htmlOrganograma(titulo, raizes, pessoas.length);
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+  fecharModalOrganograma();
+};
+
+/** HTML de um nó e seus filhos (recursivo), no layout de árvore vertical. */
+function _htmlNoOrganograma(no) {
+  const p = no.pessoa;
+  const areaPrincipal = p.setor || (Array.isArray(p.areas) ? p.areas[0] : '') || '';
+  const badgeArea = areaPrincipal ? `<span class="org-area">${esc(areaPrincipal)}</span>` : '';
+  const cargo = p.detalhes ? `<div class="org-cargo">${esc(p.detalhes)}</div>` : '';
+  const filhos = no.filhos.length
+    ? `<div class="org-filhos">${no.filhos.map(_htmlNoOrganograma).join('')}</div>`
+    : '';
+  return `<div class="org-no">
+    <div class="org-card">
+      <div class="org-nome">${esc(p.nome)}</div>
+      ${cargo}
+      ${badgeArea}
+    </div>
+    ${filhos}
+  </div>`;
+}
+
+function _htmlOrganograma(titulo, raizes, total) {
+  const corpo = total
+    ? (raizes.length
+        ? `<div class="org-tree">${raizes.map(_htmlNoOrganograma).join('')}</div>`
+        : '<p class="org-vazio">Não foi possível montar a hierarquia.</p>')
+    : '<p class="org-vazio">Nenhuma pessoa para exibir neste organograma.</p>';
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>${esc(titulo)}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#222;background:#f5f6fa;padding:24px}
+.org-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:24px}
+.org-header h1{font-size:18pt;color:#1a237e}
+.org-header .sub{font-size:9pt;color:#888;margin-top:4px}
+.btn-print{padding:9px 18px;background:#1a237e;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}
+.btn-print:hover{opacity:.9}
+.org-tree{display:flex;justify-content:center;flex-wrap:wrap;gap:24px;align-items:flex-start;padding:10px}
+/* Nó: cartão + filhos abaixo, com linhas conectoras */
+.org-no{display:flex;flex-direction:column;align-items:center;position:relative}
+.org-card{background:#fff;border:1.5px solid #c5cae9;border-top:4px solid #1a237e;border-radius:10px;padding:10px 16px;min-width:150px;max-width:220px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.1);position:relative;z-index:1}
+.org-nome{font-weight:700;color:#1a237e;font-size:10pt}
+.org-cargo{font-size:8.5pt;color:#555;margin-top:2px}
+.org-area{display:inline-block;margin-top:6px;padding:2px 9px;border-radius:10px;background:#e8eaf6;color:#1a237e;font-size:7.5pt;font-weight:700}
+.org-filhos{display:flex;justify-content:center;gap:20px;flex-wrap:nowrap;margin-top:26px;position:relative}
+/* Conectores */
+.org-filhos::before{content:'';position:absolute;top:-26px;left:50%;width:2px;height:26px;background:#c5cae9}
+.org-no > .org-filhos > .org-no{position:relative}
+.org-no > .org-filhos > .org-no::before{content:'';position:absolute;top:-26px;left:50%;width:2px;height:26px;background:#c5cae9}
+.org-no > .org-filhos::after{content:'';position:absolute;top:-26px;left:10%;right:10%;height:2px;background:#c5cae9}
+.org-no > .org-filhos > .org-no:only-child::before{left:50%}
+.org-vazio{text-align:center;color:#999;padding:60px 20px;font-size:11pt}
+.org-footer{margin-top:30px;text-align:center;font-size:8pt;color:#aaa}
+@media print{body{background:#fff}.btn-print{display:none!important}.org-card{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+</style>
+</head>
+<body>
+<div class="org-header">
+  <div>
+    <h1>${esc(titulo)}</h1>
+    <div class="sub">${total} pessoa${total === 1 ? '' : 's'} • ${new Date().toLocaleDateString('pt-BR')} • Fortes Tecnologia</div>
+  </div>
+  <button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button>
+</div>
+${corpo}
+<div class="org-footer">Organograma gerado a partir do campo "Líder Imediato" de cada pessoa.</div>
+</body>
+</html>`;
+}
 
 window.salvarPessoaCadastro = async () => {
   const nome = document.getElementById('pessoaNome').value.trim();
@@ -849,6 +1211,12 @@ window.salvarPessoaCadastro = async () => {
         categoria: 'Pessoas',
         nome,
         detalhes: document.getElementById('pessoaDetalhes').value.trim(),
+        // Áreas da Pessoa (multi). setor = a principal (1ª da lista), mantido
+        // por compat com quem lê a área única (filtros, organograma, gestor).
+        areas: window._pessoaAreas || [],
+        setor: (window._pessoaAreas && window._pessoaAreas[0]) || '',
+        // Líder imediato -- id de outra Pessoa (base do organograma).
+        liderImediato: document.getElementById('pessoaLider').value,
         telefone: document.getElementById('pessoaTelefone').value.trim(),
         email: document.getElementById('pessoaEmail').value.trim(),
       });
@@ -1202,8 +1570,9 @@ async function processos() {
   const filtroArea = document.getElementById('filtroArea');
   const areasUnicas = [...new Set(areas.map(a => a.nome))].sort();
 
-  // Gestor: filtrar apenas sua area e ocultar controles de outras areas
-  if (window.USER_PERFIL !== 'admin' && window.USER_AREA) {
+  // Gestor (sem Admin/Segurança): filtra só a própria área e oculta controles
+  // de outras áreas. Admin e SI veem tudo.
+  if (_limitadoAArea() && window.USER_AREA) {
     processosFiltroArea = window.USER_AREA;
     filtroArea.innerHTML = `<option value="${window.USER_AREA}">${window.USER_AREA}</option>`;
     filtroArea.disabled = true;
@@ -1211,7 +1580,7 @@ async function processos() {
     const btnRelatorio = document.getElementById('btnRelatorioArea');
     if (btnEnviar) btnEnviar.style.display = 'none';
     if (btnRelatorio) btnRelatorio.style.display = 'none';
-  } else if (window.USER_PERFIL !== 'admin' && !window.USER_AREA) {
+  } else if (_limitadoAArea() && !window.USER_AREA) {
     // Gestor sem área: bloquear acesso
     const loadingEl = document.getElementById('loading');
     if (loadingEl) loadingEl.style.display = 'none';
@@ -1939,7 +2308,7 @@ window.abrirModalProcesso = (p) => {
   if (btnPcnSalvo) btnPcnSalvo.style.display = (p && p.pcnSalvo) ? 'inline-block' : 'none';
   // Mostrar botão Gerar PCN apenas para admin
   const btnGerarPcn = document.getElementById('btnGerarPcn');
-  if (btnGerarPcn) btnGerarPcn.style.display = (window.USER_PERFIL === 'admin') ? 'inline-block' : 'none';
+  if (btnGerarPcn) btnGerarPcn.style.display = Perfis.podeGerarPCN(window.USER_PERFIS) ? 'inline-block' : 'none';
   // Previa do PCN na aba BCP -- reseta pra mostrar a versao mais recente,
   // sem edicao pendente (processo pode ser outro, ou o mesmo com uma versao
   // nova desde a ultima vez que o drawer foi aberto).
@@ -2383,10 +2752,9 @@ async function dependencias() {
       <button class="btn btn-primary" onclick="abrirDrawerDependencia()">+ Nova Dependência</button>
     </div>
     <div style="border:1px solid #e0e0e0;background:#f8f9ff;border-radius:9px;padding:11px 14px;margin-bottom:16px;font-size:0.86em;color:#555;">
-      Os <strong>fornecedores</strong> saíram desta tela e são gerenciados em
-      <a href="#fornecedores" style="color:#1a237e;font-weight:700;">Fornecedores</a>,
-      onde também são avaliados. Eles continuam no mesmo catálogo e continuam aparecendo para os processos
-      declararem de quem dependem — só a edição mudou de lugar.
+      Os <strong>fornecedores</strong> aparecem neste catálogo, mas são editados e avaliados em
+      <a href="#fornecedores" style="color:#1a237e;font-weight:700;">Fornecedores</a>.
+      Clique num fornecedor para gerenciá-lo lá.
     </div>
     <div style="margin-bottom:16px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
       <div>
@@ -2413,83 +2781,18 @@ async function dependencias() {
         <tbody id="depRows"></tbody>
       </table>
     </div>
-    <div class="drawer-overlay" id="drawerOverlayDependencia" onclick="fecharDrawerDependencia()"></div>
-    <div class="drawer" id="drawerDependencia">
-      <div class="drawer-header">
-        <h3 id="depDrawerTitulo">Nova Dependência</h3>
-        <button onclick="fecharDrawerDependencia()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
-      </div>
-      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
-        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
-          <button id="tab-dep-geral" onclick="trocarAbaDependencia('geral')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Dados Gerais</button>
-          <button id="tab-dep-drp" onclick="trocarAbaDependencia('drp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">DRP</button>
-        </div>
-        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
-          <input type="hidden" id="depId">
-
-          <div id="painel-dep-geral">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria</label>
-                <select id="depCategoria" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-                  <option value="">Selecione...</option>
-                  ${DEPENDENCIA_CATEGORIAS_TECNICAS.map(c => `<option value="${c}">${c}</option>`).join('')}
-                </select>
-              </div>
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Nome</label>
-                <input type="text" id="depNome" placeholder="Ex: Switches e roteadores" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-              </div>
-            </div>
-            <div style="margin-bottom:14px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Papel</label>
-              <textarea id="depDetalhes" rows="3" placeholder="Papel ou função desta dependência" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
-            </div>
-          </div>
-
-          <div id="painel-dep-drp" style="display:none;">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
-                <input type="text" id="depRto" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-              </div>
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
-                <input type="text" id="depRpo" placeholder="Ex: 1 hora" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-              </div>
-            </div>
-            <div style="margin-bottom:14px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Estratégia de Backup</label>
-              <input type="hidden" id="depEstrategia" value="">
-              <div id="chips-depEstrategia" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
-            </div>
-            <div style="margin-bottom:14px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área Responsável</label>
-              <select id="depResponsavel" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-                <option value="">Selecione...</option>
-              </select>
-            </div>
-            ${_htmlDrpLista('drpHealthCheck', 'Checklist de Verificação e Diagnóstico (Health Check)', 'Ex: Infraestrutura/Cloud: o ambiente está acessível?')}
-            ${_htmlDrpLista('drpRunbook', 'Fase Executiva de Recuperação (Runbook de Restore)', 'Ex: Restaurar o banco de dados a partir do último backup íntegro')}
-            ${_htmlDrpLista('drpCriteriosRetorno', 'Critérios de Retorno à Normalidade', 'Ex: Auditoria e conciliação manual (duplicidade ou erros)')}
-            ${_htmlDrpLista('drpLimitacoes', 'Limitações Conhecidas da Estratégia', 'Ex: Dependência direta de provedores de internet e nuvem de terceiros')}
-          </div>
-        </div>
-      </div>
-      <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="fecharDrawerDependencia()">Cancelar</button>
-        <button class="btn btn-primary" id="btnSalvarDep" onclick="salvarDep()">Salvar</button>
-      </div>
-    </div>`;
+    ${_htmlDrawerDependencia()}`;
 
   try {
-    // Fornecedor e Pessoa nao entram: a gestao das duas mora nas telas
-    // proprias delas. O filtro e aqui, e nao no banco, para que o catalogo
-    // continue inteiro -- e o mesmo de que os processos dependem. Sem tirar
-    // Pessoa, o <select> fixo de categoria (so as 7 tecnicas) nao teria como
-    // mostrar/editar uma linha de categoria "Pessoas" corretamente.
+    // Fornecedores VOLTAM a aparecer aqui (so a edicao/avaliacao mora na tela
+    // Fornecedores -- clicar numa linha de fornecedor redireciona pra la, ver
+    // renderizarDependencias/irParaFornecedor). Pessoa continua fora: o
+    // <select> fixo de categoria (so as 7 tecnicas) nao teria como
+    // mostrar/editar uma linha de categoria "Pessoas" corretamente. O filtro
+    // e aqui, e nao no banco, para que o catalogo continue inteiro -- e o
+    // mesmo de que os processos dependem.
     const [todas, areas] = await Promise.all([API.getDependencias(), API.getAreas()]);
-    dependenciasData = todas.filter(d => !Perfis.categoriaDeFornecedor(d.categoria) && !['Pessoas', 'Pessoa'].includes(d.categoria));
+    dependenciasData = todas.filter(d => !['Pessoas', 'Pessoa'].includes(d.categoria));
     // Fonte do select "Area Responsavel" na aba DRP -- mesmo catalogo que
     // Areas/Fornecedor ja usam.
     window.areasData = areas;
@@ -2527,21 +2830,44 @@ function renderizarDependencias() {
   dependenciasOrdenacao.atualizarSetas('sort-dep-', ['categoria', 'nome']);
 
   document.getElementById('depRows').innerHTML = data.length
-    ? data.map(d => `<tr style="cursor:pointer;" onclick="editarDep('${d.id}')">
+    ? data.map(d => {
+        // Fornecedor e uma linha de /dependencias com categoria Fornecedores,
+        // mas a edicao/avaliacao mora na tela Fornecedores: clicar redireciona
+        // pra la (irParaFornecedor) e o excluir nao age aqui (fornecedores tem
+        // avaliacoes atreladas, geridas la).
+        const ehForn = Perfis.categoriaDeFornecedor(d.categoria);
+        const acao = ehForn ? `irParaFornecedor('${d.id}')` : `editarDep('${d.id}')`;
+        const acoesCell = ehForn
+          ? `<button class="btn-icon" onclick="irParaFornecedor('${d.id}')" title="Gerenciar em Fornecedores">
+               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+             </button>`
+          : `<button class="btn-icon" onclick="editarDep('${d.id}')" title="Editar">
+               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+             </button>
+             <button class="btn-icon" onclick="excluirDep('${d.id}')" title="Excluir">
+               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+             </button>`;
+        const papel = ehForn
+          ? `<span style="font-size:0.78em;color:#888;font-style:italic;">Gerenciado em Fornecedores</span>`
+          : esc(d.detalhes || '-');
+        return `<tr style="cursor:pointer;" onclick="${acao}">
         <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(d.categoria)}</span></td>
         <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(d.detalhes || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${papel}</td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
-          <button class="btn-icon" onclick="editarDep('${d.id}')" title="Editar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="btn-icon" onclick="excluirDep('${d.id}')" title="Excluir">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>
+          ${acoesCell}
         </td>
-      </tr>`).join('')
+      </tr>`;
+      }).join('')
     : '<tr><td colspan="4" style="text-align:center;color:#999;padding:40px;">Nenhuma dependência cadastrada.</td></tr>';
 }
+
+/** Fornecedor é linha de /dependencias, mas editado/avaliado na tela Fornecedores.
+ *  Guarda o id pra abrir o cadastro ao chegar lá (ver fornecedores()) e navega. */
+window.irParaFornecedor = (id) => {
+  window._abrirFornecedorAoCarregar = id || null;
+  window.location.hash = 'fornecedores';
+};
 
 window.filtrarDependencias = () => renderizarDependencias();
 
@@ -2551,63 +2877,27 @@ window.ordenarDependencias = (coluna) => {
 };
 
 // ============================================================
-// Aba DRP da Dependência -- 4 listas guiadas (Health Check, Runbook,
-// Critérios de Retorno, Limitações), além dos 4 campos fixos (RTO/RPO/
-// Estratégia/Responsável) que já existiam. Item de checklist/runbook e uma
+// Aba DRP da Dependência -- 6 listas guiadas (Critérios de Acionamento,
+// Pré-requisitos, Health Check, Runbook, Critérios de Retorno, Limitações),
+// além dos campos fixos (RTO/RPO/Estratégia/Responsável), da seção
+// "Dependências" (seletor do catálogo, ver _htmlDrpDependencias) e de "Testes
+// do Procedimento" (registro único, ver _htmlDrpTestes). Item de lista e uma
 // frase curta, sem sub-campo -- por isso e um array de string simples, nao o
 // objeto {categoria,...} que outras listas do app usam (Plano de Ação, KRIs,
-// Pessoas Associadas). Reordenar so faz sentido no Runbook (passos
-// sequenciais); nas outras 3 a ordem e so a de insercao, mas mover funciona
-// igual em todas -- nao ha necessidade de esconder o recurso onde nao e
-// essencial.
+// Pessoas Associadas). Todas as listas numeram os itens e permitem
+// reordena-los com as setas ▲/▼ -- mesmo padrao do Runbook; a ordem gravada
+// e a que o usuario definir em qualquer uma delas.
 // ============================================================
-window._depDrpListas = { drpHealthCheck: [], drpRunbook: [], drpCriteriosRetorno: [], drpLimitacoes: [] };
-window._depDrpEditando = { drpHealthCheck: null, drpRunbook: null, drpCriteriosRetorno: null, drpLimitacoes: null };
+window._depDrpListas = { drpCriteriosAcionamento: [], drpPreRequisitos: [], drpHealthCheck: [], drpRunbook: [], drpCriteriosRetorno: [], drpLimitacoes: [] };
+window._depDrpEditando = { drpCriteriosAcionamento: null, drpPreRequisitos: null, drpHealthCheck: null, drpRunbook: null, drpCriteriosRetorno: null, drpLimitacoes: null };
 
-// Sugestoes clicaveis por campo -- os mesmos exemplos que o template do PCN
-// (template-pcn.md, Parte 3) ja usa, pra nao ter um segundo texto de
-// referencia que precise ficar sincronizado com o primeiro.
-const DRP_SUGESTOES = {
-  drpHealthCheck: [
-    'Infraestrutura/Cloud: o ambiente/console está acessível?',
-    'Banco de Dados: a integridade dos arquivos de backup está preservada?',
-    'Segurança e Acessos: os certificados e tokens mTLS/OAuth continuam válidos?',
-    'Rede e Conectividade: links de internet e resolução de DNS externos estão ativos?',
-  ],
-  drpRunbook: [
-    'Reprovisionar/validar a infraestrutura (VMs, containers, storage)',
-    'Restaurar o banco de dados a partir do último backup íntegro',
-    'Subir a aplicação (reinstalar/reativar serviços)',
-    'Validar conectividade e segurança (firewall, DNS, certificados)',
-    'Restabelecer integrações (tokens, endpoints de APIs)',
-    'Limpar e processar filas (reprocessar backlog acumulado)',
-    'Teste de fumaça (execução fim a fim)',
-    'Liberação comercial (homologar com o dono do processo)',
-  ],
-  drpCriteriosRetorno: [
-    'Reprocessamento de dados ou cargas pendentes',
-    'Auditoria e conciliação manual (duplicidade ou erros)',
-    'Realização da Análise de Causa Raiz (RCA)',
-    'Registro de Lições Aprendidas e atualização do documento',
-  ],
-  drpLimitacoes: [
-    'Dependência direta de provedores de internet e nuvem de terceiros',
-    'Tempo de RTO elástico devido ao modelo de provisionamento manual/semi-automatizado',
-    'Risco atrelado à integridade da última janela de backup realizada',
-  ],
-};
-
-/** Bloco de uma lista guiada da aba DRP: label + lista renderizada + chips de sugestão + caixa de adicionar. */
+/** Bloco de uma lista guiada da aba DRP: label + lista renderizada + caixa de adicionar. */
 function _htmlDrpLista(campo, titulo, placeholder) {
-  const chips = DRP_SUGESTOES[campo].map((s) =>
-    `<button type="button" onclick="usarSugestaoDrp('${campo}', '${escJs(s)}')" style="padding:4px 10px;border:1px solid #c5cae9;background:#e8eaf6;color:#1a237e;border-radius:14px;font-size:0.76em;cursor:pointer;">${esc(s)}</button>`
-  ).join('');
   return `
     <div style="border-top:1px solid #eee;margin-top:18px;padding-top:14px;">
       <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">${esc(titulo)}</label>
       <div id="lista-${campo}"></div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;">${chips}</div>
-      <div style="display:flex;gap:8px;">
+      <div style="display:flex;gap:8px;margin-top:8px;">
         <input type="text" id="novoItem-${campo}" placeholder="${esc(placeholder)}" style="flex:1;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;">
         <button class="btn btn-ghost" id="btnAdicionar-${campo}" onclick="adicionarDrpItem('${campo}')" style="white-space:nowrap;">+ Adicionar</button>
       </div>
@@ -2618,7 +2908,7 @@ function renderDrpLista(campo) {
   const container = document.getElementById('lista-' + campo);
   if (!container) return;
   const itens = window._depDrpListas[campo] || [];
-  const comOrdem = campo === 'drpRunbook';
+  const comOrdem = true;
   container.innerHTML = itens.length ? itens.map((texto, i) => `
     <div style="display:flex;align-items:center;gap:8px;border:1px solid #e0e0e0;border-radius:7px;padding:8px 10px;margin-bottom:6px;">
       ${comOrdem ? `<span style="font-weight:700;color:#1a237e;min-width:20px;">${i + 1}.</span>` : ''}
@@ -2632,8 +2922,6 @@ function renderDrpLista(campo) {
       <button class="btn-icon" onclick="removerDrpItem('${campo}', ${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
     </div>`).join('') : '<p style="font-size:0.82em;color:#999;">Nenhum item adicionado ainda.</p>';
 }
-
-window.usarSugestaoDrp = (campo, texto) => { document.getElementById('novoItem-' + campo).value = texto; };
 
 window.adicionarDrpItem = (campo) => {
   const input = document.getElementById('novoItem-' + campo);
@@ -2672,12 +2960,14 @@ window.moverDrpItem = (campo, idx, direcao) => {
 };
 
 window.trocarAbaDependencia = (aba) => {
-  ['geral', 'drp'].forEach(a => {
+  ['geral', 'drp', 'plano', 'registros'].forEach(a => {
     document.getElementById('painel-dep-' + a).style.display = a === aba ? 'block' : 'none';
     const btn = document.getElementById('tab-dep-' + a);
     btn.style.color = a === aba ? '#1a237e' : '#999';
     btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
   });
+  // Ao entrar na aba Plano, re-renderiza o preview do DRP salvo.
+  if (aba === 'plano') renderDrpResumo();
 };
 
 /**
@@ -2718,6 +3008,523 @@ function _popularSelectAreaResponsavelDep(valorAtual) {
   sel.value = valorAtual || '';
 }
 
+// ============================================================
+// Aba DRP -- Seção "Dependências": seletor inline que lê o catálogo da
+// entidade Dependências (mesmo padrão de CRUD inline da aba BIA), com opção
+// de criar quando o item não existe. Estado próprio (_depDrpDependenciasSel)
+// pra não colidir com _dependenciaSelecionadas da BIA. Cada item guardado é
+// { id, nome, categoria }.
+// ============================================================
+window._depDrpDependenciasSel = [];
+
+/** Ícone por categoria -- mesmo mapa usado pela tabela de Dependências Críticas da BIA. */
+function _iconeCategoriaDep(cat) {
+  const map = {
+    'Fornecedores': '🏢', 'Fornecedor': '🏢', 'Pessoas': '👤', 'Pessoa': '👤',
+    'Processos Internos': '🔄', 'Processo Interno': '🔄', 'API': '🔌', 'Banco de Dados': '🗄️',
+    'Infraestrutura': '⚡', 'Segurança': '🔒', 'Servidor': '🖥️', 'Sistemas': '💻', 'Outros': '📦',
+  };
+  return map[cat] || '📦';
+}
+
+/** Bloco HTML da seção "Dependências" (tags selecionadas + input de busca/criar + chips disponíveis). */
+function _htmlDrpDependencias() {
+  return `
+    <div style="border-top:1px solid #eee;margin-top:18px;padding-top:14px;">
+      <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Dependências</label>
+      <p style="font-size:0.75em;color:#888;margin:0 0 8px;">Outras dependências das quais este item depende para se recuperar. Clique nas disponíveis ou digite para buscar/criar.</p>
+      <div id="drpDep-tags" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
+      <div style="position:relative;">
+        <input type="text" id="drpDep-input" placeholder="Digite para buscar ou criar..." autocomplete="off" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;" oninput="drpDepMostrarDropdown()" onfocus="drpDepMostrarDropdown()" onblur="setTimeout(drpDepFecharDropdown,300)">
+        <div id="drpDep-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:220px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
+      </div>
+      <div id="drpDep-disponiveis" style="margin-top:8px;"></div>
+    </div>`;
+}
+
+/** Catálogo de dependências, exceto a própria (em edição) e as já selecionadas. */
+function _drpDepCatalogoDisponivel(filtro) {
+  const catalogo = window.dependenciasCatalogo || dependenciasData || [];
+  const selfId = (document.getElementById('depId') || {}).value || '';
+  const termo = (filtro || '').toLowerCase();
+  return catalogo.filter((d) =>
+    String(d.id) !== String(selfId) &&
+    !window._depDrpDependenciasSel.some((s) => s.id && String(s.id) === String(d.id)) &&
+    (termo === '' || (d.nome || '').toLowerCase().includes(termo))
+  );
+}
+
+function renderDrpDependenciasTags() {
+  const cont = document.getElementById('drpDep-tags');
+  if (!cont) return;
+  const sel = window._depDrpDependenciasSel || [];
+  cont.innerHTML = sel.length ? sel.map((item, i) =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;background:#1a237e;color:white;border:1.5px solid #1a237e;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;" title="${esc(item.categoria || '')}">${esc(_iconeCategoriaDep(item.categoria))} ${esc(item.nome)}<button onclick="removerDrpDependencia(${i})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`
+  ).join(' ') : '<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhuma dependência vinculada.</span>';
+  renderDrpDependenciasDisponiveis();
+}
+
+/** Chips cinza das dependências do catálogo ainda não selecionadas. */
+function renderDrpDependenciasDisponiveis() {
+  const cont = document.getElementById('drpDep-disponiveis');
+  if (!cont) return;
+  const disp = _drpDepCatalogoDisponivel('');
+  if (!disp.length) { cont.innerHTML = ''; return; }
+  const chips = disp.slice(0, 40).map((d) =>
+    `<span onclick="selecionarDrpDependencia('${escJs(d.nome)}','${escJs(d.categoria)}','${escJs(d.id)}')" style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;" onmouseenter="this.style.background='#c5cae9'" onmouseleave="this.style.background='#f5f6fa'" title="${esc(d.categoria || '')}">${esc(_iconeCategoriaDep(d.categoria))} ${esc(d.nome)}</span>`
+  ).join(' ');
+  cont.innerHTML = `<span style="font-size:0.7em;color:#999;">Disponíveis:</span><div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px;max-height:80px;overflow-y:auto;">${chips}</div>`;
+}
+
+window.drpDepMostrarDropdown = () => {
+  const input = document.getElementById('drpDep-input');
+  const dd = document.getElementById('drpDep-dropdown');
+  if (!input || !dd) return;
+  const filtro = input.value.trim();
+  const disp = _drpDepCatalogoDisponivel(filtro);
+  let html = disp.slice(0, 30).map((d) =>
+    `<div onmousedown="event.preventDefault();selecionarDrpDependencia('${escJs(d.nome)}','${escJs(d.categoria)}','${escJs(d.id)}');drpDepFecharDropdown();document.getElementById('drpDep-input').value='';" style="padding:8px 12px;cursor:pointer;font-size:0.86em;border-bottom:1px solid #f0f0f0;" onmouseenter="this.style.background='#f5f6fa'" onmouseleave="this.style.background='white'">${esc(_iconeCategoriaDep(d.categoria))} ${esc(d.nome)} <span style="color:#999;font-size:0.85em;">(${esc(d.categoria || 'Outros')})</span></div>`
+  ).join('');
+  // Opção de criar -- só quando há texto que não corresponde exatamente a um item já disponível.
+  const jaExiste = disp.some((d) => (d.nome || '').toLowerCase() === filtro.toLowerCase());
+  if (filtro && !jaExiste) {
+    html += `<div onmousedown="event.preventDefault();criarDrpDependencia('${escJs(filtro)}');" style="padding:9px 12px;cursor:pointer;font-size:0.86em;color:#1a237e;font-weight:700;background:#f5f6fa;" onmouseenter="this.style.background='#e8eaf6'" onmouseleave="this.style.background='#f5f6fa'">+ Criar "${esc(filtro)}"</div>`;
+  }
+  if (!html) { dd.style.display = 'none'; return; }
+  dd.innerHTML = html;
+  dd.style.display = 'block';
+};
+
+window.drpDepFecharDropdown = () => {
+  const dd = document.getElementById('drpDep-dropdown');
+  if (dd) dd.style.display = 'none';
+};
+
+window.selecionarDrpDependencia = (nome, categoria, id) => {
+  const realId = (id === 'null' || id === 'undefined' || id === '') ? null : id;
+  if (realId && window._depDrpDependenciasSel.some((s) => String(s.id) === String(realId))) return;
+  window._depDrpDependenciasSel.push({ id: realId, nome, categoria: categoria || 'Outros' });
+  const input = document.getElementById('drpDep-input');
+  if (input) input.value = '';
+  drpDepFecharDropdown();
+  renderDrpDependenciasTags();
+};
+
+window.removerDrpDependencia = (idx) => {
+  window._depDrpDependenciasSel.splice(idx, 1);
+  renderDrpDependenciasTags();
+};
+
+/** Cria uma dependência nova (categoria "Outros") no catálogo e a vincula. */
+window.criarDrpDependencia = async (nome) => {
+  const input = document.getElementById('drpDep-input');
+  if (input) input.value = '';
+  drpDepFecharDropdown();
+  // Otimista: adiciona já vinculada sem id; o id real chega do backend.
+  const item = { id: null, nome, categoria: 'Outros' };
+  window._depDrpDependenciasSel.push(item);
+  renderDrpDependenciasTags();
+  try {
+    const r = await API.salvarDependencia({ categoria: 'Outros', nome });
+    if (r && r.id) {
+      item.id = r.id;
+      const novaDep = { id: r.id, categoria: 'Outros', nome };
+      if (Array.isArray(window.dependenciasCatalogo)) window.dependenciasCatalogo.push(novaDep);
+      if (Array.isArray(dependenciasData)) dependenciasData.push(novaDep);
+      API.invalidate('getDependencias');
+    }
+    renderDrpDependenciasTags();
+  } catch (e) {
+    showToast('Erro ao criar dependência: ' + e.message, '#c62828');
+  }
+};
+
+// ============================================================
+// Aba DRP -- Seção "Testes do procedimento": registro único de dados de
+// controle (não é lista). Campos fixos lidos/gravados por id.
+// ============================================================
+const DRP_CENARIOS_TESTE = [
+  'Tabletop (Exercício de Mesa)',
+  'Teste Funcional (testa partes específicas do sistema)',
+  'Teste Paralelo (ambiente de recuperação ativado em paralelo)',
+  'Full Failover Test (Teste Completo)',
+];
+
+// "Testes do Procedimento" (Parâmetros DRP) = só as Estratégias de Teste
+// (lista de {cenario, frequencia}). O histórico de execuções foi para a aba
+// própria "Registros de Testes" (_htmlDrpRegistros). drpTestes (registro único
+// antigo) fica preservado no doc e serve de fonte pra migração ao abrir.
+window._depDrpEstrategias = [];
+
+function _htmlDrpTestes() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;';
+  return `
+    <div style="border-top:1px solid #eee;margin-top:18px;padding-top:14px;">
+      <label style="${lbl}">Testes do Procedimento — Estratégias de Teste</label>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Cadastre quantas estratégias forem necessárias, cada uma com sua frequência.</span>
+      <div id="drpEstrategiasTabela"></div>
+      <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:12px;margin-top:8px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
+          <div>
+            <label style="display:block;font-size:0.74em;font-weight:600;color:#666;margin-bottom:4px;">Tipo de Teste (Cenário)</label>
+            <select id="drpEstrategiaCenario" style="${inp}">
+              <option value="">Selecione...</option>
+              ${DRP_CENARIOS_TESTE.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:0.74em;font-weight:600;color:#666;margin-bottom:4px;">Frequência</label>
+            <input type="text" id="drpEstrategiaFrequencia" placeholder="Ex: Semestral" style="${inp}">
+          </div>
+          <button type="button" class="btn btn-ghost" onclick="adicionarDrpEstrategiaTeste()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderDrpEstrategiasTeste() {
+  const cont = document.getElementById('drpEstrategiasTabela');
+  if (!cont) return;
+  const itens = window._depDrpEstrategias || [];
+  if (!itens.length) { cont.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhuma estratégia de teste cadastrada.</p>'; return; }
+  cont.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
+    itens.map((e, i) => `<tr>
+        <td style="font-weight:600;color:#222;">${esc(e.cenario || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(e.frequencia || '-')}</td>
+        <td style="text-align:center;white-space:nowrap;">
+          <button class="btn-icon" onclick="removerDrpEstrategiaTeste(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
+        </td>
+      </tr>`).join('') + `</tbody></table>`;
+}
+
+window.adicionarDrpEstrategiaTeste = () => {
+  const cenario = (document.getElementById('drpEstrategiaCenario') || {}).value || '';
+  const frequencia = (document.getElementById('drpEstrategiaFrequencia') || {}).value.trim();
+  if (!cenario && !frequencia) return showToast('Informe o cenário e/ou a frequência.', '#e65100');
+  window._depDrpEstrategias = window._depDrpEstrategias || [];
+  window._depDrpEstrategias.push({ cenario, frequencia });
+  document.getElementById('drpEstrategiaCenario').value = '';
+  document.getElementById('drpEstrategiaFrequencia').value = '';
+  renderDrpEstrategiasTeste();
+};
+
+window.removerDrpEstrategiaTeste = (idx) => {
+  window._depDrpEstrategias.splice(idx, 1);
+  renderDrpEstrategiasTeste();
+};
+
+// ============================================================
+// Aba "Registros de Testes" -- histórico de execuções ao longo do tempo
+// (lista de {data, resultado, evidencia, pendencias}), ordenado por data desc.
+// ============================================================
+window._depDrpRegistros = [];
+
+function _htmlDrpRegistros() {
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;';
+  const fieldLbl = 'display:block;font-size:0.74em;font-weight:600;color:#666;margin-bottom:4px;';
+  return `
+    <div>
+      <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Registros de Testes</label>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Histórico das execuções de teste desta dependência ao longo do tempo.</span>
+      <div id="drpRegistrosTabela"></div>
+      <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:12px;margin-top:8px;">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div>
+            <label style="${fieldLbl}">Data do teste</label>
+            <input type="date" id="drpRegistroData" style="${inp}">
+          </div>
+          <div>
+            <label style="${fieldLbl}">Resultado</label>
+            <input type="text" id="drpRegistroResultado" placeholder="Ex: Sucesso / Sucesso parcial / Falha" style="${inp}">
+          </div>
+          <div style="grid-column:1 / -1;">
+            <label style="${fieldLbl}">Evidência</label>
+            <input type="text" id="drpRegistroEvidencia" placeholder="Ex: Link do relatório, print, ata" style="${inp}">
+          </div>
+          <div style="grid-column:1 / -1;">
+            <label style="${fieldLbl}">Pendências encontradas</label>
+            <textarea id="drpRegistroPendencias" rows="2" placeholder="Ex: Ajustar rota de failover; atualizar runbook do passo 4" style="${inp}resize:vertical;font-family:inherit;"></textarea>
+          </div>
+        </div>
+        <button type="button" class="btn btn-ghost" onclick="adicionarDrpRegistroTeste()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar registro</button>
+      </div>
+    </div>`;
+}
+
+/** Ordena por data desc (registros sem data vão para o fim). */
+function _registrosTesteOrdenados() {
+  return (window._depDrpRegistros || []).map((r, i) => ({ r, i }))
+    .sort((a, b) => String(b.r.data || '').localeCompare(String(a.r.data || '')));
+}
+
+function renderDrpRegistrosTeste() {
+  const cont = document.getElementById('drpRegistrosTabela');
+  if (!cont) return;
+  const ordenados = _registrosTesteOrdenados();
+  if (!ordenados.length) { cont.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum registro de teste ainda.</p>'; return; }
+  cont.innerHTML = `<table class="data-table" style="box-shadow:none;">
+    <thead><tr>
+      <th style="font-size:0.78em;">Data</th>
+      <th style="font-size:0.78em;">Resultado</th>
+      <th style="font-size:0.78em;">Evidência</th>
+      <th style="font-size:0.78em;">Pendências</th>
+      <th style="width:40px;"></th>
+    </tr></thead><tbody>` +
+    ordenados.map(({ r, i }) => `<tr>
+        <td style="font-size:0.85em;color:#333;white-space:nowrap;">${esc(r.data ? new Date(r.data + 'T00:00:00').toLocaleDateString('pt-BR') : '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(r.resultado || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(r.evidencia || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(r.pendencias || '-')}</td>
+        <td style="text-align:center;"><button class="btn-icon" onclick="removerDrpRegistroTeste(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button></td>
+      </tr>`).join('') + `</tbody></table>`;
+}
+
+window.adicionarDrpRegistroTeste = () => {
+  const data = (document.getElementById('drpRegistroData') || {}).value || '';
+  const resultado = (document.getElementById('drpRegistroResultado') || {}).value.trim();
+  const evidencia = (document.getElementById('drpRegistroEvidencia') || {}).value.trim();
+  const pendencias = (document.getElementById('drpRegistroPendencias') || {}).value.trim();
+  if (!data && !resultado && !evidencia && !pendencias) return showToast('Preencha ao menos um campo do registro.', '#e65100');
+  window._depDrpRegistros = window._depDrpRegistros || [];
+  window._depDrpRegistros.push({ data, resultado, evidencia, pendencias });
+  ['drpRegistroData', 'drpRegistroResultado', 'drpRegistroEvidencia', 'drpRegistroPendencias'].forEach((id) => {
+    const el = document.getElementById(id); if (el) el.value = '';
+  });
+  renderDrpRegistrosTeste();
+};
+
+window.removerDrpRegistroTeste = (idx) => {
+  window._depDrpRegistros.splice(idx, 1);
+  renderDrpRegistrosTeste();
+};
+
+// ============================================================
+// Aba "Plano de Recuperação" da Dependência.
+// Importar Template DRP (.md) -> gera o artefato DRP via IA (mesmo formato do
+// PCN) a partir do template + os Parâmetros DRP -> abre com imprimir/editar/
+// salvar versão. Template e versões moram no doc da dependência
+// (drpTemplate/drpTemplateNome/drpSalvo). Importar/Gerar são admin-only.
+// ============================================================
+window._depDrpTemplate = '';       // conteúdo Markdown do template importado (vazio = usa o padrão)
+window._depDrpTemplateNome = '';   // nome do arquivo, só para exibição
+
+function _htmlDrpPlano() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  return `
+    <div>
+      <label style="${lbl}">Template DRP</label>
+      <p style="font-size:0.8em;color:#888;margin:0 0 10px;">Importe um template em Markdown (.md) para orientar a estrutura do DRP gerado. Se nenhum for importado, um template padrão é usado.</p>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px;">
+        <input type="file" id="drpTemplateFile" accept=".md,.markdown,text/markdown" style="display:none;" onchange="importarTemplateDrp(this)">
+        <button class="btn btn-ghost" id="btnImportarTemplateDrp" onclick="document.getElementById('drpTemplateFile').click()">📥 Importar Template DRP</button>
+        <span id="drpTemplateNome" style="font-size:0.83em;color:#555;"></span>
+      </div>
+
+      <div style="border-top:1px solid #eee;margin-top:16px;padding-top:16px;">
+        <label style="${lbl}">Artefato DRP</label>
+        <p style="font-size:0.8em;color:#888;margin:0 0 10px;">Gere o Plano de Recuperação de Desastres a partir do template e dos Parâmetros DRP desta dependência.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+          <button class="btn btn-ghost" id="btnGerarDrp" onclick="gerarDRPDependencia()" style="color:#2e7d32;border-color:#2e7d32;">🤖 Gerar DRP</button>
+          <button class="btn btn-ghost" id="btnAbrirDrp" onclick="abrirDRPSalvo()" style="color:#1565c0;border-color:#1565c0;display:none;">📂 Abrir DRP</button>
+        </div>
+        <div id="drpResumo"></div>
+      </div>
+    </div>`;
+}
+
+/** Lê o .md escolhido e guarda em memória (persistido no salvar da dependência). */
+window.importarTemplateDrp = (input) => {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  const nome = file.name || '';
+  if (!/\.(md|markdown)$/i.test(nome)) {
+    showToast('Selecione um arquivo Markdown (.md).', '#e65100');
+    input.value = '';
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    window._depDrpTemplate = String(reader.result || '');
+    window._depDrpTemplateNome = nome;
+    _renderDrpTemplateNome();
+    showToast('✅ Template importado. Salve a dependência para guardá-lo.', '#2e7d32');
+  };
+  reader.onerror = () => showToast('Não foi possível ler o arquivo.', '#c62828');
+  reader.readAsText(file);
+  input.value = '';
+};
+
+function _renderDrpTemplateNome() {
+  const el = document.getElementById('drpTemplateNome');
+  if (!el) return;
+  el.innerHTML = window._depDrpTemplateNome
+    ? `📄 ${esc(window._depDrpTemplateNome)} <button class="btn-icon" onclick="removerTemplateDrp()" title="Remover template" style="color:#c62828;">&times;</button>`
+    : '<span style="color:#999;font-style:italic;">Nenhum template importado — usando o padrão.</span>';
+}
+
+window.removerTemplateDrp = () => {
+  window._depDrpTemplate = '';
+  window._depDrpTemplateNome = '';
+  _renderDrpTemplateNome();
+};
+
+/**
+ * Preview do DRP salvo dentro da aba Plano de Recuperação -- espelha
+ * renderPcnResumoBcp: mostra a última versão sanitizada, com botões de abrir/
+ * editar/gerar novo. A edição inline por seção e o índice lateral ficam no
+ * popup completo (_buildDRPPage).
+ */
+function renderDrpResumo() {
+  const container = document.getElementById('drpResumo');
+  if (!container) return;
+  // Importar template e Gerar DRP: Admin ou Segurança (TI opera/edita, mas não gera).
+  const podeGerar = Perfis.podeGerarDRP(window.USER_PERFIS);
+  const btnImp = document.getElementById('btnImportarTemplateDrp');
+  const btnGer = document.getElementById('btnGerarDrp');
+  if (btnImp) btnImp.style.display = podeGerar ? 'inline-block' : 'none';
+  if (btnGer) btnGer.style.display = podeGerar ? 'inline-block' : 'none';
+  _renderDrpTemplateNome();
+
+  const id = document.getElementById('depId').value || '';
+  const d = id ? (dependenciasData || []).find((x) => String(x.id) === String(id)) : null;
+  const versoes = d && d.drpSalvo ? _parsePCNVersoes(d.drpSalvo) : [];
+  const btnAbrir = document.getElementById('btnAbrirDrp');
+  if (btnAbrir) btnAbrir.style.display = versoes.length ? 'inline-block' : 'none';
+
+  if (!id) {
+    container.innerHTML = '<div style="border:1px dashed #ddd;border-radius:8px;padding:16px;text-align:center;color:#888;background:#fafafa;">Salve a dependência antes de gerar o DRP.</div>';
+    return;
+  }
+  if (!versoes.length) {
+    container.innerHTML = '<div style="border:1px dashed #ddd;border-radius:8px;padding:16px;text-align:center;color:#888;background:#fafafa;">Nenhum DRP gerado ainda para esta dependência.</div>';
+    return;
+  }
+
+  if (!document.getElementById('drpPreviewStyle')) {
+    const style = document.createElement('style');
+    style.id = 'drpPreviewStyle';
+    style.textContent = `
+      .drp-preview h1, .drp-preview h2, .drp-preview h3 { color:#1a237e; margin:14px 0 8px; }
+      .drp-preview h1 { font-size:1.25em; } .drp-preview h2 { font-size:1.1em; } .drp-preview h3 { font-size:1em; }
+      .drp-preview p, .drp-preview li { font-size:0.95em; color:#333; }
+      .drp-preview table { width:100%; border-collapse:collapse; margin:10px 0; font-size:0.85em; }
+      .drp-preview th, .drp-preview td { border:1px solid #e0e0e0; padding:6px 10px; text-align:left; }
+      .drp-preview th { background:#f5f6fa; }`;
+    document.head.appendChild(style);
+  }
+
+  const idx = versoes.length - 1;
+  const versao = versoes[idx];
+  const limpo = sanitizarPCN(versao.html || '');
+  const dataFmt = versao.data ? new Date(versao.data).toLocaleString('pt-BR') : '-';
+  container.innerHTML = `
+    <div style="font-size:0.82em;color:#666;margin-bottom:8px;">Versão ${versao.versao || (idx + 1)} · gerado em ${dataFmt}${versao.autor ? ' · ' + esc(versao.autor) : ''}</div>
+    <div class="drp-preview" style="max-height:360px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;background:#fff;line-height:1.55;">
+      ${limpo.html}
+    </div>`;
+}
+
+/**
+ * Markup do drawer de Dependência (abas Dados Gerais / Parâmetros DRP / Plano
+ * de Recuperação). Extraído pra ser reusado tanto no Catálogo de Dependências
+ * quanto na tela DRP (que também gerencia os Parâmetros DRP). Mesmos ids, então
+ * abrirDrawerDependencia/salvarDep funcionam igual nas duas telas.
+ */
+function _htmlDrawerDependencia() {
+  return `
+    <div class="drawer-overlay" id="drawerOverlayDependencia" onclick="fecharDrawerDependencia()"></div>
+    <div class="drawer" id="drawerDependencia">
+      <div class="drawer-header">
+        <h3 id="depDrawerTitulo">Nova Dependência</h3>
+        <button onclick="fecharDrawerDependencia()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
+        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
+          <button id="tab-dep-geral" onclick="trocarAbaDependencia('geral')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Dados Gerais</button>
+          <button id="tab-dep-drp" onclick="trocarAbaDependencia('drp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Parâmetros DRP</button>
+          <button id="tab-dep-plano" onclick="trocarAbaDependencia('plano')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Plano de Recuperação</button>
+          <button id="tab-dep-registros" onclick="trocarAbaDependencia('registros')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Registros de Testes</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
+          <input type="hidden" id="depId">
+
+          <div id="painel-dep-geral">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria</label>
+                <select id="depCategoria" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                  <option value="">Selecione...</option>
+                  ${DEPENDENCIA_CATEGORIAS_TECNICAS.map(c => `<option value="${c}">${c}</option>`).join('')}
+                </select>
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Nome</label>
+                <input type="text" id="depNome" placeholder="Ex: Switches e roteadores" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              </div>
+            </div>
+            <div style="margin-bottom:14px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Papel</label>
+              <textarea id="depDetalhes" rows="3" placeholder="Papel ou função desta dependência" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
+            </div>
+          </div>
+
+          <div id="painel-dep-drp" style="display:none;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
+                <input type="text" id="depRto" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              </div>
+              <div>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
+                <input type="text" id="depRpo" placeholder="Ex: 1 hora" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              </div>
+            </div>
+            <div style="margin-bottom:14px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Estratégia de contingência</label>
+              <input type="hidden" id="depEstrategia" value="">
+              <div id="chips-depEstrategia" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            </div>
+            <div style="margin-bottom:14px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área Responsável</label>
+              <select id="depResponsavel" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                <option value="">Selecione...</option>
+              </select>
+            </div>
+            ${_htmlDrpLista('drpCriteriosAcionamento', 'Critérios de Acionamento do DRP', 'Ex: Indisponibilidade do serviço por mais de 30 minutos confirmada pelo monitoramento')}
+            ${_htmlDrpLista('drpPreRequisitos', 'Pré-requisitos', 'Ex: Backup íntegro das últimas 24h disponível e validado')}
+            ${_htmlDrpDependencias()}
+            ${_htmlDrpLista('drpHealthCheck', 'Checklist de Verificação e Diagnóstico (Health Check)', 'Ex: Infraestrutura/Cloud: o ambiente está acessível?')}
+            ${_htmlDrpLista('drpRunbook', 'Fase Executiva de Recuperação (Runbook de Restore)', 'Ex: Restaurar o banco de dados a partir do último backup íntegro')}
+            ${_htmlDrpLista('drpCriteriosRetorno', 'Critérios de Retorno à Normalidade', 'Ex: Auditoria e conciliação manual (duplicidade ou erros)')}
+            ${_htmlDrpLista('drpLimitacoes', 'Limitações Conhecidas da Estratégia', 'Ex: Dependência direta de provedores de internet e nuvem de terceiros')}
+            ${_htmlDrpTestes()}
+          </div>
+
+          <div id="painel-dep-plano" style="display:none;">
+            ${_htmlDrpPlano()}
+          </div>
+
+          <div id="painel-dep-registros" style="display:none;">
+            ${_htmlDrpRegistros()}
+          </div>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerDependencia()">Cancelar</button>
+        <button class="btn btn-primary" id="btnSalvarDep" onclick="salvarDep()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+/** Título do drawer de Dependência com o nome como subtítulo -- espelha _atualizarTituloDrawerRisco. */
+function _atualizarTituloDrawerDependencia(d) {
+  const titulo = (d && d.id) ? 'Editar Dependência' : 'Nova Dependência';
+  const nome = d && d.nome ? String(d.nome).trim() : '';
+  const subtitulo = nome ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(nome)}</div>` : '';
+  document.getElementById('depDrawerTitulo').innerHTML = titulo + subtitulo;
+}
+
 window.abrirDrawerDependencia = (d) => {
   document.getElementById('depId').value = d ? d.id : '';
   document.getElementById('depCategoria').value = d ? d.categoria : '';
@@ -2729,18 +3536,50 @@ window.abrirDrawerDependencia = (d) => {
   renderEstrategiaChips();
   _popularSelectAreaResponsavelDep(d ? (d.responsavel || '') : '');
   window._depDrpListas = {
+    drpCriteriosAcionamento: d && Array.isArray(d.drpCriteriosAcionamento) ? [...d.drpCriteriosAcionamento] : [],
+    drpPreRequisitos: d && Array.isArray(d.drpPreRequisitos) ? [...d.drpPreRequisitos] : [],
     drpHealthCheck: d && Array.isArray(d.drpHealthCheck) ? [...d.drpHealthCheck] : [],
     drpRunbook: d && Array.isArray(d.drpRunbook) ? [...d.drpRunbook] : [],
     drpCriteriosRetorno: d && Array.isArray(d.drpCriteriosRetorno) ? [...d.drpCriteriosRetorno] : [],
     drpLimitacoes: d && Array.isArray(d.drpLimitacoes) ? [...d.drpLimitacoes] : [],
   };
-  window._depDrpEditando = { drpHealthCheck: null, drpRunbook: null, drpCriteriosRetorno: null, drpLimitacoes: null };
-  ['drpHealthCheck', 'drpRunbook', 'drpCriteriosRetorno', 'drpLimitacoes'].forEach((c) => {
+  window._depDrpEditando = { drpCriteriosAcionamento: null, drpPreRequisitos: null, drpHealthCheck: null, drpRunbook: null, drpCriteriosRetorno: null, drpLimitacoes: null };
+  ['drpCriteriosAcionamento', 'drpPreRequisitos', 'drpHealthCheck', 'drpRunbook', 'drpCriteriosRetorno', 'drpLimitacoes'].forEach((c) => {
     document.getElementById('novoItem-' + c).value = '';
     document.getElementById('btnAdicionar-' + c).textContent = '+ Adicionar';
     renderDrpLista(c);
   });
-  document.getElementById('depDrawerTitulo').textContent = d ? 'Editar Dependência' : 'Nova Dependência';
+  // Seção "Dependências" (seletor do catálogo).
+  window._depDrpDependenciasSel = d && Array.isArray(d.drpDependencias)
+    ? d.drpDependencias.map((x) => ({ id: x.id != null ? x.id : null, nome: x.nome || '', categoria: x.categoria || 'Outros' }))
+    : [];
+  document.getElementById('drpDep-input').value = '';
+  drpDepFecharDropdown();
+  renderDrpDependenciasTags();
+  // Seção "Testes do procedimento" (registro único).
+  // Testes do Procedimento: Estratégias (Parâmetros DRP) + Registros (aba).
+  window._depDrpEstrategias = d && Array.isArray(d.drpEstrategiasTeste)
+    ? d.drpEstrategiasTeste.map((e) => ({ cenario: e.cenario || '', frequencia: e.frequencia || '' }))
+    : [];
+  window._depDrpRegistros = d && Array.isArray(d.drpRegistrosTeste)
+    ? d.drpRegistrosTeste.map((r) => ({ data: r.data || '', resultado: r.resultado || '', evidencia: r.evidencia || '', pendencias: r.pendencias || '' }))
+    : [];
+  // Migração não-destrutiva: se ainda não há listas mas existe o drpTestes
+  // antigo (registro único) com conteúdo, semeia 1 estratégia + 1 registro.
+  const t = (d && d.drpTestes && typeof d.drpTestes === 'object') ? d.drpTestes : {};
+  if (!window._depDrpEstrategias.length && (t.cenarioTestado || t.frequenciaEsperada)) {
+    window._depDrpEstrategias.push({ cenario: t.cenarioTestado || '', frequencia: t.frequenciaEsperada || '' });
+  }
+  if (!window._depDrpRegistros.length && (t.dataUltimoTeste || t.resultado || t.evidencia || t.pendencias)) {
+    window._depDrpRegistros.push({ data: t.dataUltimoTeste || '', resultado: t.resultado || '', evidencia: t.evidencia || '', pendencias: t.pendencias || '' });
+  }
+  renderDrpEstrategiasTeste();
+  renderDrpRegistrosTeste();
+  // Aba "Plano de Recuperação": template importado + preview do DRP salvo.
+  window._depDrpTemplate = d && d.drpTemplate ? String(d.drpTemplate) : '';
+  window._depDrpTemplateNome = d && d.drpTemplateNome ? String(d.drpTemplateNome) : '';
+  renderDrpResumo();
+  _atualizarTituloDrawerDependencia(d);
   trocarAbaDependencia('geral');
   document.getElementById('drawerDependencia').classList.add('open');
   document.getElementById('drawerOverlayDependencia').classList.add('open');
@@ -2789,10 +3628,25 @@ window.salvarDep = async () => {
     rpo: document.getElementById('depRpo').value.trim(),
     estrategia: document.getElementById('depEstrategia').value,
     responsavel: document.getElementById('depResponsavel').value,
+    drpCriteriosAcionamento: window._depDrpListas.drpCriteriosAcionamento || [],
+    drpPreRequisitos: window._depDrpListas.drpPreRequisitos || [],
     drpHealthCheck: window._depDrpListas.drpHealthCheck || [],
     drpRunbook: window._depDrpListas.drpRunbook || [],
     drpCriteriosRetorno: window._depDrpListas.drpCriteriosRetorno || [],
     drpLimitacoes: window._depDrpListas.drpLimitacoes || [],
+    drpDependencias: (window._depDrpDependenciasSel || []).map((x) => ({ id: x.id != null ? x.id : null, nome: x.nome, categoria: x.categoria || 'Outros' })),
+    // Estratégias de Teste (Parâmetros DRP) e histórico de Registros (aba).
+    drpEstrategiasTeste: (window._depDrpEstrategias || []).map((e) => ({ cenario: e.cenario || '', frequencia: e.frequencia || '' })),
+    drpRegistrosTeste: (window._depDrpRegistros || []).map((r) => ({ data: r.data || '', resultado: r.resultado || '', evidencia: r.evidencia || '', pendencias: r.pendencias || '' })),
+    // drpTestes (registro único antigo) não é mais editado pela UI -- preserva
+    // o que já estava gravado (fonte da migração e fallback do gerarDRP).
+    drpTestes: existente && existente.drpTestes ? existente.drpTestes : undefined,
+    // Aba Plano de Recuperação: template importado. drpSalvo (versões do
+    // artefato) é gravado pelo fluxo próprio (salvarDRP) -- aqui só preserva o
+    // que já existe pra não sumir do objeto em memória no merge otimista.
+    drpTemplate: window._depDrpTemplate || '',
+    drpTemplateNome: window._depDrpTemplateNome || '',
+    drpSalvo: existente ? (existente.drpSalvo || '') : '',
   };
   if (!d.categoria) return showToast('Informe a categoria.', '#e65100');
   if (!d.nome) return showToast('Informe o nome.', '#e65100');
@@ -2815,7 +3669,7 @@ window.salvarDep = async () => {
     d.id = tempId;
     dependenciasData.push(d);
   }
-  renderizarDependencias();
+  _refreshAposSalvarDependencia();
   window.dependenciasCatalogo = dependenciasData;
   showToast('✅ Salvando...', '#1a237e');
 
@@ -2836,10 +3690,24 @@ window.salvarDep = async () => {
     // Reverter (remove o registro temporário criado nesta operação)
     if (isNew && tempId) {
       dependenciasData = dependenciasData.filter(x => x.id !== tempId);
-      renderizarDependencias();
+      _refreshAposSalvarDependencia();
     }
   }
 };
+
+/**
+ * Re-renderiza a lista da tela ativa depois de salvar/reverter uma dependência.
+ * O drawer de dependência agora é usado tanto no Catálogo (#dependencias)
+ * quanto na tela DRP (#drp) -- cada uma tem sua própria lista.
+ */
+function _refreshAposSalvarDependencia() {
+  const page = (window.location.hash.slice(1).split('?')[0]) || '';
+  if (page === 'drp') {
+    if (typeof renderDRPListaComFiltro === 'function') renderDRPListaComFiltro();
+  } else if (document.getElementById('depRows')) {
+    renderizarDependencias();
+  }
+}
 
 // ============================================================
 // PÁGINA: ADMIN (Painel)
@@ -2855,8 +3723,8 @@ async function admin() {
 
   const [processos, areas] = await Promise.all([API.getProcessos(), API.getAreas()]);
 
-  // Gestor sem área: bloquear acesso
-  if (window.USER_PERFIL !== 'admin' && !window.USER_AREA) {
+  // Gestor (sem Admin/Segurança) sem área: bloquear acesso.
+  if (_limitadoAArea() && !window.USER_AREA) {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('painel').style.display = 'block';
     document.getElementById('painel').innerHTML = `
@@ -2868,13 +3736,10 @@ async function admin() {
     return;
   }
 
-  // Gestor: filtrar apenas sua area
-  const processosVisiveis = (window.USER_PERFIL !== 'admin' && window.USER_AREA)
-    ? processos.filter(p => p.area === window.USER_AREA)
-    : processos;
-  const areasVisiveis = (window.USER_PERFIL !== 'admin' && window.USER_AREA)
-    ? areas.filter(a => a.nome === window.USER_AREA)
-    : areas;
+  // Gestor puro vê só a própria área; Admin e SI veem tudo.
+  const recorte = _recorteAreaGestor();
+  const processosVisiveis = recorte ? processos.filter(p => p.area === recorte) : processos;
+  const areasVisiveis = recorte ? areas.filter(a => a.nome === recorte) : areas;
 
   document.getElementById('loading').style.display = 'none';
   document.getElementById('painel').style.display = 'block';
@@ -3491,7 +4356,7 @@ function _formatarReais(v) {
 }
 
 async function riscos() {
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Gestão de Riscos</h2><p class="page-sub">Registro, análise, tratamento e monitoramento dos riscos identificados</p></div>
@@ -3947,7 +4812,7 @@ async function monitor() {
 function renderizarRiscos() {
   _renderPainelRiscoConsolidado();
   let data = [...riscosData];
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
 
   const filtroArea = document.getElementById('filtroRiscoArea');
   if (filtroArea && filtroArea.value) data = data.filter(r => r.area === filtroArea.value);
@@ -4342,7 +5207,7 @@ function _atualizarTituloDrawerRisco(r) {
 }
 
 window.abrirDrawerRisco = async (r) => {
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
   document.getElementById('rId').value = r ? r.id : '';
 
   if (!riscosProcessosCache.length) {
@@ -4619,7 +5484,7 @@ window._riscoImpactoFinanceiro = [];
 
 function renderImpactoFinanceiroRisco() {
   const itens = window._riscoImpactoFinanceiro || [];
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
   const total = itens.reduce((soma, it) => soma + (Number(it.valor) || 0), 0);
   const totalInput = document.getElementById('rImpactoFinanceiro');
   if (totalInput) totalInput.value = itens.length ? total : '';
@@ -4680,7 +5545,7 @@ function renderPlanoAcaoRisco() {
   const container = document.getElementById('planoAcaoTabela');
   if (!container) return;
   const itens = window._riscoPlanoAcao || [];
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
   if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhuma ação cadastrada.</p>'; return; }
   // Compatibilidade com itens salvos no formato antigo (acao/responsavel/prazo/status):
   // `quando` cai para `prazo` quando o item nao tem o campo novo.
@@ -4770,7 +5635,7 @@ function renderKrisRisco() {
   const container = document.getElementById('krisTabela');
   if (!container) return;
   const itens = window._riscoKris || [];
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
   if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum KRI cadastrado.</p>'; return; }
   // dataLancamento e o nome novo do campo; ultimaAtualizacao e o antigo, mantido
   // como fallback para KRIs ja lancados antes desta tela ganhar o campo visivel.
@@ -5349,7 +6214,7 @@ window.atualizarMesDashboard = (mes) => {
 function renderizarIndicadoresDashboard() {
   const conteudo = document.getElementById('indicadoresConteudoDashboard');
   if (!conteudo) return;
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarIndicadores(window.USER_PERFIS);
   const f = indicadoresDashboardFiltro;
 
   const mesRef = indicadoresDashboardMes;
@@ -5469,7 +6334,7 @@ function renderizarIndicadoresDashboard() {
 // PÁGINA: INDICADORES — CADASTRO
 // ============================================================
 async function indicadoresCadastro() {
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarIndicadores(window.USER_PERFIS);
   indicadoresPaginaAtual = 1;
   indicadoresFiltrosCadastro = { pilar: '', responsavel: '', busca: '' };
   indicadoresSelecionados = new Set();
@@ -5573,7 +6438,7 @@ function renderizarIndicadoresCadastro() {
   const conteudo = document.getElementById('indicadoresConteudoCadastro');
   if (!conteudo) return;
   let data = _filtrarIndicadores(indicadoresData, indicadoresFiltrosCadastro);
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarIndicadores(window.USER_PERFIS);
 
   data.sort((a, b) => {
     const valA = (a[indicadoresOrdenacao.coluna] || '').toString().toLowerCase();
@@ -5640,7 +6505,7 @@ function renderizarIndicadoresCadastro() {
 function _atualizarBotaoExcluirSelecionados() {
   const btn = document.getElementById('btnExcluirIndicadoresSelecionados');
   if (!btn) return;
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarIndicadores(window.USER_PERFIS);
   const n = indicadoresSelecionados.size;
   btn.style.display = isAdmin && n > 0 ? 'inline-block' : 'none';
   btn.textContent = `🗑️ Excluir selecionados (${n})`;
@@ -5694,7 +6559,7 @@ let indicadoresFiltrosLancamento = { pilar: '', responsavel: '', mes: '', busca:
 let indicadoresLancamentoPaginaAtual = 1;
 
 async function indicadoresLancamento() {
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarIndicadores(window.USER_PERFIS);
   indicadoresFiltrosLancamento = { pilar: '', responsavel: '', mes: '', busca: '' };
   indicadoresLancamentoPaginaAtual = 1;
   app.innerHTML = `
@@ -5792,7 +6657,7 @@ window.irParaPaginaLancamentos = (delta) => {
 function renderizarGradeLancamentos() {
   const el = document.getElementById('indicadoresGradeLancamentos');
   if (!el) return;
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeEditarIndicadores(window.USER_PERFIS);
 
   let data = _filtrarLancamentos(_todosLancamentos(), indicadoresFiltrosLancamento);
   // Sempre decrescente por mês, independente do filtro aplicado.
@@ -6539,9 +7404,9 @@ window.gerarDossieProcesso = () => {
 // GERAÇÃO DE PCN VIA IA (Gemini) - com sidebar recolhível
 // ============================================================
 window.gerarPCNProcesso = async () => {
-  // Apenas administradores podem gerar PCN
-  if (window.USER_PERFIL !== 'admin') {
-    return showToast('Apenas administradores podem gerar PCNs.', '#e65100');
+  // Gerar PCN: Admin ou Segurança da Informação.
+  if (!Perfis.podeGerarPCN(window.USER_PERFIS)) {
+    return showToast('Seu perfil não pode gerar PCNs.', '#e65100');
   }
 
   const id = document.getElementById('fId').value || '';
@@ -6717,7 +7582,7 @@ function renderPcnResumoBcp() {
   const limpo = sanitizarPCN(versao.html || '');
   limpo.html = _limparOpcoesRiscoInvalidas(limpo.html);
   const dataFmt = versao.data ? new Date(versao.data).toLocaleString('pt-BR') : '-';
-  const isAdmin = window.USER_PERFIL === 'admin';
+  const isAdmin = Perfis.podeGerarPCN(window.USER_PERFIS);
   const editando = !!window._bcpPcnEditando;
 
   const seletor = versoes.length > 1 ? `
@@ -6990,6 +7855,207 @@ window.abrirPCNDireto = async (id) => {
 
 
 // ============================================================
+// ARTEFATO DRP (aba "Plano de Recuperação" da Dependência)
+// Espelha o fluxo do PCN: gerar via IA -> auto-salvar v1 -> abrir viewer com
+// imprimir/editar/salvar versão/seletor. Versões no doc da dependência
+// (drpSalvo), viewer montado por _buildDRPPage.
+// ============================================================
+window.gerarDRPDependencia = async () => {
+  if (!Perfis.podeGerarDRP(window.USER_PERFIS)) return showToast('Seu perfil não pode gerar DRPs.', '#e65100');
+  const id = document.getElementById('depId').value || '';
+  if (!id) return showToast('Salve a dependência antes de gerar o DRP.', '#e65100');
+  const d = (dependenciasData || []).find((x) => String(x.id) === String(id));
+
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
+  win.document.write('<p style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#1a237e;">⏳ Gerando DRP...</p>');
+
+  const btn = document.getElementById('btnGerarDrp');
+  const textoOriginal = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Gerando...'; btn.style.opacity = '0.7'; }
+  try {
+    const result = await API.post('gerarDRP', { id, template: window._depDrpTemplate || '' });
+    if (result.error) throw new Error(result.error);
+    let drpContent = (result.drp || '');
+    const htmlStart = drpContent.indexOf('<');
+    if (htmlStart > 0) drpContent = drpContent.substring(htmlStart);
+    drpContent = drpContent.replace(/^```html\s*/i, '').replace(/```\s*$/i, '').trim();
+
+    // Auto-salvar como primeira versão.
+    let versoes = d && d.drpSalvo ? _parsePCNVersoes(d.drpSalvo) : [];
+    try {
+      await API.post('salvarDRP', { id: String(id), html: drpContent });
+      API.invalidate('getDependencias');
+      versoes.push({ versao: versoes.length + 1, data: new Date().toISOString(), autor: window.USER_EMAIL || 'sistema', html: drpContent });
+      if (d) d.drpSalvo = JSON.stringify(versoes);
+      renderDrpResumo();
+    } catch (saveErr) { console.warn('Auto-save DRP falhou:', saveErr); }
+
+    const drpHtml = _buildDRPPage(drpContent, { nome: result.nome, categoria: result.categoria }, id, versoes, await _tokenParaPCN());
+    win.document.open();
+    win.document.write(drpHtml);
+    win.document.close();
+    showToast('✅ DRP gerado e salvo!', '#2e7d32');
+  } catch (err) {
+    console.error('Erro DRP:', err);
+    showToast('❌ ' + err.message, '#c62828');
+    if (win) win.close();
+  } finally { if (btn) { btn.disabled = false; btn.innerHTML = textoOriginal; btn.style.opacity = '1'; } }
+};
+
+window.abrirDRPSalvo = async () => {
+  const id = document.getElementById('depId').value || '';
+  const d = id ? (dependenciasData || []).find((x) => String(x.id) === String(id)) : null;
+  if (!d || !d.drpSalvo) return showToast('Nenhum DRP salvo.', '#e65100');
+  const versoes = _parsePCNVersoes(d.drpSalvo);
+  if (!versoes.length) return showToast('Nenhuma versão de DRP encontrada.', '#e65100');
+  const ultima = versoes[versoes.length - 1];
+  let drpHtml;
+  try {
+    drpHtml = _buildDRPPage(ultima.html, { nome: d.nome, categoria: d.categoria }, id, versoes, await _tokenParaPCN());
+  } catch (e) {
+    return showToast('❌ ' + e.message, '#c62828');
+  }
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado.', '#e65100');
+  win.document.open();
+  win.document.write(drpHtml);
+  win.document.close();
+};
+
+// Viewer do DRP -- mesmo layout/CSS do PCN (_buildPCNPage), adaptado: capa
+// "Plano de Recuperação de Desastres", entidade = dependência, e o salvar
+// versão aponta pra action 'salvarDRP' (por id da dependência) em vez de
+// 'salvarPCN' (por área/processo).
+function _buildDRPPage(drpContent, info, depId, versoes, idToken) {
+  const _limpo = sanitizarPCN(drpContent);
+  if (_limpo.usouFallback) {
+    console.warn('DRP: DOMPurify indisponível, usando limpeza básica.');
+    showToast('Aviso: o DRP foi exibido com limpeza reduzida (biblioteca indisponível).', '#e65100');
+  }
+  drpContent = _limpo.html;
+  const versoesJson = versoes ? JSON.stringify(versoes).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t').replace(/</g, '\\x3c') : '[]';
+  const versaoAtual = versoes ? versoes.length : 1;
+  const seletorVersoes = versoes && versoes.length > 1 ? `
+    <div style="position:fixed;bottom:16px;right:20px;z-index:60;background:white;border:1.5px solid #e0e0e0;border-radius:8px;padding:8px 14px;box-shadow:0 2px 12px rgba(0,0,0,0.15);font-size:9pt;display:flex;align-items:center;gap:8px;">
+      <span style="color:#666;">Versão:</span>
+      <select id="drp-versao-select" onchange="trocarVersaoDRP(this.value)" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:9pt;">
+        ${versoes.map(function(v) { return '<option value="' + (v.versao-1) + '"' + (v.versao === versaoAtual ? ' selected' : '') + '>v' + v.versao + ' — ' + new Date(v.data).toLocaleDateString('pt-BR') + ' ' + new Date(v.data).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) + '</option>'; }).join('')}
+      </select>
+      <span style="color:#999;font-size:8pt;">${versoes.length} versões</span>
+    </div>` : '';
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>DRP - ${esc(info.nome || '')}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#333;font-size:10.5pt;line-height:1.6;margin:0}
+.sidebar{position:fixed;left:0;top:0;width:260px;height:100vh;overflow-y:auto;background:linear-gradient(180deg,#1a237e,#283593);padding:20px 16px;z-index:50;box-shadow:4px 0 16px rgba(0,0,0,0.15);transition:transform 0.3s ease}
+.sidebar.collapsed{transform:translateX(-260px)}
+.sidebar h3{color:rgba(255,255,255,0.9);font-size:10pt;margin-bottom:12px}
+.sidebar ol{list-style:none;padding:0;margin:0}
+.sidebar li{margin-bottom:6px}
+.sidebar a{color:rgba(255,255,255,0.75);text-decoration:none;font-size:8.5pt;display:block;padding:4px 8px;border-radius:4px;transition:background 0.2s}
+.sidebar a:hover{background:rgba(255,255,255,0.1);color:white}
+.sidebar a.h1-link{font-weight:700;font-size:9pt}
+.sidebar a.h2-link{font-size:8.5pt}
+.sidebar a.h3-link{font-size:8pt;opacity:0.7;padding-left:16px}
+.toggle-btn{position:fixed;left:268px;top:12px;z-index:60;background:#1a237e;color:white;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,0.2);transition:left 0.3s ease}
+.toggle-btn.collapsed{left:12px}
+.main{margin-left:280px;padding:40px 50px;max-width:950px;transition:margin-left 0.3s ease}
+.main.expanded{margin-left:20px}
+h1{font-size:22pt;color:#1a237e;margin-bottom:4px}
+h2{font-size:13pt;color:#1a237e;margin:30px 0 14px;padding:8px 14px;background:linear-gradient(135deg,#e8eaf6,#f5f6fa);border-left:4px solid #1a237e;border-radius:0 6px 6px 0}
+h3{font-size:11pt;color:#333;margin:20px 0 8px}
+p{margin-bottom:8px}
+ul,ol{margin:6px 0 12px 24px}
+li{margin-bottom:5px}
+table{width:100%;border-collapse:collapse;margin:10px 0 18px;font-size:9.5pt}
+th{background:#1a237e;color:white;padding:9px 12px;text-align:left;font-weight:600;font-size:9pt}
+td{padding:8px 12px;border:1px solid #ddd;vertical-align:top}
+tr:nth-child(even){background:#fafbfc}
+.cover{background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:40px 50px;margin:-40px -50px 30px;border-radius:0 0 12px 12px}
+.cover h1{color:white;font-size:24pt}
+.cover p{color:rgba(255,255,255,0.85)}
+.cover .badge{background:rgba(255,255,255,0.2);color:white;display:inline-block;padding:5px 16px;border-radius:14px;font-size:9.5pt;font-weight:700;margin-top:10px}
+.btn-action{position:fixed;top:12px;padding:10px 20px;background:#1a237e;color:white;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600;z-index:60;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
+.btn-action:hover{opacity:0.9}
+.footer{margin-top:40px;padding-top:16px;border-top:2px solid #e8eaf6;font-size:8pt;color:#999;text-align:center}
+@media print{.sidebar,.toggle-btn,.btn-action,#drp-versao-select,.version-panel{display:none!important}.main{margin-left:0!important;padding:20px 30px}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.cover{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;margin:-20px -30px 20px;padding:30px}th{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}h2{page-break-after:avoid}table{page-break-inside:avoid}}
+</style>
+</head>
+<body>
+<nav class="sidebar" id="drp-sidebar"><h3>📋 Navegação</h3><ol id="drp-nav-list"></ol></nav>
+<button class="toggle-btn" id="drp-toggle" onclick="toggleDRPSidebar()">☰</button>
+<button class="btn-action" style="right:180px;" onclick="window.print()">🖨️ Imprimir / PDF</button>
+<button class="btn-action" style="right:20px;background:#2e7d32;" onclick="salvarVersaoDRP()">💾 Salvar versão</button>
+${seletorVersoes}
+<div class="main" id="drp-main">
+  <div class="cover">
+    <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:16px;" alt="Fortes" onerror="this.style.display='none'">
+    <h1>Plano de Recuperação de Desastres</h1>
+    <p style="font-size:13pt;">${esc(info.nome || '')}</p>
+    <p>Categoria: ${esc(info.categoria || '')}</p>
+    <p style="margin-top:16px;font-size:9pt;opacity:0.7;">Versão ${versaoAtual} • ${new Date().toLocaleDateString('pt-BR')} • Classificação: Uso Interno</p>
+  </div>
+  <div id="drp-editavel" contenteditable="true" style="outline:none;min-height:200px;">
+  ${drpContent}
+  </div>
+  <div class="footer">
+    <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:24px;margin-bottom:6px;" alt="Fortes" onerror="this.style.display='none'"><br>
+    DRP v${versaoAtual} • Fortes Tecnologia
+  </div>
+</div>
+<script>
+var DRP_DEP_ID = '${escScript(depId)}';
+var DRP_API_URL = '` + APP_API_URL + `';
+var DRP_TOKEN = '` + (idToken || '') + `';
+var DRP_VERSOES = JSON.parse('${versoesJson}');
+function buildDRPNav(){
+  var el = document.getElementById('drp-editavel');
+  var nav = document.getElementById('drp-nav-list');
+  if(!el||!nav)return;
+  var hs = el.querySelectorAll('h1,h2,h3');
+  if(!hs.length){document.getElementById('drp-sidebar').style.display='none';document.getElementById('drp-toggle').style.display='none';return;}
+  var html='';
+  for(var i=0;i<hs.length;i++){var h=hs[i];var sid='s'+i;h.id=sid;var cls=h.tagName==='H1'?'h1-link':h.tagName==='H2'?'h2-link':'h3-link';html+='<li style="'+(h.tagName==='H3'?'padding-left:12px;':'')+'"><a href="#'+sid+'" class="'+cls+'">'+h.textContent.trim()+'</a></li>';}
+  nav.innerHTML=html;
+}
+setTimeout(buildDRPNav, 300);
+setTimeout(buildDRPNav, 1000);
+setTimeout(buildDRPNav, 2000);
+function toggleDRPSidebar(){
+  var sb=document.getElementById('drp-sidebar');var mn=document.getElementById('drp-main');var tb=document.getElementById('drp-toggle');
+  sb.classList.toggle('collapsed');mn.classList.toggle('expanded');tb.classList.toggle('collapsed');
+}
+function trocarVersaoDRP(idx){
+  var versao = DRP_VERSOES[Number(idx)];
+  if(versao && versao.html){document.getElementById('drp-editavel').innerHTML = versao.html;setTimeout(buildDRPNav,100);}
+}
+async function salvarVersaoDRP(){
+  var conteudo=document.getElementById('drp-editavel').innerHTML;
+  var btn=document.querySelector('button[onclick="salvarVersaoDRP()"]');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Salvando...';}
+  try{
+    var payload = JSON.stringify({action:'salvarDRP',id:DRP_DEP_ID,html:conteudo});
+    var res = await fetch(DRP_API_URL, {method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8','Authorization':'Bearer '+DRP_TOKEN},body:payload});
+    if(res.status===401){throw new Error('A sessão desta aba expirou. Feche esta aba, volte ao sistema e abra o DRP de novo — o conteúdo editado não foi salvo.');}
+    var data = JSON.parse(await res.text());
+    if(data.error) throw new Error(data.error);
+    alert('✅ Versão ' + (data.versao || '') + ' salva com sucesso! (' + (data.totalVersoes || '') + ' versões no total)');
+  }catch(e){alert('❌ Erro: '+e.message);}
+  finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
+}
+</script>
+</body>
+</html>`;
+}
+
+
+// ============================================================
 // BCP - TABELA DE FORNECEDORES (com Plano B e SLA)
 // ============================================================
 /**
@@ -7103,9 +8169,11 @@ async function pcns() {
 
     let comPCN = processos.filter(p => p.pcnSalvo);
 
-    if (window.USER_PERFIL !== 'admin' && window.USER_AREA) {
-      comPCN = comPCN.filter(p => p.area === window.USER_AREA);
-    } else if (window.USER_PERFIL !== 'admin' && !window.USER_AREA) {
+    // Gestor puro vê só a própria área; Admin e SI veem tudo.
+    const recortePcn = _recorteAreaGestor();
+    if (recortePcn) {
+      comPCN = comPCN.filter(p => p.area === recortePcn);
+    } else if (_limitadoAArea() && !window.USER_AREA) {
       document.getElementById('pcns-lista').innerHTML = `
         <div style="text-align:center;padding:60px 20px;color:#999;">
           <div style="font-size:3em;margin-bottom:16px;">🔒</div>
@@ -7247,6 +8315,211 @@ window.excluirPCN = async (id, area, processo) => {
 };
 
 // ============================================================
+// PÁGINA: DRP — Biblioteca de Planos de Recuperação de Desastres
+//
+// Mesmo padrão da tela PCNs, mas a entidade é a Dependência. Além de listar/
+// abrir/excluir os DRPs gerados (campo drpSalvo), também gerencia por completo
+// os Parâmetros DRP de cada dependência, reusando o mesmo drawer do Catálogo
+// (_htmlDrawerDependencia / abrirDrawerDependencia). Filtro "Com DRP / Todas":
+// "Todas" mostra também as dependências técnicas ainda sem DRP, para preparar
+// os parâmetros e gerar. Escopo técnico = exclui Pessoas (como o Catálogo).
+// ============================================================
+async function drp() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>🛠️ Planos de Recuperação (DRP)</h2><p class="page-sub">Gere, abra e gerencie os Parâmetros DRP das dependências, organizados por categoria</p></div>
+    </div>
+    <div id="drp-resumo" style="display:none;margin-bottom:20px;"></div>
+    <div style="margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+      <input type="text" id="drpBusca" placeholder="🔍 Buscar dependência..." oninput="filtrarDRPs()" style="flex:1;min-width:220px;max-width:400px;padding:10px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;">
+      <select id="drpFiltroTipo" onchange="filtrarDRPs()" style="padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;">
+        <option value="com">Com DRP gerado</option>
+        <option value="todas">Todas as dependências</option>
+      </select>
+    </div>
+    <div class="loading" id="loading">
+      <div class="skeleton-table">
+        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:100%;height:40px;border-radius:8px;"></div></div>
+        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:60%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:20%;height:14px;"></div></div>
+        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:50%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:15%;height:14px;"></div></div>
+      </div>
+    </div>
+    <div id="drp-lista"></div>
+    ${_htmlDrawerDependencia()}`;
+
+  try {
+    API.invalidate('getDependencias');
+    const [deps, areas] = await Promise.all([API.getDependencias(), API.getAreas()]);
+    document.getElementById('loading').style.display = 'none';
+
+    // Escopo técnico (exclui Pessoas) -- mesmo recorte do Catálogo. Alimenta o
+    // drawer (edição) e a lista. Fornecedores entram (têm DRP técnico também).
+    dependenciasData = deps.filter(d => !['Pessoas', 'Pessoa'].includes(d.categoria));
+    window.dependenciasCatalogo = dependenciasData;
+    // Área Responsável (drawer) e picker de Dependências precisam disso.
+    window.areasData = areas;
+
+    renderDRPResumo();
+    renderDRPListaComFiltro();
+  } catch (err) {
+    document.getElementById('loading').innerHTML = `
+      <div style="color:#c62828;padding:20px;text-align:center;">
+        <h3>❌ Erro ao carregar DRPs</h3>
+        <p>${err.message}</p>
+      </div>`;
+  }
+}
+
+function _agruparPorCategoria(lista) {
+  const porCat = {};
+  lista.forEach(d => { const cat = d.categoria || 'Sem Categoria'; if (!porCat[cat]) porCat[cat] = []; porCat[cat].push(d); });
+  return porCat;
+}
+
+/** Dependências que têm ao menos uma versão de DRP salva. */
+function _depsComDRP() {
+  return (dependenciasData || []).filter(d => d.drpSalvo && _parsePCNVersoes(d.drpSalvo).length);
+}
+
+/** Cards de resumo: total com DRP + top 3 categorias + nº de categorias. */
+function renderDRPResumo() {
+  const box = document.getElementById('drp-resumo');
+  if (!box) return;
+  const comDRP = _depsComDRP();
+  const porCategoria = _agruparPorCategoria(comDRP);
+  const topCats = Object.entries(porCategoria).sort((a, b) => b[1].length - a[1].length).slice(0, 3);
+  const cores = ['#c62828', '#f57c00', '#1565c0'];
+  const semDRP = (dependenciasData || []).length - comDRP.length;
+  box.style.display = 'flex';
+  box.innerHTML = `
+    <div style="display:flex;gap:12px;flex-wrap:wrap;">
+      <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #1a237e;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+        <div style="font-size:1.6em;font-weight:700;color:#1a237e;">${comDRP.length}</div>
+        <div style="font-size:0.75em;color:#666;">Com DRP</div>
+      </div>
+      <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #999;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+        <div style="font-size:1.6em;font-weight:700;color:#999;">${semDRP}</div>
+        <div style="font-size:0.75em;color:#666;">Sem DRP</div>
+      </div>
+      ${topCats.map(([cat, arr], i) => `
+      <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid ${cores[i]};min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+        <div style="font-size:1.6em;font-weight:700;color:${cores[i]};">${arr.length}</div>
+        <div style="font-size:0.75em;color:#666;">${esc(cat)}</div>
+      </div>`).join('')}
+    </div>`;
+}
+
+/** Aplica filtro (Com DRP/Todas) + busca e re-renderiza a lista. */
+function renderDRPListaComFiltro() {
+  const tipo = (document.getElementById('drpFiltroTipo') || {}).value || 'com';
+  const busca = ((document.getElementById('drpBusca') || {}).value || '').toLowerCase();
+  let data = tipo === 'todas' ? (dependenciasData || []).slice() : _depsComDRP();
+  if (busca) data = data.filter(d => (d.nome || '').toLowerCase().includes(busca) || (d.categoria || '').toLowerCase().includes(busca));
+  window._drpData = data;
+  renderDRPLista(data, tipo);
+}
+
+window.filtrarDRPs = () => renderDRPListaComFiltro();
+
+window.toggleCategoriaDRP = (catId) => {
+  const el = document.getElementById(catId);
+  if (el) el.style.display = el.style.display === 'none' ? 'block' : 'none';
+};
+
+function renderDRPLista(lista, tipo) {
+  const podeExcluir = Perfis.podeGerarDRP(window.USER_PERFIS); // Admin ou Segurança
+  const porCategoria = _agruparPorCategoria(lista);
+
+  let html = '';
+  Object.entries(porCategoria).sort((a, b) => a[0].localeCompare(b[0])).forEach(([cat, deps]) => {
+    const catId = 'drp-cat-' + cat.replace(/[^a-zA-Z0-9]/g, '_');
+    html += `<div style="margin-bottom:20px;">
+      <div onclick="toggleCategoriaDRP('${catId}')" style="background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:12px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;">
+        <span style="font-weight:700;font-size:0.95em;">📁 ${esc(cat)}</span>
+        <span style="font-size:0.78em;opacity:0.8;">${deps.length} dependência${deps.length > 1 ? 's' : ''} ▾</span>
+      </div>
+      <div id="${catId}" style="border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">`;
+
+    deps.sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR')).forEach(d => {
+      const versoes = _parsePCNVersoes(d.drpSalvo);
+      const temDRP = versoes.length > 0;
+      const ultima = versoes[versoes.length - 1];
+      const dataVersao = ultima && ultima.data ? new Date(ultima.data).toLocaleDateString('pt-BR') : '-';
+      const sub = temDRP
+        ? `Atualizado: ${dataVersao} · ${versoes.length} versã${versoes.length > 1 ? 'es' : 'o'}`
+        : '<span style="color:#e65100;">Sem DRP gerado</span>';
+      html += `<div style="display:flex;align-items:center;padding:12px 20px;border-bottom:1px solid #f0f0f0;transition:background 0.15s;"
+                    onmouseenter="this.style.background='#f8f9ff'" onmouseleave="this.style.background='white'">
+        <div style="flex:1;cursor:pointer;" onclick="gerenciarDrpDependencia('${d.id}')">
+          <div style="font-weight:600;color:#222;font-size:0.92em;">${esc(d.nome)}</div>
+          <div style="font-size:0.78em;color:#999;margin-top:2px;">${sub}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button onclick="event.stopPropagation();gerenciarDrpDependencia('${d.id}')" class="btn btn-ghost" style="padding:5px 10px;font-size:0.82em;" title="Gerenciar Parâmetros DRP">⚙️ Gerenciar</button>
+          ${temDRP ? `<button onclick="event.stopPropagation();abrirDRPDireto('${d.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Abrir DRP">📄</button>` : ''}
+          ${(temDRP && podeExcluir) ? `<button onclick="event.stopPropagation();excluirDRPDaLista('${d.id}','${escJs(d.nome)}')" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#bbb'" title="Excluir DRP">🗑️</button>` : ''}
+        </div>
+      </div>`;
+    });
+
+    html += `</div></div>`;
+  });
+
+  if (!html) {
+    html = tipo === 'todas'
+      ? '<p style="text-align:center;color:#999;padding:40px;">Nenhuma dependência técnica encontrada.</p>'
+      : '<div style="text-align:center;padding:60px 20px;color:#999;"><div style="font-size:3em;margin-bottom:16px;">🛠️</div><h3 style="color:#666;margin-bottom:8px;">Nenhum DRP gerado ainda</h3><p>Use o filtro "Todas as dependências" para preparar os Parâmetros DRP e gerar o plano.</p></div>';
+  }
+  document.getElementById('drp-lista').innerHTML = html;
+}
+
+/** Abre o drawer de dependência na aba "Parâmetros DRP" para gerenciar tudo. */
+window.gerenciarDrpDependencia = (id) => {
+  const d = (dependenciasData || []).find(x => String(x.id) === String(id));
+  if (!d) return showToast('Dependência não encontrada.', '#c62828');
+  abrirDrawerDependencia(d);
+  trocarAbaDependencia('drp');
+};
+
+/** Abre o DRP salvo de uma dependência direto da lista (espelha abrirPCNDireto). */
+window.abrirDRPDireto = async (id) => {
+  const d = (window._drpData || dependenciasData || []).find(x => String(x.id) === String(id));
+  if (!d || !d.drpSalvo) return showToast('Nenhum DRP salvo para esta dependência.', '#e65100');
+  const versoes = _parsePCNVersoes(d.drpSalvo);
+  if (!versoes.length) return showToast('Nenhuma versão de DRP encontrada.', '#e65100');
+  const ultima = versoes[versoes.length - 1];
+  let drpHtml;
+  try {
+    drpHtml = _buildDRPPage(ultima.html, { nome: d.nome, categoria: d.categoria }, id, versoes, await _tokenParaPCN());
+  } catch (e) {
+    return showToast('❌ ' + e.message, '#c62828');
+  }
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado.', '#e65100');
+  win.document.open();
+  win.document.write(drpHtml);
+  win.document.close();
+};
+
+/** Exclui todas as versões de DRP de uma dependência (admin), a partir da lista. */
+window.excluirDRPDaLista = async (id, nome) => {
+  if (!Perfis.podeGerarDRP(window.USER_PERFIS)) return showToast('Seu perfil não pode excluir DRPs.', '#e65100');
+  if (!confirm('Tem certeza que deseja excluir o DRP de "' + nome + '"? Esta ação não pode ser desfeita.')) return;
+  try {
+    showToast('🗑️ Excluindo DRP...', '#555');
+    const result = await API.post('excluirDRP', { id: String(id) });
+    if (result.error) throw new Error(result.error);
+    const d = (dependenciasData || []).find(x => String(x.id) === String(id));
+    if (d) d.drpSalvo = '';
+    showToast('✅ DRP excluído.', '#2e7d32');
+    API.invalidate('getDependencias');
+    drp(); // Recarregar lista
+  } catch (e) {
+    showToast('❌ ' + e.message, '#c62828');
+  }
+};
+
+// ============================================================
 // PÁGINA: FORNECEDORES — CRITÉRIOS DE AVALIAÇÃO
 //
 // O fornecedor NAO tem cadastro proprio: ele e uma linha de Dependencias com
@@ -7258,7 +8531,7 @@ let configFornecedor = { limiarRisco: 70 };
 
 async function fornecedoresCriterios() {
   // Permissao, nao perfil: o perfil de fornecedores tambem gerencia os criterios.
-  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Critérios de Avaliação de Fornecedores</h2><p class="page-sub">A régua com que todo fornecedor é avaliado — cada critério vale um peso</p></div>
@@ -7308,7 +8581,7 @@ async function fornecedoresCriterios() {
 }
 
 function renderLimiarFornecedor() {
-  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   const box = document.getElementById('fornLimiarBox');
   if (!box) return;
   box.innerHTML = `
@@ -7344,7 +8617,7 @@ let criteriosOrdenacao = criarOrdenacao('nome', 'asc');
 window.ordenarCriterios = (coluna) => { criteriosOrdenacao.ordenar(coluna); renderizarCriterios(); };
 
 function renderizarCriterios() {
-  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   const lista = document.getElementById('listaCriterios');
   if (!lista) return;
 
@@ -7463,7 +8736,7 @@ window.excluirCriterio = async (id) => {
 let categoriasFornecedorData = [];
 
 async function fornecedoresCategorias() {
-  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Categorias de Fornecedores</h2><p class="page-sub">O segmento de negócio de cada fornecedor</p></div>
@@ -7505,7 +8778,7 @@ let categoriasFornOrdenacao = criarOrdenacao('nome', 'asc');
 window.ordenarCategoriasForn = (coluna) => { categoriasFornOrdenacao.ordenar(coluna); renderizarCategoriasFornecedor(); };
 
 function renderizarCategoriasFornecedor() {
-  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   const lista = document.getElementById('listaCategoriasForn');
   if (!lista) return;
 
@@ -7669,13 +8942,25 @@ function _badgeCriticidadeFornecedor(av) {
 /** Resumo das pessoas da empresa: primeiro contato + quantos ficaram de fora. */
 function _resumoPessoasFornecedor(f) {
   const pessoas = f.pessoas || [];
-  if (!pessoas.length) return '<span style="color:#999;">Nenhuma pessoa cadastrada</span>';
+  if (!pessoas.length) return '<span style="color:#999;">Nenhum contato cadastrado</span>';
   const extra = pessoas.length - 1;
   return `${esc(pessoas[0].nome)}${extra > 0 ? ` <span style="color:#999;">+${extra}</span>` : ''}`;
 }
 
+/** Resumo do(s) Gestor(es) do Contrato na grade: 1º nome + "+N". Cai no
+ *  gestorContrato (string legado) quando ainda não há a lista nova. */
+function _resumoGestoresFornecedor(f) {
+  const gestores = Array.isArray(f.gestoresContrato) ? f.gestoresContrato : [];
+  if (gestores.length) {
+    const extra = gestores.length - 1;
+    return `${esc(gestores[0].nome || '')}${extra > 0 ? ` <span style="color:#999;">+${extra}</span>` : ''}`;
+  }
+  if (f.gestorContrato) return esc(f.gestorContrato);
+  return '<span style="color:#999;">–</span>';
+}
+
 async function fornecedores() {
-  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Fornecedores</h2><p class="page-sub">Catálogo, avaliação e criticidade dos fornecedores da empresa</p></div>
@@ -7702,7 +8987,6 @@ async function fornecedores() {
     </div>
     <div class="loading" id="loadingFornecedores">⏳ Carregando...</div>
     <div id="listaFornecedores"></div>
-    ${_htmlDrawerAvaliacaoFornecedor()}
     ${_htmlDrawerFornecedorCadastro()}`;
 
   document.getElementById('btnIrCriterios').style.display = podeMexer ? 'inline-block' : 'none';
@@ -7742,10 +9026,20 @@ async function fornecedores() {
   }
   document.getElementById('loadingFornecedores').style.display = 'none';
   renderizarFornecedores();
+  // Veio de um clique numa linha de fornecedor no Catálogo de Dependências
+  // (irParaFornecedor guardou o id): abre o cadastro direto. So agora, com
+  // fornecedoresData/categoriasFornecedorData ja carregados.
+  if (window._abrirFornecedorAoCarregar) {
+    const idPendente = window._abrirFornecedorAoCarregar;
+    window._abrirFornecedorAoCarregar = null;
+    if (fornecedoresData.some((x) => String(x.id) === String(idPendente))) {
+      abrirDrawerFornecedorCadastro(idPendente);
+    }
+  }
 }
 
 function renderizarFornecedores() {
-  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   const lista = document.getElementById('listaFornecedores');
   const resumo = document.getElementById('fornResumo');
   if (!lista) return;
@@ -7837,8 +9131,9 @@ function renderizarFornecedores() {
             ${th('nome', 'Empresa', 'width:16%;')}
             ${th('categoria', 'Categoria', 'width:11%;')}
             ${th('setor', 'Setor', 'width:9%;')}
-            <th style="width:12%;">Pessoas</th>
-            ${th('nota', 'Nota de Conformidade', 'width:11%;text-align:center;')}
+            <th style="width:11%;">Contatos</th>
+            <th style="width:11%;">Gestor do Contrato</th>
+            ${th('nota', 'Nota de Conformidade', 'width:10%;text-align:center;')}
             ${th('criticidade', 'Criticidade', 'width:9%;text-align:center;')}
             <th style="width:11%;">Situação</th>
             ${th('avaliadoEm', 'Última avaliação', 'width:10%;')}
@@ -7855,6 +9150,7 @@ function renderizarFornecedores() {
               <td style="color:#666;font-size:0.88em;">${esc(f.categoriaFornecedor || '–')}</td>
               <td style="color:#666;font-size:0.88em;">${esc(f.setor || '–')}</td>
               <td style="color:#666;font-size:0.88em;">${_resumoPessoasFornecedor(f)}</td>
+              <td style="color:#666;font-size:0.88em;">${_resumoGestoresFornecedor(f)}</td>
               <td style="text-align:center;">
                 ${av && av.nota !== null
                   ? `<span title="${esc(FornecedorScore.faixaNota(av.nota).rotulo)} — ${av.nota} de 100" style="display:inline-block;min-width:30px;padding:3px 8px;border-radius:10px;font-size:0.84em;font-weight:700;background:${FornecedorScore.faixaNota(av.nota).fundo};color:${FornecedorScore.faixaNota(av.nota).cor};">${av.nota}</span>`
@@ -7870,13 +9166,12 @@ function renderizarFornecedores() {
               </td>
               <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
                 ${podeMexer
-                  ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">${av ? 'Reavaliar' : 'Avaliar'}</button>
-                     <button class="btn-icon" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" title="Editar dados do fornecedor">✏️</button>
+                  ? `<button class="btn-icon" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" title="Editar / avaliar fornecedor">✏️</button>
                      <button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>`
-                  : (av ? `<button class="btn btn-ghost" onclick="abrirAvaliacaoFornecedor('${f.id}')" style="padding:5px 12px;font-size:0.86em;">Ver</button>` : '–')}
+                  : `<button class="btn btn-ghost" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" style="padding:5px 12px;font-size:0.86em;">Ver</button>`}
               </td>
             </tr>`;
-          }).join('') : `<tr><td colspan="9" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
+          }).join('') : `<tr><td colspan="10" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
         </tbody>
       </table>
     </div>`;
@@ -7886,146 +9181,13 @@ function renderizarFornecedores() {
 
 // ---- Drawer de avaliação do fornecedor ----
 
-function _htmlDrawerAvaliacaoFornecedor() {
-  return `
-    <div class="drawer-overlay" id="drawerOverlayFornecedor" onclick="fecharAvaliacaoFornecedor()"></div>
-    <div class="drawer" id="drawerFornecedor">
-      <div class="drawer-header">
-        <h3 id="fornDrawerTitulo">Avaliar Fornecedor</h3>
-        <button onclick="fecharAvaliacaoFornecedor()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
-      </div>
-      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
-        <input type="hidden" id="fornAvalId">
-        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
-          <button id="tab-avalForn-criticidade" onclick="trocarAbaAvaliacaoFornecedor('criticidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Criticidade</button>
-          <button id="tab-avalForn-conformidade" onclick="trocarAbaAvaliacaoFornecedor('conformidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Conformidade</button>
-        </div>
-        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
-          <div id="painel-avalForn-criticidade">
-            <div id="fornCriticidadePreview" style="position:sticky;top:0;background:#fff;padding:0 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
-            <div id="fornCriticidadeLista"></div>
-          </div>
-          <div id="painel-avalForn-conformidade" style="display:none;">
-            <div id="fornNotaPreview" style="position:sticky;top:0;background:#fff;padding:0 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
-            <div style="margin-bottom:18px;padding:14px 16px;border:1px solid #e3e6f5;background:#f7f8fd;border-radius:9px;">
-              <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:8px;">
-                Controles aplicáveis a este fornecedor
-              </label>
-              <div id="fornControlesAplicaveisLista" style="display:flex;flex-wrap:wrap;gap:8px 18px;"></div>
-              <div style="font-size:0.74em;color:#888;margin-top:8px;">Marque só os controles que fazem sentido para este fornecedor — só os marcados entram na avaliação e na nota.</div>
-            </div>
-            <div id="fornCriteriosLista"></div>
-            <div style="margin-top:20px;">
-              <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">Observação geral (opcional)</label>
-              <textarea id="fornObservacao" rows="3" placeholder="Contexto que ajuda quem for ler esta avaliação depois" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;font-family:inherit;"></textarea>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="fecharAvaliacaoFornecedor()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarAvaliacaoFornecedor()" id="btnSalvarAvaliacaoForn">Salvar avaliação</button>
-      </div>
-    </div>`;
-}
-
-window.trocarAbaAvaliacaoFornecedor = (aba) => {
-  ['conformidade', 'criticidade'].forEach((a) => {
-    document.getElementById('painel-avalForn-' + a).style.display = a === aba ? 'block' : 'none';
-    const btn = document.getElementById('tab-avalForn-' + a);
-    btn.style.color = a === aba ? '#1a237e' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
-  });
-};
-
-window.abrirAvaliacaoFornecedor = (fornecedorId) => {
-  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
-  const f = fornecedoresData.find((x) => String(x.id) === String(fornecedorId));
-  if (!f) return showToast('Fornecedor não encontrado.', '#c62828');
-
-  const av = _avaliacaoDoFornecedor(f.id);
-  const ativos = criteriosFornecedorData.filter(FornecedorScore.criterioAtivo)
-    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
-
-  document.getElementById('fornAvalId').value = f.id;
-  const primeiraPessoa = (f.pessoas || [])[0];
-  document.getElementById('fornDrawerTitulo').innerHTML = `${isAdmin ? (av ? 'Reavaliar' : 'Avaliar') : 'Avaliação de'} fornecedor
-    <div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(f.nome)}${primeiraPessoa ? ' — ' + esc(primeiraPessoa.nome) : ''}</div>`;
-  document.getElementById('fornObservacao').value = av ? (av.observacao || '') : '';
-
-  const respostasAnteriores = av ? (av.respostas || {}) : {};
-
-  // Ausencia (fornecedor nunca customizado) cai em nenhum marcado — decisao
-  // explicita do usuario, nao herda "tudo aplicavel" so porque o catalogo
-  // existe.
-  const aplicaveisAtuais = new Set(Array.isArray(f.criteriosAplicaveis) ? f.criteriosAplicaveis : []);
-
-  document.getElementById('fornControlesAplicaveisLista').innerHTML = ativos.length
-    ? ativos.map((c) => `
-        <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.86em;cursor:pointer;">
-          <input type="checkbox" class="forn-aplicavel" value="${esc(c.id)}" ${aplicaveisAtuais.has(c.id) ? 'checked' : ''} onchange="_alternarControleAplicavelFornecedor(this)">
-          ${esc(c.nome)}
-        </label>`).join('')
-    : '';
-
-  document.getElementById('fornCriteriosLista').innerHTML = ativos.length
-    ? ativos.map((c) => {
-        const r = respostasAnteriores[c.id] || {};
-        const opcoes = FornecedorScore.RESPOSTAS.map((op) => `
-          <label style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.88em;cursor:pointer;">
-            <input type="radio" name="fornResp_${esc(c.id)}" value="${esc(op)}" ${String(r.resposta || '') === op ? 'checked' : ''} onchange="_atualizarEvidenciaFornecedor('${esc(c.id)}')">
-            ${esc(op)}
-          </label>`).join('');
-        const semEvidenciaInicial = _semEvidenciaResposta(r);
-        return `
-          <div data-criterio="${esc(c.id)}" style="border:1px solid #eee;border-radius:9px;padding:13px 15px;margin-bottom:12px;${aplicaveisAtuais.has(c.id) ? '' : 'display:none;'}">
-            <div style="font-weight:600;color:#333;">${esc(c.nome)}
-              <span style="font-size:0.75em;color:#888;font-weight:400;margin-left:6px;">peso ${c.peso}</span>
-            </div>
-            ${c.descricao ? `<div style="font-size:0.8em;color:#888;margin-top:3px;">${esc(c.descricao)}</div>` : ''}
-            <div style="margin-top:9px;">${opcoes}</div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
-              <div style="display:flex;gap:6px;align-items:center;">
-                <input type="url" class="forn-link" value="${esc(r.link || '')}" placeholder="Link do documento (SharePoint, Drive, portal)" oninput="_atualizarEvidenciaFornecedor('${esc(c.id)}')" style="flex:1;padding:7px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:0.85em;">
-                <a href="${esc(r.link || '')}" target="_blank" rel="noopener" class="forn-link-abrir" id="fornLinkAbrir_${esc(c.id)}" title="Abrir evidência" style="${r.link ? '' : 'display:none;'}">🔗</a>
-              </div>
-              <input type="text" class="forn-obs" value="${esc(r.observacao || '')}" placeholder="Observação deste critério" style="padding:7px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:0.85em;">
-            </div>
-            <div id="fornEvidAviso_${esc(c.id)}" style="display:${semEvidenciaInicial ? 'block' : 'none'};font-size:0.74em;color:#e65100;margin-top:6px;">⚠ Sem evidência anexada — esta resposta não conta na nota até um link ser informado</div>
-          </div>`;
-      }).join('')
-    : `<div style="padding:24px;text-align:center;color:#e65100;background:#fff8e1;border-radius:9px;">
-         Nenhum critério ativo cadastrado. Cadastre os critérios antes de avaliar.
-       </div>`;
-
-  const respostasCriticidadeAnteriores = av ? (av.respostasCriticidade || {}) : {};
-  document.getElementById('fornCriticidadeLista').innerHTML = FornecedorCriticidade.PERGUNTAS.map((p) => {
-    const opcoes = p.opcoes.map((op) => `
-      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;font-size:0.88em;cursor:pointer;">
-        <input type="radio" name="fornCrit_${p.chave}" value="${op.valor}" ${respostasCriticidadeAnteriores[p.chave] === op.valor ? 'checked' : ''} onchange="atualizarPreviewCriticidadeFornecedor()" style="margin-top:3px;">
-        <span>${esc(op.rotulo)} <span style="color:#888;font-weight:600;">(${op.score})</span></span>
-      </label>`).join('');
-    return `
-      <div style="border:1px solid #eee;border-radius:9px;padding:13px 15px;margin-bottom:12px;">
-        <div style="font-weight:600;color:#333;margin-bottom:9px;">${esc(p.titulo)}</div>
-        ${opcoes}
-      </div>`;
-  }).join('');
-
-  document.querySelectorAll('#drawerFornecedor input, #drawerFornecedor textarea').forEach((el) => { el.disabled = !isAdmin; });
-  document.getElementById('btnSalvarAvaliacaoForn').style.display = isAdmin && ativos.length ? 'inline-block' : 'none';
-
-  atualizarPreviewNotaFornecedor();
-  atualizarPreviewCriticidadeFornecedor();
-  trocarAbaAvaliacaoFornecedor('criticidade');
-  document.getElementById('drawerFornecedor').classList.add('open');
-  document.getElementById('drawerOverlayFornecedor').classList.add('open');
-};
-
-window.fecharAvaliacaoFornecedor = () => {
-  document.getElementById('drawerFornecedor').classList.remove('open');
-  document.getElementById('drawerOverlayFornecedor').classList.remove('open');
-};
+// O drawer de avaliação deixou de existir como tela separada: Criticidade e
+// Conformidade agora são abas do drawer unificado de fornecedor
+// (_htmlDrawerFornecedorCadastro / abrirDrawerFornecedorCadastro). Este alias
+// fica só pra não quebrar chamadas antigas -- abre o unificado já na aba
+// Criticidade.
+window.abrirAvaliacaoFornecedor = (fornecedorId) => abrirDrawerFornecedorCadastro(fornecedorId, 'criticidade');
+window.fecharAvaliacaoFornecedor = () => fecharDrawerFornecedorCadastro();
 
 /** Ids dos controles marcados como aplicáveis a este fornecedor, na tela. */
 function _coletarCriteriosAplicaveisFornecedor() {
@@ -8198,8 +9360,11 @@ window.salvarAvaliacaoFornecedor = async () => {
     const novaAvaliacao = { ...r.dado, id: r.id };
     const idx = avaliacoesFornecedorData.findIndex((av) => av.fornecedorId === novaAvaliacao.fornecedorId);
     if (idx >= 0) avaliacoesFornecedorData[idx] = novaAvaliacao; else avaliacoesFornecedorData.push(novaAvaliacao);
-    fecharAvaliacaoFornecedor();
+    // Não fecha o drawer unificado: o usuário pode continuar em Dados/avaliação.
+    // Só atualiza a lista por baixo (nota/situação) e os previews.
     renderizarFornecedores();
+    atualizarPreviewNotaFornecedor();
+    atualizarPreviewCriticidadeFornecedor();
 
     const abre = FornecedorScore.abreRisco(r.nota, configFornecedor.limiarRisco);
     showToast(`✅ Avaliação salva!${abre ? ' Um risco será aberto para este fornecedor em alguns segundos.' : ''}`, '#2e7d32');
@@ -8237,11 +9402,14 @@ let perfisData = [];
 let perfisAreasCache = [];
 
 async function perfis() {
-  const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIL);
+  const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIS);
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Perfis de Acesso</h2><p class="page-sub">Quem tem qual acesso ao sistema</p></div>
-      <button class="btn btn-primary" onclick="abrirModalPerfil()" id="btnNovoPerfil" style="display:none;">+ Dar acesso a alguém</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="preencherAreasPelasPessoas()" id="btnBackfillAreas" style="display:none;" title="Copia a área do cadastro de Pessoas para os perfis que ainda estão sem área">🔄 Preencher áreas pelas Pessoas</button>
+        <button class="btn btn-primary" onclick="abrirModalPerfil()" id="btnNovoPerfil" style="display:none;">+ Dar acesso a alguém</button>
+      </div>
     </div>
     <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 16px;background:#fff;margin-bottom:18px;">
       <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">O que cada perfil pode</div>
@@ -8255,21 +9423,41 @@ async function perfis() {
         Somente administrador mexe nesta tela — se outro perfil pudesse, ele se promoveria a administrador.
       </div>
     </div>
+    <div style="margin-bottom:16px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+      <input type="text" id="buscaPerfil" placeholder="🔍 Buscar por e-mail..." oninput="renderizarPerfis()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;flex:1;">
+      <select id="filtroPerfilTipo" onchange="renderizarPerfis()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:200px;">
+        <option value="">Todos os perfis</option>
+        ${Perfis.CATALOGO.map((p) => `<option value="${esc(p.valor)}">${esc(p.rotulo)}</option>`).join('')}
+      </select>
+      <select id="filtroPerfilArea" onchange="renderizarPerfis()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:180px;">
+        <option value="">Todas as áreas</option>
+      </select>
+    </div>
     <div class="loading" id="loadingPerfis">⏳ Carregando...</div>
     <div id="listaPerfis"></div>
     <div class="modal-overlay" id="modalPerfil"><div class="modal" onclick="event.stopPropagation()">
       <h3 id="modalPerfilTitulo">Dar acesso a alguém</h3>
       <input type="hidden" id="perfEmailOriginal">
+      <div id="perfPessoaBox">
+        <label>Pessoa</label>
+        <select id="perfPessoa" onchange="aoEscolherPessoaPerfil()"></select>
+        <div style="font-size:0.75em;color:#999;margin-top:4px;">Só aparecem pessoas com e-mail cadastrado na tela de Pessoas.</div>
+      </div>
       <label>E-mail corporativo</label>
-      <input type="email" id="perfEmail" placeholder="nome@fortestecnologia.com.br">
-      <label>Perfil</label>
-      <select id="perfPerfil" onchange="ajustarCampoAreaPerfil()">
-        ${Perfis.CATALOGO.map((p) => `<option value="${esc(p.valor)}">${esc(p.rotulo)}</option>`).join('')}
-      </select>
-      <span id="perfDescricao" style="font-size:0.75em;color:#888;display:block;margin-top:-6px;"></span>
+      <input type="email" id="perfEmail" placeholder="nome@fortestecnologia.com.br" readonly style="background:#f5f6fa;">
+      <label>Perfis (pode marcar mais de um)</label>
+      <div id="perfPerfisBox" style="display:flex;flex-direction:column;gap:8px;margin-bottom:4px;">
+        ${Perfis.CATALOGO.map((p) => `
+          <label style="display:flex;align-items:flex-start;gap:8px;font-size:0.9em;cursor:pointer;">
+            <input type="checkbox" class="perf-perfil-check" value="${esc(p.valor)}" onchange="ajustarCampoAreaPerfil()" style="margin-top:3px;">
+            <span><strong>${esc(p.rotulo)}</strong><br><span style="font-size:0.82em;color:#888;">${esc(p.descricao)}</span></span>
+          </label>`).join('')}
+      </div>
       <div id="perfAreaBox">
         <label>Área</label>
         <select id="perfArea"></select>
+        <div id="perfAreaDica" style="font-size:0.75em;color:#999;margin-top:4px;display:none;"></div>
+        <div id="perfAreaAvisoGestor" style="font-size:0.75em;color:#e65100;margin-top:4px;display:none;">O perfil Gestor de área só altera algo com uma área definida.</div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalPerfil()">Cancelar</button>
@@ -8278,11 +9466,16 @@ async function perfis() {
     </div></div>`;
 
   document.getElementById('btnNovoPerfil').style.display = podeGerenciar ? 'inline-block' : 'none';
+  document.getElementById('btnBackfillAreas').style.display = podeGerenciar ? 'inline-block' : 'none';
 
   try {
-    const [lista, areas] = await Promise.all([API.getPerfis(), API.getAreas()]);
+    const [lista, areas, deps] = await Promise.all([API.getPerfis(), API.getAreas(), API.getDependencias()]);
     perfisData = lista;
     perfisAreasCache = areas;
+    // Fonte do select "Pessoa" no modal: o mesmo catalogo (categoria Pessoas)
+    // das telas de Pessoas/Areas/Fornecedor. So quem tem e-mail serve, porque
+    // o e-mail e a chave do perfil de acesso.
+    pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
   } catch (e) {
     console.error('Perfis: falha ao carregar', e);
     document.getElementById('loadingPerfis').style.display = 'none';
@@ -8300,13 +9493,45 @@ let perfisOrdenacao = criarOrdenacao('email', 'asc');
 window.ordenarPerfis = (coluna) => { perfisOrdenacao.ordenar(coluna); renderizarPerfis(); };
 
 function renderizarPerfis() {
-  const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIL);
+  const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIS);
   const lista = document.getElementById('listaPerfis');
   if (!lista) return;
 
-  const admins = perfisData.filter((p) => p.perfil === Perfis.PERFIL.ADMIN);
+  const admins = perfisData.filter((p) => Perfis.ehAdmin(p.perfis || p.perfil));
   const meuEmail = String(window.USER_EMAIL || '').toLowerCase();
-  const data = perfisOrdenacao.aplicar(perfisData);
+
+  // Busca por e-mail (texto) e filtro por perfil (select). Rodam antes da
+  // ordenacao. O contador de admins acima usa a lista inteira de proposito:
+  // filtrar a tela nao pode esconder o alerta de "so existe um admin".
+  const termo = (document.getElementById('buscaPerfil') || {}).value || '';
+  const termoNorm = termo.trim().toLowerCase();
+  const tipo = (document.getElementById('filtroPerfilTipo') || {}).value || '';
+
+  // Preenche o select de Area com as areas que aparecem nos perfis (so gestor
+  // tem area), preservando a selecao atual. Feito aqui e nao no HTML porque a
+  // lista de areas so existe depois de carregar os perfis.
+  const filtroAreaSel = document.getElementById('filtroPerfilArea');
+  const areaSelecionada = (filtroAreaSel || {}).value || '';
+  if (filtroAreaSel) {
+    const areasUsadas = [...new Set(perfisData.map((p) => p.area).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    filtroAreaSel.innerHTML = '<option value="">Todas as áreas</option>' +
+      areasUsadas.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+    filtroAreaSel.value = areaSelecionada;
+  }
+
+  let filtrada = perfisData;
+  if (termoNorm) {
+    filtrada = filtrada.filter((p) => String(p.email || '').toLowerCase().includes(termoNorm));
+  }
+  if (tipo) {
+    filtrada = filtrada.filter((p) => Perfis.normalizarLista(p.perfis || p.perfil).includes(tipo));
+  }
+  if (areaSelecionada) {
+    filtrada = filtrada.filter((p) => (p.area || '') === areaSelecionada);
+  }
+  const houveBusca = !!(termoNorm || tipo || areaSelecionada);
+  const data = perfisOrdenacao.aplicar(filtrada);
   const th = (coluna, rotulo, estilo) => `<th onclick="ordenarPerfis('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-perfil-${coluna}"></span></th>`;
 
   lista.innerHTML = `
@@ -8332,10 +9557,10 @@ function renderizarPerfis() {
             <tr${podeGerenciar ? ` style="cursor:pointer;" onclick="abrirModalPerfil('${esc(p.email)}')"` : ''}>
               <td style="font-weight:600;">${esc(p.email)}${euMesmo ? ' <span style="font-size:0.75em;color:#888;font-weight:400;">(você)</span>' : ''}</td>
               <td>
-                <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:${p.perfil === Perfis.PERFIL.ADMIN ? '#e8eaf6' : '#f5f5f5'};color:${p.perfil === Perfis.PERFIL.ADMIN ? '#1a237e' : '#555'};">${esc(Perfis.rotulo(p.perfil))}</span>
+                ${(p.perfis || [p.perfil]).map((v) => `<span style="display:inline-block;margin:0 4px 4px 0;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:${v === Perfis.PERFIL.ADMIN ? '#e8eaf6' : '#f5f5f5'};color:${v === Perfis.PERFIL.ADMIN ? '#1a237e' : '#555'};">${esc(Perfis.rotulo(v))}</span>`).join('')}
                 ${desconhecido ? `<div style="font-size:0.72em;color:#e65100;margin-top:3px;">Gravado como "${esc(p.perfilGravado)}", que não existe — está valendo o menor acesso</div>` : ''}
               </td>
-              <td style="color:#666;">${esc(p.area || (Perfis.exigeArea(p.perfil) ? '— sem área, não altera nada' : '–'))}</td>
+              <td style="color:#666;">${esc(p.area || (Perfis.exigeArea(p.perfis || p.perfil) ? '— sem área, não altera nada' : '–'))}</td>
               <td style="color:#666;font-size:0.88em;">${p.atualizadoEm ? new Date(p.atualizadoEm).toLocaleDateString('pt-BR') : '–'}</td>
               <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${podeGerenciar ? `
@@ -8343,7 +9568,7 @@ function renderizarPerfis() {
                   ${euMesmo ? '' : `<button class="btn-icon" onclick="excluirPerfilAcesso('${esc(p.email)}')" title="Remover acesso" style="color:#c62828;">🗑️</button>`}` : '–'}
               </td>
             </tr>`;
-          }).join('') : '<tr><td colspan="5" style="padding:20px;text-align:center;color:#888;">Ninguém cadastrado. Todo mundo que entrar cai no menor acesso.</td></tr>'}
+          }).join('') : `<tr><td colspan="5" style="padding:20px;text-align:center;color:#888;">${houveBusca ? 'Nenhum perfil corresponde à busca.' : 'Ninguém cadastrado. Todo mundo que entrar cai no menor acesso.'}</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -8355,14 +9580,79 @@ function renderizarPerfis() {
   perfisOrdenacao.atualizarSetas('sort-perfil-', ['email', 'perfil', 'area', 'atualizadoEm']);
 }
 
+/** Perfis marcados no modal (checkboxes). */
+function _perfisSelecionadosModal() {
+  return Array.from(document.querySelectorAll('#perfPerfisBox .perf-perfil-check:checked')).map((el) => el.value);
+}
+
 window.ajustarCampoAreaPerfil = () => {
-  const perfil = document.getElementById('perfPerfil').value;
+  // O campo Área aparece para TODA pessoa, qualquer que seja o perfil marcado
+  // (as áreas vêm do cadastro de Pessoas). Só o Gestor DEPENDE de área para
+  // alterar algo -- por isso o aviso condicional -- mas o campo em si é sempre
+  // visível, para dar contexto de qual área a pessoa pertence.
   const box = document.getElementById('perfAreaBox');
-  const info = document.getElementById('perfDescricao');
-  const cat = Perfis.CATALOGO.find((p) => p.valor === perfil);
-  if (info) info.textContent = cat ? cat.descricao : '';
-  if (box) box.style.display = Perfis.exigeArea(perfil) ? 'block' : 'none';
+  if (box) box.style.display = 'block';
+  const aviso = document.getElementById('perfAreaAvisoGestor');
+  if (aviso) aviso.style.display = Perfis.exigeArea(_perfisSelecionadosModal()) ? 'block' : 'none';
 };
+
+/** Ao escolher uma Pessoa no select, copia o e-mail dela para o campo chave
+ *  e vincula o campo Área às áreas cadastradas para ELA na entidade Pessoas. */
+window.aoEscolherPessoaPerfil = () => {
+  const sel = document.getElementById('perfPessoa');
+  const email = sel ? (sel.value || '') : '';
+  document.getElementById('perfEmail').value = email;
+  _popularAreaPerfilPorPessoa(email, '');
+};
+
+/** Pessoas com e-mail, sem duplicar e-mail, ordenadas por nome. */
+function _pessoasComEmailParaPerfil() {
+  const vistos = new Set();
+  return pessoasData
+    .filter((p) => p.email && p.email.trim())
+    .filter((p) => { const e = p.email.trim().toLowerCase(); if (vistos.has(e)) return false; vistos.add(e); return true; })
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+}
+
+/**
+ * Popula o select de Área do modal com as áreas da PESSOA (entidade Pessoas),
+ * casando pelo e-mail. A área do gestor tem que ser uma das áreas em que a
+ * pessoa está cadastrada -- por isso o vínculo, e não a lista solta de Áreas.
+ *
+ * Se a pessoa não tem área cadastrada (ou não foi encontrada), cai na lista
+ * geral de Áreas como último recurso, para não travar o cadastro. `atual` é a
+ * área já gravada no perfil (modo editar), preservada mesmo que a pessoa não a
+ * tenha mais na ficha.
+ */
+function _popularAreaPerfilPorPessoa(email, atual) {
+  const sel = document.getElementById('perfArea');
+  if (!sel) return;
+  const e = String(email || '').trim().toLowerCase();
+  const pessoa = e ? pessoasData.find((x) => String(x.email || '').trim().toLowerCase() === e) : null;
+  let areas = pessoa ? _areasDaPessoa(pessoa) : [];
+
+  let dica = document.getElementById('perfAreaDica');
+  let usouFallback = false;
+  if (!areas.length) {
+    // Fallback: lista geral de Áreas do sistema.
+    areas = perfisAreasCache.map((a) => a.nome);
+    usouFallback = true;
+  }
+  // Garante que a área já gravada apareça mesmo se não estiver na lista.
+  if (atual && !areas.includes(atual)) areas = [atual, ...areas];
+
+  const unicas = [...new Set(areas.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    unicas.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+  sel.value = atual || (unicas.length === 1 ? unicas[0] : '');
+
+  if (dica) {
+    dica.textContent = pessoa && !usouFallback
+      ? 'Áreas vinculadas a esta pessoa no cadastro de Pessoas.'
+      : (e ? 'Esta pessoa não tem área no cadastro de Pessoas — mostrando todas as áreas.' : '');
+    dica.style.display = dica.textContent ? 'block' : 'none';
+  }
+}
 
 window.abrirModalPerfil = (email) => {
   const p = email ? perfisData.find((x) => x.email === email) : null;
@@ -8370,10 +9660,37 @@ window.abrirModalPerfil = (email) => {
   document.getElementById('perfEmailOriginal').value = p ? p.email : '';
   document.getElementById('perfEmail').value = p ? p.email : '';
   document.getElementById('perfEmail').disabled = !!p;
-  document.getElementById('perfPerfil').value = p ? p.perfil : Perfis.PERFIL.GESTOR;
-  document.getElementById('perfArea').innerHTML = '<option value="">Selecione...</option>' +
-    perfisAreasCache.map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
-  document.getElementById('perfArea').value = p ? (p.area || '') : '';
+
+  // Modo NOVO: escolhe uma Pessoa (a lista vem da entidade Pessoas) e o e-mail
+  // dela vira a chave do acesso. Modo EDITAR: o e-mail e a chave e nao muda,
+  // entao o select de Pessoa some (nao faz sentido "trocar a pessoa" de um
+  // acesso ja existente -- seria remover um e criar outro).
+  const pessoaBox = document.getElementById('perfPessoaBox');
+  const selPessoa = document.getElementById('perfPessoa');
+  if (p) {
+    pessoaBox.style.display = 'none';
+  } else {
+    pessoaBox.style.display = 'block';
+    const opts = _pessoasComEmailParaPerfil();
+    // E-mails que ja tem acesso: ainda aparecem, mas marcados, pra nao dar a
+    // impressao de que sumiram -- so nao viram um segundo perfil.
+    const jaTemAcesso = new Set(perfisData.map((x) => String(x.email || '').toLowerCase()));
+    selPessoa.innerHTML = '<option value="">Selecione uma pessoa...</option>' +
+      opts.map((pe) => {
+        const em = pe.email.trim();
+        const marca = jaTemAcesso.has(em.toLowerCase()) ? ' — já tem acesso' : '';
+        return `<option value="${esc(em)}">${esc(pe.nome || em)} (${esc(em)})${marca}</option>`;
+      }).join('') +
+      (opts.length ? '' : '<option value="" disabled>Nenhuma pessoa com e-mail cadastrado</option>');
+    selPessoa.value = '';
+    document.getElementById('perfEmail').value = '';
+  }
+  // Marca os perfis existentes (ou Gestor por padrão para alguém novo).
+  const marcados = new Set(p && Array.isArray(p.perfis) && p.perfis.length ? p.perfis : [Perfis.PERFIL.GESTOR]);
+  document.querySelectorAll('#perfPerfisBox .perf-perfil-check').forEach((el) => { el.checked = marcados.has(el.value); });
+  // Area vinculada à Pessoa: no editar, casa pelo e-mail do perfil e preserva a
+  // área já gravada; no novo, começa vazio até escolher a pessoa.
+  _popularAreaPerfilPorPessoa(p ? p.email : '', p ? (p.area || '') : '');
   ajustarCampoAreaPerfil();
   document.getElementById('modalPerfil').classList.add('open');
 };
@@ -8382,17 +9699,21 @@ window.fecharModalPerfil = () => document.getElementById('modalPerfil').classLis
 
 window.salvarPerfilAcesso = async () => {
   const email = document.getElementById('perfEmail').value.trim().toLowerCase();
-  const perfil = document.getElementById('perfPerfil').value;
+  const perfis = _perfisSelecionadosModal();
   const area = document.getElementById('perfArea').value;
   const meuEmail = String(window.USER_EMAIL || '').toLowerCase();
+  const editando = !!document.getElementById('perfEmailOriginal').value;
+
+  if (!email) return showToast(editando ? 'E-mail ausente.' : 'Escolha uma pessoa.', '#e65100');
+  if (!perfis.length) return showToast('Marque ao menos um perfil.', '#e65100');
 
   // Tirar o proprio acesso de administrador deixa o sistema sem quem de acesso.
-  if (email === meuEmail && !Perfis.ehAdmin(perfil)
+  if (email === meuEmail && !Perfis.ehAdmin(perfis)
     && !confirm('Você está retirando o seu próprio acesso de administrador.\n\nSe não houver outro administrador, ninguém mais consegue dar acesso a ninguém sem entrar no console do Firebase. Continuar?')) return;
 
   await comBotaoCarregando('btnSalvarPerfilAcesso', async () => {
     try {
-      await API.salvarPerfilAcesso({ email, perfil, area });
+      await API.salvarPerfilAcesso({ email, perfis, area });
       fecharModalPerfil();
       perfisData = await API.getPerfis();
       renderizarPerfis();
@@ -8415,6 +9736,63 @@ window.excluirPerfilAcesso = async (email) => {
   }
 };
 
+/**
+ * Backfill: preenche a área dos perfis que estão SEM área, copiando a área do
+ * cadastro de Pessoas (casada pelo e-mail). Conservador de propósito:
+ *  - só toca em perfil SEM área (não sobrescreve área já definida);
+ *  - só quando existe uma Pessoa com aquele e-mail E com área cadastrada;
+ *  - preserva os perfis atuais (envia perfis: p.perfis) — grava só a área.
+ * Roda no navegador do admin (que tem permissão de escrita nas rules).
+ */
+window.preencherAreasPelasPessoas = async () => {
+  // Índice e-mail -> primeira área da Pessoa (só pessoas com e-mail e área).
+  const areaPorEmail = {};
+  pessoasData.forEach((pe) => {
+    const em = String(pe.email || '').trim().toLowerCase();
+    if (!em) return;
+    const areas = _areasDaPessoa(pe);
+    if (areas.length && !areaPorEmail[em]) areaPorEmail[em] = areas[0];
+  });
+
+  // Candidatos: perfil sem área, com Pessoa correspondente que tem área.
+  const candidatos = perfisData
+    .filter((p) => !p.area)
+    .map((p) => ({ email: p.email, perfis: p.perfis, area: areaPorEmail[String(p.email || '').trim().toLowerCase()] }))
+    .filter((c) => c.area);
+
+  if (!candidatos.length) {
+    return showToast('Nada a preencher: todos os perfis já têm área, ou não há Pessoa com área para os que faltam.', '#e65100');
+  }
+
+  const amostra = candidatos.slice(0, 8).map((c) => `• ${c.email} → ${c.area}`).join('\n');
+  const resto = candidatos.length > 8 ? `\n… e mais ${candidatos.length - 8}.` : '';
+  if (!confirm(`Preencher a área de ${candidatos.length} perfil(is) a partir do cadastro de Pessoas?\n\n${amostra}${resto}\n\nSó são alterados perfis que estão sem área. Os perfis de cada pessoa não mudam.`)) return;
+
+  await comBotaoCarregando('btnBackfillAreas', async () => {
+    let ok = 0;
+    const falhas = [];
+    for (const c of candidatos) {
+      try {
+        // Envia os perfis atuais + a área nova. _salvarPerfilAcesso grava a
+        // área para qualquer perfil (e as rules já garantem que ter área não
+        // vira poder de gestor para quem não é gestor).
+        await API.salvarPerfilAcesso({ email: c.email, perfis: c.perfis, area: c.area });
+        ok++;
+      } catch (e) {
+        falhas.push(`${c.email}: ${e.message || 'erro'}`);
+      }
+    }
+    perfisData = await API.getPerfis();
+    renderizarPerfis();
+    if (falhas.length) {
+      console.warn('Backfill de áreas — falhas:', falhas);
+      showToast(`✅ ${ok} preenchido(s). ⚠️ ${falhas.length} falhou(aram) — veja o console.`, '#e65100');
+    } else {
+      showToast(`✅ Área preenchida em ${ok} perfil(is).`, '#2e7d32');
+    }
+  });
+};
+
 // ============================================================
 // FORNECEDORES — cadastro/edição (drawer compartilhado com a tela unica de
 // Fornecedores, ver fornecedores()/renderizarFornecedores() mais acima).
@@ -8428,9 +9806,11 @@ window.excluirPerfilAcesso = async (email) => {
 const CATEGORIA_FORNECEDOR_PADRAO = 'Fornecedores';
 
 /**
- * Drawer de cadastro/edição de fornecedor -- clique na linha ou "✏️ Editar"
- * na tela de Fornecedores abrem este mesmo drawer; "Avaliar/Reavaliar" abre
- * o outro (_htmlDrawerAvaliacaoFornecedor).
+ * Drawer unificado de fornecedor: clique na linha ou "✏️" abrem este mesmo
+ * drawer, com três abas -- Dados (cadastro), Criticidade e Conformidade
+ * (avaliação, antes um drawer à parte). Cada aba tem seu próprio salvar:
+ * Dados grava o cadastro (salvarDependencia); as outras duas gravam a
+ * avaliação (salvarAvaliacaoFornecedor), backends distintos.
  */
 function _htmlDrawerFornecedorCadastro() {
   // Mesmo padrao visual do drawer de Risco (_htmlDrawerRisco): o drawer nao
@@ -8447,9 +9827,17 @@ function _htmlDrawerFornecedorCadastro() {
         <h3 id="fornCadastroDrawerTitulo">Novo Fornecedor</h3>
         <button onclick="fecharDrawerFornecedorCadastro()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
-      <div class="drawer-body">
-      <input type="hidden" id="fornCadId">
+      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
+        <input type="hidden" id="fornCadId">
+        <input type="hidden" id="fornAvalId">
+        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
+          <button id="tab-forn-dados" onclick="trocarAbaFornecedor('dados')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Dados</button>
+          <button id="tab-forn-criticidade" onclick="trocarAbaFornecedor('criticidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Criticidade</button>
+          <button id="tab-forn-conformidade" onclick="trocarAbaFornecedor('conformidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Conformidade</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
 
+      <div id="painel-forn-dados">
       <label style="${lbl}margin-bottom:10px;">Dados do fornecedor</label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
         <div><label style="${lbl}">Razão Social</label><input type="text" id="fornCadNome" placeholder="Ex: Alfa Tecnologia S.A." style="${inp}"></div>
@@ -8491,15 +9879,20 @@ function _htmlDrawerFornecedorCadastro() {
       </div>
 
       <label style="${lbl}margin-bottom:10px;border-top:1px solid #eee;padding-top:14px;">Dados do contratante</label>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-        <div>
-          <label style="${lbl}">Gestor do Contrato</label>
-          <div style="display:flex;gap:6px;align-items:center;">
-            <select id="fornCadGestorContrato" style="${inp}flex:1;"><option value="">Selecione...</option></select>
-            <button type="button" class="btn-icon" onclick="_recarregarPessoasFornecedor()" title="Atualizar lista de pessoas">🔄</button>
-          </div>
-          <a href="#pessoas" target="_blank" style="font-size:0.74em;color:#1a237e;font-weight:600;">+ Cadastrar nova pessoa</a>
+
+      <label style="${lbl}">Gestor do Contrato</label>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Escolha uma ou mais pessoas cadastradas. Cargo, área, telefone e e-mail vêm do cadastro da Pessoa.</span>
+      <div id="gestoresContratoTabela"></div>
+      <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:12px;margin-top:8px;margin-bottom:16px;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <select id="gestorContratoBusca" style="${inp}flex:1;min-width:180px;"><option value="">Buscar pessoa...</option></select>
+          <button type="button" class="btn btn-ghost" id="btnAdicionarGestorContrato" onclick="adicionarGestorContrato()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+          <button type="button" class="btn-icon" onclick="_recarregarPessoasFornecedor()" title="Atualizar lista de pessoas">🔄</button>
         </div>
+        <a href="#pessoas" target="_blank" style="font-size:0.74em;color:#1a237e;font-weight:600;display:inline-block;margin-top:8px;">👤 Gerenciar Pessoas</a>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr;gap:16px;">
         <div>
           <label style="${lbl}">Setor responsável pelo contrato</label>
           <div style="display:flex;gap:6px;align-items:center;">
@@ -8510,11 +9903,62 @@ function _htmlDrawerFornecedorCadastro() {
         </div>
       </div>
       </div>
+
+      <div id="painel-forn-criticidade" style="display:none;">
+        <div id="fornCriticidadePreview" style="position:sticky;top:0;background:#fff;padding:0 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
+        <div id="fornCriticidadeLista"></div>
+      </div>
+
+      <div id="painel-forn-conformidade" style="display:none;">
+        <div id="fornNotaPreview" style="position:sticky;top:0;background:#fff;padding:0 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
+        <div style="margin-bottom:18px;padding:14px 16px;border:1px solid #e3e6f5;background:#f7f8fd;border-radius:9px;">
+          <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:8px;">
+            Controles aplicáveis a este fornecedor
+          </label>
+          <div id="fornControlesAplicaveisLista" style="display:flex;flex-wrap:wrap;gap:8px 18px;"></div>
+          <div style="font-size:0.74em;color:#888;margin-top:8px;">Marque só os controles que fazem sentido para este fornecedor — só os marcados entram na avaliação e na nota.</div>
+        </div>
+        <div id="fornCriteriosLista"></div>
+        <div style="margin-top:20px;">
+          <label style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">Observação geral (opcional)</label>
+          <textarea id="fornObservacao" rows="3" placeholder="Contexto que ajuda quem for ler esta avaliação depois" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;font-family:inherit;"></textarea>
+        </div>
+      </div>
+
+      </div>
       <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharDrawerFornecedorCadastro()">Cancelar</button>
         <button class="btn btn-primary" id="btnSalvarFornecedorCadastro" onclick="salvarFornecedorCadastro()">Salvar</button>
+        <button class="btn btn-primary" id="btnSalvarAvaliacaoForn" onclick="salvarAvaliacaoFornecedor()" style="display:none;">Salvar avaliação</button>
       </div>
     </div>`;
+}
+
+/** Alterna as três abas do drawer unificado de fornecedor e o botão de salvar de cada uma. */
+window.trocarAbaFornecedor = (aba) => {
+  ['dados', 'criticidade', 'conformidade'].forEach((a) => {
+    document.getElementById('painel-forn-' + a).style.display = a === aba ? 'block' : 'none';
+    const btn = document.getElementById('tab-forn-' + a);
+    btn.style.color = a === aba ? '#1a237e' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
+  });
+  // Cada aba tem seu próprio salvar: Dados grava o cadastro; Criticidade/
+  // Conformidade gravam a avaliação (backends distintos). O botão só aparece
+  // se o perfil pode mexer -- _fornPodeMexer guarda isso ao abrir.
+  const podeMexer = window._fornPodeMexer !== false;
+  const naDados = aba === 'dados';
+  const btnCad = document.getElementById('btnSalvarFornecedorCadastro');
+  const btnAval = document.getElementById('btnSalvarAvaliacaoForn');
+  if (btnCad) btnCad.style.display = (naDados && podeMexer) ? 'inline-block' : 'none';
+  if (btnAval) btnAval.style.display = (!naDados && podeMexer && window._fornTemCriterios) ? 'inline-block' : 'none';
+};
+
+/** Título do drawer de fornecedor com a razão social como subtítulo -- espelha _atualizarTituloDrawerRisco. */
+function _atualizarTituloDrawerFornecedor(f) {
+  const titulo = (f && f.id) ? 'Editar Fornecedor' : 'Novo Fornecedor';
+  const nome = f && f.nome ? String(f.nome).trim() : '';
+  const subtitulo = nome ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(nome)}</div>` : '';
+  document.getElementById('fornCadastroDrawerTitulo').innerHTML = titulo + subtitulo;
 }
 
 window._fornecedorPessoas = [];
@@ -8593,24 +10037,76 @@ window.removerPessoaFornecedor = (idx) => {
   renderPessoasFornecedor();
 };
 
-/**
- * Popula o select de Gestor do Contrato a partir de pessoasData.
- *
- * Fornecedor antigo pode ter gestorContrato em texto livre que nao bate com
- * nenhuma pessoa cadastrada -- vira opcao extra selecionada, nunca some em
- * silencio so por abrir o modal (mesmo padrao ja usado pra Categoria).
- */
-function _popularSelectPessoasFornecedor(valorAtual) {
-  const sel = document.getElementById('fornCadGestorContrato');
-  if (!sel) return;
-  const temNaLista = pessoasData.some((p) => p.nome === valorAtual);
-  sel.innerHTML = '<option value="">Selecione...</option>' +
-    pessoasData.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
-    (valorAtual && !temNaLista ? `<option value="${esc(valorAtual)}">${esc(valorAtual)} (não cadastrado como pessoa)</option>` : '');
-  sel.value = valorAtual || '';
+// ============================================================
+// Gestor do Contrato -- lista de Pessoas (snapshots), estilo "Pessoas
+// associadas". Cada item guarda {id,nome,cargo,telefone,email,area} vindo do
+// cadastro da Pessoa. gestorContrato (string legado) é espelhado no 1º item.
+// ============================================================
+window._fornecedorGestores = [];
+
+/** Snapshot dos campos de uma Pessoa (de pessoasData) para o gestor do contrato. */
+function _snapshotGestorDaPessoa(p) {
+  return { id: p.id != null ? p.id : null, nome: p.nome || '', cargo: p.detalhes || '', telefone: p.telefone || '', email: p.email || '', area: p.setor || '' };
 }
 
-/** Mesma ideia de _popularSelectPessoasFornecedor, pro Setor responsavel (Area). */
+/** Resolve um gestor legado (string com o nome) para um snapshot, buscando a Pessoa por nome. */
+function _gestorLegadoParaSnapshot(nome) {
+  const p = (pessoasData || []).find((x) => x.nome === nome);
+  return p ? _snapshotGestorDaPessoa(p) : { id: null, nome, cargo: '', telefone: '', email: '', area: '' };
+}
+
+function renderGestoresContrato() {
+  const container = document.getElementById('gestoresContratoTabela');
+  if (!container) return;
+  const itens = window._fornecedorGestores || [];
+  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum gestor do contrato adicionado.</p>'; return; }
+  container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
+    itens.map((g, i) => `<tr>
+        <td style="font-weight:600;color:#222;">${esc(g.nome)}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(g.cargo || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(g.area || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(g.telefone || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(g.email || '-')}</td>
+        <td style="text-align:center;white-space:nowrap;">
+          ${g.id ? `<a href="#pessoas?editPessoa=${encodeURIComponent(g.id)}" target="_blank" class="btn-icon" title="Abrir esta pessoa em Pessoas" style="text-decoration:none;">✏️</a>` : ''}
+          <button class="btn-icon" onclick="removerGestorContrato(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
+        </td>
+      </tr>`).join('') + `</tbody></table>`;
+}
+
+/** Popula o <select> de busca com as Pessoas ainda não adicionadas como gestor. */
+function _popularSelectBuscaGestor() {
+  const sel = document.getElementById('gestorContratoBusca');
+  if (!sel) return;
+  const jaIds = new Set((window._fornecedorGestores || []).filter((g) => g.id).map((g) => String(g.id)));
+  const disponiveis = (pessoasData || []).filter((p) => !jaIds.has(String(p.id)));
+  sel.innerHTML = '<option value="">Buscar pessoa...</option>' +
+    disponiveis.map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}${p.setor ? ' — ' + esc(p.setor) : ''}</option>`).join('');
+  sel.value = '';
+}
+
+window.adicionarGestorContrato = () => {
+  const sel = document.getElementById('gestorContratoBusca');
+  const id = sel ? sel.value : '';
+  if (!id) return showToast('Selecione uma pessoa cadastrada.', '#e65100');
+  const p = (pessoasData || []).find((x) => String(x.id) === String(id));
+  if (!p) return showToast('Pessoa não encontrada.', '#c62828');
+  window._fornecedorGestores = window._fornecedorGestores || [];
+  if (window._fornecedorGestores.some((g) => g.id && String(g.id) === String(id))) {
+    return showToast('Essa pessoa já é gestor do contrato.', '#e65100');
+  }
+  window._fornecedorGestores.push(_snapshotGestorDaPessoa(p));
+  renderGestoresContrato();
+  _popularSelectBuscaGestor();
+};
+
+window.removerGestorContrato = (idx) => {
+  window._fornecedorGestores.splice(idx, 1);
+  renderGestoresContrato();
+  _popularSelectBuscaGestor();
+};
+
+/** Popula o <select> "Setor responsável" (Area) do fornecedor; preserva valor legado fora da lista. */
 function _popularSelectAreasFornecedor(valorAtual) {
   const sel = document.getElementById('fornCadSetor');
   if (!sel) return;
@@ -8630,11 +10126,11 @@ function _popularSelectAreasFornecedor(valorAtual) {
  * a lista desta aba.
  */
 window._recarregarPessoasFornecedor = async () => {
-  const atual = document.getElementById('fornCadGestorContrato').value;
   API.invalidate('getDependencias');
   const deps = await API.getDependencias();
   pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
-  _popularSelectPessoasFornecedor(atual);
+  _popularSelectBuscaGestor();
+  renderGestoresContrato();
   showToast('Lista de pessoas atualizada.', '#2e7d32');
 };
 
@@ -8646,10 +10142,11 @@ window._recarregarAreasFornecedor = async () => {
   showToast('Lista de áreas atualizada.', '#2e7d32');
 };
 
-window.abrirDrawerFornecedorCadastro = (id) => {
-  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIL);
+window.abrirDrawerFornecedorCadastro = (id, abaInicial) => {
+  const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
+  window._fornPodeMexer = podeMexer;
   const f = id ? fornecedoresData.find((x) => String(x.id) === String(id)) : null;
-  document.getElementById('fornCadastroDrawerTitulo').textContent = f ? 'Editar Fornecedor' : 'Novo Fornecedor';
+  _atualizarTituloDrawerFornecedor(f);
   document.getElementById('fornCadId').value = f ? f.id : '';
   document.getElementById('fornCadNome').value = f ? (f.nome || '') : '';
   document.getElementById('fornCadNomeFantasia').value = f ? (f.nomeFantasia || '') : '';
@@ -8664,7 +10161,13 @@ window.abrirDrawerFornecedorCadastro = (id) => {
     categoriasAtivas.map((c) => `<option value="${esc(c.nome)}">${esc(c.nome)}</option>`).join('') +
     (categoriaAtual && !temNaLista ? `<option value="${esc(categoriaAtual)}">${esc(categoriaAtual)} (inativa)</option>` : '');
   document.getElementById('fornCadCategoria').value = categoriaAtual || '';
-  _popularSelectPessoasFornecedor(f ? (f.gestorContrato || '') : '');
+  // Gestores do Contrato: usa a lista nova; se só houver o legado (string),
+  // hidrata com um item resolvido por nome em pessoasData.
+  window._fornecedorGestores = f && Array.isArray(f.gestoresContrato) && f.gestoresContrato.length
+    ? f.gestoresContrato.map((g) => ({ id: g.id != null ? g.id : null, nome: g.nome || '', cargo: g.cargo || '', telefone: g.telefone || '', email: g.email || '', area: g.area || '' }))
+    : (f && f.gestorContrato ? [_gestorLegadoParaSnapshot(f.gestorContrato)] : []);
+  renderGestoresContrato();
+  _popularSelectBuscaGestor();
   document.getElementById('fornCadTic').checked = f ? (f.tic !== false) : true;
   document.getElementById('fornCadDetalhes').value = f ? (f.detalhes || '') : '';
   _popularSelectAreasFornecedor(f ? (f.setor || '') : '');
@@ -8676,12 +10179,105 @@ window.abrirDrawerFornecedorCadastro = (id) => {
   // ver renderizarFornecedores) abriria um drawer totalmente editavel pra
   // quem so pode ver -- mesmo tratamento que o drawer de Risco ja da
   // (abrirDrawerRisco).
-  document.querySelectorAll('#drawerFornecedorCadastro input, #drawerFornecedorCadastro select').forEach((el) => { el.disabled = !podeMexer; });
+  // ---- Abas Criticidade/Conformidade (antes um drawer separado) ----
+  _popularAvaliacaoFornecedor(f);
+
+  // Gating de perfil: desabilita campos de Dados E das abas de avaliação.
+  document.querySelectorAll('#drawerFornecedorCadastro input, #drawerFornecedorCadastro select, #drawerFornecedorCadastro textarea').forEach((el) => { el.disabled = !podeMexer; });
   document.getElementById('btnAdicionarPessoaForn').style.display = podeMexer ? 'inline-block' : 'none';
-  document.getElementById('btnSalvarFornecedorCadastro').style.display = podeMexer ? 'inline-block' : 'none';
+  // A visibilidade dos dois botões de salvar é resolvida por trocarAbaFornecedor
+  // (depende da aba e de _fornPodeMexer/_fornTemCriterios).
+  trocarAbaFornecedor(abaInicial || 'dados');
   document.getElementById('drawerFornecedorCadastro').classList.add('open');
   document.getElementById('drawerOverlayFornecedorCadastro').classList.add('open');
 };
+
+/**
+ * Popula as abas Criticidade e Conformidade do drawer unificado de fornecedor.
+ * Extraído do antigo abrirAvaliacaoFornecedor -- reaproveita os mesmos ids
+ * (fornCriteriosLista, fornCriticidadeLista, previews, fornAvalId) e helpers
+ * (collectors/previews), então nada abaixo precisou mudar de nome.
+ */
+function _popularAvaliacaoFornecedor(f) {
+  window._fornTemCriterios = false;
+  if (!f) {
+    // Novo fornecedor: ainda não existe para avaliar. Limpa os painéis.
+    document.getElementById('fornAvalId').value = '';
+    document.getElementById('fornObservacao').value = '';
+    document.getElementById('fornControlesAplicaveisLista').innerHTML = '';
+    document.getElementById('fornCriteriosLista').innerHTML = `<div style="padding:24px;text-align:center;color:#888;background:#fafbff;border-radius:9px;">Salve os dados do fornecedor primeiro para poder avaliá-lo.</div>`;
+    document.getElementById('fornCriticidadeLista').innerHTML = `<div style="padding:24px;text-align:center;color:#888;background:#fafbff;border-radius:9px;">Salve os dados do fornecedor primeiro para poder avaliá-lo.</div>`;
+    document.getElementById('fornNotaPreview').innerHTML = '';
+    document.getElementById('fornCriticidadePreview').innerHTML = '';
+    return;
+  }
+
+  const av = _avaliacaoDoFornecedor(f.id);
+  const ativos = criteriosFornecedorData.filter(FornecedorScore.criterioAtivo)
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  window._fornTemCriterios = ativos.length > 0;
+
+  document.getElementById('fornAvalId').value = f.id;
+  document.getElementById('fornObservacao').value = av ? (av.observacao || '') : '';
+
+  const respostasAnteriores = av ? (av.respostas || {}) : {};
+  const aplicaveisAtuais = new Set(Array.isArray(f.criteriosAplicaveis) ? f.criteriosAplicaveis : []);
+
+  document.getElementById('fornControlesAplicaveisLista').innerHTML = ativos.length
+    ? ativos.map((c) => `
+        <label style="display:inline-flex;align-items:center;gap:6px;font-size:0.86em;cursor:pointer;">
+          <input type="checkbox" class="forn-aplicavel" value="${esc(c.id)}" ${aplicaveisAtuais.has(c.id) ? 'checked' : ''} onchange="_alternarControleAplicavelFornecedor(this)">
+          ${esc(c.nome)}
+        </label>`).join('')
+    : '';
+
+  document.getElementById('fornCriteriosLista').innerHTML = ativos.length
+    ? ativos.map((c) => {
+        const r = respostasAnteriores[c.id] || {};
+        const opcoes = FornecedorScore.RESPOSTAS.map((op) => `
+          <label style="display:inline-flex;align-items:center;gap:5px;margin-right:14px;font-size:0.88em;cursor:pointer;">
+            <input type="radio" name="fornResp_${esc(c.id)}" value="${esc(op)}" ${String(r.resposta || '') === op ? 'checked' : ''} onchange="_atualizarEvidenciaFornecedor('${esc(c.id)}')">
+            ${esc(op)}
+          </label>`).join('');
+        const semEvidenciaInicial = _semEvidenciaResposta(r);
+        return `
+          <div data-criterio="${esc(c.id)}" style="border:1px solid #eee;border-radius:9px;padding:13px 15px;margin-bottom:12px;${aplicaveisAtuais.has(c.id) ? '' : 'display:none;'}">
+            <div style="font-weight:600;color:#333;">${esc(c.nome)}
+              <span style="font-size:0.75em;color:#888;font-weight:400;margin-left:6px;">peso ${c.peso}</span>
+            </div>
+            ${c.descricao ? `<div style="font-size:0.8em;color:#888;margin-top:3px;">${esc(c.descricao)}</div>` : ''}
+            <div style="margin-top:9px;">${opcoes}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
+              <div style="display:flex;gap:6px;align-items:center;">
+                <input type="url" class="forn-link" value="${esc(r.link || '')}" placeholder="Link do documento (SharePoint, Drive, portal)" oninput="_atualizarEvidenciaFornecedor('${esc(c.id)}')" style="flex:1;padding:7px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:0.85em;">
+                <a href="${esc(r.link || '')}" target="_blank" rel="noopener" class="forn-link-abrir" id="fornLinkAbrir_${esc(c.id)}" title="Abrir evidência" style="${r.link ? '' : 'display:none;'}">🔗</a>
+              </div>
+              <input type="text" class="forn-obs" value="${esc(r.observacao || '')}" placeholder="Observação deste critério" style="padding:7px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:0.85em;">
+            </div>
+            <div id="fornEvidAviso_${esc(c.id)}" style="display:${semEvidenciaInicial ? 'block' : 'none'};font-size:0.74em;color:#e65100;margin-top:6px;">⚠ Sem evidência anexada — esta resposta não conta na nota até um link ser informado</div>
+          </div>`;
+      }).join('')
+    : `<div style="padding:24px;text-align:center;color:#e65100;background:#fff8e1;border-radius:9px;">
+         Nenhum critério ativo cadastrado. Cadastre os critérios antes de avaliar.
+       </div>`;
+
+  const respostasCriticidadeAnteriores = av ? (av.respostasCriticidade || {}) : {};
+  document.getElementById('fornCriticidadeLista').innerHTML = FornecedorCriticidade.PERGUNTAS.map((p) => {
+    const opcoes = p.opcoes.map((op) => `
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;font-size:0.88em;cursor:pointer;">
+        <input type="radio" name="fornCrit_${p.chave}" value="${op.valor}" ${respostasCriticidadeAnteriores[p.chave] === op.valor ? 'checked' : ''} onchange="atualizarPreviewCriticidadeFornecedor()" style="margin-top:3px;">
+        <span>${esc(op.rotulo)} <span style="color:#888;font-weight:600;">(${op.score})</span></span>
+      </label>`).join('');
+    return `
+      <div style="border:1px solid #eee;border-radius:9px;padding:13px 15px;margin-bottom:12px;">
+        <div style="font-weight:600;color:#333;margin-bottom:9px;">${esc(p.titulo)}</div>
+        ${opcoes}
+      </div>`;
+  }).join('');
+
+  atualizarPreviewNotaFornecedor();
+  atualizarPreviewCriticidadeFornecedor();
+}
 
 window.fecharDrawerFornecedorCadastro = () => {
   document.getElementById('drawerFornecedorCadastro').classList.remove('open');
@@ -8705,7 +10301,10 @@ window.salvarFornecedorCadastro = async () => {
       nomeFantasia: document.getElementById('fornCadNomeFantasia').value.trim(),
       cnpj: document.getElementById('fornCadCnpj').value.trim(),
       categoriaFornecedor: document.getElementById('fornCadCategoria').value,
-      gestorContrato: document.getElementById('fornCadGestorContrato').value.trim(),
+      // Lista de gestores (snapshots de Pessoa). gestorContrato (string) segue
+      // gravado espelhando o 1º, por compat com quem ainda lê o campo antigo.
+      gestoresContrato: window._fornecedorGestores || [],
+      gestorContrato: (window._fornecedorGestores && window._fornecedorGestores[0] ? window._fornecedorGestores[0].nome : ''),
       tic: document.getElementById('fornCadTic').checked,
       detalhes: document.getElementById('fornCadDetalhes').value.trim(),
       // Setor e endereco existem no catalogo e sao gravados por esta tela. Sem

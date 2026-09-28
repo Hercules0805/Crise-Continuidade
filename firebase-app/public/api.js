@@ -136,6 +136,7 @@ async function _lerAreas() {
     nome: d.nome || '',
     responsavel: d.responsavel || '',
     email: d.email || '',
+    telefone: d.telefone || '',
     solucao: d.solucao || '',
   }));
 }
@@ -161,25 +162,40 @@ async function _lerAreas() {
  *      primeiro login. Agora essa gravacao so acontece para quem ja e gestor, e
  *      ela nunca escreve o campo perfil.
  */
+/**
+ * Le os perfis (cumulativos) da pessoa. Fonte: `perfis[]` (novo) com fallback
+ * ao `perfil` (string legado). Migracao nao-destrutiva do valor antigo
+ * 'fornecedores' -> 'seguranca' (o perfil existia para a pessoa de SI avaliar
+ * fornecedor). Devolve { perfis: string[], perfil: string, area }.
+ */
 async function _lerPerfil(email) {
   const emailLower = String(email || '').trim().toLowerCase();
-  if (!emailLower) return { perfil: Perfis.PERFIL_PADRAO, area: null };
+  if (!emailLower) return { perfis: [Perfis.PERFIL_PADRAO], perfil: Perfis.PERFIL_PADRAO, area: null };
 
   const perfilSnap = await _db.collection(COLLECTION.configPerfis).doc(emailLower).get();
   const perfilData = perfilSnap.exists ? perfilSnap.data() : null;
-  const perfil = Perfis.normalizar(perfilData && perfilData.perfil);
 
-  // Somente o perfil de gestor esta amarrado a uma area.
-  if (!Perfis.exigeArea(perfil)) return { perfil, area: null };
+  // Migra o valor legado 'fornecedores' antes de normalizar (que descartaria
+  // um perfil desconhecido). Vale tanto para o array novo quanto para a string.
+  const migrar = (v) => (String(v || '').trim().toLowerCase() === 'fornecedores' ? 'seguranca' : v);
+  let brutos = [];
+  if (perfilData && Array.isArray(perfilData.perfis)) brutos = perfilData.perfis.map(migrar);
+  else if (perfilData && perfilData.perfil) brutos = [migrar(perfilData.perfil)];
+  const perfis = Perfis.normalizarLista(brutos); // [] impossivel: cai em [gestor]
+  const perfil = perfis[0];
 
+  // A area e lida para qualquer perfil (a tela mostra a area de todos). Mas o
+  // auto-resolve por e-mail de responsavel de Area e a persistencia dele so
+  // fazem sentido para o GESTOR: e a area dele que as rules usam, e gravar a
+  // area de um nao-gestor nao muda o poder dele (ver gestorArea nas rules).
   let area = perfilData && perfilData.area ? String(perfilData.area).trim() : null;
-  if (!area) {
+  if (!area && Perfis.exigeArea(perfis)) {
     const areas = await _getAll(COLLECTION.areas);
     const match = areas.find((a) => String(a.email || '').trim().toLowerCase() === emailLower);
     if (match) area = String(match.nome).trim();
 
     // Persistir a area resolvida (as rules do gestor dependem dela). NUNCA
-    // gravar `perfil` junto: ver cuidado 2 acima.
+    // gravar `perfil`/`perfis` junto: gravaria por cima do que o admin definiu.
     if (area) {
       try {
         await _db.collection(COLLECTION.configPerfis).doc(emailLower).set(
@@ -193,7 +209,7 @@ async function _lerPerfil(email) {
     }
   }
 
-  return { perfil, area: area || null };
+  return { perfis, perfil, area: area || null };
 }
 
 // ------------------------------------------------------------
@@ -201,24 +217,33 @@ async function _lerPerfil(email) {
 // ------------------------------------------------------------
 
 async function _lerPerfis() {
+  const migrar = (v) => (String(v || '').trim().toLowerCase() === 'fornecedores' ? 'seguranca' : v);
   const docs = await _getAll(COLLECTION.configPerfis);
-  return docs.map((d) => ({
-    id: d.id,
-    email: String(d.email || d.id || '').toLowerCase(),
-    perfil: Perfis.normalizar(d.perfil),
-    perfilGravado: String(d.perfil || ''),
-    area: d.area || '',
-    atualizadoEm: d.atualizadoEm || '',
-    atualizadoPor: d.atualizadoPor || '',
-  })).sort((a, b) => a.email.localeCompare(b.email));
+  return docs.map((d) => {
+    // Fonte: perfis[] (novo) com fallback ao perfil (string legado); migra o
+    // valor antigo 'fornecedores' -> 'seguranca'.
+    const brutos = Array.isArray(d.perfis) ? d.perfis.map(migrar) : (d.perfil ? [migrar(d.perfil)] : []);
+    const perfis = Perfis.normalizarLista(brutos);
+    const gravado = Array.isArray(d.perfis) ? d.perfis.join(', ') : String(d.perfil || '');
+    return {
+      id: d.id,
+      email: String(d.email || d.id || '').toLowerCase(),
+      perfis,
+      perfil: perfis[0],
+      perfilGravado: gravado,
+      area: d.area || '',
+      atualizadoEm: d.atualizadoEm || '',
+      atualizadoPor: d.atualizadoPor || '',
+    };
+  }).sort((a, b) => a.email.localeCompare(b.email));
 }
 
 /**
- * Cria ou altera o perfil de uma pessoa.
+ * Cria ou altera os perfis (cumulativos) de uma pessoa.
  *
  * O documento tem o e-mail como id, em minusculas: e assim que as rules acham
- * o perfil de quem esta logado. Gravar com outra grafia faria a pessoa entrar
- * como gestor sem ninguem entender por que.
+ * os perfis de quem esta logado. Grava `perfis` (array) e `perfil` = perfis[0]
+ * (compat com o campo string legado e com quem ainda le um valor so).
  */
 async function _salvarPerfilAcesso(p) {
   const email = String(p.email || '').trim().toLowerCase();
@@ -226,25 +251,31 @@ async function _salvarPerfilAcesso(p) {
   if (!email.endsWith(DOMINIO_CORPORATIVO)) {
     throw new Error(`O e-mail tem que ser do domínio ${DOMINIO_CORPORATIVO}.`);
   }
-  if (!Perfis.conhecido(p.perfil)) throw new Error('Perfil inválido.');
+  // Aceita p.perfis (array) ou p.perfil (string, compat).
+  const perfis = Perfis.normalizarLista(p.perfis != null ? p.perfis : p.perfil);
+  if (!perfis.length || !(p.perfis != null ? p.perfis : [p.perfil]).some((x) => Perfis.conhecido(x))) {
+    throw new Error('Selecione ao menos um perfil válido.');
+  }
 
-  const perfil = Perfis.normalizar(p.perfil);
-  const precisaArea = Perfis.exigeArea(perfil);
-  const area = precisaArea ? String(p.area || '').trim() : '';
+  const precisaArea = Perfis.exigeArea(perfis);
+  const area = String(p.area || '').trim();
   if (precisaArea && !area) throw new Error('Gestor precisa de uma área.');
 
   const dados = {
     email,
-    perfil,
+    perfis,
+    perfil: perfis[0], // compat com o campo string legado
     atualizadoEm: new Date().toISOString(),
     atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
   };
 
-  // Perfil que nao usa area tem o campo REMOVIDO, nao gravado em branco.
-  // Gravar `area: ''` fazia a pessoa valer como gestor da "area vazia" — e os
-  // riscos corporativos nascem com area vazia. A regra do banco tambem foi
-  // corrigida; as duas guardas existem de proposito.
-  dados.area = precisaArea ? area : firebase.firestore.FieldValue.delete();
+  // A area agora e gravada para QUALQUER perfil (a tela mostra a area de todo
+  // mundo). Isso e seguro porque as rules so concedem PODER de gestor por area
+  // a quem TEM o perfil gestor (ver gestorArea() em firestore.rules): um SI com
+  // area gravada nao vira gestor daquela area. Quando o campo vem vazio, remove
+  // em vez de gravar '' — `area: ''` ainda seria "area vazia", e os riscos
+  // corporativos nascem com area vazia.
+  dados.area = area ? area : firebase.firestore.FieldValue.delete();
 
   await _db.collection(COLLECTION.configPerfis).doc(email).set(dados, { merge: true });
   return { success: true, id: email };
@@ -280,6 +311,11 @@ async function _lerDependencias() {
     nomeFantasia: d.nomeFantasia || '',
     detalhes: d.detalhes || '',
     setor: d.setor || '',
+    // So usado por Pessoas: áreas às quais a pessoa pertence (multi). setor
+    // acima segue como a área "principal" (= areas[0]) por compat.
+    areas: Array.isArray(d.areas) ? d.areas.filter(Boolean) : [],
+    // So usado por Pessoas: id da Pessoa que é o líder imediato (organograma).
+    liderImediato: d.liderImediato || '',
     empresa: d.empresa || '',
     telefone: d.telefone || '',
     email: d.email || '',
@@ -291,6 +327,7 @@ async function _lerDependencias() {
     // responsavel interno pelo contrato.
     categoriaFornecedor: d.categoriaFornecedor || '',
     gestorContrato: d.gestorContrato || '',
+    gestoresContrato: Array.isArray(d.gestoresContrato) ? d.gestoresContrato : [],
     cnpj: d.cnpj || '',
     // Quais controles do catalogo de conformidade valem para este fornecedor.
     // null = nunca customizado (ausencia, nao "nenhum") — a tela comeca sem
@@ -309,12 +346,35 @@ async function _lerDependencias() {
     rpo: d.rpo || '',
     estrategia: d.estrategia || '',
     responsavel: d.responsavel || '',
-    // Aba DRP: 4 listas guiadas (Health Check, Runbook, Criterios de Retorno,
-    // Limitacoes) -- mesmo escopo das 7 categorias tecnicas acima.
+    // Aba DRP: listas guiadas (Criterios de Acionamento, Pre-requisitos,
+    // Health Check, Runbook, Criterios de Retorno, Limitacoes), a secao
+    // Dependencias e o registro de Testes -- mesmo escopo das 7 categorias
+    // tecnicas acima.
+    drpCriteriosAcionamento: Array.isArray(d.drpCriteriosAcionamento) ? d.drpCriteriosAcionamento : [],
+    drpPreRequisitos: Array.isArray(d.drpPreRequisitos) ? d.drpPreRequisitos : [],
     drpHealthCheck: Array.isArray(d.drpHealthCheck) ? d.drpHealthCheck : [],
     drpRunbook: Array.isArray(d.drpRunbook) ? d.drpRunbook : [],
     drpCriteriosRetorno: Array.isArray(d.drpCriteriosRetorno) ? d.drpCriteriosRetorno : [],
     drpLimitacoes: Array.isArray(d.drpLimitacoes) ? d.drpLimitacoes : [],
+    // Novas dependências vinculadas (outras dependências das quais esta depende).
+    drpDependencias: Array.isArray(d.drpDependencias) ? d.drpDependencias : [],
+    // Testes do procedimento -- registro único de controle.
+    drpTestes: (d.drpTestes && typeof d.drpTestes === 'object') ? {
+      dataUltimoTeste: d.drpTestes.dataUltimoTeste || '',
+      frequenciaEsperada: d.drpTestes.frequenciaEsperada || '',
+      cenarioTestado: d.drpTestes.cenarioTestado || '',
+      resultado: d.drpTestes.resultado || '',
+      evidencia: d.drpTestes.evidencia || '',
+      pendencias: d.drpTestes.pendencias || '',
+    } : { dataUltimoTeste: '', frequenciaEsperada: '', cenarioTestado: '', resultado: '', evidencia: '', pendencias: '' },
+    // Estratégias de teste (Parâmetros DRP) e histórico de registros (aba
+    // própria). drpTestes acima continua para compat/migração.
+    drpEstrategiasTeste: Array.isArray(d.drpEstrategiasTeste) ? d.drpEstrategiasTeste : [],
+    drpRegistrosTeste: Array.isArray(d.drpRegistrosTeste) ? d.drpRegistrosTeste : [],
+    // Plano de Recuperação: template importado + versões do artefato DRP.
+    drpTemplate: d.drpTemplate || '',
+    drpTemplateNome: d.drpTemplateNome || '',
+    drpSalvo: d.drpSalvo || '',
   }));
 }
 // _lerComponentes/_salvarComponente/COLLECTION.componentes foram removidos: o
@@ -788,6 +848,9 @@ async function _salvarArea(a) {
     nome: a.nome || '',
     responsavel: a.responsavel || '',
     email: a.email || '',
+    telefone: a.telefone || '',
+    // solucao saiu da tela de Áreas, mas continua gravado quando enviado
+    // (compat com dados antigos); não é mais editado pela UI.
     solucao: a.solucao || '',
   };
   if (a.id) {
@@ -855,6 +918,8 @@ async function _salvarDependencia(d) {
     nomeFantasia: d.nomeFantasia || '',
     detalhes: d.detalhes || '',
     setor: d.setor || '',
+    areas: Array.isArray(d.areas) ? d.areas.filter(Boolean) : [],
+    liderImediato: d.liderImediato || '',
     empresa: d.empresa || '',
     telefone: d.telefone || '',
     email: d.email || '',
@@ -862,6 +927,16 @@ async function _salvarDependencia(d) {
     pessoas: Array.isArray(d.pessoas) ? d.pessoas : [],
     categoriaFornecedor: d.categoriaFornecedor || '',
     gestorContrato: d.gestorContrato || '',
+    // Gestores do Contrato como lista de snapshots de Pessoa (nova UI). O
+    // gestorContrato (string) acima é mantido espelhando o 1º, por compat.
+    gestoresContrato: Array.isArray(d.gestoresContrato) ? d.gestoresContrato.map((g) => ({
+      id: g.id != null ? g.id : null,
+      nome: g.nome || '',
+      cargo: g.cargo || '',
+      telefone: g.telefone || '',
+      email: g.email || '',
+      area: g.area || '',
+    })) : [],
     tic: d.tic !== false,
     cnpj: d.cnpj || '',
     // So usado pelas 7 categorias tecnicas -- ver _lerDependencias.
@@ -869,10 +944,37 @@ async function _salvarDependencia(d) {
     rpo: d.rpo || '',
     estrategia: d.estrategia || '',
     responsavel: d.responsavel || '',
+    drpCriteriosAcionamento: Array.isArray(d.drpCriteriosAcionamento) ? d.drpCriteriosAcionamento : [],
+    drpPreRequisitos: Array.isArray(d.drpPreRequisitos) ? d.drpPreRequisitos : [],
     drpHealthCheck: Array.isArray(d.drpHealthCheck) ? d.drpHealthCheck : [],
     drpRunbook: Array.isArray(d.drpRunbook) ? d.drpRunbook : [],
     drpCriteriosRetorno: Array.isArray(d.drpCriteriosRetorno) ? d.drpCriteriosRetorno : [],
     drpLimitacoes: Array.isArray(d.drpLimitacoes) ? d.drpLimitacoes : [],
+    drpDependencias: Array.isArray(d.drpDependencias) ? d.drpDependencias : [],
+    drpTestes: (d.drpTestes && typeof d.drpTestes === 'object') ? {
+      dataUltimoTeste: d.drpTestes.dataUltimoTeste || '',
+      frequenciaEsperada: d.drpTestes.frequenciaEsperada || '',
+      cenarioTestado: d.drpTestes.cenarioTestado || '',
+      resultado: d.drpTestes.resultado || '',
+      evidencia: d.drpTestes.evidencia || '',
+      pendencias: d.drpTestes.pendencias || '',
+    } : { dataUltimoTeste: '', frequenciaEsperada: '', cenarioTestado: '', resultado: '', evidencia: '', pendencias: '' },
+    // Estratégias de teste (lista) e histórico de registros de teste (lista).
+    drpEstrategiasTeste: Array.isArray(d.drpEstrategiasTeste) ? d.drpEstrategiasTeste.map((e) => ({
+      cenario: e.cenario || '',
+      frequencia: e.frequencia || '',
+    })) : [],
+    drpRegistrosTeste: Array.isArray(d.drpRegistrosTeste) ? d.drpRegistrosTeste.map((r) => ({
+      data: r.data || '',
+      resultado: r.resultado || '',
+      evidencia: r.evidencia || '',
+      pendencias: r.pendencias || '',
+    })) : [],
+    // Aba "Plano de Recuperação": template DRP importado (Markdown) e versões
+    // do artefato DRP gerado (drpSalvo, mesmo formato de versões do pcnSalvo).
+    drpTemplate: d.drpTemplate || '',
+    drpTemplateNome: d.drpTemplateNome || '',
+    drpSalvo: d.drpSalvo || '',
   };
   if (d.id) {
     await _db.collection(COLLECTION.dependencias).doc(String(d.id)).set(data, { merge: true });
@@ -1270,6 +1372,15 @@ const API = {
     }
     if (action === 'gerarPCN') {
       return _appApi('POST', 'gerarPCN', { id: body.id });
+    }
+    if (action === 'gerarDRP') {
+      return _appApi('POST', 'gerarDRP', { id: body.id, template: body.template });
+    }
+    if (action === 'salvarDRP') {
+      return _appApi('POST', 'salvarDRP', { id: body.id, html: body.html });
+    }
+    if (action === 'excluirDRP') {
+      return _appApi('POST', 'excluirDRP', { id: body.id });
     }
     // Só o envio por e-mail ainda depende do Apps Script.
     return LegacyAPI.post(action, body, options);

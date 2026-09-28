@@ -293,8 +293,19 @@ describe('Security Rules — retrato diário do risco', () => {
   });
 });
 
+// Perfis do RBAC cumulativo (28/09/2026). Semeados com o array `perfis`.
+const SI = { email: 'si@fortestecnologia.com.br' };
+const TI_USER = { email: 'ti@fortestecnologia.com.br' };
+const TIGESTOR = { email: 'tigestor@fortestecnologia.com.br' };
+
+async function seedPerfil(email, dados) {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await ctx.firestore().doc(`config_perfis/${email}`).set(Object.assign({ email }, dados));
+  });
+}
+
 describe('Security Rules — fornecedores, perfis e dependências', () => {
-  // ---- Fornecedores ----
+  // ---- Fornecedores (Admin ou Segurança da Informação) ----
 
   test('gestor lê os critérios de fornecedor, mas não escreve', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -335,105 +346,139 @@ describe('Security Rules — fornecedores, perfis e dependências', () => {
     });
     await assertSucceeds(db(GESTOR).doc('avaliacoes_fornecedor/a5').get());
   });
-  // ---- Perfis de acesso ----
 
-  test('perfil com area VAZIA não vira gestor dos riscos corporativos', async () => {
-    const FORNEC = { email: 'seguranca@fortestecnologia.com.br' };
+  // ---- Segurança da Informação: opera todos os módulos, menos o do Admin ----
+
+  test('SI (perfis:[seguranca]) com area VAZIA não vira gestor dos riscos corporativos', async () => {
+    await seedPerfil(SI.email, { perfis: ['seguranca'], area: '' });
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`config_perfis/${FORNEC.email}`).set({ email: FORNEC.email, perfil: 'fornecedores', area: '' });
       // Risco corporativo: os automáticos (indicador, fornecedor) nascem assim.
       await ctx.firestore().doc('riscos/r-corp').set({ area: '', titulo: 'Desvio', origem: 'Indicador de Segurança' });
     });
-    await assertFails(db(FORNEC).doc('riscos/r-corp').get());
-    await assertFails(db(FORNEC).doc('riscos/r-corp').set({ titulo: 'alterado' }, { merge: true }));
+    // SI lê e escreve risco por PERMISSAO (não por área): a guarda de área vazia
+    // é sobre o GESTOR não herdar risco corporativo, não sobre a SI.
+    await assertSucceeds(db(SI).doc('riscos/r-corp').get());
+    await assertSucceeds(db(SI).doc('riscos/r-corp').set({ titulo: 'alterado' }, { merge: true }));
   });
 
-  test('perfil de fornecedores gerencia critérios e grava avaliação', async () => {
-    const FORNEC = { email: 'seguranca2@fortestecnologia.com.br' };
+  test('ter uma área SEM ser gestor não dá poder de gestor daquela área', async () => {
+    // A Área agora aparece na tela e é gravada para qualquer perfil (ex.: para
+    // mostrar a área do pessoal de SI). Isso NÃO pode transformar um SI puro em
+    // gestor da área: só quem TEM o perfil 'gestor' vira gestor da área.
+    const SIAREA = { email: 'si-com-area@fortestecnologia.com.br' };
+    await seedPerfil(SIAREA.email, { perfis: ['seguranca'], area: 'RH' });
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`config_perfis/${FORNEC.email}`).set({ email: FORNEC.email, perfil: 'fornecedores' });
+      await ctx.firestore().doc('riscos/r-rh-priv').set({ area: 'RH', titulo: 'Folha' });
+      await ctx.firestore().doc('processos/rh__x').set({ area: 'RH', processo: 'X' });
     });
-    await assertSucceeds(db(FORNEC).doc('criterios_fornecedor/c-sec').set({ nome: 'ISO', peso: 3, ativo: true }));
-    await assertSucceeds(db(FORNEC).doc('avaliacoes_fornecedor/a-sec').set({ fornecedorId: 'f1', nota: 55 }));
+    // SI já lê qualquer risco por permissão própria — isso continua valendo.
+    await assertSucceeds(db(SIAREA).doc('riscos/r-rh-priv').get());
+    // Mas NÃO ganha a escrita de processo pela rota de gestor da área RH
+    // (SI não escreve processos; só admin ou o gestor DAQUELA área).
+    await assertFails(db(SIAREA).doc('processos/rh__x').set({ area: 'RH', processo: 'X2' }, { merge: true }));
+    // E a consulta de riscos filtrando a "sua" área NÃO passa como gestor:
+    // ele não é gestor, então não vale a regra por documento de gestor.
+    await assertFails(db(SIAREA).collection('riscos').where('area', '==', 'RH').get());
   });
 
-  test('perfil de fornecedores NÃO escreve em riscos — o servidor abre o risco', async () => {
-    const FORNEC = { email: 'seguranca3@fortestecnologia.com.br' };
+  test('gestor com área continua sendo gestor da própria área (não quebrou)', async () => {
+    // GESTOR (semeado no beforeEach) é da área TI.
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`config_perfis/${FORNEC.email}`).set({ email: FORNEC.email, perfil: 'fornecedores' });
+      await ctx.firestore().doc('riscos/r-ti-g').set({ area: 'TI', titulo: 'Queda' });
     });
-    await assertFails(db(FORNEC).doc('riscos/r-novo').set({ area: '', titulo: 'inventado' }));
+    await assertSucceeds(db(GESTOR).doc('riscos/r-ti-g').get());
+    await assertSucceeds(db(GESTOR).collection('riscos').where('area', '==', 'TI').get());
+    await assertSucceeds(db(GESTOR).doc('processos/ti__proc').set({ area: 'TI', processo: 'Proc' }, { merge: true }));
   });
 
-  test('perfil de fornecedores NÃO se promove a admin', async () => {
-    const FORNEC = { email: 'seguranca4@fortestecnologia.com.br' };
-    await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`config_perfis/${FORNEC.email}`).set({ email: FORNEC.email, perfil: 'fornecedores' });
-    });
-    await assertFails(db(FORNEC).doc(`config_perfis/${FORNEC.email}`).set({ perfil: 'admin' }, { merge: true }));
-    await assertFails(db(FORNEC).doc('config_perfis/outro@fortestecnologia.com.br').set({ perfil: 'admin' }));
+  test('SI gerencia critérios, grava avaliação e escreve risco', async () => {
+    await seedPerfil(SI.email, { perfis: ['seguranca'] });
+    await assertSucceeds(db(SI).doc('criterios_fornecedor/c-sec').set({ nome: 'ISO', peso: 3, ativo: true }));
+    await assertSucceeds(db(SI).doc('avaliacoes_fornecedor/a-sec').set({ fornecedorId: 'f1', nota: 55 }));
+    await assertSucceeds(db(SI).doc('riscos/r-sec').set({ area: 'RH', titulo: 'Risco', status: 'Identificado' }));
   });
 
-  test('perfil de fornecedores NÃO mexe no catálogo do BIA nem em processos', async () => {
-    const FORNEC = { email: 'seguranca5@fortestecnologia.com.br' };
-    await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`config_perfis/${FORNEC.email}`).set({ email: FORNEC.email, perfil: 'fornecedores' });
-    });
-    await assertFails(db(FORNEC).doc('perguntas/p-nova').set({ pergunta: 'x' }));
-    await assertFails(db(FORNEC).doc('config_respostas/cr-nova').set({ valor: 9 }));
-    await assertFails(db(FORNEC).doc('processos/pr-novo').set({ area: 'TI', processo: 'x' }));
+  test('SI mexe em Áreas e no catálogo de dependências (opera todos os módulos)', async () => {
+    await seedPerfil(SI.email, { perfis: ['seguranca'] });
+    await assertSucceeds(db(SI).doc('areas/a-si').set({ nome: 'Compras' }));
+    await assertSucceeds(db(SI).doc('dependencias/d-si').set({ categoria: 'Sistemas', nome: 'ERP' }));
   });
 
-  test('gestor pode gravar a PRÓPRIA área, mas não o próprio perfil', async () => {
+  test('SI NÃO faz o que é próprio do Admin: perguntas, régua e perfis', async () => {
+    await seedPerfil(SI.email, { perfis: ['seguranca'] });
+    await assertFails(db(SI).doc('perguntas/p-si').set({ pergunta: 'x' }));
+    await assertFails(db(SI).doc('config_respostas/cr-si').set({ valor: 9 }));
+    await assertFails(db(SI).doc('config_regua/rg-si').set({ versao: 2 }));
+    // Não se promove: não pode escrever config_perfis de ninguém.
+    await assertFails(db(SI).doc('config_perfis/outro@fortestecnologia.com.br').set({ perfis: ['admin'] }));
+    await assertFails(db(SI).doc(`config_perfis/${SI.email}`).set({ perfis: ['admin'] }, { merge: true }));
+  });
+
+  // ---- TI: opera o DRP (dependências), mas não os outros módulos ----
+
+  test('TI (perfis:[ti]) escreve no catálogo de dependências — é onde edita o DRP', async () => {
+    await seedPerfil(TI_USER.email, { perfis: ['ti'] });
+    await assertSucceeds(db(TI_USER).doc('dependencias/d-ti').set({ categoria: 'Sistemas', nome: 'ERP', drpSalvo: true }));
+    await assertSucceeds(db(TI_USER).doc('dependencias/d-ti').set({ drpTemplate: '...' }, { merge: true }));
+  });
+
+  test('TI NÃO mexe em Áreas, fornecedores, riscos nem perguntas', async () => {
+    await seedPerfil(TI_USER.email, { perfis: ['ti'] });
+    await assertFails(db(TI_USER).doc('areas/a-ti').set({ nome: 'X' }));
+    await assertFails(db(TI_USER).doc('criterios_fornecedor/c-ti').set({ nome: 'ISO', peso: 1 }));
+    await assertFails(db(TI_USER).doc('avaliacoes_fornecedor/a-ti').set({ fornecedorId: 'f1', nota: 10 }));
+    await assertFails(db(TI_USER).doc('riscos/r-ti-w').set({ area: 'TI', titulo: 'x' }));
+    await assertFails(db(TI_USER).doc('perguntas/p-ti').set({ pergunta: 'x' }));
+  });
+
+  test('TI NÃO se promove a admin', async () => {
+    await seedPerfil(TI_USER.email, { perfis: ['ti'] });
+    await assertFails(db(TI_USER).doc(`config_perfis/${TI_USER.email}`).set({ perfis: ['admin'] }, { merge: true }));
+    await assertFails(db(TI_USER).doc('config_perfis/outro@fortestecnologia.com.br').set({ perfis: ['admin'] }));
+  });
+
+  // ---- Cumulatividade: TI + Gestor soma os dois poderes ----
+
+  test('TI + Gestor (perfis:[ti,gestor]) escreve dependências (TI) e processos da própria área (gestor)', async () => {
+    await seedPerfil(TIGESTOR.email, { perfis: ['ti', 'gestor'], area: 'TI' });
+    // Poder de TI: catálogo de dependências.
+    await assertSucceeds(db(TIGESTOR).doc('dependencias/d-tg').set({ categoria: 'Sistemas', nome: 'ERP' }));
+    // Poder de gestor: processo da própria área.
+    await assertSucceeds(db(TIGESTOR).doc('processos/ti__proc').set({ area: 'TI', processo: 'Proc' }, { merge: true }));
+    // Mas continua sem o do gestor de outra área.
+    await assertFails(db(TIGESTOR).doc('processos/rh__proc').set({ area: 'RH', processo: 'Proc' }, { merge: true }));
+    // E não vira admin.
+    await assertFails(db(TIGESTOR).doc(`config_perfis/${TIGESTOR.email}`).set({ perfis: ['admin'] }, { merge: true }));
+  });
+
+  // ---- Perfis de acesso: só admin escreve ----
+
+  test('gestor pode gravar a PRÓPRIA área, mas não o próprio perfil nem perfis', async () => {
     await assertSucceeds(db(GESTOR).doc(`config_perfis/${GESTOR.email}`).set({ email: GESTOR.email, area: 'TI' }, { merge: true }));
     await assertFails(db(GESTOR).doc(`config_perfis/${GESTOR.email}`).set({ perfil: 'admin' }, { merge: true }));
+    await assertFails(db(GESTOR).doc(`config_perfis/${GESTOR.email}`).set({ perfis: ['admin'] }, { merge: true }));
   });
 
   test('ninguém mexe no perfil de outra pessoa, só admin', async () => {
-    await assertFails(db(GESTOR).doc('config_perfis/alguem@fortestecnologia.com.br').set({ perfil: 'gestor', area: 'RH' }));
-    await assertSucceeds(db(ADMIN).doc('config_perfis/alguem@fortestecnologia.com.br').set({ perfil: 'gestor', area: 'RH' }));
-  });
-  test('perfil de fornecedores cadastra, edita e apaga fornecedor', async () => {
-    const F = { email: 'seguranca6@fortestecnologia.com.br' };
-    await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`config_perfis/${F.email}`).set({ email: F.email, perfil: 'fornecedores' });
-    });
-    await assertSucceeds(db(F).doc('dependencias/d-forn').set({ categoria: 'Fornecedores', nome: 'Alfa' }));
-    await assertSucceeds(db(F).doc('dependencias/d-forn').set({ nome: 'Alfa S.A.' }, { merge: true }));
-    await assertSucceeds(db(F).doc('dependencias/d-forn').delete());
+    await assertFails(db(GESTOR).doc('config_perfis/alguem@fortestecnologia.com.br').set({ perfis: ['gestor'], area: 'RH' }));
+    await assertSucceeds(db(ADMIN).doc('config_perfis/alguem@fortestecnologia.com.br').set({ perfis: ['gestor'], area: 'RH' }));
   });
 
-  test('perfil de fornecedores NÃO mexe nas outras categorias do catálogo do BIA', async () => {
-    const F = { email: 'seguranca7@fortestecnologia.com.br' };
-    await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`config_perfis/${F.email}`).set({ email: F.email, perfil: 'fornecedores' });
-      await ctx.firestore().doc('dependencias/d-sis').set({ categoria: 'Sistemas', nome: 'ERP' });
-    });
-    await assertFails(db(F).doc('dependencias/d-sis').set({ nome: 'ERP novo' }, { merge: true }));
-    await assertFails(db(F).doc('dependencias/d-sis').delete());
-    await assertFails(db(F).doc('dependencias/d-infra').set({ categoria: 'Infraestrutura', nome: 'Link' }));
-  });
-
-  test('perfil de fornecedores NÃO move dependência de Sistemas para Fornecedores', async () => {
-    const F = { email: 'seguranca8@fortestecnologia.com.br' };
-    await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`config_perfis/${F.email}`).set({ email: F.email, perfil: 'fornecedores' });
-      await ctx.firestore().doc('dependencias/d-sis2').set({ categoria: 'Sistemas', nome: 'ERP' });
-    });
-    // Sem a checagem das duas pontas, isto passaria e daria acesso à linha.
-    await assertFails(db(F).doc('dependencias/d-sis2').set({ categoria: 'Fornecedores' }, { merge: true }));
-  });
-
-  test('perfil de fornecedores NÃO tira um fornecedor da categoria para escapar da guarda', async () => {
-    const F = { email: 'seguranca9@fortestecnologia.com.br' };
-    await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc(`config_perfis/${F.email}`).set({ email: F.email, perfil: 'fornecedores' });
-      await ctx.firestore().doc('dependencias/d-forn2').set({ categoria: 'Fornecedores', nome: 'Beta' });
-    });
-    await assertFails(db(F).doc('dependencias/d-forn2').set({ categoria: 'Sistemas' }, { merge: true }));
+  test('admin cadastra, edita e apaga qualquer dependência', async () => {
+    await assertSucceeds(db(ADMIN).doc('dependencias/d-forn').set({ categoria: 'Fornecedores', nome: 'Alfa' }));
+    await assertSucceeds(db(ADMIN).doc('dependencias/d-forn').set({ nome: 'Alfa S.A.' }, { merge: true }));
+    await assertSucceeds(db(ADMIN).doc('dependencias/d-forn').delete());
   });
 
   test('gestor não mexe no catálogo de dependências', async () => {
     await assertFails(db(GESTOR).doc('dependencias/d-g').set({ categoria: 'Fornecedores', nome: 'X' }));
+  });
+
+  // ---- Compat: documento antigo com `perfil` string (sem `perfis`) ----
+
+  test('perfil legado string "admin" (sem array perfis) ainda é reconhecido como admin', async () => {
+    const LEGACY = { email: 'legadoadmin@fortestecnologia.com.br' };
+    await seedPerfil(LEGACY.email, { perfil: 'admin' });
+    await assertSucceeds(db(LEGACY).doc('perguntas/p-legacy').set({ pergunta: 'x' }));
   });
 });

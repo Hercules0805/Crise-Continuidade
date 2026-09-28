@@ -28,60 +28,144 @@ test('maiuscula e espaco sobrando sao toleraveis — mas so isso', () => {
 
 test('erro de digitacao no console do Firebase nao promove ninguem', () => {
   assert.strictEqual(Perfis.normalizar('admln'), Perfis.PERFIL.GESTOR);
-  assert.strictEqual(Perfis.normalizar('Fornecedores '), Perfis.PERFIL.FORNECEDORES, 'espaco e maiuscula sao toleraveis');
-  assert.strictEqual(Perfis.normalizar('fornecedores-admin'), Perfis.PERFIL.GESTOR);
+  assert.strictEqual(Perfis.normalizar('SEGURANCA '), Perfis.PERFIL.SEGURANCA, 'espaco e maiuscula sao toleraveis');
+  assert.strictEqual(Perfis.normalizar('seguranca-admin'), Perfis.PERFIL.GESTOR);
 });
 
-test('o perfil de fornecedores NAO e admin', () => {
-  assert.strictEqual(Perfis.ehAdmin(Perfis.PERFIL.FORNECEDORES), false);
+test('o perfil de fornecedores foi extinto: nao e conhecido e vira o menor acesso', () => {
+  assert.strictEqual(Perfis.conhecido('fornecedores'), false);
+  assert.strictEqual(Perfis.normalizar('fornecedores'), Perfis.PERFIL.GESTOR);
+  assert.strictEqual(Perfis.ehAdmin('fornecedores'), false);
 });
 
-test('o perfil de fornecedores NAO edita perfis — senao se promoveria', () => {
-  assert.strictEqual(Perfis.podeGerenciarPerfis(Perfis.PERFIL.FORNECEDORES), false);
-  assert.strictEqual(Perfis.podeGerenciarPerfis(Perfis.PERFIL.GESTOR), false);
+test('so o Admin edita perfis — senao qualquer um se promoveria', () => {
   assert.strictEqual(Perfis.podeGerenciarPerfis(Perfis.PERFIL.ADMIN), true);
+  assert.strictEqual(Perfis.podeGerenciarPerfis(Perfis.PERFIL.SEGURANCA), false);
+  assert.strictEqual(Perfis.podeGerenciarPerfis(Perfis.PERFIL.TI), false);
+  assert.strictEqual(Perfis.podeGerenciarPerfis(Perfis.PERFIL.GESTOR), false);
 });
 
-test('gestor NAO gerencia fornecedores', () => {
+// ============================================================
+// RBAC CUMULATIVO: O PODER E A UNIAO DOS PERFIS
+// ============================================================
+
+test('array de perfis: pode se QUALQUER perfil conceder', () => {
+  assert.strictEqual(Perfis.ehTI(['gestor', 'ti']), true, 'gestor+ti tem TI');
+  assert.strictEqual(Perfis.ehSeguranca(['gestor', 'seguranca']), true);
+  assert.strictEqual(Perfis.ehAdmin(['gestor', 'ti']), false, 'sem admin no array = nao e admin');
+});
+
+test('normalizarLista limpa desconhecidos e duplicatas, mantendo os validos', () => {
+  assert.deepStrictEqual(Perfis.normalizarLista(['ti', 'ti', 'lixo', 'gestor']), ['ti', 'gestor']);
+  assert.deepStrictEqual(Perfis.normalizarLista([]), [Perfis.PERFIL_PADRAO]);
+  assert.deepStrictEqual(Perfis.normalizarLista('seguranca'), ['seguranca']);
+});
+
+test('exige area se QUALQUER perfil for gestor', () => {
+  assert.strictEqual(Perfis.exigeArea(Perfis.PERFIL.GESTOR), true);
+  assert.strictEqual(Perfis.exigeArea(['ti', 'gestor']), true);
+  assert.strictEqual(Perfis.exigeArea(Perfis.PERFIL.ADMIN), false);
+  assert.strictEqual(Perfis.exigeArea(Perfis.PERFIL.SEGURANCA), false);
+  assert.strictEqual(Perfis.exigeArea(Perfis.PERFIL.TI), false);
+});
+
+test('gestor NAO gerencia fornecedores; admin e seguranca sim; TI nao', () => {
   assert.strictEqual(Perfis.podeGerenciarFornecedores(Perfis.PERFIL.GESTOR), false);
+  assert.strictEqual(Perfis.podeGerenciarFornecedores(Perfis.PERFIL.TI), false);
+  assert.strictEqual(Perfis.podeGerenciarFornecedores(Perfis.PERFIL.ADMIN), true);
+  assert.strictEqual(Perfis.podeGerenciarFornecedores(Perfis.PERFIL.SEGURANCA), true);
 });
 
-test('admin e o perfil de fornecedores gerenciam fornecedores', () => {
-  assert.strictEqual(Perfis.podeGerenciarFornecedores(Perfis.PERFIL.ADMIN), true);
-  assert.strictEqual(Perfis.podeGerenciarFornecedores(Perfis.PERFIL.FORNECEDORES), true);
+// ============================================================
+// FRONTEIRA DA SEGURANCA DA INFORMACAO
+// SI opera todos os modulos, MENOS o proprio do Admin.
+// ============================================================
+
+test('SI faz o que e de modulo: PCN, DRP, riscos, indicadores, fornecedores, area, dependencia', () => {
+  const si = Perfis.PERFIL.SEGURANCA;
+  assert.strictEqual(Perfis.podeGerarPCN(si), true);
+  assert.strictEqual(Perfis.podeGerarDRP(si), true);
+  assert.strictEqual(Perfis.podeOperarDRP(si), true);
+  assert.strictEqual(Perfis.podeEditarRiscos(si), true);
+  assert.strictEqual(Perfis.podeEditarIndicadores(si), true);
+  assert.strictEqual(Perfis.podeGerenciarFornecedores(si), true);
+  assert.strictEqual(Perfis.podeMexerNaArea(si), true);
+  assert.strictEqual(Perfis.podeMexerNaDependencia(si), true);
+});
+
+test('SI NAO faz o que e proprio do Admin: perfis, perguntas, regua', () => {
+  const si = Perfis.PERFIL.SEGURANCA;
+  assert.strictEqual(Perfis.podeGerenciarPerfis(si), false);
+  assert.strictEqual(Perfis.podeEditarPerguntas(si), false);
+  assert.strictEqual(Perfis.podeEditarRegua(si), false);
+});
+
+// ============================================================
+// FRONTEIRA DA TI
+// TI opera o DRP (parametros/dependencias) mas NAO gera PCN nem DRP.
+// ============================================================
+
+test('TI opera o DRP e mexe em dependencias, mas NAO gera PCN nem DRP', () => {
+  const ti = Perfis.PERFIL.TI;
+  assert.strictEqual(Perfis.podeOperarDRP(ti), true, 'TI opera o DRP');
+  assert.strictEqual(Perfis.podeMexerNaDependencia(ti), true, 'TI edita parametros DRP nas dependencias');
+  assert.strictEqual(Perfis.podeGerarPCN(ti), false, 'TI nao gera PCN');
+  assert.strictEqual(Perfis.podeGerarDRP(ti), false, 'TI nao gera DRP');
+});
+
+test('TI NAO faz modulos alheios: riscos, indicadores, fornecedores, area, perfis', () => {
+  const ti = Perfis.PERFIL.TI;
+  assert.strictEqual(Perfis.podeEditarRiscos(ti), false);
+  assert.strictEqual(Perfis.podeEditarIndicadores(ti), false);
+  assert.strictEqual(Perfis.podeGerenciarFornecedores(ti), false);
+  assert.strictEqual(Perfis.podeMexerNaArea(ti), false);
+  assert.strictEqual(Perfis.podeGerenciarPerfis(ti), false);
+  assert.strictEqual(Perfis.podeEditarPerguntas(ti), false);
+});
+
+test('TI + Gestor soma poderes: opera DRP (TI) e cai na propria area (gestor)', () => {
+  const tg = ['ti', 'gestor'];
+  assert.strictEqual(Perfis.podeOperarDRP(tg), true);
+  assert.strictEqual(Perfis.exigeArea(tg), true);
+  assert.strictEqual(Perfis.podeGerarPCN(tg), false, 'nem TI nem gestor geram PCN');
+  assert.strictEqual(Perfis.podeGerenciarPerfis(tg), false);
 });
 
 // ============================================================
 // CATALOGO
 // ============================================================
 
-test('sao exatamente tres perfis, e o catalogo descreve todos', () => {
-  assert.strictEqual(Perfis.CATALOGO.length, 3);
+test('sao exatamente quatro perfis, e o catalogo descreve todos', () => {
+  assert.strictEqual(Perfis.CATALOGO.length, 4);
   Object.values(Perfis.PERFIL).forEach((v) => {
     assert.ok(Perfis.CATALOGO.some((p) => p.valor === v), `${v} falta no catalogo`);
   });
   Perfis.CATALOGO.forEach((p) => {
-    assert.ok(p.rotulo && p.rotulo.length > 2, `${p.valor} sem rotulo`);
+    assert.ok(p.rotulo && p.rotulo.length > 1, `${p.valor} sem rotulo`);
     assert.ok(p.descricao && p.descricao.length > 20, `${p.valor} sem descricao util`);
   });
 });
 
-test('so o gestor esta amarrado a uma area', () => {
-  assert.strictEqual(Perfis.exigeArea(Perfis.PERFIL.GESTOR), true);
-  assert.strictEqual(Perfis.exigeArea(Perfis.PERFIL.ADMIN), false);
-  assert.strictEqual(Perfis.exigeArea(Perfis.PERFIL.FORNECEDORES), false);
+test('nao existe mais perfil de fornecedores no catalogo', () => {
+  assert.ok(!Perfis.CATALOGO.some((p) => p.valor === 'fornecedores'),
+    'o perfil fornecedores foi extinto');
+  assert.strictEqual(Perfis.PERFIL.FORNECEDORES, undefined);
 });
 
 test('conhecido separa perfil real de texto qualquer', () => {
   assert.strictEqual(Perfis.conhecido('admin'), true);
-  assert.strictEqual(Perfis.conhecido('fornecedores'), true);
+  assert.strictEqual(Perfis.conhecido('seguranca'), true);
+  assert.strictEqual(Perfis.conhecido('ti'), true);
+  assert.strictEqual(Perfis.conhecido('gestor'), true);
+  assert.strictEqual(Perfis.conhecido('fornecedores'), false);
   assert.strictEqual(Perfis.conhecido('auditor'), false);
   assert.strictEqual(Perfis.conhecido(''), false);
 });
 
 test('rotulo devolve nome legivel, nunca o valor cru', () => {
   assert.strictEqual(Perfis.rotulo('admin'), 'Administrador');
-  assert.strictEqual(Perfis.rotulo('fornecedores'), 'Fornecedores');
+  assert.strictEqual(Perfis.rotulo('seguranca'), 'Segurança da Informação');
+  assert.strictEqual(Perfis.rotulo('ti'), 'TI');
   assert.strictEqual(Perfis.rotulo('gestor'), 'Gestor de área');
 });
 
@@ -91,15 +175,28 @@ test('rotulo devolve nome legivel, nunca o valor cru', () => {
 // firestore.rules nao importa JavaScript: os nomes dos perfis vivem nos dois
 // lugares. Este teste existe para que renomear um perfil aqui e esquecer o
 // banco nao passe em silencio — o que abriria ou fecharia acesso sem ninguem
-// perceber.
+// perceber. As regras verificam perfil por temPerfil('x') e/ou perfil == 'x'.
 // ============================================================
 
 test('os perfis que as regras testam por nome existem nesta lista', () => {
   const regras = lerRegras();
   // 'gestor' NAO aparece por nome nas regras de proposito: la o gestor e
   // identificado por TER uma area, nao pelo texto do perfil.
-  [Perfis.PERFIL.ADMIN, Perfis.PERFIL.FORNECEDORES].forEach((v) => {
-    assert.ok(regras.includes(`perfil == '${v}'`), `o perfil '${v}' nao aparece em firestore.rules`);
+  [Perfis.PERFIL.ADMIN, Perfis.PERFIL.SEGURANCA, Perfis.PERFIL.TI].forEach((v) => {
+    assert.ok(regras.includes(`temPerfil('${v}')`),
+      `o perfil '${v}' nao aparece em firestore.rules via temPerfil()`);
+  });
+});
+
+test('as regras nao conhecem perfil que esta lista nao tem', () => {
+  const regras = lerRegras();
+  const usados = [
+    ...[...regras.matchAll(/temPerfil\('([^']+)'\)/g)].map((m) => m[1]),
+    ...[...regras.matchAll(/perfil\s*==\s*'([^']+)'/g)].map((m) => m[1]),
+  ];
+  assert.ok(usados.length > 0, 'nenhuma comparacao de perfil encontrada nas regras');
+  usados.forEach((v) => {
+    assert.ok(Perfis.conhecido(v), `firestore.rules usa o perfil '${v}', que nao existe em perfis.js`);
   });
 });
 
@@ -111,16 +208,21 @@ test('as regras nao tratam area VAZIA como area — senao qualquer perfil virari
     'gestorArea() tem que recusar area vazia: os riscos corporativos nascem com area vazia');
 });
 
-test('o perfil de fornecedores nao pode escrever em config_perfis', () => {
+test('nem SI nem TI podem escrever em config_perfis — so admin', () => {
   const regras = lerRegras();
   const bloco = regras.slice(regras.indexOf('match /config_perfis/'));
   const corpo = bloco.slice(0, bloco.indexOf('\n    }'));
-  assert.ok(!corpo.includes('podeGerenciarFornecedores'),
-    'se o perfil de fornecedores escrevesse perfis, ele se promoveria a admin');
+  assert.ok(!corpo.includes('isSeguranca()'),
+    'se SI escrevesse perfis, ela se promoveria a admin');
+  assert.ok(!corpo.includes('isTI()'),
+    'se TI escrevesse perfis, ela se promoveria a admin');
   assert.ok(corpo.includes('isAdmin()'), 'admin tem que poder gerenciar perfis');
+  // Auto-edicao (gestor gravando a propria area) nao pode tocar perfis nem perfil.
+  assert.ok(corpo.includes("'perfil'") && corpo.includes("'perfis'"),
+    'a auto-edicao tem que barrar mudar perfil e perfis');
 });
 
-test('as colecoes de fornecedor usam a permissao, nao o perfil admin direto', () => {
+test('as colecoes de fornecedor usam a permissao (Admin ou SI), nao o perfil admin direto', () => {
   const regras = lerRegras();
   ['criterios_fornecedor', 'avaliacoes_fornecedor', 'categorias_fornecedor'].forEach((col) => {
     const bloco = regras.slice(regras.indexOf(`match /${col}/`));
@@ -129,30 +231,27 @@ test('as colecoes de fornecedor usam a permissao, nao o perfil admin direto', ()
   });
 });
 
-test('as regras nao conhecem perfil que esta lista nao tem', () => {
+test('dependencias no banco liberam escrita para Admin, SI e TI (sem guarda de categoria)', () => {
   const regras = lerRegras();
-  const usados = [...regras.matchAll(/perfil\s*==\s*'([^']+)'/g)].map((m) => m[1]);
-  assert.ok(usados.length > 0, 'nenhuma comparacao de perfil encontrada nas regras');
-  usados.forEach((v) => {
-    assert.ok(Perfis.conhecido(v), `firestore.rules compara com o perfil '${v}', que nao existe em perfis.js`);
-  });
+  const bloco = regras.slice(regras.indexOf('match /dependencias/'));
+  const corpo = bloco.slice(0, bloco.indexOf('\n    }'));
+  assert.ok(corpo.includes('podeMexerNaDependencia()'),
+    'dependencias deveria usar podeMexerNaDependencia() (Admin/SI/TI)');
 });
 
 // ============================================================
 // QUEM VE QUAL TELA
 //
-// Antes era uma lista do que ESCONDER, e ela deixou passar Processos, PCNs,
-// Riscos e Indicadores para o perfil de fornecedores. Lista de exclusao erra
-// por omissao. Agora cada perfil declara o que ve, e estes testes garantem que
-// tela nova nao nasce visivel para quem nao deveria.
+// Cada perfil DECLARA o que ve (allowlist). Tela nova nasce invisivel ate
+// alguem decidir de quem ela e — que e o lado certo para errar.
 // ============================================================
 
 const TODAS_AS_TELAS = [
-  'processos', 'pcns', 'areas', 'pessoas', 'riscos',
+  'processos', 'pcns', 'drp', 'areas', 'pessoas', 'riscos',
   'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
   'dependencias', 'componentes', 'perguntas',
   'admin', 'perfis',
-  'fornecedores', 'fornecedores-criterios',
+  'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
 ];
 
 test('admin ve todas as telas', () => {
@@ -161,22 +260,38 @@ test('admin ve todas as telas', () => {
   });
 });
 
-test('o perfil de fornecedores ve as telas de fornecedor mais Areas e Pessoas', () => {
-  // Areas e Pessoas entraram porque Gestor do Contrato (Pessoa) e Setor
-  // responsavel (Area) sao escolhidos no proprio cadastro de fornecedor.
-  const vistas = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela(Perfis.PERFIL.FORNECEDORES, t));
-  assert.deepStrictEqual(vistas.sort(), ['areas', 'fornecedores', 'fornecedores-criterios', 'pessoas']);
-});
-
-test('o perfil de fornecedores NAO ve processos, PCNs, riscos nem indicadores', () => {
-  ['processos', 'pcns', 'riscos', 'indicadores-dashboard', 'indicadores-cadastro',
-    'indicadores-lancamento', 'indicadores-matriz', 'admin', 'perfis',
-    'perguntas', 'dependencias', 'componentes'].forEach((t) => {
-    assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.FORNECEDORES, t), false, `nao deveria ver ${t}`);
+test('SI ve quase tudo, menos as tres telas proprias do Admin', () => {
+  ['processos', 'pcns', 'drp', 'riscos', 'areas', 'pessoas', 'dependencias',
+    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
+    'indicadores-dashboard', 'admin'].forEach((t) => {
+    assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.SEGURANCA, t), true, `SI deveria ver ${t}`);
+  });
+  ['perfis', 'perguntas', 'componentes'].forEach((t) => {
+    assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.SEGURANCA, t), false, `SI nao deveria ver ${t}`);
   });
 });
 
-test('gestor NAO ve as telas de cadastro nem as de fornecedor', () => {
+test('TI ve o DRP e o catalogo de dependencias, e nada mais', () => {
+  const vistas = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela(Perfis.PERFIL.TI, t));
+  assert.deepStrictEqual(vistas.sort(), ['dependencias', 'drp']);
+});
+
+test('TI NAO ve processos, PCNs, riscos, fornecedores nem admin', () => {
+  ['processos', 'pcns', 'riscos', 'fornecedores', 'admin', 'perfis', 'perguntas',
+    'indicadores-dashboard', 'areas', 'pessoas'].forEach((t) => {
+    assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.TI, t), false, `TI nao deveria ver ${t}`);
+  });
+});
+
+test('TI + Gestor ve a uniao: DRP e dependencias (TI) mais o que o gestor ve', () => {
+  assert.strictEqual(Perfis.podeVerTela(['ti', 'gestor'], 'drp'), true);
+  assert.strictEqual(Perfis.podeVerTela(['ti', 'gestor'], 'dependencias'), true);
+  assert.strictEqual(Perfis.podeVerTela(['ti', 'gestor'], 'processos'), true, 'do gestor');
+  assert.strictEqual(Perfis.podeVerTela(['ti', 'gestor'], 'riscos'), true, 'do gestor');
+  assert.strictEqual(Perfis.podeVerTela(['ti', 'gestor'], 'perfis'), false);
+});
+
+test('gestor NAO ve telas de cadastro nem as de fornecedor', () => {
   ['areas', 'pessoas', 'perguntas', 'dependencias', 'componentes', 'perfis',
     'fornecedores', 'fornecedores-criterios'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, t), false, `nao deveria ver ${t}`);
@@ -184,14 +299,14 @@ test('gestor NAO ve as telas de cadastro nem as de fornecedor', () => {
 });
 
 test('gestor continua vendo o que sempre viu', () => {
-  ['processos', 'pcns', 'riscos', 'indicadores-dashboard', 'indicadores-matriz', 'admin'].forEach((t) => {
+  ['processos', 'pcns', 'drp', 'riscos', 'indicadores-dashboard', 'indicadores-matriz', 'admin'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, t), true, t);
   });
 });
 
 test('tela desconhecida nao abre para ninguem, menos admin', () => {
   assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, 'tela-que-nao-existe'), false);
-  assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.FORNECEDORES, 'tela-que-nao-existe'), false);
+  assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.TI, 'tela-que-nao-existe'), false);
   assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, ''), false);
   assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, null), false);
 });
@@ -210,32 +325,18 @@ test('cada perfil tem pelo menos uma tela, senao a pessoa entra e nao ve nada', 
 });
 
 // ============================================================
-// PERMISSAO TOTAL NO MODULO, E SO NELE
+// DEPENDENCIAS: ADMIN, SI E TI MEXEM; GESTOR NAO
+// (a guarda de categoria caiu com o fim do perfil de fornecedores)
 // ============================================================
 
-test('o perfil de fornecedores cadastra, edita e apaga fornecedor', () => {
-  assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.FORNECEDORES, 'Fornecedores'), true);
-  assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.FORNECEDORES, 'Fornecedor'), true);
-});
-
-test('o perfil de fornecedores tambem mexe em Pessoas -- e de onde vem o Gestor do Contrato', () => {
-  assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.FORNECEDORES, 'Pessoas'), true);
-});
-
-test('o perfil de fornecedores NAO mexe nas categorias do BIA que nao sao Fornecedor nem Pessoas', () => {
-  ['Infraestrutura', 'Sistemas', 'Processos Internos', '', null].forEach((cat) => {
-    assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.FORNECEDORES, cat), false, `categoria ${cat}`);
-  });
-});
-
-test('admin mexe em qualquer categoria do catalogo', () => {
-  ['Fornecedores', 'Infraestrutura', 'Pessoas', 'Sistemas', 'Processos Internos'].forEach((cat) => {
-    assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.ADMIN, cat), true, cat);
+test('Admin, SI e TI mexem no catalogo de dependencias', () => {
+  [Perfis.PERFIL.ADMIN, Perfis.PERFIL.SEGURANCA, Perfis.PERFIL.TI].forEach((p) => {
+    assert.strictEqual(Perfis.podeMexerNaDependencia(p), true, p);
   });
 });
 
 test('gestor nao mexe no catalogo de dependencias', () => {
-  assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.GESTOR, 'Fornecedores'), false);
+  assert.strictEqual(Perfis.podeMexerNaDependencia(Perfis.PERFIL.GESTOR), false);
 });
 
 test('categoriaDeFornecedor aceita as duas grafias em uso e recusa o resto', () => {
@@ -244,15 +345,4 @@ test('categoriaDeFornecedor aceita as duas grafias em uso e recusa o resto', () 
   assert.strictEqual(Perfis.categoriaDeFornecedor(' Fornecedores '), true);
   assert.strictEqual(Perfis.categoriaDeFornecedor('fornecedores'), false, 'minuscula nao e a grafia gravada no catalogo');
   assert.strictEqual(Perfis.categoriaDeFornecedor('Sistemas'), false);
-});
-
-test('as regras do banco tambem guardam a categoria em /dependencias', () => {
-  const regras = lerRegras();
-  const bloco = regras.slice(regras.indexOf('match /dependencias/'));
-  const corpo = bloco.slice(0, bloco.indexOf('\n    }'));
-  assert.ok(corpo.includes('categoriaGerenciavelPorFornecedores'),
-    'sem a guarda de categoria, quem avalia fornecedor apagaria as dependencias do BIA');
-  // As duas pontas: como esta e como vai ficar.
-  assert.ok(corpo.includes('resource.data.categoria') && corpo.includes('request.resource.data.categoria'),
-    'checar so uma ponta deixaria mover dependencia de Sistemas para Fornecedores');
 });

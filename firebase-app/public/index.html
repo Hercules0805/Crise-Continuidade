@@ -15,6 +15,7 @@
         <div class="nav-dropdown">
           <a href="#areas" class="nav-link" data-page="areas">Áreas</a>
           <a href="#dependencias" class="nav-link" data-page="dependencias">Dependências</a>
+          <a href="#drp" class="nav-link" data-page="drp">DRP</a>
           <a href="#pcns" class="nav-link" data-page="pcns">PCNs</a>
           <a href="#perguntas" class="nav-link" data-page="perguntas">Perguntas</a>
           <a href="#pessoas" class="nav-link" data-page="pessoas">Pessoas</a>
@@ -89,11 +90,15 @@
       window.USER_EMAIL = user.email;
       try {
         const perfil = await API.getPerfil(user.email);
-        window.USER_PERFIL = Perfis.normalizar(perfil.perfil);
+        // RBAC cumulativo: USER_PERFIS e a lista; USER_PERFIL (string) segue
+        // existindo = perfis[0], por compat com codigo que le um valor so.
+        window.USER_PERFIS = Perfis.normalizarLista(perfil.perfis != null ? perfil.perfis : perfil.perfil);
+        window.USER_PERFIL = window.USER_PERFIS[0];
         window.USER_AREA = perfil.area || null;
       } catch(e) {
         // Falha ao ler o perfil cai no MENOR acesso, nunca no maior.
         console.error('Falha ao carregar perfil, assumindo o menor acesso:', e);
+        window.USER_PERFIS = [Perfis.PERFIL_PADRAO];
         window.USER_PERFIL = Perfis.PERFIL_PADRAO;
         window.USER_AREA = null;
       }
