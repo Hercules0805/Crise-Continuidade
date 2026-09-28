@@ -9406,10 +9406,7 @@ async function perfis() {
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Perfis de Acesso</h2><p class="page-sub">Quem tem qual acesso ao sistema</p></div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" onclick="preencherAreasPelasPessoas()" id="btnBackfillAreas" style="display:none;" title="Copia a área do cadastro de Pessoas para os perfis que ainda estão sem área">🔄 Preencher áreas pelas Pessoas</button>
-        <button class="btn btn-primary" onclick="abrirModalPerfil()" id="btnNovoPerfil" style="display:none;">+ Dar acesso a alguém</button>
-      </div>
+      <button class="btn btn-primary" onclick="abrirModalPerfil()" id="btnNovoPerfil" style="display:none;">+ Dar acesso a alguém</button>
     </div>
     <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 16px;background:#fff;margin-bottom:18px;">
       <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">O que cada perfil pode</div>
@@ -9466,7 +9463,6 @@ async function perfis() {
     </div></div>`;
 
   document.getElementById('btnNovoPerfil').style.display = podeGerenciar ? 'inline-block' : 'none';
-  document.getElementById('btnBackfillAreas').style.display = podeGerenciar ? 'inline-block' : 'none';
 
   try {
     const [lista, areas, deps] = await Promise.all([API.getPerfis(), API.getAreas(), API.getDependencias()]);
@@ -9734,63 +9730,6 @@ window.excluirPerfilAcesso = async (email) => {
   } catch (e) {
     showToast('❌ ' + (e.message || 'Não foi possível remover.'), '#c62828');
   }
-};
-
-/**
- * Backfill: preenche a área dos perfis que estão SEM área, copiando a área do
- * cadastro de Pessoas (casada pelo e-mail). Conservador de propósito:
- *  - só toca em perfil SEM área (não sobrescreve área já definida);
- *  - só quando existe uma Pessoa com aquele e-mail E com área cadastrada;
- *  - preserva os perfis atuais (envia perfis: p.perfis) — grava só a área.
- * Roda no navegador do admin (que tem permissão de escrita nas rules).
- */
-window.preencherAreasPelasPessoas = async () => {
-  // Índice e-mail -> primeira área da Pessoa (só pessoas com e-mail e área).
-  const areaPorEmail = {};
-  pessoasData.forEach((pe) => {
-    const em = String(pe.email || '').trim().toLowerCase();
-    if (!em) return;
-    const areas = _areasDaPessoa(pe);
-    if (areas.length && !areaPorEmail[em]) areaPorEmail[em] = areas[0];
-  });
-
-  // Candidatos: perfil sem área, com Pessoa correspondente que tem área.
-  const candidatos = perfisData
-    .filter((p) => !p.area)
-    .map((p) => ({ email: p.email, perfis: p.perfis, area: areaPorEmail[String(p.email || '').trim().toLowerCase()] }))
-    .filter((c) => c.area);
-
-  if (!candidatos.length) {
-    return showToast('Nada a preencher: todos os perfis já têm área, ou não há Pessoa com área para os que faltam.', '#e65100');
-  }
-
-  const amostra = candidatos.slice(0, 8).map((c) => `• ${c.email} → ${c.area}`).join('\n');
-  const resto = candidatos.length > 8 ? `\n… e mais ${candidatos.length - 8}.` : '';
-  if (!confirm(`Preencher a área de ${candidatos.length} perfil(is) a partir do cadastro de Pessoas?\n\n${amostra}${resto}\n\nSó são alterados perfis que estão sem área. Os perfis de cada pessoa não mudam.`)) return;
-
-  await comBotaoCarregando('btnBackfillAreas', async () => {
-    let ok = 0;
-    const falhas = [];
-    for (const c of candidatos) {
-      try {
-        // Envia os perfis atuais + a área nova. _salvarPerfilAcesso grava a
-        // área para qualquer perfil (e as rules já garantem que ter área não
-        // vira poder de gestor para quem não é gestor).
-        await API.salvarPerfilAcesso({ email: c.email, perfis: c.perfis, area: c.area });
-        ok++;
-      } catch (e) {
-        falhas.push(`${c.email}: ${e.message || 'erro'}`);
-      }
-    }
-    perfisData = await API.getPerfis();
-    renderizarPerfis();
-    if (falhas.length) {
-      console.warn('Backfill de áreas — falhas:', falhas);
-      showToast(`✅ ${ok} preenchido(s). ⚠️ ${falhas.length} falhou(aram) — veja o console.`, '#e65100');
-    } else {
-      showToast(`✅ Área preenchida em ${ok} perfil(is).`, '#2e7d32');
-    }
-  });
 };
 
 // ============================================================
