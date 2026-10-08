@@ -1777,14 +1777,14 @@ async function processos() {
           <tr>
             <th style="width:3%;text-align:center;padding-left:6px;padding-right:6px;"><input type="checkbox" id="chkTodosProcessos" onchange="toggleTodosProcessos(this.checked)" title="Selecionar todos"></th>
             <th onclick="ordenarProcessos('area')" style="cursor:pointer;width:10%;">Área <span id="sort-area"></span></th>
-            <th onclick="ordenarProcessos('processo')" style="cursor:pointer;width:14%;">Processo de Negócio <span id="sort-processo"></span></th>
-            <th onclick="ordenarProcessos('responsavel')" style="cursor:pointer;width:9%;">Responsável <span id="sort-responsavel"></span></th>
-            <th onclick="ordenarProcessos('status')" style="cursor:pointer;width:8%;">Tier <span id="sort-status"></span></th>
-            <th onclick="ordenarProcessos('score')" style="cursor:pointer;width:6%;">Score <span id="sort-score"></span></th>
+            <th onclick="ordenarProcessos('processo')" style="cursor:pointer;width:15%;">Processo de Negócio <span id="sort-processo"></span></th>
+            <th onclick="ordenarProcessos('responsavel')" style="cursor:pointer;width:10%;">Responsável <span id="sort-responsavel"></span></th>
+            <th onclick="ordenarProcessos('status')" style="cursor:pointer;width:12%;">Tier <span id="sort-status"></span></th>
+            <th class="col-c" onclick="ordenarProcessos('score')" style="cursor:pointer;width:7%;">Score <span id="sort-score"></span></th>
             <th onclick="ordenarProcessos('biaHomologada')" style="cursor:pointer;width:9%;">BIA Status <span id="sort-biaHomologada"></span></th>
             <th onclick="ordenarProcessos('bcpStatus')" style="cursor:pointer;width:9%;">BCP Status <span id="sort-bcpStatus"></span></th>
             <th onclick="ordenarProcessos('drpStatus')" style="cursor:pointer;width:9%;">DRP Status <span id="sort-drpStatus"></span></th>
-            <th style="width:10%;text-align:center;">Ações</th>
+            <th class="col-c col-sticky" style="width:10%;">Ações</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
@@ -2226,7 +2226,7 @@ function renderizarProcessos() {
         <td style="font-size:0.8em;color:#555;">${p.biaHomologada || '-'}</td>
         <td style="font-size:0.8em;color:#555;">${p.bcpStatus || '-'}</td>
         <td style="font-size:0.8em;color:#555;">${p.drpStatus || '-'}</td>
-        <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
+        <td class="col-c col-nw col-sticky" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarProcesso('${p.id}')" title="Editar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -6313,7 +6313,11 @@ async function vulnerabilidades() {
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table" id="listaVulnerabilidades" style="display:none;">
-      <table>
+      <table style="min-width:1240px;">
+        <colgroup>
+          <col style="width:100px"><col style="width:170px"><col style="width:320px"><col style="width:130px">
+          <col style="width:160px"><col style="width:110px"><col style="width:150px"><col style="width:100px">
+        </colgroup>
         <thead>
           <tr>
             <th onclick="ordenarVulnerabilidades('codigo')" style="cursor:pointer;">Código <span id="sort-vuln-codigo"></span></th>
@@ -6323,7 +6327,7 @@ async function vulnerabilidades() {
             <th onclick="ordenarVulnerabilidades('statusCorrecao')" style="cursor:pointer;">Status da Correção <span id="sort-vuln-statusCorrecao"></span></th>
             <th onclick="ordenarVulnerabilidades('dataDeteccao')" style="cursor:pointer;">Detecção <span id="sort-vuln-dataDeteccao"></span></th>
             <th>Responsável</th>
-            <th style="width:12%;text-align:center;">Ações</th>
+            <th class="col-c">Ações</th>
           </tr>
         </thead>
         <tbody id="vulnerabilidadeRows"></tbody>
@@ -7461,26 +7465,34 @@ async function riscos() {
       </div>
     </div>
     <div class="loading">⏳ Carregando...</div>
-    <div class="data-table" id="listaRiscos" style="display:none;">
-      <table>
+    <div class="data-table data-table--compact" id="listaRiscos" style="display:none;">
+      <!-- Larguras em px (soma 2214) em vez de %: 16 colunas não cabem espremidas;
+           abaixo disso a grade rola na horizontal e Ações fica fixa à direita. -->
+      <table style="min-width:2214px;">
+        <colgroup>
+          <col style="width:104px"><col style="width:210px"><col style="width:200px"><col style="width:150px">
+          <col style="width:300px"><col style="width:130px"><col style="width:140px"><col style="width:140px">
+          <col style="width:104px"><col style="width:104px"><col style="width:72px"><col style="width:72px">
+          <col style="width:140px"><col style="width:132px"><col style="width:112px"><col style="width:104px">
+        </colgroup>
         <thead>
           <tr>
-            <th onclick="ordenarRiscos('dataIdentificacao')" style="cursor:pointer;width:7%;">Data Identif. <span id="sort-risco-dataIdentificacao"></span></th>
-            <th onclick="ordenarRiscos('area')" style="cursor:pointer;width:9%;">Área <span id="sort-risco-area"></span></th>
-            <th style="width:9%;">Processo / Fornecedor</th>
-            <th style="width:8%;">Origem</th>
-            <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;width:13%;">Título <span id="sort-risco-titulo"></span></th>
-            <th style="width:7%;">Categoria</th>
-            <th style="width:8%;">Responsável</th>
-            <th style="width:8%;">Reportado por</th>
-            <th style="width:6%;">Probab.</th>
-            <th style="width:6%;">Impacto</th>
-            <th onclick="ordenarRiscos('score')" style="cursor:pointer;width:5%;text-align:center;" title="Probabilidade x Impacto, de 1 a 12">Score <span id="sort-risco-score"></span></th>
-            <th style="width:5%;text-align:center;" title="Score x peso do Tier do processo (ou criticidade do fornecedor) -- quanto este risco soma na Carga de Risco da Empresa">Carga</th>
-            <th style="width:9%;text-align:right;">Impacto Financeiro</th>
-            <th style="width:7%;">Status</th>
-            <th style="width:6%;">Prioridade</th>
-            <th style="width:6%;text-align:center;">Ações</th>
+            <th class="col-nw" onclick="ordenarRiscos('dataIdentificacao')" style="cursor:pointer;" title="Data de identificação">Data <span id="sort-risco-dataIdentificacao"></span></th>
+            <th onclick="ordenarRiscos('area')" style="cursor:pointer;">Área <span id="sort-risco-area"></span></th>
+            <th title="Processo / Fornecedor">Processo</th>
+            <th>Origem</th>
+            <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;">Título <span id="sort-risco-titulo"></span></th>
+            <th>Categoria</th>
+            <th>Responsável</th>
+            <th>Reportado por</th>
+            <th title="Probabilidade">Prob.</th>
+            <th>Impacto</th>
+            <th class="col-c" onclick="ordenarRiscos('score')" style="cursor:pointer;" title="Probabilidade x Impacto, de 1 a 12">Score <span id="sort-risco-score"></span></th>
+            <th class="col-c" title="Score x peso do Tier do processo (ou criticidade do fornecedor) -- quanto este risco soma na Carga de Risco da Empresa">Carga</th>
+            <th class="col-r" title="Impacto financeiro">Impacto R$</th>
+            <th>Status</th>
+            <th>Prioridade</th>
+            <th class="col-c col-sticky">Ações</th>
           </tr>
         </thead>
         <tbody id="riscoRows"></tbody>
@@ -7928,22 +7940,22 @@ function renderizarRiscos() {
 
   document.getElementById('riscoRows').innerHTML = data.length
     ? data.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${r.id}')">
-        <td class="num">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '–'}</td>
-        <td>${r.area ? `<span class="chip-area">${esc(r.area)}</span>` : '<span class="chip-area">–</span>'}</td>
+        <td class="num col-nw">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '–'}</td>
+        <td>${r.area ? `<span class="chip-area" title="${esc(r.area)}">${esc(r.area)}</span>` : '<span class="muted">–</span>'}</td>
         <td>${r.processo || (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span class="muted">Corporativo</span>')}</td>
         <td>${esc(_rotuloOrigemRisco(r.origem))}</td>
-        <td class="title">${esc(r.titulo)}</td>
+        <td class="title" title="${esc(r.titulo)}">${esc(r.titulo)}</td>
         <td class="muted">${esc((r.categorias || []).join(', ')) || '–'}</td>
         <td>${esc(r.responsavel || '–')}</td>
         <td>${esc(r.reportadoPor || '–')}</td>
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
-        <td style="text-align:center;">${_badgeScoreRisco(r)}</td>
-        <td style="text-align:center;">${_badgeCargaRisco(r, processosPorId)}</td>
-        <td class="num" style="text-align:right;">${r.impactoFinanceiro === null || r.impactoFinanceiro === undefined ? '<span class="muted">–</span>' : _formatarReais(r.impactoFinanceiro)}</td>
+        <td class="col-c">${_badgeScoreRisco(r)}</td>
+        <td class="col-c">${_badgeCargaRisco(r, processosPorId)}</td>
+        <td class="num col-r col-nw">${r.impactoFinanceiro === null || r.impactoFinanceiro === undefined ? '<span class="muted">–</span>' : _formatarReais(r.impactoFinanceiro)}</td>
         <td>${_badgeStatusRisco(r.status)}</td>
         <td>${_badgeProbImpactoRisco(r.prioridade)}</td>
-        <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
+        <td class="col-c col-nw col-sticky" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarRisco('${r.id}')" title="${isAdmin ? 'Editar' : 'Visualizar'}">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
