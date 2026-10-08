@@ -36,10 +36,16 @@
     PENDENTE: 'Pendente',
   };
 
+  // DECISAO 04/10/2026 (rebrand GRC360): cores viram variáveis CSS do pacote
+  // vendor/grc360 (--risk-critical/high/medium), pra bater com o Badge
+  // (ver _nivelTierProcesso/_htmlBadge em app.js) -- só resolve de verdade em
+  // contexto de navegador (onde tokens.css está carregado); os testes deste
+  // módulo (criticidade.test.js) checam só que tiers diferentes têm cores
+  // diferentes, nunca o hex exato, então a troca não quebra nada.
   var COR = {};
-  COR[TIER.T1] = '#c62828';
-  COR[TIER.T2] = '#f57c00';
-  COR[TIER.T3] = '#1565c0';
+  COR[TIER.T1] = 'var(--risk-critical)';
+  COR[TIER.T2] = 'var(--risk-high)';
+  COR[TIER.T3] = 'var(--risk-medium)';
   COR[TIER.PENDENTE] = '#999999';
 
   /** Um processo conta como avaliado quando existe resposta registrada. */

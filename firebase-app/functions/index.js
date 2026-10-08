@@ -20,6 +20,7 @@ const logger = require('firebase-functions/logger');
 const { READ_ACTIONS, WRITE_ACTIONS, TokenError } = require('./tokenLogic');
 const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia, medicaoDeLancamento, medicaoDeRisco, medicaoDeExclusaoRisco, medicaoDeAvaliacaoFornecedor, scoreDeRisco } = require('./medicoes');
 const fornecedorRisco = require('./fornecedorRisco');
+const vulnerabilidadeRisco = require('./vulnerabilidadeRisco');
 const retratoRisco = require('./retratoRisco');
 const {
   READ_ACTIONS: APP_READ,
@@ -357,6 +358,61 @@ exports.riscoDeFornecedor = onDocumentCreated(
       logger.info('riscoDeFornecedor: nada a fazer', { fornecedorId, motivo: decisao.motivo });
     } catch (err) {
       logger.error('riscoDeFornecedor: falha ao tratar o risco automatico', { fornecedorId, erro: err.message });
+    }
+  }
+);
+
+// Vulnerabilidade -> risco automatico.
+//
+// Mesma razao de riscoDeFornecedor (acima) pra rodar no servidor: quem
+// cadastra Vulnerabilidade nao tem acesso de escrita a /riscos, e nao pode
+// existir caminho que grave a vulnerabilidade e esqueca o risco.
+//
+// DIFERENCA do Fornecedor: onDocumentWritten, nao onDocumentCreated -- uma
+// Vulnerabilidade e UM documento so, editado no lugar (o Status da Correcao
+// muda de "Aberto" pra "Corrigida" quando o time resolve), entao o gatilho
+// precisa reagir tambem a updates, nao so a criacao.
+exports.riscoDeVulnerabilidade = onDocumentWritten(
+  { region: 'us-central1', document: 'vulnerabilidades/{id}' },
+  async (event) => {
+    const depois = event.data && event.data.after && event.data.after.exists
+      ? event.data.after.data() : null;
+    if (!depois) return; // vulnerabilidade excluida: nada a decidir aqui.
+
+    const vulnerabilidade = Object.assign({ id: event.params.id }, depois);
+
+    try {
+      const riscosSnap = await db.collection('riscos').where('vulnerabilidadeId', '==', event.params.id).get();
+      const riscos = riscosSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+
+      const decisao = vulnerabilidadeRisco.decidir({ vulnerabilidade, riscos });
+
+      if (decisao.acao === 'abrir') {
+        const agora = new Date().toISOString();
+        await db.collection('riscos').add(Object.assign({}, decisao.risco, {
+          criadoEm: agora,
+          atualizadoEm: agora,
+          criadoPor: String(depois.atualizadoPor || ''),
+        }));
+        logger.info('riscoDeVulnerabilidade: risco aberto', { vulnerabilidadeId: event.params.id });
+        return;
+      }
+
+      if (decisao.acao === 'encerrar') {
+        const lote = db.batch();
+        decisao.ids.forEach((id) => {
+          lote.set(db.collection('riscos').doc(id),
+            Object.assign({}, decisao.patch, { atualizadoEm: new Date().toISOString() }),
+            { merge: true });
+        });
+        await lote.commit();
+        logger.info('riscoDeVulnerabilidade: risco(s) encerrado(s)', { vulnerabilidadeId: event.params.id, ids: decisao.ids });
+        return;
+      }
+
+      logger.info('riscoDeVulnerabilidade: nada a fazer', { vulnerabilidadeId: event.params.id, motivo: decisao.motivo });
+    } catch (err) {
+      logger.error('riscoDeVulnerabilidade: falha ao tratar o risco automatico', { vulnerabilidadeId: event.params.id, erro: err.message });
     }
   }
 );

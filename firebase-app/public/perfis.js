@@ -67,14 +67,20 @@
   var TELAS = {};
   TELAS[PERFIL.ADMIN] = '*';
   TELAS[PERFIL.SEGURANCA] = [
-    'processos', 'pcns', 'drp', 'riscos',
+    'processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
-    'dependencias', 'areas', 'pessoas',
-    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
+    'dependencias', 'areas', 'pessoas', 'relatorios', 'servicos', 'catalogo-backup',
+    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'admin',
   ];
+  // DECISAO 02/10/2026: Servicos sai da posse de TI -- quem gerencia agora e so
+  // Seguranca da Informacao ("Seguranca de Sistemas" no pedido do usuario). TI
+  // mantem DRP/Dependencias/Relatorios, que continuam sendo dele.
+  // DECISAO 03/10/2026: Backup deixou de ter tela propria (virou aba do drawer
+  // de Servico) -- revertido na DECISAO 04/10/2026: Backup volta a ter tela
+  // propria ("catalogo-backup"), mesma posse de 'servicos' (Admin + Seguranca).
   TELAS[PERFIL.TI] = [
-    'drp', 'dependencias',
+    'drp', 'dependencias', 'relatorios',
   ];
   TELAS[PERFIL.GESTOR] = [
     'processos', 'pcns', 'drp', 'riscos',

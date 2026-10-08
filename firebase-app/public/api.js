@@ -40,7 +40,12 @@ const COLLECTION = {
   criteriosFornecedor: 'criterios_fornecedor',
   avaliacoesFornecedor: 'avaliacoes_fornecedor',
   categoriasFornecedor: 'categorias_fornecedor',
+  subcategoriasFornecedor: 'subcategorias_fornecedor',
+  criticidadeFornecedorPerguntas: 'criticidade_fornecedor_perguntas',
   historicoRisco: 'historico_risco',
+  servicos: 'servicos',
+  backups: 'backups',
+  vulnerabilidades: 'vulnerabilidades',
 };
 
 // ------------------------------------------------------------
@@ -326,6 +331,9 @@ async function _lerDependencias() {
     // Idem: segmento de negocio (catalogo categorias_fornecedor) e o
     // responsavel interno pelo contrato.
     categoriaFornecedor: d.categoriaFornecedor || '',
+    // Subcategoria (catalogo subcategorias_fornecedor, filha da Categoria
+    // acima) -- mesma convencao de guardar o NOME, nao o id.
+    subcategoriaFornecedor: d.subcategoriaFornecedor || '',
     gestorContrato: d.gestorContrato || '',
     gestoresContrato: Array.isArray(d.gestoresContrato) ? d.gestoresContrato : [],
     cnpj: d.cnpj || '',
@@ -371,12 +379,163 @@ async function _lerDependencias() {
     // própria). drpTestes acima continua para compat/migração.
     drpEstrategiasTeste: Array.isArray(d.drpEstrategiasTeste) ? d.drpEstrategiasTeste : [],
     drpRegistrosTeste: Array.isArray(d.drpRegistrosTeste) ? d.drpRegistrosTeste : [],
+    drpRoteirosTeste: Array.isArray(d.drpRoteirosTeste) ? d.drpRoteirosTeste : [],
     // Plano de Recuperação: template importado + versões do artefato DRP.
     drpTemplate: d.drpTemplate || '',
     drpTemplateNome: d.drpTemplateNome || '',
     drpSalvo: d.drpSalvo || '',
   }));
 }
+
+/**
+ * Serviços: agrupam dependências técnicas já cadastradas (sempre por id --
+ * nunca por nome solto, pra não repetir o bug de "referência fantasma" que
+ * levou a fundir Componentes do Serviço em Dependencias em 24/09/2026).
+ * Coleção própria: um Serviço é um contêiner, não mais um item técnico igual
+ * aos que ele agrupa.
+ */
+async function _lerServicos() {
+  const docs = await _getAll(COLLECTION.servicos);
+  return docs.map((s) => ({
+    id: s.id,
+    nome: s.nome || '',
+    descricao: s.descricao || '',
+    dependenciaItens: Array.isArray(s.dependenciaItens) ? s.dependenciaItens : [],
+  })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+
+const _CAMPOS_SERVICO = ['nome', 'descricao', 'dependenciaItens'];
+
+async function _salvarServico(s) {
+  const data = {};
+  _CAMPOS_SERVICO.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(s, campo) && s[campo] !== undefined) data[campo] = s[campo];
+  });
+  data.atualizadoEm = new Date().toISOString();
+  data.atualizadoPor = (window.USER_EMAIL || '').toLowerCase();
+
+  if (s.id) {
+    await _db.collection(COLLECTION.servicos).doc(String(s.id)).set(data, { merge: true });
+    return { success: true, id: s.id };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = data.atualizadoPor;
+  const ref = await _db.collection(COLLECTION.servicos).add(data);
+  return { success: true, id: ref.id };
+}
+
+/**
+ * Backup: vinculado a 1 Serviço, 1 Servidor (Dependência) e 1 Stakeholder
+ * (Pessoa). Jobs ficam como array dentro do próprio documento -- nunca são
+ * abertos/buscados sozinhos, não precisam de coleção própria (mesmo espírito
+ * de Pessoas Associadas/Gestores do Contrato do Fornecedor).
+ *
+ * DECISAO 04/10/2026: Servidor era multi-seleção por categoria (servidorItens[]);
+ * virou 1 Dependência só, igual Stakeholder -- servidorId/servidorNome.
+ * servidorItens continua lido (não gravado mais) só pra abrirDrawerBackup()
+ * migrar não-destrutivamente backups antigos que ainda não têm servidorId.
+ */
+async function _lerBackups() {
+  const docs = await _getAll(COLLECTION.backups);
+  return docs.map((b) => ({
+    id: b.id,
+    nome: b.nome || '',
+    descricao: b.descricao || '',
+    servicoId: b.servicoId || '',
+    servidorId: b.servidorId || '',
+    servidorNome: b.servidorNome || '',
+    servidorItens: Array.isArray(b.servidorItens) ? b.servidorItens : [],
+    stakeholderId: b.stakeholderId || '',
+    stakeholderNome: b.stakeholderNome || '',
+    jobs: Array.isArray(b.jobs) ? b.jobs : [],
+  })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+
+const _CAMPOS_BACKUP = ['nome', 'descricao', 'servicoId', 'servidorId', 'servidorNome', 'stakeholderId', 'stakeholderNome', 'jobs'];
+
+async function _salvarBackup(b) {
+  const data = {};
+  _CAMPOS_BACKUP.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(b, campo) && b[campo] !== undefined) data[campo] = b[campo];
+  });
+  data.atualizadoEm = new Date().toISOString();
+  data.atualizadoPor = (window.USER_EMAIL || '').toLowerCase();
+
+  if (b.id) {
+    await _db.collection(COLLECTION.backups).doc(String(b.id)).set(data, { merge: true });
+    return { success: true, id: b.id };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = data.atualizadoPor;
+  const ref = await _db.collection(COLLECTION.backups).add(data);
+  return { success: true, id: ref.id };
+}
+/**
+ * Vulnerabilidades: catálogo de vulnerabilidades reportadas (CVSS/CWE/CVE,
+ * status de correção), com score e abertura automática de Risco.
+ *
+ * A abertura/encerramento do Risco automático NÃO acontece aqui -- roda no
+ * servidor (Cloud Function `riscoDeVulnerabilidade`, gatilho em qualquer
+ * escrita de `vulnerabilidades/{id}`), mesmo motivo do risco automático de
+ * Fornecedor: quem cadastra Vulnerabilidade não tem (nem deveria precisar
+ * ter) acesso de escrita a `/riscos`.
+ */
+async function _lerVulnerabilidades() {
+  const docs = await _getAll(COLLECTION.vulnerabilidades);
+  return docs.map((v) => ({
+    id: v.id,
+    codigo: v.codigo || '',
+    ticketReport: v.ticketReport || '',
+    produto: v.produto || '',
+    versao: v.versao || '',
+    nome: v.nome || '',
+    cwe: v.cwe || '',
+    cve: v.cve || '',
+    cvss: v.cvss != null && v.cvss !== '' ? Number(v.cvss) : null,
+    severidadeManual: v.severidadeManual || '',
+    descricao: v.descricao || '',
+    dataDeteccao: v.dataDeteccao || '',
+    origemDeteccao: v.origemDeteccao || '',
+    exploitDisponivel: v.exploitDisponivel || '',
+    equipeResponsavel: v.equipeResponsavel || '',
+    responsavel: v.responsavel || '',
+    ticketCorrecao: v.ticketCorrecao || '',
+    statusCorrecao: v.statusCorrecao || '',
+    dataPrevistaCorrecao: v.dataPrevistaCorrecao || '',
+    dataCorrecao: v.dataCorrecao || '',
+    evidenciaCorrecao: v.evidenciaCorrecao || '',
+    observacoes: v.observacoes || '',
+  })).sort((a, b) => b.codigo.localeCompare(a.codigo, 'pt-BR'));
+}
+
+const _CAMPOS_VULNERABILIDADE = [
+  'codigo', 'ticketReport', 'produto', 'versao', 'nome', 'cwe', 'cve', 'cvss', 'severidadeManual',
+  'descricao', 'dataDeteccao', 'origemDeteccao', 'exploitDisponivel',
+  'equipeResponsavel', 'responsavel', 'ticketCorrecao', 'statusCorrecao',
+  'dataPrevistaCorrecao', 'dataCorrecao', 'evidenciaCorrecao', 'observacoes',
+];
+
+async function _salvarVulnerabilidade(v) {
+  const data = {};
+  _CAMPOS_VULNERABILIDADE.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(v, campo) && v[campo] !== undefined) data[campo] = v[campo];
+  });
+  if (Object.prototype.hasOwnProperty.call(data, 'cvss')) {
+    data.cvss = data.cvss !== '' && data.cvss != null ? Number(data.cvss) : null;
+  }
+  data.atualizadoEm = new Date().toISOString();
+  data.atualizadoPor = (window.USER_EMAIL || '').toLowerCase();
+
+  if (v.id) {
+    await _db.collection(COLLECTION.vulnerabilidades).doc(String(v.id)).set(data, { merge: true });
+    return { success: true, id: v.id };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = data.atualizadoPor;
+  const ref = await _db.collection(COLLECTION.vulnerabilidades).add(data);
+  return { success: true, id: ref.id };
+}
+
 // _lerComponentes/_salvarComponente/COLLECTION.componentes foram removidos: o
 // catalogo de Componentes do Servico se fundiu em Dependencias (ver
 // scripts/migrar-componentes-para-dependencias.js) -- Sistemas, Servidores,
@@ -585,6 +744,123 @@ async function _salvarCategoriaFornecedor(c) {
   return { success: true, id: ref.id };
 }
 
+/**
+ * Subcategorias do fornecedor -- filhas de uma Categoria (categoriaId),
+ * mesmo molde de _lerCategoriasFornecedor/_salvarCategoriaFornecedor acima,
+ * só que com o vinculo hierarquico. Ao contrario de Fornecedor->Categoria
+ * (que guarda o NOME, uma etiqueta solta), Subcategoria->Categoria guarda o
+ * ID -- e um vinculo estrutural entre dois catalogos, nao uma etiqueta num
+ * registro de negocio; por id, renomear a Categoria nao orfaniza as
+ * Subcategorias dela.
+ */
+async function _lerSubcategoriasFornecedor() {
+  const docs = await _getAll(COLLECTION.subcategoriasFornecedor);
+  return docs.map((d) => ({
+    id: d.id,
+    nome: d.nome || '',
+    categoriaId: d.categoriaId || '',
+    ativo: d.ativo !== false,
+    ordem: Number(d.ordem) || 0,
+    criadoEm: d.criadoEm || '',
+    atualizadoEm: d.atualizadoEm || '',
+  })).sort((a, b) => (a.ordem - b.ordem) || a.nome.localeCompare(b.nome));
+}
+
+const _CAMPOS_SUBCATEGORIA_FORNECEDOR = ['nome', 'ativo', 'ordem', 'categoriaId'];
+
+async function _salvarSubcategoriaFornecedor(c) {
+  const data = {};
+  _CAMPOS_SUBCATEGORIA_FORNECEDOR.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(c, campo) && c[campo] !== undefined) data[campo] = c[campo];
+  });
+  data.atualizadoEm = new Date().toISOString();
+
+  if (c.id) {
+    await _db.collection(COLLECTION.subcategoriasFornecedor).doc(String(c.id)).set(data, { merge: true });
+    return { success: true, id: c.id };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = (window.USER_EMAIL || '').toLowerCase();
+  if (data.ordem === undefined) data.ordem = Date.now();
+  const ref = await _db.collection(COLLECTION.subcategoriasFornecedor).add(data);
+  return { success: true, id: ref.id };
+}
+
+/**
+ * Perguntas de Criticidade do fornecedor -- cadastraveis desde 08/10/2026
+ * (antes eram fixas em fornecedor-criticidade.js). Cada pergunta tem sua
+ * propria lista de opcoes (rotulo + score); nao ha "config de respostas"
+ * compartilhada entre perguntas (diferente do BIA), porque cada pergunta
+ * daqui tem opcoes com texto proprio, nao um conjunto generico reusado.
+ */
+async function _lerCriticidadeFornecedorPerguntas() {
+  const docs = await _getAll(COLLECTION.criticidadeFornecedorPerguntas);
+  return docs.map((d) => ({
+    id: d.id,
+    texto: d.texto || '',
+    ativa: d.ativa !== false,
+    ordem: Number(d.ordem) || 0,
+    opcoes: Array.isArray(d.opcoes) ? d.opcoes.map((o) => ({ rotulo: o.rotulo || '', score: Number(o.score) || 0 })) : [],
+    criadoEm: d.criadoEm || '',
+    atualizadoEm: d.atualizadoEm || '',
+  })).sort((a, b) => (a.ordem - b.ordem) || a.texto.localeCompare(b.texto));
+}
+
+const _CAMPOS_CRITICIDADE_FORNECEDOR_PERGUNTA = ['texto', 'ativa', 'ordem', 'opcoes'];
+
+async function _salvarCriticidadeFornecedorPergunta(p) {
+  const texto = String(p.texto || '').trim();
+  if (!texto) throw new Error('Informe o texto da pergunta.');
+  const opcoes = Array.isArray(p.opcoes) ? p.opcoes : [];
+  if (!opcoes.length) throw new Error('Cadastre ao menos uma opção de resposta.');
+  opcoes.forEach((o) => {
+    if (!String(o.rotulo || '').trim()) throw new Error('Toda opção precisa de um rótulo.');
+    if (o.score === undefined || o.score === null || isNaN(Number(o.score))) throw new Error('Toda opção precisa de um peso numérico.');
+  });
+
+  const data = {};
+  _CAMPOS_CRITICIDADE_FORNECEDOR_PERGUNTA.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(p, campo) && p[campo] !== undefined) data[campo] = p[campo];
+  });
+  data.texto = texto;
+  data.opcoes = opcoes.map((o) => ({ rotulo: String(o.rotulo).trim(), score: Number(o.score) }));
+  data.atualizadoEm = new Date().toISOString();
+
+  if (p.id) {
+    await _db.collection(COLLECTION.criticidadeFornecedorPerguntas).doc(String(p.id)).set(data, { merge: true });
+    return { success: true, id: p.id, criticidadeVersao: await _subirVersaoCriticidadeFornecedor() };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = (window.USER_EMAIL || '').toLowerCase();
+  if (data.ordem === undefined) data.ordem = Date.now();
+  const ref = await _db.collection(COLLECTION.criticidadeFornecedorPerguntas).add(data);
+  return { success: true, id: ref.id, criticidadeVersao: await _subirVersaoCriticidadeFornecedor() };
+}
+
+// Versao de auditoria -- mesmo papel/nivel de simplicidade de
+// _subirVersaoCriterios (so grava um numero crescente junto de cada
+// avaliacao; nunca e lida de volta pra recalcular uma avaliacao antiga).
+async function _versaoCriticidadeFornecedorAtual() {
+  try {
+    const snap = await _db.collection(COLLECTION.regua).doc('criticidadeFornecedor').get();
+    return snap.exists ? Number((snap.data() || {}).versao) || 1 : 1;
+  } catch {
+    return 1;
+  }
+}
+
+async function _subirVersaoCriticidadeFornecedor() {
+  const ref = _db.collection(COLLECTION.regua).doc('criticidadeFornecedor');
+  const snap = await ref.get();
+  const versao = (snap.exists ? Number((snap.data() || {}).versao) || 1 : 1) + 1;
+  await ref.set({
+    versao,
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  }, { merge: true });
+  return versao;
+}
+
 // Versao da regua de criterios, no mesmo lugar da regua do BIA mas em outro
 // documento. Cada avaliacao grava a versao que a pontuou — sem isso, mudar um
 // peso muda as notas passadas e ninguem consegue explicar por que a nota do
@@ -684,6 +960,11 @@ async function _lerAvaliacoesFornecedor() {
         // Criticidade: aba separada da conformidade, na mesma avaliacao.
         respostasCriticidade: d.respostasCriticidade || {},
         scoreCriticidade: d.scoreCriticidade === null || d.scoreCriticidade === undefined ? null : Number(d.scoreCriticidade),
+        // Score maximo possivel NA EPOCA desta avaliacao -- perguntas de
+        // criticidade sao cadastraveis agora; sem congelar isto aqui, uma
+        // avaliacao antiga mudaria de faixa sozinha se o total de perguntas
+        // mudar depois (ver fornecedor-criticidade.js).
+        scoreMaximoCriticidade: Number(d.scoreMaximoCriticidade) || 0,
         completaCriticidade: !!d.completaCriticidade,
         observacao: d.observacao || '',
         avaliadoEm: d.avaliadoEm || '',
@@ -710,15 +991,20 @@ async function _salvarAvaliacaoFornecedor(a) {
   const idsAplicaveis = (Array.isArray(a.criteriosAplicaveis) ? a.criteriosAplicaveis : []).map(String);
   if (!idsAplicaveis.length) throw new Error('Selecione ao menos um controle aplicável a este fornecedor.');
 
-  // As duas leituras nao dependem uma da outra -- em paralelo, nao em serie.
-  const [catalogo, criteriosVersao] = await Promise.all([_lerCriteriosFornecedor(), _versaoCriteriosAtual()]);
+  // As leituras nao dependem uma da outra -- em paralelo, nao em serie.
+  const [catalogo, criteriosVersao, perguntasCriticidade, criticidadeVersao] = await Promise.all([
+    _lerCriteriosFornecedor(), _versaoCriteriosAtual(),
+    _lerCriticidadeFornecedorPerguntas(), _versaoCriticidadeFornecedorAtual(),
+  ]);
   const setAplicaveis = new Set(idsAplicaveis);
   const criteriosAplicaveis = catalogo.filter((c) => setAplicaveis.has(String(c.id)));
   const calc = FornecedorScore.calcular(criteriosAplicaveis, a.respostas || {});
   // Criticidade e uma aba da MESMA avaliacao, nao uma colecao separada. Assim
   // como a nota, o score vem calculado aqui — nunca aceito do que a tela
   // mandar — pela mesma razao que o score do risco e recalculado no servidor.
-  const calcCrit = FornecedorCriticidade.calcular(a.respostasCriticidade || {});
+  // So as perguntas ATIVAS no momento entram na conta.
+  const perguntasCriticidadeAtivas = perguntasCriticidade.filter((p) => p.ativa);
+  const calcCrit = FornecedorCriticidade.calcular(perguntasCriticidadeAtivas, a.respostasCriticidade || {});
   const agora = new Date().toISOString();
 
   const data = {
@@ -731,7 +1017,12 @@ async function _salvarAvaliacaoFornecedor(a) {
     criteriosVersao: criteriosVersao,
     respostasCriticidade: a.respostasCriticidade || {},
     scoreCriticidade: calcCrit.score,
+    // Congela o maximo da epoca junto do score -- ver nota em
+    // _lerAvaliacoesFornecedor sobre por que isto nao pode ser recalculado
+    // depois a partir das perguntas atuais.
+    scoreMaximoCriticidade: calcCrit.scoreMaximo,
     completaCriticidade: calcCrit.completa,
+    criticidadeVersao: criticidadeVersao,
     observacao: String(a.observacao || ''),
     avaliadoEm: agora,
     avaliadoPor: (window.USER_EMAIL || '').toLowerCase(),
@@ -748,7 +1039,8 @@ async function _salvarAvaliacaoFornecedor(a) {
   ]);
   return {
     success: true, id: ref.id, dado: data,
-    nota: calc.nota, completa: calc.completa, scoreCriticidade: calcCrit.score, completaCriticidade: calcCrit.completa,
+    nota: calc.nota, completa: calc.completa,
+    scoreCriticidade: calcCrit.score, scoreMaximoCriticidade: calcCrit.scoreMaximo, completaCriticidade: calcCrit.completa,
   };
 }
 
@@ -919,6 +1211,11 @@ async function _salvarDependencia(d) {
     detalhes: d.detalhes || '',
     setor: d.setor || '',
     areas: Array.isArray(d.areas) ? d.areas.filter(Boolean) : [],
+    // Perfil de Sistema (RBAC) como atributo da Pessoa -- espelho de
+    // config_perfis/{email}, gravado por conveniencia de exibicao/edicao na
+    // ficha dela. Quem realmente concede poder no sistema continua sendo
+    // config_perfis (ver Perfis.podeGerenciarPerfis e firestore.rules).
+    perfis: Array.isArray(d.perfis) ? d.perfis.filter(Boolean) : [],
     liderImediato: d.liderImediato || '',
     empresa: d.empresa || '',
     telefone: d.telefone || '',
@@ -926,6 +1223,7 @@ async function _salvarDependencia(d) {
     endereco: d.endereco || '',
     pessoas: Array.isArray(d.pessoas) ? d.pessoas : [],
     categoriaFornecedor: d.categoriaFornecedor || '',
+    subcategoriaFornecedor: d.subcategoriaFornecedor || '',
     gestorContrato: d.gestorContrato || '',
     // Gestores do Contrato como lista de snapshots de Pessoa (nova UI). O
     // gestorContrato (string) acima é mantido espelhando o 1º, por compat.
@@ -970,6 +1268,11 @@ async function _salvarDependencia(d) {
       evidencia: r.evidencia || '',
       pendencias: r.pendencias || '',
     })) : [],
+    // Roteiros de Teste: metadado (categoria/versao/data/autor, sem html) só
+    // repassado tal e qual -- quem grava de verdade é salvarRoteiroTeste/
+    // excluirRoteiroTeste (Cloud Function), nunca o Salvar deste drawer (mesmo
+    // tratamento de drpSalvo, logo abaixo).
+    drpRoteirosTeste: Array.isArray(d.drpRoteirosTeste) ? d.drpRoteirosTeste : [],
     // Aba "Plano de Recuperação": template DRP importado (Markdown) e versões
     // do artefato DRP gerado (drpSalvo, mesmo formato de versões do pcnSalvo).
     drpTemplate: d.drpTemplate || '',
@@ -1056,7 +1359,7 @@ async function _salvarIndicadorSeguranca(ind) {
 // convenção da época em que o backend era uma planilha do Sheets).
 const _CAMPOS_RISCO = [
   'area', 'processoId', 'processo', 'fornecedor', 'fornecedorNome', 'indicadorId', 'titulo', 'descricao', 'categorias', 'responsavel',
-  'dataIdentificacao', 'status', 'origem',
+  'reportadoPor', 'dataIdentificacao', 'status', 'origem',
   'probabilidade', 'impacto', 'impactoFinanceiro', 'impactoFinanceiroDescricao', 'score', 'prioridade',
   'estrategiaTratamento', 'estrategiaDescricao', 'planoAcao', 'kris', 'impactoFinanceiroComponentes',
   'dataUltimaReavaliacao', 'proximaReavaliacao', 'historicoReavaliacao',
@@ -1230,10 +1533,15 @@ const _GET_FIRESTORE = {
   getIndicadoresSeguranca: () => _lerIndicadoresSeguranca(),
   getCriteriosFornecedor: () => _lerCriteriosFornecedor(),
   getCategoriasFornecedor: () => _lerCategoriasFornecedor(),
+  getSubcategoriasFornecedor: () => _lerSubcategoriasFornecedor(),
+  getCriticidadeFornecedorPerguntas: () => _lerCriticidadeFornecedorPerguntas(),
   getAvaliacoesFornecedor: () => _lerAvaliacoesFornecedor(),
   getHistoricoRisco: () => _lerHistoricoRisco(),
   getConfigFornecedor: () => _lerConfigFornecedor(),
   getPerfis: () => _lerPerfis(),
+  getServicos: () => _lerServicos(),
+  getBackups: () => _lerBackups(),
+  getVulnerabilidades: () => _lerVulnerabilidades(),
 };
 
 // Ações de ESCRITA atendidas pelo Firestore
@@ -1258,6 +1566,17 @@ const _POST_FIRESTORE = {
     .then(() => _subirVersaoCriterios()).then((versao) => ({ success: true, criteriosVersao: versao })),
   salvarCategoriaFornecedor: (b) => _salvarCategoriaFornecedor(b),
   excluirCategoriaFornecedor: (b) => _db.collection(COLLECTION.categoriasFornecedor).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarSubcategoriaFornecedor: (b) => _salvarSubcategoriaFornecedor(b),
+  excluirSubcategoriaFornecedor: (b) => _db.collection(COLLECTION.subcategoriasFornecedor).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarCriticidadeFornecedorPergunta: (b) => _salvarCriticidadeFornecedorPergunta(b),
+  excluirCriticidadeFornecedorPergunta: (b) => _db.collection(COLLECTION.criticidadeFornecedorPerguntas).doc(String(b.id)).delete()
+    .then(() => _subirVersaoCriticidadeFornecedor()).then((versao) => ({ success: true, criticidadeVersao: versao })),
+  salvarServico: (b) => _salvarServico(b),
+  excluirServico: (b) => _db.collection(COLLECTION.servicos).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarBackup: (b) => _salvarBackup(b),
+  excluirBackup: (b) => _db.collection(COLLECTION.backups).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarVulnerabilidade: (b) => _salvarVulnerabilidade(b),
+  excluirVulnerabilidade: (b) => _db.collection(COLLECTION.vulnerabilidades).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarAvaliacaoFornecedor: (b) => _salvarAvaliacaoFornecedor(b),
   salvarConfigFornecedor: (b) => _salvarConfigFornecedor(b),
   salvarPerfilAcesso: (b) => _salvarPerfilAcesso(b),
@@ -1340,6 +1659,19 @@ const API = {
       _cache[cacheKey] = r;
       return r;
     }
+
+    // obterDRP: sem cache -- o conteudo muda a cada nova versao salva, e essa
+    // acao so roda quando o usuario pede pra abrir um DRP (nao e chamada com
+    // frequencia a ponto de precisar de cache). O perfil e conferido no
+    // servidor (ver appLogic.js); sem o perfil certo, o fetch rejeita.
+    if (action === 'obterDRP') {
+      return _appApi('GET', 'obterDRP', { id: params.id });
+    }
+    // obterRoteiroTeste: mesmo motivo de obterDRP acima -- sem cache, conteudo
+    // muda a cada geracao e o perfil e conferido no servidor.
+    if (action === 'obterRoteiroTeste') {
+      return _appApi('GET', 'obterRoteiroTeste', { id: params.id });
+    }
     // Leituras residuais restantes vão ao Apps Script.
     const data = await LegacyAPI.get(action, params);
     _cache[cacheKey] = data;
@@ -1382,6 +1714,18 @@ const API = {
     if (action === 'excluirDRP') {
       return _appApi('POST', 'excluirDRP', { id: body.id });
     }
+    if (action === 'gerarRoteiroTeste') {
+      return _appApi('POST', 'gerarRoteiroTeste', { id: body.id, categoria: body.categoria });
+    }
+    if (action === 'salvarRoteiroTeste') {
+      return _appApi('POST', 'salvarRoteiroTeste', { id: body.id, categoria: body.categoria, html: body.html });
+    }
+    if (action === 'excluirRoteiroTeste') {
+      return _appApi('POST', 'excluirRoteiroTeste', { id: body.id, categoria: body.categoria });
+    }
+    if (action === 'importarVulnerabilidadeParaRisco') {
+      return _appApi('POST', 'importarVulnerabilidadeParaRisco', { id: body.id });
+    }
     // Só o envio por e-mail ainda depende do Apps Script.
     return LegacyAPI.post(action, body, options);
   },
@@ -1415,6 +1759,8 @@ const API = {
   getIndicadoresSeguranca: () => API.get('getIndicadoresSeguranca'),
   getCriteriosFornecedor: () => API.get('getCriteriosFornecedor'),
   getCategoriasFornecedor: () => API.get('getCategoriasFornecedor'),
+  getSubcategoriasFornecedor: () => API.get('getSubcategoriasFornecedor'),
+  getCriticidadeFornecedorPerguntas: () => API.get('getCriticidadeFornecedorPerguntas'),
   getAvaliacoesFornecedor: () => API.get('getAvaliacoesFornecedor'),
   getHistoricoRisco: () => API.get('getHistoricoRisco'),
   getConfigFornecedor: () => API.get('getConfigFornecedor'),
@@ -1433,6 +1779,29 @@ const API = {
     .then((r) => { API.invalidate('getCategoriasFornecedor'); return r; }),
   excluirCategoriaFornecedor: (id) => API.post('excluirCategoriaFornecedor', { id })
     .then((r) => { API.invalidate('getCategoriasFornecedor'); return r; }),
+  salvarSubcategoriaFornecedor: (c) => API.post('salvarSubcategoriaFornecedor', c)
+    .then((r) => { API.invalidate('getSubcategoriasFornecedor'); return r; }),
+  excluirSubcategoriaFornecedor: (id) => API.post('excluirSubcategoriaFornecedor', { id })
+    .then((r) => { API.invalidate('getSubcategoriasFornecedor'); return r; }),
+  salvarCriticidadeFornecedorPergunta: (p) => API.post('salvarCriticidadeFornecedorPergunta', p)
+    .then((r) => { API.invalidate('getCriticidadeFornecedorPerguntas'); return r; }),
+  excluirCriticidadeFornecedorPergunta: (id) => API.post('excluirCriticidadeFornecedorPergunta', { id })
+    .then((r) => { API.invalidate('getCriticidadeFornecedorPerguntas'); return r; }),
+  getServicos: () => API.get('getServicos'),
+  salvarServico: (s) => API.post('salvarServico', s)
+    .then((r) => { API.invalidate('getServicos'); return r; }),
+  excluirServico: (id) => API.post('excluirServico', { id })
+    .then((r) => { API.invalidate('getServicos'); return r; }),
+  getBackups: () => API.get('getBackups'),
+  salvarBackup: (b) => API.post('salvarBackup', b)
+    .then((r) => { API.invalidate('getBackups'); return r; }),
+  excluirBackup: (id) => API.post('excluirBackup', { id })
+    .then((r) => { API.invalidate('getBackups'); return r; }),
+  getVulnerabilidades: () => API.get('getVulnerabilidades'),
+  salvarVulnerabilidade: (v) => API.post('salvarVulnerabilidade', v)
+    .then((r) => { API.invalidate('getVulnerabilidades'); return r; }),
+  excluirVulnerabilidade: (id) => API.post('excluirVulnerabilidade', { id })
+    .then((r) => { API.invalidate('getVulnerabilidades'); return r; }),
   salvarAvaliacaoFornecedor: (a) => API.post('salvarAvaliacaoFornecedor', a)
     .then((r) => { API.invalidate('getAvaliacoesFornecedor'); return r; }),
   salvarIndicadorSeguranca: (ind) => API.post('salvarIndicadorSeguranca', ind),

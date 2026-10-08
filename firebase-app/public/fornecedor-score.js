@@ -92,13 +92,15 @@
     return RESPOSTAS.indexOf(String(v || '').trim()) !== -1;
   }
 
-  /** Faixas da conformidade, de 0 a 100. Maior e melhor. */
+  /** Faixas da conformidade, de 0 a 100. Maior e melhor -- escala invertida,
+   * por isso Adequado (nota alta) cai no verde (risk-low) e Crítico (nota
+   * baixa) no vermelho (risk-critical). Ver DECISAO 04/10/2026 em criticidade.js. */
   function faixaNota(n) {
     if (n === null || n === undefined) return { rotulo: 'Não avaliado', cor: '#999', fundo: '#f5f5f5' };
-    if (n >= 90) return { rotulo: 'Adequado', cor: '#2e7d32', fundo: '#e8f5e9' };
-    if (n >= 70) return { rotulo: 'Aceitável', cor: '#f57c00', fundo: '#fff8e1' };
-    if (n >= 50) return { rotulo: 'Insuficiente', cor: '#e65100', fundo: '#fff3e0' };
-    return { rotulo: 'Crítico', cor: '#c62828', fundo: '#ffebee' };
+    if (n >= 90) return { rotulo: 'Adequado', cor: 'var(--risk-low)', fundo: '#e8f5e9' };
+    if (n >= 70) return { rotulo: 'Aceitável', cor: 'var(--risk-medium)', fundo: '#fff8e1' };
+    if (n >= 50) return { rotulo: 'Insuficiente', cor: 'var(--risk-high)', fundo: '#fff3e0' };
+    return { rotulo: 'Crítico', cor: 'var(--risk-critical)', fundo: 'var(--risk-critical-surface)' };
   }
 
   /**

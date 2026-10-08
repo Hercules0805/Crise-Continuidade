@@ -16,13 +16,64 @@
  */
 
 const { calcularTier, calcularRTO } = require('./tokenLogic');
+const vulnerabilidadeRisco = require('./vulnerabilidadeRisco');
 
 const COLLECTION = {
   processos: 'processos',
   tokens: 'tokens',
   respostas: 'respostas_bia',
   dependencias: 'dependencias',
+  configPerfis: 'config_perfis',
+  drpConteudo: 'drp_conteudo',
+  roteiroConteudo: 'roteiro_conteudo',
+  riscos: 'riscos',
+  vulnerabilidades: 'vulnerabilidades',
 };
+
+/**
+ * Perfis que podem operar o DRP gerado (gerar/salvar/excluir/abrir o
+ * conteudo). Mirror de Perfis.podeOperarDRP (public/perfis.js) -- resolvido
+ * aqui no servidor porque as Cloud Functions usam o Admin SDK, que ignora as
+ * firestore.rules, e por isso precisam da propria checagem de perfil.
+ * ANTES desta funcao, gerarDRP/salvarDRP/excluirDRP so conferiam dominio
+ * (autenticar() em index.js), nunca perfil -- qualquer conta do dominio podia
+ * gerar/sobrescrever/apagar o DRP de qualquer dependencia chamando a Cloud
+ * Function direto, mesmo sem o botao aparecer na tela pra ela.
+ */
+const PERFIS_DRP = ['admin', 'seguranca', 'ti'];
+
+async function podeOperarDRP(db, email) {
+  const snap = await db.collection(COLLECTION.configPerfis).doc(String(email || '').toLowerCase()).get();
+  const d = snap.exists ? snap.data() : null;
+  const brutos = d && Array.isArray(d.perfis) ? d.perfis : (d && d.perfil ? [d.perfil] : []);
+  return brutos.some((p) => PERFIS_DRP.includes(String(p || '').trim().toLowerCase()));
+}
+
+/**
+ * Perfis que podem operar Vulnerabilidades (criar/editar/excluir pela tela,
+ * e importar manualmente para o Registro de Riscos). Mesma posse de
+ * `/vulnerabilidades` em firestore.rules (`isAdmin() || isSeguranca()`) --
+ * mais restrito que PERFIS_DRP porque TI nao opera Vulnerabilidades (nem
+ * enxerga a tela, ver perfis.js TELAS[PERFIL.TI]).
+ */
+const PERFIS_VULNERABILIDADE = ['admin', 'seguranca'];
+
+async function podeOperarVulnerabilidade(db, email) {
+  const snap = await db.collection(COLLECTION.configPerfis).doc(String(email || '').toLowerCase()).get();
+  const d = snap.exists ? snap.data() : null;
+  const brutos = d && Array.isArray(d.perfis) ? d.perfis : (d && d.perfil ? [d.perfil] : []);
+  return brutos.some((p) => PERFIS_VULNERABILIDADE.includes(String(p || '').trim().toLowerCase()));
+}
+
+/** Mesmo recorte de Perfis.podeEditarRiscos (perfis.js, client-side). */
+const PERFIS_RISCO = ['admin', 'seguranca'];
+
+async function podeOperarRiscos(db, email) {
+  const snap = await db.collection(COLLECTION.configPerfis).doc(String(email || '').toLowerCase()).get();
+  const d = snap.exists ? snap.data() : null;
+  const brutos = d && Array.isArray(d.perfis) ? d.perfis : (d && d.perfil ? [d.perfil] : []);
+  return brutos.some((p) => PERFIS_RISCO.includes(String(p || '').trim().toLowerCase()));
+}
 
 class AppError extends Error {}
 
@@ -174,6 +225,32 @@ async function _scoreDoProcesso(db, area, processo) {
     .get();
   const docs = snap.docs.map((d) => d.data()).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
   return docs[0] ? Number(docs[0].score) || 0 : 0;
+}
+
+/**
+ * Processos que dependem de uma dependencia -- mirror server-side de
+ * _processosVinculadosADependencia (public/app.js), mesmo criterio: casa por
+ * dependenciaItens[].id quando existe, senao por nome (com categoria como
+ * desempate quando o item legado ja tiver uma gravada).
+ */
+function _processosLigadosADependencia(depId, depNome, depCategoria, processos) {
+  return (processos || []).filter((p) => Array.isArray(p.dependenciaItens) && p.dependenciaItens.some((item) =>
+    item.id ? item.id === depId : (item.nome === depNome && (!item.categoria || item.categoria === depCategoria))
+  ));
+}
+
+/**
+ * Tier de um processo pra exibir no prompt do DRP: prioriza o score real (ja
+ * avaliado) sobre o tier manual, e só cai em "Pendente" quando nao ha nem um
+ * nem outro. calcularTier(score) sozinho (tokenLogic.js, usado por gerarPCN)
+ * nao cobre isso -- ele sempre deriva de score, nunca olha tierManual nem
+ * devolve "Pendente" -- e descreveria como "Suporte" um processo critico que
+ * so ainda nao foi formalmente avaliado.
+ */
+function _tierProcessoServidor(score, tierManual) {
+  if (Number(score) > 0) return calcularTier(score);
+  if (tierManual) return tierManual;
+  return 'Pendente';
 }
 
 /**
@@ -402,7 +479,10 @@ const TEMPLATE_DRP_PADRAO = `# PLANO DE RECUPERAÇÃO DE DESASTRES (DRP): [Nome 
 - Outras dependências das quais esta depende para se recuperar.
 
 ## 10. Testes do Procedimento
-- Estratégia (tipo/cenário e frequência) e registro do último teste (data, resultado, evidência, pendências).`;
+- Estratégia (tipo/cenário e frequência) e registro do último teste (data, resultado, evidência, pendências).
+
+## 11. Impactos Operacionais nos Processos
+- Processos de negócio que dependem deste recurso e o impacto operacional de sua indisponibilidade.`;
 
 /**
  * Gera um DRP completo via Gemini a partir do template + os Parametros DRP de
@@ -410,6 +490,7 @@ const TEMPLATE_DRP_PADRAO = `# PLANO DE RECUPERAÇÃO DE DESASTRES (DRP): [Nome 
  * so muda a entidade de origem e o prompt.
  */
 async function gerarDRP(db, data, ctx) {
+  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode operar o DRP.');
   const id = exigir(data.id, 'id');
   if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
 
@@ -495,6 +576,22 @@ async function gerarDRP(db, data, ctx) {
     ? contatosUnicos.map((c) => `- ${c.nome || 'Contato'}${c.origem ? ' (' + c.origem + ')' : ''}${c.finalidade ? ' — ' + c.finalidade : ''} | Telefone: ${c.telefone || '—'} | E-mail: ${c.email || '—'}`).join('\n')
     : 'Nenhum contato com telefone/e-mail cadastrado na base para esta dependência.';
 
+  // ---- Processos de Negócio impactados (seção "Impactos Operacionais nos Processos") ----
+  let processosLigados = [];
+  try {
+    const procSnap = await db.collection(COLLECTION.processos).get();
+    const todosProcessos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    processosLigados = _processosLigadosADependencia(String(id), dep.nome, dep.categoria, todosProcessos);
+  } catch (e) { processosLigados = []; }
+
+  const processosComTier = await Promise.all(processosLigados.map(async (p) => {
+    const score = await _scoreDoProcesso(db, p.area, p.processo);
+    return { ...p, tier: _tierProcessoServidor(score, p.tierManual) };
+  }));
+  const processosImpactadosTexto = processosComTier.length
+    ? processosComTier.map((p) => `- ${p.processo} (${p.area || 'Área não informada'}) — ${p.tier}${p.descricao ? ' | Impacto: ' + p.descricao : ''}`).join('\n')
+    : 'Nenhum processo de negócio vinculado a esta dependência na base.';
+
   // Estratégias de teste (lista nova) com fallback ao drpTestes antigo.
   let estrategiasTeste = Array.isArray(dep.drpEstrategiasTeste) ? dep.drpEstrategiasTeste : [];
   if (!estrategiasTeste.length && (t.cenarioTestado || t.frequenciaEsperada)) {
@@ -562,6 +659,9 @@ ${registrosTexto}
 ### Contatos disponíveis (dados reais da base)
 ${contatosTexto}
 
+### Processos de Negócio impactados (dados reais da base)
+${processosImpactadosTexto}
+
 ---
 ## TEMPLATE OBRIGATÓRIO DO DRP (siga esta estrutura exata)
 
@@ -580,7 +680,8 @@ ${template}
 - NÃO use sintaxe markdown como **negrito** ou *itálico*. Use SOMENTE tags HTML: <strong> para negrito, <em> para itálico.
 - Linguagem: Português do Brasil, técnica e direta.
 - Onde a dependência já tiver dados (RTO/RPO/Estratégia/Responsável/listas), use ESSES VALORES EXATOS; onde faltar, infira valores tecnicamente razoáveis a partir da categoria e do contexto.
-- CONTATOS DE CONTINGÊNCIA: se o template tiver uma seção/tabela de contatos (colunas como Contato, Organização/Área, Finalidade, Canal, Informação), preencha com os itens de "Contatos disponíveis (dados reais da base)" acima. A coluna "Canal" deve conter os dados REAIS de contato (telefone e/ou e-mail exatamente como fornecidos), NÃO rótulos genéricos como "Telefone" ou "Portal". NÃO invente contatos, telefones ou e-mails: use somente os que estão na lista. Se a lista disser que não há contatos cadastrados, deixe a tabela com uma única linha indicando "Contato não cadastrado na base" em vez de inventar nomes/canais.`;
+- CONTATOS DE CONTINGÊNCIA: se o template tiver uma seção/tabela de contatos (colunas como Contato, Organização/Área, Finalidade, Canal, Informação), preencha com os itens de "Contatos disponíveis (dados reais da base)" acima. A coluna "Canal" deve conter os dados REAIS de contato (telefone e/ou e-mail exatamente como fornecidos), NÃO rótulos genéricos como "Telefone" ou "Portal". NÃO invente contatos, telefones ou e-mails: use somente os que estão na lista. Se a lista disser que não há contatos cadastrados, deixe a tabela com uma única linha indicando "Contato não cadastrado na base" em vez de inventar nomes/canais.
+- IMPACTOS OPERACIONAIS NOS PROCESSOS: a seção "Impactos Operacionais nos Processos" (ou equivalente no template) deve usar EXCLUSIVAMENTE os itens de "Processos de Negócio impactados (dados reais da base)" acima — processo, área e tier exatamente como fornecidos, descrevendo o impacto operacional de cada um com base na descrição de impacto fornecida (quando houver) e no tier (quanto mais crítico, mais grave o impacto a destacar). NÃO invente processos que não estejam na lista. Se a lista disser que não há processo vinculado, deixe a seção indicando isso claramente, sem inventar exemplos.`;
 
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + ctx.geminiApiKey;
   const payload = {
@@ -615,22 +716,26 @@ ${template}
   return { success: true, drp: drpHtml, nome: dep.nome || '', categoria: dep.categoria || '' };
 }
 
-/** Grava uma nova versao do DRP no doc da dependencia (mesmo formato do pcnSalvo). */
+/**
+ * Grava uma nova versao do DRP. O HTML de verdade vai pra drp_conteudo
+ * (colecao fechada, so Cloud Function le/escreve); dependencias.drpSalvo
+ * guarda so o metadado (versao/data/autor, sem html) -- e tudo que a lista de
+ * DRPs (renderDRPLista/renderDRPResumo) precisa pra mostrar contagem e data.
+ */
 async function salvarDRP(db, data, ctx) {
+  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode operar o DRP.');
   const id = exigir(data.id, 'id');
   const html = exigir(data.html, 'html');
-  const ref = db.collection(COLLECTION.dependencias).doc(String(id));
-  const snap = await ref.get();
-  if (!snap.exists) throw new AppError('Dependência não encontrada.');
+  const depRef = db.collection(COLLECTION.dependencias).doc(String(id));
+  const depSnap = await depRef.get();
+  if (!depSnap.exists) throw new AppError('Dependência não encontrada.');
 
-  const atual = snap.data() || {};
+  const conteudoRef = db.collection(COLLECTION.drpConteudo).doc(String(id));
+  const conteudoSnap = await conteudoRef.get();
   let versoes = [];
-  try {
-    versoes = atual.drpSalvo ? JSON.parse(atual.drpSalvo) : [];
-  } catch {
-    versoes = [];
+  if (conteudoSnap.exists && Array.isArray((conteudoSnap.data() || {}).versoes)) {
+    versoes = conteudoSnap.data().versoes;
   }
-  if (!Array.isArray(versoes)) versoes = [];
 
   versoes.push({
     versao: versoes.length + 1,
@@ -639,18 +744,321 @@ async function salvarDRP(db, data, ctx) {
     html,
   });
 
-  await ref.set({ drpSalvo: JSON.stringify(versoes) }, { merge: true });
+  await conteudoRef.set({ versoes });
+  const metadados = versoes.map((v) => ({ versao: v.versao, data: v.data, autor: v.autor }));
+  await depRef.set({ drpSalvo: JSON.stringify(metadados) }, { merge: true });
+
   return { success: true, versao: versoes.length, totalVersoes: versoes.length };
 }
 
-/** Apaga todas as versoes do DRP da dependencia. */
-async function excluirDRP(db, data) {
+/** Apaga todas as versoes do DRP da dependencia (metadado + conteudo). */
+async function excluirDRP(db, data, ctx) {
+  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode operar o DRP.');
   const id = exigir(data.id, 'id');
-  const ref = db.collection(COLLECTION.dependencias).doc(String(id));
-  const snap = await ref.get();
+  const depRef = db.collection(COLLECTION.dependencias).doc(String(id));
+  const snap = await depRef.get();
   if (!snap.exists) throw new AppError('Dependência não encontrada.');
-  await ref.set({ drpSalvo: '' }, { merge: true });
+  await depRef.set({ drpSalvo: '' }, { merge: true });
+  await db.collection(COLLECTION.drpConteudo).doc(String(id)).delete();
   return { success: true };
+}
+
+/**
+ * Unico jeito de ler o HTML de um DRP gerado -- confere o perfil no servidor
+ * antes de devolver qualquer coisa. drp_conteudo e colecao fechada pra
+ * qualquer leitura/escrita direta de cliente (ver firestore.rules); so esta
+ * Cloud Function, com Admin SDK, le de la.
+ */
+async function obterDRP(db, query, ctx) {
+  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode acessar o DRP.');
+  const id = exigir(query.id, 'id');
+  const snap = await db.collection(COLLECTION.drpConteudo).doc(String(id)).get();
+  const versoes = snap.exists && Array.isArray((snap.data() || {}).versoes) ? snap.data().versoes : [];
+  return { success: true, versoes };
+}
+
+// ============================================================
+// Roteiro de Teste (aba "Gestão de Testes" da Dependência).
+//
+// Não existe uma secao "Plano de Teste" separada no DRP -- a equivalente e a
+// "10. Testes do Procedimento", que so lista estrategia+frequencia+historico
+// (rasa demais pra ser um roteiro executavel). Por isso o Roteiro de Teste e
+// um documento NOVO, gerado por uma chamada de IA dedicada que usa o DRP ja
+// gerado como contexto/base, elaborando um passo a passo pra UM tipo de teste
+// especifico (categoria = um dos cenarios ja previstos em
+// dep.drpEstrategiasTeste). Mesmo mecanismo de versionamento do DRP
+// (roteiro_conteudo, colecao fechada, so Cloud Function le/escreve), so que
+// cada versao carrega tambem a `categoria` -- um array so guarda o historico
+// de TODOS os tipos de teste desta dependencia, gerar de novo pra um tipo
+// acrescenta versao, nunca sobrescreve.
+// ============================================================
+
+async function gerarRoteiroTeste(db, data, ctx) {
+  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode operar o DRP.');
+  const id = exigir(data.id, 'id');
+  const categoria = exigir(data.categoria, 'categoria');
+  if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
+
+  const snap = await db.collection(COLLECTION.dependencias).doc(String(id)).get();
+  if (!snap.exists) throw new AppError('Dependência não encontrada.');
+  const dep = snap.data() || {};
+  if (!dep.drpSalvo) throw new AppError('Gere o DRP (aba Plano de Recuperação) antes de gerar um roteiro de teste.');
+
+  const conteudoSnap = await db.collection(COLLECTION.drpConteudo).doc(String(id)).get();
+  const versoesDRP = conteudoSnap.exists && Array.isArray((conteudoSnap.data() || {}).versoes) ? conteudoSnap.data().versoes : [];
+  const drpHtml = versoesDRP.length ? versoesDRP[versoesDRP.length - 1].html : '';
+  if (!drpHtml) throw new AppError('Conteúdo do DRP não encontrado.');
+
+  const estrategiasTeste = Array.isArray(dep.drpEstrategiasTeste) ? dep.drpEstrategiasTeste : [];
+  const estrategia = estrategiasTeste.find((e) => (e.cenario || '') === categoria);
+  const frequencia = estrategia ? (estrategia.frequencia || 'Não definida') : 'Não definida';
+
+  const lista = (arr) => (Array.isArray(arr) && arr.length)
+    ? arr.map((x, i) => `${i + 1}. ${x}`).join('\n')
+    : 'Não informado.';
+
+  const prompt = `Você é o "Fortes Resiliente", um arquiteto sênior de Continuidade de Negócios e Resiliência Organizacional, com profundo conhecimento das normas ISO 22301, ISO 27031 e NIST SP 800-34.
+
+Com base no DRP (Plano de Recuperação de Desastres) já gerado para a dependência abaixo e nos dados operacionais fornecidos, elabore um ROTEIRO DE TESTE completo e executável para o tipo de teste "${categoria}" (frequência prevista: ${frequencia}).
+
+REGRA CRÍTICA: NÃO anonimize, mascare ou oculte NENHUM dado fornecido. Reproduza nomes, responsáveis e valores EXATAMENTE como fornecidos. Este é um documento interno corporativo.
+
+Onde houver dados disponíveis, preencha com informações reais. Onde não houver dados suficientes, faça inferências técnicas inteligentes com base no contexto da dependência e do DRP abaixo (nunca deixe "[Inserir...]" — sempre preencha com conteúdo real ou recomendado).
+
+---
+## DADOS DA DEPENDÊNCIA
+
+**Dependência:** ${dep.nome || 'Não informada'}
+**Categoria:** ${dep.categoria || 'Não informada'}
+**RTO:** ${dep.rto || 'Não definido'}
+**RPO:** ${dep.rpo || 'Não definido'}
+**Tipo de Teste a elaborar:** ${categoria}
+**Frequência prevista:** ${frequencia}
+
+### Checklist de Verificação e Diagnóstico (Health Check)
+${lista(dep.drpHealthCheck)}
+
+### Fase Executiva de Recuperação (Runbook de Restore)
+${lista(dep.drpRunbook)}
+
+### Critérios de Retorno à Normalidade
+${lista(dep.drpCriteriosRetorno)}
+
+---
+## DRP JÁ GERADO PARA ESTA DEPENDÊNCIA (use como base, em especial a seção "Testes do Procedimento")
+
+${drpHtml}
+
+---
+## ESTRUTURA OBRIGATÓRIA DO ROTEIRO DE TESTE
+
+1. Objetivo do Teste
+2. Participantes e Papéis
+3. Pré-requisitos
+4. Passo a Passo de Execução (numerado, detalhado, executável)
+5. Critérios de Sucesso / Encerramento
+6. Registro do Resultado (lembrete: registrar o resultado na aba "Gestão de Testes" do sistema após a execução)
+
+---
+## INSTRUÇÕES DE FORMATAÇÃO
+
+- Gere o roteiro em formato HTML bem estruturado e formatado para impressão.
+- Use headings (h1, h2, h3) para as seções e listas (ul/ol) para os passos.
+- NÃO inclua tags <html>, <head> ou <body> — retorne apenas o conteúdo interno.
+- NÃO inclua texto introdutório, explicações ou comentários fora do HTML. Comece DIRETAMENTE com a primeira tag HTML (<h1> ou <div>).
+- NÃO use code fences. Retorne HTML puro sem marcação markdown.
+- NÃO use sintaxe markdown como **negrito** ou *itálico*. Use SOMENTE tags HTML: <strong> para negrito, <em> para itálico.
+- Linguagem: Português do Brasil, técnica e direta.`;
+
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + ctx.geminiApiKey;
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 16384,
+      thinkingConfig: { thinkingBudget: 0 },
+    },
+  };
+
+  let body;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    body = await response.json();
+    if (!response.ok) {
+      throw new AppError('Erro na API do Gemini: ' + (body.error ? body.error.message : 'Status ' + response.status));
+    }
+  } catch (err) {
+    if (err instanceof AppError) throw err;
+    throw new AppError('Erro ao gerar Roteiro de Teste: ' + err.message);
+  }
+
+  const content = body.candidates && body.candidates[0] && body.candidates[0].content;
+  const roteiroHtml = content && content.parts && content.parts[0] && content.parts[0].text;
+  if (!roteiroHtml) throw new AppError('Resposta vazia do Gemini.');
+
+  return { success: true, html: roteiroHtml, categoria, nome: dep.nome || '' };
+}
+
+/**
+ * Grava uma nova versao do Roteiro de Teste. Mesma receita de salvarDRP: o
+ * HTML vai pra roteiro_conteudo (colecao fechada), e dependencias.drpRoteirosTeste
+ * guarda so o metadado (categoria/versao/data/autor, sem html) -- e tudo que a
+ * tabela "Roteiros de Teste" precisa pra mostrar a lista.
+ */
+async function salvarRoteiroTeste(db, data, ctx) {
+  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode operar o DRP.');
+  const id = exigir(data.id, 'id');
+  const categoria = exigir(data.categoria, 'categoria');
+  const html = exigir(data.html, 'html');
+  const depRef = db.collection(COLLECTION.dependencias).doc(String(id));
+  const depSnap = await depRef.get();
+  if (!depSnap.exists) throw new AppError('Dependência não encontrada.');
+
+  const conteudoRef = db.collection(COLLECTION.roteiroConteudo).doc(String(id));
+  const conteudoSnap = await conteudoRef.get();
+  let versoes = [];
+  if (conteudoSnap.exists && Array.isArray((conteudoSnap.data() || {}).versoes)) {
+    versoes = conteudoSnap.data().versoes;
+  }
+
+  versoes.push({
+    categoria,
+    versao: versoes.length + 1,
+    data: new Date().toISOString(),
+    autor: ctx.email,
+    html,
+  });
+
+  await conteudoRef.set({ versoes });
+  const metadados = versoes.map((v) => ({ categoria: v.categoria, versao: v.versao, data: v.data, autor: v.autor }));
+  await depRef.set({ drpRoteirosTeste: metadados }, { merge: true });
+
+  return { success: true, versao: versoes.length, totalVersoes: versoes.length };
+}
+
+/**
+ * Unico jeito de ler o HTML de Roteiros de Teste gerados -- confere o perfil
+ * no servidor antes de devolver qualquer coisa (mesmo criterio de obterDRP).
+ * Devolve TODAS as categorias; o cliente filtra pela que quer abrir.
+ */
+async function obterRoteiroTeste(db, query, ctx) {
+  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode acessar o DRP.');
+  const id = exigir(query.id, 'id');
+  const snap = await db.collection(COLLECTION.roteiroConteudo).doc(String(id)).get();
+  const versoes = snap.exists && Array.isArray((snap.data() || {}).versoes) ? snap.data().versoes : [];
+  return { success: true, versoes };
+}
+
+/** Apaga todas as versoes de Roteiro de Teste de UMA categoria (as demais categorias desta dependencia continuam intactas). */
+async function excluirRoteiroTeste(db, data, ctx) {
+  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode operar o DRP.');
+  const id = exigir(data.id, 'id');
+  const categoria = exigir(data.categoria, 'categoria');
+  const depRef = db.collection(COLLECTION.dependencias).doc(String(id));
+  const snap = await depRef.get();
+  if (!snap.exists) throw new AppError('Dependência não encontrada.');
+
+  const conteudoRef = db.collection(COLLECTION.roteiroConteudo).doc(String(id));
+  const conteudoSnap = await conteudoRef.get();
+  const versoes = (conteudoSnap.exists && Array.isArray((conteudoSnap.data() || {}).versoes))
+    ? conteudoSnap.data().versoes.filter((v) => v.categoria !== categoria)
+    : [];
+
+  await conteudoRef.set({ versoes });
+  const metadados = versoes.map((v) => ({ categoria: v.categoria, versao: v.versao, data: v.data, autor: v.autor }));
+  await depRef.set({ drpRoteirosTeste: metadados }, { merge: true });
+
+  return { success: true };
+}
+
+/**
+ * Importa MANUALMENTE uma Vulnerabilidade para o Registro de Riscos --
+ * disparada por um botão na tela, sem checar limiar de CVSS nem Status da
+ * Correção (ao contrário do gatilho automático `riscoDeVulnerabilidade`,
+ * index.js): é uma decisão explícita de quem está olhando o cadastro, por
+ * isso ignora as duas condições que normalmente bloqueiam a abertura
+ * automática (severidade abaixo do limiar, ou já Corrigida/Aceita).
+ *
+ * Mesma razão de sempre pra rodar no servidor: quem opera Vulnerabilidade
+ * não tem -- nem deveria precisar ter -- acesso de escrita a /riscos
+ * (firestore.rules: `match /riscos/{id} { allow write: if isAdmin(); }`).
+ *
+ * Ainda assim NÃO duplica: se já existe um risco automático aberto pra esta
+ * vulnerabilidade, devolve `jaExiste` em vez de criar um segundo.
+ */
+async function importarVulnerabilidadeParaRisco(db, data, ctx) {
+  if (!(await podeOperarVulnerabilidade(db, ctx.email))) throw new AppError('Seu perfil não pode operar Vulnerabilidades.');
+  const id = exigir(data.id, 'id');
+
+  const snap = await db.collection(COLLECTION.vulnerabilidades).doc(String(id)).get();
+  if (!snap.exists) throw new AppError('Vulnerabilidade não encontrada.');
+  const vulnerabilidade = Object.assign({ id }, snap.data());
+
+  const riscosSnap = await db.collection(COLLECTION.riscos).where('vulnerabilidadeId', '==', id).get();
+  const riscos = riscosSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+  const abertos = vulnerabilidadeRisco.riscosAbertosDaVulnerabilidade(riscos, id);
+  if (abertos.length) return { success: true, jaExiste: true };
+
+  const risco = vulnerabilidadeRisco.construirRisco(vulnerabilidade, { manual: true });
+  const agora = new Date().toISOString();
+  const novoId = ctx.novoUuid();
+  await db.collection(COLLECTION.riscos).doc(novoId).set(Object.assign({}, risco, {
+    criadoEm: agora,
+    atualizadoEm: agora,
+    criadoPor: ctx.email,
+  }));
+  return { success: true, id: novoId };
+}
+
+/**
+ * Exporta UM risco pra Gestao de Riscos a partir de um registro exibido no
+ * visualizador do DRP ou do PCN (drp-live.js/pcn-live.js) -- essas paginas
+ * abrem em janela separada, sem SDK do Firestore, e so tem fetch cru +
+ * token; por isso precisam de uma Cloud Function (igual
+ * importarVulnerabilidadeParaRisco acima), ja que `/riscos/{id}` so aceita
+ * escrita de isAdmin() no firestore.rules. Payload generico o bastante pra
+ * servir as duas origens: PCN manda area/processo/processoId/probabilidade/
+ * impacto/estrategiaDescricao (a tabela de riscos ja tem esses dados);
+ * DRP manda so titulo/descricao (+ probabilidade/impacto escolhidos na hora
+ * pelo usuario), porque a secao de Limitacoes nao tem essa classificacao
+ * pronta. Sem checagem de duplicata -- nem o picker de import em lote de
+ * PCN/DRP tem.
+ */
+async function exportarRiscoDocumento(db, data, ctx) {
+  if (!(await podeOperarRiscos(db, ctx.email))) throw new AppError('Seu perfil não pode operar Riscos.');
+  const titulo = exigir(data.titulo, 'titulo');
+
+  const risco = {
+    area: data.area || '',
+    processoId: data.processoId || '',
+    processo: data.processo || '',
+    titulo,
+    descricao: data.descricao || titulo,
+    categoria: '',
+    responsavel: '',
+    dataIdentificacao: new Date().toISOString().slice(0, 10),
+    status: 'Identificado',
+    origem: data.origem || 'Importado de documento',
+    probabilidade: data.probabilidade || '',
+    impacto: data.impacto || '',
+    estrategiaTratamento: '',
+    estrategiaDescricao: data.estrategiaDescricao || '',
+    planoAcao: [],
+    kris: [],
+  };
+
+  const agora = new Date().toISOString();
+  const novoId = ctx.novoUuid();
+  await db.collection(COLLECTION.riscos).doc(novoId).set(Object.assign({}, risco, {
+    criadoEm: agora,
+    atualizadoEm: agora,
+    criadoPor: ctx.email,
+  }));
+  return { success: true, id: novoId };
 }
 
 
@@ -742,6 +1150,8 @@ async function salvarDrpDependencia(db, data, ctx) {
 const READ_ACTIONS = {
   getLevantamentoPCN,
   dadosPCN,
+  obterDRP,
+  obterRoteiroTeste,
 };
 
 const WRITE_ACTIONS = {
@@ -754,6 +1164,11 @@ const WRITE_ACTIONS = {
   gerarDRP,
   salvarDRP,
   excluirDRP,
+  gerarRoteiroTeste,
+  salvarRoteiroTeste,
+  excluirRoteiroTeste,
+  importarVulnerabilidadeParaRisco,
+  exportarRiscoDocumento,
 };
 
 module.exports = {

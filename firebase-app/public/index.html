@@ -3,23 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BIA - Business Impact Analysis</title>
-  <link rel="stylesheet" href="styles.css?v=3">
+  <title>GRC360</title>
+  <link rel="icon" type="image/png" href="vendor/grc360/grc360-favicon.png">
+  <link rel="stylesheet" href="vendor/grc360/tokens.css?v=1">
+  <link rel="stylesheet" href="vendor/grc360/bundle.css?v=1">
+  <script src="vendor/grc360/bundle.js?v=4"></script>
+  <link rel="stylesheet" href="styles.css?v=15">
 </head>
 <body>
   <nav class="nav">
-    <div class="nav-brand">📋 BIA<span>Business Impact Analysis</span></div>
+    <div class="nav-brand" title="GRC360 · Governança, Riscos e Conformidade"><span id="nav-logo"></span></div>
+    <script>document.getElementById('nav-logo').appendChild(window.GRC360.Logo({ height: 22, tone: 'on-dark' }));</script>
     <div class="nav-links">
       <div class="nav-group" data-group="continuidade">
         <button type="button" class="nav-group-label">Continuidade de Negócio <span class="caret">▾</span></button>
         <div class="nav-dropdown">
           <a href="#areas" class="nav-link" data-page="areas">Áreas</a>
+          <a href="#admin" class="nav-link" data-page="admin">Dashboard de Continuidade</a>
           <a href="#dependencias" class="nav-link" data-page="dependencias">Dependências</a>
           <a href="#drp" class="nav-link" data-page="drp">DRP</a>
           <a href="#pcns" class="nav-link" data-page="pcns">PCNs</a>
           <a href="#perguntas" class="nav-link" data-page="perguntas">Perguntas</a>
           <a href="#pessoas" class="nav-link" data-page="pessoas">Pessoas</a>
           <a href="#processos" class="nav-link" data-page="processos">Processos</a>
+          <a href="#relatorios" class="nav-link" data-page="relatorios">Relatórios</a>
         </div>
       </div>
       <div class="nav-group" data-group="riscos">
@@ -27,6 +34,7 @@
         <div class="nav-dropdown">
           <a href="#riscos" class="nav-link" data-page="riscos">Registro de Riscos</a>
           <a href="#monitor" class="nav-link" data-page="monitor">Risco no Tempo</a>
+          <a href="#vulnerabilidades" class="nav-link" data-page="vulnerabilidades">Vulnerabilidades</a>
         </div>
       </div>
       <div class="nav-group" data-group="indicadores">
@@ -44,15 +52,28 @@
           <a href="#fornecedores-categorias" class="nav-link" data-page="fornecedores-categorias">Categorias</a>
           <a href="#fornecedores-criterios" class="nav-link" data-page="fornecedores-criterios">Critérios</a>
           <a href="#fornecedores" class="nav-link" data-page="fornecedores">Fornecedores</a>
+          <a href="#fornecedores-criticidade" class="nav-link" data-page="fornecedores-criticidade">Perguntas de Criticidade</a>
+          <a href="#fornecedores-subcategorias" class="nav-link" data-page="fornecedores-subcategorias">Subcategorias</a>
+        </div>
+      </div>
+      <div class="nav-group" data-group="servicos">
+        <button type="button" class="nav-group-label">Serviços <span class="caret">▾</span></button>
+        <div class="nav-dropdown">
+          <a href="#catalogo-backup" class="nav-link" data-page="catalogo-backup">Catálogo do Backup</a>
+          <a href="#servicos" class="nav-link" data-page="servicos">Serviços</a>
         </div>
       </div>
       <div class="nav-group" data-group="administracao">
         <button type="button" class="nav-group-label">Administração <span class="caret">▾</span></button>
         <div class="nav-dropdown">
-          <a href="#admin" class="nav-link" data-page="admin">Painel</a>
           <a href="#perfis" class="nav-link" data-page="perfis">Perfis de Acesso</a>
         </div>
       </div>
+    </div>
+    <div class="nav-busca" id="navBuscaWrap">
+      <input type="text" id="navBuscaInput" placeholder="🔍 Buscar tela..." autocomplete="off"
+             oninput="filtrarNavBusca()" onfocus="filtrarNavBusca()" onkeydown="onNavBuscaKeydown(event)">
+      <div class="nav-busca-resultados" id="navBuscaResultados"></div>
     </div>
     <div id="nav-user" style="display:flex;align-items:center;gap:12px;margin-left:auto;padding:0 8px;"></div>
   </nav>
@@ -69,17 +90,95 @@
   <script src="vendor/purify-3.4.15.min.js?v=1"></script>
   <script src="sanitizar-pcn.js?v=1"></script>
   <script src="util.js?v=2"></script>
-  <script src="perfis.js?v=3"></script>
+  <script src="perfis.js?v=7"></script>
   <script src="criticidade.js?v=2"></script>
   <script src="fornecedor-score.js?v=2"></script>
-  <script src="fornecedor-criticidade.js?v=4"></script>
-  <script src="risco-consolidado.js?v=4"></script>
+  <script src="fornecedor-criticidade.js?v=5"></script>
+  <script src="vulnerabilidade-severidade.js?v=1"></script>
+  <script src="risco-consolidado.js?v=5"></script>
   <script src="api-legacy.js?v=6"></script>
-  <script src="api.js?v=35"></script>
+  <script src="api.js?v=47"></script>
   <script>
     if (!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     const auth = firebase.auth();
     const DOMINIO = 'fortestecnologia.com.br';
+
+    // Busca de telas no menu superior -- le os proprios .nav-link[data-page]
+    // ja renderizados (mesmo rotulo, mesma restricao de permissao que ja
+    // escondeu os que esse perfil nao pode ver mais abaixo), sem duplicar
+    // essa lista em outro lugar.
+    function _normalizarBusca(s) {
+      // Remove so os diacriticos (marcas de acento) do resultado do NFD --
+      // evita escrever a faixa Unicode como escape \uXXXX dentro de um
+      // regex literal (ambiguo de preservar byte a byte dependendo de como
+      // a string passa pelas ferramentas de edicao; faixa numerica pura
+      // nao tem essa ambiguidade).
+      let resultado = '';
+      for (const ch of (s || '').toLowerCase().normalize('NFD')) {
+        const code = ch.codePointAt(0);
+        if (code < 0x0300 || code > 0x036f) resultado += ch;
+      }
+      return resultado;
+    }
+    function _navBuscaItens() {
+      return Array.from(document.querySelectorAll('.nav-link[data-page]'))
+        .filter(el => el.style.display !== 'none')
+        .map(el => ({
+          page: el.dataset.page,
+          label: el.textContent.trim(),
+          grupo: (el.closest('.nav-group').querySelector('.nav-group-label').textContent || '').replace('▾', '').trim(),
+        }));
+    }
+    window.filtrarNavBusca = () => {
+      const termo = _normalizarBusca(document.getElementById('navBuscaInput').value);
+      const resultados = document.getElementById('navBuscaResultados');
+      if (!termo) { resultados.classList.remove('open'); resultados.innerHTML = ''; return; }
+      const itens = _navBuscaItens().filter(it =>
+        _normalizarBusca(it.label).includes(termo) || _normalizarBusca(it.page).includes(termo));
+      if (!itens.length) {
+        resultados.innerHTML = '<div class="vazio">Nenhuma tela encontrada.</div>';
+      } else {
+        resultados.innerHTML = itens.map((it, i) => `
+          <div class="item${i === 0 ? ' sel' : ''}" data-page="${it.page}" onclick="irParaTelaNavBusca('${it.page}')">
+            ${it.label}
+            <span class="grupo">${it.grupo}</span>
+          </div>`).join('');
+      }
+      resultados.classList.add('open');
+    };
+    window.onNavBuscaKeydown = (e) => {
+      const resultados = document.getElementById('navBuscaResultados');
+      const itensEl = Array.from(resultados.querySelectorAll('.item'));
+      if (!itensEl.length) return;
+      let idx = itensEl.findIndex(el => el.classList.contains('sel'));
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        idx = (idx + 1) % itensEl.length;
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        idx = (idx - 1 + itensEl.length) % itensEl.length;
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        if (idx >= 0) irParaTelaNavBusca(itensEl[idx].dataset.page);
+        return;
+      } else if (e.key === 'Escape') {
+        document.getElementById('navBuscaInput').value = '';
+        resultados.classList.remove('open');
+        resultados.innerHTML = '';
+        return;
+      } else {
+        return;
+      }
+      itensEl.forEach(el => el.classList.remove('sel'));
+      itensEl[idx].classList.add('sel');
+    };
+    window.irParaTelaNavBusca = (page) => {
+      document.getElementById('navBuscaInput').value = '';
+      const resultados = document.getElementById('navBuscaResultados');
+      resultados.classList.remove('open');
+      resultados.innerHTML = '';
+      window.location.hash = '#' + page;
+    };
     auth.onAuthStateChanged(async user => {
       if (!user || !user.email.endsWith('@' + DOMINIO)) {
         auth.signOut();
@@ -128,8 +227,11 @@
           if (!jaAberto) grupo.classList.add('open');
         });
       });
-      document.addEventListener('click', () => {
+      document.addEventListener('click', (e) => {
         document.querySelectorAll('.nav-group.open').forEach(g => g.classList.remove('open'));
+        if (!e.target.closest('#navBuscaWrap')) {
+          document.getElementById('navBuscaResultados').classList.remove('open');
+        }
       });
       // Mostrar usuario no nav
       document.getElementById('nav-user').innerHTML = `
@@ -146,6 +248,6 @@
       if (window._routePendente) route();
     });
   </script>
-  <script src="app.js?v=82"></script>
+  <script src="app.js?v=132"></script>
 </body>
 </html>

@@ -247,11 +247,11 @@ test('dependencias no banco liberam escrita para Admin, SI e TI (sem guarda de c
 // ============================================================
 
 const TODAS_AS_TELAS = [
-  'processos', 'pcns', 'drp', 'areas', 'pessoas', 'riscos',
+  'processos', 'pcns', 'drp', 'areas', 'pessoas', 'riscos', 'vulnerabilidades',
   'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
-  'dependencias', 'componentes', 'perguntas',
+  'dependencias', 'componentes', 'perguntas', 'relatorios', 'servicos', 'catalogo-backup',
   'admin', 'perfis',
-  'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
+  'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
 ];
 
 test('admin ve todas as telas', () => {
@@ -261,8 +261,8 @@ test('admin ve todas as telas', () => {
 });
 
 test('SI ve quase tudo, menos as tres telas proprias do Admin', () => {
-  ['processos', 'pcns', 'drp', 'riscos', 'areas', 'pessoas', 'dependencias',
-    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
+  ['processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades', 'areas', 'pessoas', 'dependencias', 'relatorios', 'servicos', 'catalogo-backup',
+    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'indicadores-dashboard', 'admin'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.SEGURANCA, t), true, `SI deveria ver ${t}`);
   });
@@ -271,14 +271,14 @@ test('SI ve quase tudo, menos as tres telas proprias do Admin', () => {
   });
 });
 
-test('TI ve o DRP e o catalogo de dependencias, e nada mais', () => {
+test('TI ve o DRP, o catalogo de dependencias e relatorios, e nada mais', () => {
   const vistas = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela(Perfis.PERFIL.TI, t));
-  assert.deepStrictEqual(vistas.sort(), ['dependencias', 'drp']);
+  assert.deepStrictEqual(vistas.sort(), ['dependencias', 'drp', 'relatorios']);
 });
 
-test('TI NAO ve processos, PCNs, riscos, fornecedores nem admin', () => {
+test('TI NAO ve processos, PCNs, riscos, fornecedores, servicos/catalogo-backup nem admin', () => {
   ['processos', 'pcns', 'riscos', 'fornecedores', 'admin', 'perfis', 'perguntas',
-    'indicadores-dashboard', 'areas', 'pessoas'].forEach((t) => {
+    'indicadores-dashboard', 'areas', 'pessoas', 'servicos', 'catalogo-backup'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.TI, t), false, `TI nao deveria ver ${t}`);
   });
 });
@@ -292,8 +292,8 @@ test('TI + Gestor ve a uniao: DRP e dependencias (TI) mais o que o gestor ve', (
 });
 
 test('gestor NAO ve telas de cadastro nem as de fornecedor', () => {
-  ['areas', 'pessoas', 'perguntas', 'dependencias', 'componentes', 'perfis',
-    'fornecedores', 'fornecedores-criterios'].forEach((t) => {
+  ['areas', 'pessoas', 'perguntas', 'dependencias', 'componentes', 'perfis', 'relatorios', 'servicos', 'catalogo-backup',
+    'fornecedores', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, t), false, `nao deveria ver ${t}`);
   });
 });

@@ -3,31 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BIA - Avaliação de Área</title>
+  <title>GRC360 - Avaliação de Área</title>
   <link rel="stylesheet" href="styles.css">
   <style>
     body { background: #f5f6fa; }
     .avaliar-container { max-width: 1000px; margin: 40px auto; padding: 0 20px 60px; }
-    .avaliar-header { background: linear-gradient(135deg, #1a237e, #283593); color: white; border-radius: 12px; padding: 28px 32px; margin-bottom: 28px; }
+    .avaliar-header { background: linear-gradient(135deg, #d60014, #e6262b); color: white; border-radius: 12px; padding: 28px 32px; margin-bottom: 28px; }
     .avaliar-header h1 { font-size: 1.3em; margin: 0 0 6px; }
     .avaliar-header p { margin: 0; opacity: 0.8; font-size: 0.9em; }
     .card { background: white; border-radius: 10px; padding: 24px; box-shadow: 0 1px 4px rgba(0,0,0,0.08); margin-bottom: 20px; }
     .field-group { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
     .field label { display: block; font-size: 0.78em; font-weight: 700; color: #444; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 5px; }
     .field input { width: 100%; padding: 9px 12px; border: 1.5px solid #e0e0e0; border-radius: 7px; font-size: 0.93em; box-sizing: border-box; }
-    .field input:focus { border-color: #1a237e; outline: none; }
+    .field input:focus { border-color: #d60014; outline: none; }
     .processo-nav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
     .processo-nav-btn { padding: 6px 14px; border-radius: 20px; border: 2px solid #e0e0e0; background: white; font-size: 0.82em; font-weight: 600; cursor: pointer; transition: all 0.2s; color: #555; }
-    .processo-nav-btn.ativo { border-color: #1a237e; background: #1a237e; color: white; }
+    .processo-nav-btn.ativo { border-color: #d60014; background: #d60014; color: white; }
     .processo-nav-btn.respondido { border-color: #2e7d32; background: #e8f5e9; color: #2e7d32; }
     .btn-nav { padding: 10px 24px; border-radius: 7px; font-weight: 600; font-size: 0.93em; cursor: pointer; border: none; }
     .btn-prev { background: white; color: #555; border: 1.5px solid #ddd; }
-    .btn-next { background: #1a237e; color: white; }
-    .btn-next:hover { background: #283593; }
+    .btn-next { background: #d60014; color: white; }
+    .btn-next:hover { background: #e6262b; }
     .btn-submit { background: #2e7d32; color: white; padding: 12px 32px; border-radius: 7px; font-size: 1em; font-weight: 600; cursor: pointer; border: none; width: 100%; margin-top: 8px; }
-    .score-box { background: linear-gradient(135deg,#1a237e,#283593); padding: 16px 20px; border-radius: 8px; margin: 16px 0; color: white; display: flex; justify-content: space-between; align-items: center; }
+    .score-box { background: linear-gradient(135deg,#d60014,#e6262b); padding: 16px 20px; border-radius: 8px; margin: 16px 0; color: white; display: flex; justify-content: space-between; align-items: center; }
     .progresso { background: #f0f0f0; border-radius: 20px; height: 8px; margin-bottom: 20px; overflow: hidden; }
-    .progresso-bar { background: linear-gradient(90deg, #1a237e, #3949ab); height: 100%; border-radius: 20px; transition: width 0.4s; }
+    .progresso-bar { background: linear-gradient(90deg, #d60014, #3949ab); height: 100%; border-radius: 20px; transition: width 0.4s; }
     #estado-loading, #estado-erro, #estado-sucesso { text-align: center; padding: 60px 20px; }
     #estado-erro h2 { color: #c62828; }
     #estado-sucesso h2 { color: #2e7d32; }
@@ -36,8 +36,8 @@
 <body>
   <div class="avaliar-container">
     <div class="avaliar-header">
-      <h1>📋 BIA — Avaliação de Processos</h1>
-      <p id="header-area">Business Impact Analysis · Fortes Tecnologia</p>
+      <h1>GRC360 — Avaliação de Processos</h1>
+      <p id="header-area">Governança, Riscos e Conformidade · Fortes Tecnologia</p>
     </div>
 
     <div id="estado-loading" class="card">⏳ Validando link de avaliação...</div>
@@ -62,15 +62,15 @@
       <div class="card">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
           <div>
-            <div style="font-size:1.4em;font-weight:800;color:#1a237e;line-height:1.3;" id="processo-titulo"></div>
+            <div style="font-size:1.4em;font-weight:800;color:#d60014;line-height:1.3;" id="processo-titulo"></div>
             <div style="font-size:0.82em;color:#888;margin-top:2px;" id="processo-contador"></div>
           </div>
         </div>
         <div class="progresso"><div class="progresso-bar" id="progresso-bar"></div></div>
         <div class="processo-nav" id="processo-nav"></div>
 
-        <div style="background:#f0f4ff;border-left:4px solid #1a237e;border-radius:0 7px 7px 0;padding:14px 18px;margin-bottom:24px;">
-          <div style="font-size:0.78em;font-weight:700;color:#1a237e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Objetivo</div>
+        <div style="background:#f0f4ff;border-left:4px solid #d60014;border-radius:0 7px 7px 0;padding:14px 18px;margin-bottom:24px;">
+          <div style="font-size:0.78em;font-weight:700;color:#d60014;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Objetivo</div>
           <ul style="margin:0;padding-left:18px;">
             <li style="font-size:0.88em;color:#333;line-height:1.6;">Estamos convidando você para uma avaliação de impacto em situações de crise.</li>
           </ul>

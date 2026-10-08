@@ -4,7 +4,8 @@
 
 const app = document.getElementById('app');
 const pages = {
-  processos, perguntas, areas, pessoas, admin, dependencias, pcns, drp, riscos,
+  processos, perguntas, areas, pessoas, admin, dependencias, pcns, drp, riscos, relatorios, servicos,
+  vulnerabilidades,
   'indicadores-dashboard': indicadoresDashboard,
   'indicadores-cadastro': indicadoresCadastro,
   'indicadores-lancamento': indicadoresLancamento,
@@ -13,13 +14,98 @@ const pages = {
   fornecedores,
   'fornecedores-criterios': fornecedoresCriterios,
   'fornecedores-categorias': fornecedoresCategorias,
+  'fornecedores-subcategorias': fornecedoresSubcategorias,
+  'fornecedores-criticidade': fornecedoresCriticidadePerguntas,
+  'catalogo-backup': catalogoBackup,
   perfis,
 };
 
 // Paleta rotativa de 10 cores para tags de categoria dinâmicas (dependências/BIA).
 // Fonte única — ver .amazonq/rules/ui-referencias.md, seção "Paleta de categorias".
 // avaliar.html mantém sua própria cópia por ser uma página pública standalone.
+// Nota: NÃO faz parte do rebrand GRC360 (04/10/2026) -- é 1 de 10 cores de um
+// gráfico categórico, mantida igual mesmo com #1a237e virando #d60014 em todo
+// o resto do sistema, porque trocá-la mudaria o significado dos gráficos já
+// existentes (ver ui-referencias.md).
 const CATEGORIA_CORES = ['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1b9a','#00695c','#1565c0','#4e342e','#558b2f'];
+
+// ============================================================
+// GRC360 (vendor/grc360) -- helpers locais
+//
+// O app inteiro renderiza por template string + innerHTML, nunca monta nó DOM
+// por nó DOM. window.GRC360.Badge(...)/MetricCard(...) devolvem nós DOM, o que
+// não serve pra esse padrão sem reescrever a arquitetura de renderização
+// inteira. Por isso, em vez de chamar as funções do bundle, reaproveitamos as
+// MESMAS classes CSS que vendor/grc360/bundle.css já define
+// (bia-badge/bia-badge--nivel, bia-metric/bia-metric__*) dentro de helpers que
+// devolvem HTML (string) -- visual idêntico ao componente oficial, só a forma
+// de montar muda (é a adaptação que o próprio INTEGRACAO-GRC360.md já previa).
+// Logo é o único componente realmente chamado como função (só existe o nav e o
+// login precisando dele), ver index.html/login.html.
+// ============================================================
+const GRC360_LEVEL_LABEL = { low: 'Baixo', medium: 'Médio', high: 'Alto', critical: 'Crítico' };
+
+function _htmlBadge(level, label) {
+  if (!level) return `<span class="badge badge-gray">${esc(label)}</span>`;
+  return `<span class="bia-badge bia-badge--${level}"><span class="bia-badge__dot"></span><span class="bia-badge__label label">${esc(label)}</span></span>`;
+}
+
+function _htmlMetricCard({ label, value, level, trend }) {
+  return `<div class="bia-metric">
+    <div class="bia-metric__label label">${esc(label)}</div>
+    <div class="bia-metric__value display">${esc(String(value != null ? value : '0'))}</div>
+    ${level ? _htmlBadge(level, GRC360_LEVEL_LABEL[level] || level) : ''}
+    ${trend ? `<div class="bia-metric__trend body-sm">${esc(trend)}</div>` : ''}
+  </div>`;
+}
+
+// ---- Tradutores de nível por módulo: cada um preserva o rótulo de verdade do
+// módulo (Tier 1/2/3, Adequado/Aceitável...) e só escolhe a COR via `level`.
+// Estados sem gravidade (Pendente/Não avaliado/Sem nota/Vencida) devolvem null
+// -- _htmlBadge trata null como neutro (cinza), nunca força numa das 4 cores. ----
+
+/** Criticidade.tierDoProcesso(p) -- Tier 1 (Crítico)/Tier 2 (Essencial)/Tier 3 (Suporte)/Pendente. */
+function _nivelTierProcesso(tier) {
+  return { 'Tier 1 (Crítico)': 'critical', 'Tier 2 (Essencial)': 'high', 'Tier 3 (Suporte)': 'medium' }[tier] || null;
+}
+
+/** risco-consolidado.js faixaScore(n).rotulo -- Crítico/Alto/Moderado/Baixo. */
+function _nivelFaixaRisco(rotulo) {
+  return { 'Crítico': 'critical', 'Alto': 'high', 'Moderado': 'medium', 'Baixo': 'low' }[rotulo] || null;
+}
+
+/** fornecedor-score.js faixaNota(n).rotulo -- escala invertida (nota alta = bom). */
+function _nivelNotaFornecedor(rotulo) {
+  return { 'Crítico': 'critical', 'Insuficiente': 'high', 'Aceitável': 'medium', 'Adequado': 'low' }[rotulo] || null;
+}
+
+/**
+ * Situação do fornecedor (_situacaoFornecedor) -- "Vencida" e avaliação
+ * incompleta (sit.aviso preenchido) não são a faixa real da nota, são um
+ * aviso de "precisa de atenção" -- viram "high" (laranja), não a cor real da
+ * faixa nem o cinza neutro de "sem dado". "Não avaliado"/"Sem nota" são
+ * ausência de dado de verdade -- ficam neutros (null).
+ */
+function _nivelSituacaoFornecedor(sit) {
+  if (sit.rotulo === 'Não avaliado' || sit.rotulo === 'Sem nota') return null;
+  if (sit.rotulo === 'Vencida' || sit.aviso) return 'high';
+  return _nivelNotaFornecedor(sit.rotulo);
+}
+
+/** fornecedor-criticidade.js faixa(score).rotulo -- só 3 níveis (sem "high" de propósito). */
+function _nivelCriticidadeFornecedor(rotulo) {
+  return { 'Alta': 'critical', 'Média': 'medium', 'Baixa': 'low' }[rotulo] || null;
+}
+
+/** Probabilidade/Impacto/Prioridade do Risco -- escalas próprias (3 ou 4 níveis, com "Crítica" feminino de Prioridade). */
+function _nivelProbImpacto(valor) {
+  return { 'Baixa': 'low', 'Baixo': 'low', 'Média': 'medium', 'Moderado': 'medium', 'Alta': 'high', 'Alto': 'high', 'Crítico': 'critical', 'Crítica': 'critical' }[valor] || null;
+}
+
+/** vulnerabilidade-severidade.js faixa(vuln).rotulo -- "Não informado" cai em cinza neutro, nunca numa das 4 cores. */
+function _nivelSeveridadeVulnerabilidade(rotulo) {
+  return { 'Baixa': 'low', 'Média': 'medium', 'Alta': 'high', 'Crítica': 'critical' }[rotulo] || null;
+}
 
 // Roteamento
 window.addEventListener('hashchange', route);
@@ -78,6 +164,36 @@ function route() {
     }
     setTimeout(tryOpenPessoa, 600);
   }
+  // Deep link: abrir direto o DRP gerado de uma dependência (link "🔗 Copiar
+  // link" da lista de DRPs ou do próprio visualizador). O acesso ao conteúdo
+  // em si é conferido no servidor (obterDRP) -- quem não tem o perfil certo
+  // vê a tela normalmente, mas a abertura do DRP falha com aviso.
+  if (page === 'drp' && params.get('abrir')) {
+    const depId = params.get('abrir');
+    function tryOpenDRP() {
+      if (dependenciasData && dependenciasData.length) {
+        if (window.abrirDRPDireto) window.abrirDRPDireto(depId);
+      } else {
+        setTimeout(tryOpenDRP, 500);
+      }
+    }
+    setTimeout(tryOpenDRP, 800);
+  }
+  // Deep link: Catálogo do Backup já filtrado por um Serviço (vindo da aba
+  // "Backups", só consulta, do drawer de Serviço).
+  if (page === 'catalogo-backup' && params.get('servico')) {
+    const servicoIdQS = params.get('servico');
+    function tryFiltrarCatalogoBackup() {
+      const sel = document.getElementById('filtroBackupServico');
+      if (sel && sel.options.length > 1) {
+        sel.value = servicoIdQS;
+        if (window.renderizarCatalogoBackup) renderizarCatalogoBackup();
+      } else {
+        setTimeout(tryFiltrarCatalogoBackup, 400);
+      }
+    }
+    setTimeout(tryFiltrarCatalogoBackup, 600);
+  }
 }
 
 /**
@@ -109,7 +225,7 @@ function _telaSemAcesso(pagina) {
   app.innerHTML = `
     <div style="max-width:520px;margin:60px auto;text-align:center;">
       <div style="font-size:2.4em;margin-bottom:10px;">🔒</div>
-      <h2 style="color:#1a237e;margin-bottom:8px;">Esta tela não é do seu perfil</h2>
+      <h2 style="color:#d60014;margin-bottom:8px;">Esta tela não é do seu perfil</h2>
       <p style="color:#666;font-size:0.95em;line-height:1.6;">
         O seu acesso é <strong>${esc((window.USER_PERFIS || [window.USER_PERFIL]).map(Perfis.rotulo).join(', '))}</strong>, que não inclui esta tela.
         Se você precisa dela, peça ao administrador do sistema.
@@ -163,7 +279,7 @@ async function perguntas() {
     document.getElementById('loading').style.display = 'none';
   
   const CAT_CORES = {
-    'Impacto na Operação e Missão': { bg: '#1a237e', fg: 'white' },
+    'Impacto na Operação e Missão': { bg: '#d60014', fg: 'white' },
     'Impacto Financeiro': { bg: '#c62828', fg: 'white' },
     'Impacto Jurídico e Regulatório': { bg: '#e65100', fg: 'white' },
     'Impacto Reputacional': { bg: '#00838f', fg: 'white' },
@@ -256,8 +372,8 @@ window.trocarAbaProcesso = (aba) => {
   ['identificacao','avaliacao','bia','bcp','drp'].forEach(a => {
     document.getElementById('painel-' + a).style.display = a === aba ? 'block' : 'none';
     const btn = document.getElementById('tab-' + a);
-    btn.style.color = a === aba ? '#1a237e' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
+    btn.style.color = a === aba ? '#d60014' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
   });
   if (aba === 'bcp') {
     renderFornecedoresBcp();
@@ -289,7 +405,7 @@ window.renderAvaliacaoInline = () => {
       </div>
       <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
         <div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div>
-        <div style="font-size:0.95em;font-weight:700;" id="avaliacaoTierValor"><span style="background:${cor};color:white;padding:4px 12px;border-radius:12px;">${tier}</span></div>
+        <div style="font-size:0.95em;font-weight:700;" id="avaliacaoTierValor">${_htmlBadge(_nivelTierProcesso(tier), tier)}</div>
       </div>
     </div>`;
   } else if (resumoContainer) {
@@ -399,7 +515,7 @@ window.calcularScoreInline = () => {
       </div>
       <div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};">
         <div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div>
-        <div style="font-size:0.95em;font-weight:700;" id="avaliacaoTierValor"><span style="background:${cor};color:white;padding:4px 12px;border-radius:12px;">${tier}</span></div>
+        <div style="font-size:0.95em;font-weight:700;" id="avaliacaoTierValor">${_htmlBadge(_nivelTierProcesso(tier), tier)}</div>
       </div>
     </div>`;
   }
@@ -422,7 +538,7 @@ function renderizarConfigRespostas(config) {
   const CAT_CORES = {
     '_default': { bg: '#455a64', fg: 'white' },
     'Geral': { bg: '#37474f', fg: 'white' },
-    'Impacto na Operação e Missão': { bg: '#1a237e', fg: 'white' },
+    'Impacto na Operação e Missão': { bg: '#d60014', fg: 'white' },
     'Impacto Financeiro': { bg: '#c62828', fg: 'white' },
     'Impacto Jurídico e Regulatório': { bg: '#e65100', fg: 'white' },
     'Impacto Reputacional': { bg: '#00838f', fg: 'white' },
@@ -430,7 +546,7 @@ function renderizarConfigRespostas(config) {
   document.getElementById('lista-respostas').innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <div>
-        <h3 style="font-size:1.1em;font-weight:700;color:#1a237e;margin:0 0 4px;">Opções de Resposta por Categoria</h3>
+        <h3 style="font-size:1.1em;font-weight:700;color:#d60014;margin:0 0 4px;">Opções de Resposta por Categoria</h3>
         <p style="font-size:0.85em;color:#888;margin:0;">Personalize os rótulos e pontuações exibidos no questionário</p>
       </div>
       <button class="btn btn-primary" onclick="abrirModalConfigResposta()">+ Nova Opção</button>
@@ -456,7 +572,7 @@ function renderizarConfigRespostas(config) {
       </div>`;
     }).join('')}
     <div class="modal-overlay" id="modalConfigResposta"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
-      <h3 id="modalConfigRespostaTitulo" style="font-size:1.1em;font-weight:700;color:#1a237e;border-bottom:2px solid #e8eaf6;padding-bottom:12px;margin-bottom:20px;">Nova Opção de Resposta</h3>
+      <h3 id="modalConfigRespostaTitulo" style="font-size:1.1em;font-weight:700;color:#d60014;border-bottom:2px solid #fce8ea;padding-bottom:12px;margin-bottom:20px;">Nova Opção de Resposta</h3>
       <input type="hidden" id="crRowIndex">
       <div style="margin-bottom:14px;">
         <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria</label>
@@ -624,7 +740,7 @@ async function areas() {
         <button type="button" class="btn-icon" onclick="_recarregarPessoasArea()" title="Atualizar lista de pessoas">🔄</button>
         <button type="button" class="btn-icon" id="btnEditarPessoaArea" onclick="_editarPessoaResponsavelArea()" title="Editar esta pessoa" style="display:none;">✏️</button>
       </div>
-      <span style="font-size:0.75em;color:#888;display:block;margin-top:2px;margin-bottom:8px;">Vem do cadastro de Pessoas. <a href="#pessoas" target="_blank" style="color:#1a237e;font-weight:600;">👤 Gerenciar Pessoas</a></span>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:2px;margin-bottom:8px;">Vem do cadastro de Pessoas. <a href="#pessoas" target="_blank" style="color:#d60014;font-weight:600;">👤 Gerenciar Pessoas</a></span>
       <label>Email</label>
       <input type="email" id="fEmail" placeholder="Preenchido pela Pessoa" readonly style="background:#f5f6fa;color:#555;">
       <label>Telefone</label>
@@ -813,12 +929,79 @@ window.excluirArea = async (id) => {
 // ============================================================
 let pessoasOrdenacao = criarOrdenacao('nome', 'asc');
 
+/**
+ * Drawer de cadastro de Pessoa -- extraído de dentro de pessoas() pra poder ser
+ * reaproveitado também no drawer de Backup (cadastro rápido de Stakeholder).
+ */
+function _htmlDrawerPessoa() {
+  // Sem ".drawer input"/".drawer label" no CSS (só ".modal input"/".modal
+  // label") -- mesmo motivo pelo qual Fornecedor/Risco/Processo já injetam
+  // esse estilo inline nos próprios campos do drawer.
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  return `
+    <div class="drawer-overlay" id="drawerOverlayPessoa" onclick="fecharModalPessoa()"></div>
+    <div class="drawer" id="drawerPessoa">
+      <div class="drawer-header">
+        <h3 id="modalPessoaTitulo">Nova Pessoa</h3>
+        <button onclick="fecharModalPessoa()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <input type="hidden" id="pessoaId">
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}">Nome</label>
+          <input type="text" id="pessoaNome" placeholder="Nome da pessoa" style="${inp}">
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}">Cargo / Papel</label>
+          <input type="text" id="pessoaDetalhes" placeholder="Ex: Gerente de TI" style="${inp}">
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}">Áreas</label>
+          <div id="pessoaAreasTabela"></div>
+          <select id="pessoaAreaAdd" onchange="adicionarPessoaArea()" style="${inp}margin-top:4px;"><option value="">Selecione para adicionar...</option></select>
+          <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Uma pessoa pode pertencer a mais de uma área. A primeira é a principal.</span>
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}">Líder Imediato</label>
+          <select id="pessoaLider" style="${inp}"><option value="">Selecione...</option></select>
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}">Telefone</label>
+          <input type="text" id="pessoaTelefone" placeholder="Telefone" style="${inp}">
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}">Email</label>
+          <input type="email" id="pessoaEmail" placeholder="email@empresa.com" oninput="_ajustarPerfilPessoa()" style="${inp}">
+        </div>
+        <div id="pessoaPerfilBox" style="display:none;margin-bottom:16px;">
+          <label style="${lbl}">Perfil de Sistema</label>
+          <div id="pessoaPerfilChecks" style="display:flex;flex-direction:column;gap:8px;margin-bottom:4px;">
+            ${Perfis.CATALOGO.map((p) => `
+              <label style="display:flex;align-items:flex-start;gap:8px;font-size:0.9em;cursor:pointer;">
+                <input type="checkbox" class="pessoa-perfil-check" value="${esc(p.valor)}" onchange="_ajustarPerfilPessoa()" style="margin-top:3px;">
+                <span><strong>${esc(p.rotulo)}</strong><br><span style="font-size:0.82em;color:#888;">${esc(p.descricao)}</span></span>
+              </label>`).join('')}
+          </div>
+          <div id="pessoaPerfilAvisoGestor" style="font-size:0.75em;color:#e65100;margin-top:2px;display:none;">O perfil Gestor de área usa a primeira área cadastrada acima como referência; adicione uma área para o perfil funcionar.</div>
+          <div style="font-size:0.72em;color:#888;margin-top:4px;">Somente administradores veem e alteram este campo. Para remover completamente o acesso de alguém, use a tela <a href="#perfis" style="color:#d60014;font-weight:600;">Perfis de Acesso</a>.</div>
+        </div>
+        <div id="pessoaPerfilSemEmail" style="display:none;font-size:0.8em;color:#999;margin:6px 0 16px;">Informe um e-mail para atribuir um perfil de sistema.</div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharModalPessoa()">Fechar</button>
+        <button class="btn btn-ghost" id="btnRelatorioPessoa" onclick="gerarRelatorioPessoa()" style="color:#1565c0;border-color:#1565c0;display:none;">📄 Relatório de Vínculos</button>
+        <button class="btn btn-primary" id="btnSalvarPessoaCadastro" onclick="salvarPessoaCadastro()">Salvar</button>
+      </div>
+    </div>`;
+}
+
 async function pessoas() {
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Pessoas</h2><p class="page-sub">Usadas como Gestor do Contrato (Fornecedores) e Responsável (Áreas)</p></div>
       <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" onclick="abrirModalOrganograma()" style="color:#1a237e;border-color:#1a237e;">🗂️ Gerar organograma</button>
+        <button class="btn btn-ghost" onclick="abrirModalOrganograma()" style="color:#d60014;border-color:#d60014;">🗂️ Gerar organograma</button>
         <button class="btn btn-primary" onclick="abrirModalPessoa()">+ Nova Pessoa</button>
       </div>
     </div>
@@ -843,51 +1026,36 @@ async function pessoas() {
         <tbody id="rowsPessoas"></tbody>
       </table>
     </div>
-    <div class="modal-overlay" id="modalPessoa"><div class="modal" onclick="event.stopPropagation()">
-      <h3 id="modalPessoaTitulo">Nova Pessoa</h3>
-      <input type="hidden" id="pessoaId">
-      <label>Nome</label>
-      <input type="text" id="pessoaNome" placeholder="Nome da pessoa">
-      <label>Cargo / Papel</label>
-      <input type="text" id="pessoaDetalhes" placeholder="Ex: Gerente de TI">
-      <label>Áreas</label>
-      <div id="pessoaAreasTabela"></div>
-      <div style="display:flex;gap:6px;align-items:center;margin-top:4px;">
-        <select id="pessoaAreaAdd" style="flex:1;"><option value="">Selecione...</option></select>
-        <button type="button" class="btn btn-ghost" onclick="adicionarPessoaArea()" style="padding:8px 12px;white-space:nowrap;">+ Adicionar</button>
+    ${_htmlDrawerPessoa()}
+    <div class="drawer-overlay" id="drawerOverlayOrganograma" onclick="fecharModalOrganograma()"></div>
+    <div class="drawer" id="drawerOrganograma">
+      <div class="drawer-header">
+        <h3>Gerar Organograma</h3>
+        <button onclick="fecharModalOrganograma()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
-      <span style="font-size:0.72em;color:#888;display:block;margin-top:2px;margin-bottom:6px;">Uma pessoa pode pertencer a mais de uma área. A primeira é a principal.</span>
-      <label>Líder Imediato</label>
-      <select id="pessoaLider"><option value="">Selecione...</option></select>
-      <label>Telefone</label>
-      <input type="text" id="pessoaTelefone" placeholder="Telefone">
-      <label>Email</label>
-      <input type="email" id="pessoaEmail" placeholder="email@empresa.com">
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="fecharModalPessoa()">Cancelar</button>
-        <button class="btn btn-primary" id="btnSalvarPessoaCadastro" onclick="salvarPessoaCadastro()">Salvar</button>
+      <div class="drawer-body">
+        <p style="font-size:0.85em;color:#666;margin-bottom:12px;">Monta a hierarquia a partir do "Líder Imediato" de cada pessoa.</p>
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;">
+          <input type="radio" name="orgModo" value="geral" checked onchange="_atualizarModoOrganograma()"> Organograma Geral (todas as áreas)
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;">
+          <input type="radio" name="orgModo" value="area" onchange="_atualizarModoOrganograma()"> Por Área específica
+        </label>
+        <select id="orgArea" disabled style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;margin-top:4px;"><option value="">Selecione a área...</option></select>
       </div>
-    </div></div>
-    <div class="modal-overlay" id="modalOrganograma"><div class="modal" onclick="event.stopPropagation()">
-      <h3>Gerar Organograma</h3>
-      <p style="font-size:0.85em;color:#666;margin-bottom:12px;">Monta a hierarquia a partir do "Líder Imediato" de cada pessoa.</p>
-      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;">
-        <input type="radio" name="orgModo" value="geral" checked onchange="_atualizarModoOrganograma()"> Organograma Geral (todas as áreas)
-      </label>
-      <label style="display:flex;align-items:center;gap:8px;margin-bottom:8px;cursor:pointer;">
-        <input type="radio" name="orgModo" value="area" onchange="_atualizarModoOrganograma()"> Por Área específica
-      </label>
-      <select id="orgArea" disabled style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;margin-top:4px;"><option value="">Selecione a área...</option></select>
-      <div class="modal-footer">
+      <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharModalOrganograma()">Cancelar</button>
         <button class="btn btn-primary" onclick="gerarOrganograma()">Gerar</button>
       </div>
-    </div></div>`;
+    </div>`;
 
-  const [deps, areas] = await Promise.all([API.getDependencias(), API.getAreas()]);
+  const [deps, areas, perfis] = await Promise.all([API.getDependencias(), API.getAreas(), API.getPerfis()]);
   pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
   // Fonte do dropdown "Área" no modal de Pessoa -- mesmo catálogo de Áreas.
   window.areasData = areas;
+  // Fonte do bloco "Perfil de Sistema" no modal de Pessoa -- mesmo catálogo
+  // usado pela tela Perfis de Acesso (casamento por e-mail, ver _perfilDaPessoa).
+  perfisData = perfis;
   // Área do chooser de organograma.
   const orgAreaSel = document.getElementById('orgArea');
   if (orgAreaSel) {
@@ -999,7 +1167,7 @@ function renderPessoaAreas() {
   const itens = window._pessoaAreas || [];
   if (!itens.length) { cont.innerHTML = '<p style="font-size:0.83em;color:#999;margin:4px 0;">Nenhuma área vinculada.</p>'; _popularSelectAreaPessoaAdd(); return; }
   cont.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;">` +
-    itens.map((a, i) => `<span style="display:inline-flex;align-items:center;gap:6px;background:${i === 0 ? '#1a237e' : '#e8eaf6'};color:${i === 0 ? '#fff' : '#1a237e'};padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(a)}${i === 0 ? ' <span style="opacity:0.8;font-size:0.85em;">(principal)</span>' : ''}<button onclick="removerPessoaArea(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:${i === 0 ? 'rgba(255,255,255,0.75)' : '#c62828'};line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`).join('') +
+    itens.map((a, i) => `<span style="display:inline-flex;align-items:center;gap:6px;background:${i === 0 ? '#d60014' : '#fce8ea'};color:${i === 0 ? '#fff' : '#d60014'};padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(a)}${i === 0 ? ' <span style="opacity:0.8;font-size:0.85em;">(principal)</span>' : ''}<button onclick="removerPessoaArea(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:${i === 0 ? 'rgba(255,255,255,0.75)' : '#c62828'};line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`).join('') +
     `</div>`;
   _popularSelectAreaPessoaAdd();
 }
@@ -1012,11 +1180,13 @@ window.adicionarPessoaArea = () => {
   if (window._pessoaAreas.includes(nome)) return showToast('Essa área já foi adicionada.', '#e65100');
   window._pessoaAreas.push(nome);
   renderPessoaAreas();
+  _ajustarPerfilPessoa();
 };
 
 window.removerPessoaArea = (idx) => {
   window._pessoaAreas.splice(idx, 1);
   renderPessoaAreas();
+  _ajustarPerfilPessoa();
 };
 
 /** Popula o <select> de Líder Imediato (outras Pessoas, value=id); preserva id legado fora da lista. */
@@ -1034,6 +1204,39 @@ function _popularSelectLiderPessoa(valorAtualId, excluirId) {
   sel.value = valorAtualId || '';
 }
 
+/** Acha em perfisData o acesso da Pessoa por e-mail (case-insensitive). Sem e-mail ou sem acesso -> null. */
+function _perfilDaPessoa(email) {
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return null;
+  return perfisData.find((x) => String(x.email || '').trim().toLowerCase() === e) || null;
+}
+
+/**
+ * Ajusta a visibilidade do bloco "Perfil de Sistema" no modal de Pessoa:
+ * some inteiro pra quem nao pode gerenciar perfis (mesma regra da tela Perfis
+ * de Acesso), pede e-mail antes de mostrar os checkboxes, e avisa quando
+ * "Gestor de area" esta marcado mas a Pessoa ainda nao tem nenhuma area.
+ */
+window._ajustarPerfilPessoa = () => {
+  const box = document.getElementById('pessoaPerfilBox');
+  const semEmail = document.getElementById('pessoaPerfilSemEmail');
+  if (!box || !semEmail) return;
+  const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIS);
+  if (!podeGerenciar) {
+    box.style.display = 'none';
+    semEmail.style.display = 'none';
+    return;
+  }
+  const email = (document.getElementById('pessoaEmail').value || '').trim();
+  box.style.display = email ? 'block' : 'none';
+  semEmail.style.display = email ? 'none' : 'block';
+
+  const gestorMarcado = Array.from(document.querySelectorAll('#pessoaPerfilBox .pessoa-perfil-check:checked'))
+    .some((el) => el.value === Perfis.PERFIL.GESTOR);
+  const aviso = document.getElementById('pessoaPerfilAvisoGestor');
+  if (aviso) aviso.style.display = (gestorMarcado && !(window._pessoaAreas || []).length) ? 'block' : 'none';
+};
+
 window.abrirModalPessoa = (id) => {
   const p = id ? pessoasData.find((x) => String(x.id) === String(id)) : null;
   document.getElementById('pessoaId').value = p ? p.id : '';
@@ -1047,11 +1250,207 @@ window.abrirModalPessoa = (id) => {
   _popularSelectLiderPessoa(p ? (p.liderImediato || '') : '', p ? p.id : null);
   document.getElementById('pessoaTelefone').value = p ? (p.telefone || '') : '';
   document.getElementById('pessoaEmail').value = p ? (p.email || '') : '';
+  // Perfil de Sistema: atributo da propria Pessoa (p.perfis). Pessoa antiga,
+  // salva antes deste campo existir, cai no fallback de config_perfis casado
+  // por e-mail (nao-destrutivo -- mesmo espirito de _areasDaPessoa cair no
+  // setor quando areas esta vazio). Pessoa nova ou sem acesso comeca sem
+  // nenhum marcado -- nao faz sentido empurrar um perfil padrao pra quem nao
+  // pediu acesso.
+  const acesso = p && Array.isArray(p.perfis) && p.perfis.length
+    ? p.perfis
+    : (p ? ((_perfilDaPessoa(p.email) || {}).perfis || []) : []);
+  const marcados = new Set(acesso);
+  // Guardado pra reenviar sem perda no save de quem nao pode editar este
+  // bloco (checkboxes ficam ocultos, mas o valor tem que sobreviver ao save).
+  window._pessoaPerfisOriginais = [...marcados];
+  document.querySelectorAll('#pessoaPerfilBox .pessoa-perfil-check').forEach((el) => { el.checked = marcados.has(el.value); });
   document.getElementById('modalPessoaTitulo').textContent = p ? 'Editar Pessoa' : 'Nova Pessoa';
-  document.getElementById('modalPessoa').classList.add('open');
+  document.getElementById('btnRelatorioPessoa').style.display = p ? 'inline-block' : 'none';
+  document.getElementById('drawerPessoa').classList.add('open');
+  document.getElementById('drawerOverlayPessoa').classList.add('open');
+  _ajustarPerfilPessoa();
 };
 
-window.fecharModalPessoa = () => document.getElementById('modalPessoa').classList.remove('open');
+window.fecharModalPessoa = () => {
+  document.getElementById('drawerPessoa').classList.remove('open');
+  document.getElementById('drawerOverlayPessoa').classList.remove('open');
+  _reabrirDrawerPaiSeEscondido();
+};
+
+// ============================================================
+// RELATÓRIO DE VÍNCULOS DA PESSOA -- a quais Processos, Riscos, Indicadores,
+// Áreas, Fornecedores e Backups esta Pessoa está ligada no sistema, mais
+// hierarquia (líder/subordinados) e acesso ao sistema (perfil via e-mail).
+//
+// Só a tela Pessoas carrega pessoasData/areasData/perfisData -- os outros 6
+// datasets (Processos/Dependências/Riscos/Indicadores/Backups/Áreas) não têm
+// garantia de já estar em memória quando este relatório roda, então busca
+// tudo via API.getX() (cache genérico de api.js, nunca busca em dobro) antes
+// de montar a página -- por isso é assíncrono e abre o popup com um "⏳
+// Gerando..." primeiro, preenchendo de verdade só depois que os dados voltam
+// (mesmo padrão de gerarDRPDependencia).
+//
+// Vínculos por ID (confiáveis): bcpContatos/dependenciaItens (Processo),
+// gestoresContrato (Fornecedor), stakeholderId (Backup), liderImediato
+// (hierarquia). Vínculos por NOME (Risco.responsavel e Área.responsavel são
+// <select> do catálogo de Pessoas -- comparação por nome é confiável;
+// Indicador.responsavel é texto livre -- sinalizado como tal no relatório).
+// Fora do relatório, de propósito: Fornecedor.pessoas[] (cópias soltas, sem
+// id) -- alto risco de falso-positivo por coincidência de nome.
+// Risco.planoAcao[].responsavel virou <select> do catálogo de Pessoas
+// (08/10/2026, mesmo padrão de Risco.responsavel) -- tão confiável quanto os
+// outros vínculos por nome acima, mas ainda não entra neste relatório
+// (decisão separada: incluir é mudar o conteúdo do relatório, não só a
+// confiabilidade do campo).
+// ============================================================
+window.gerarRelatorioPessoa = async (pessoaDireta) => {
+  // Chamada sem argumento: botão do drawer de Pessoa, lê a pessoa aberta ali
+  // (#pessoaId só existe nesse contexto). Chamada com argumento: tela
+  // Relatórios, que não tem o drawer de Pessoa no DOM -- já manda o objeto.
+  let pessoa = pessoaDireta || null;
+  if (!pessoa) {
+    const id = (document.getElementById('pessoaId') || {}).value || '';
+    pessoa = id ? pessoasData.find((x) => String(x.id) === String(id)) : null;
+  }
+  if (!pessoa) return showToast('Selecione uma pessoa para gerar o relatório.', '#e65100');
+
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
+  win.document.write('<p style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#d60014;">⏳ Gerando relatório...</p>');
+
+  try {
+    const [processos, deps, riscos, indicadores, backups, perfis, areas] = await Promise.all([
+      API.getProcessos(), API.getDependencias(), API.getRiscos(),
+      API.getIndicadoresSeguranca(), API.getBackups(), API.getPerfis(), API.getAreas(),
+    ]);
+    const html = _buildRelatorioPessoaPage(pessoa, { processos, deps, riscos, indicadores, backups, perfis, areas });
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  } catch (e) {
+    win.document.write('<p style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#c62828;">❌ Erro ao gerar relatório: ' + esc(e.message || 'erro desconhecido') + '</p>');
+  }
+};
+
+function _buildRelatorioPessoaPage(pessoa, dados) {
+  const { processos, deps, riscos, indicadores, backups, perfis, areas } = dados;
+  const pessoasTodas = deps.filter((d) => d.categoria === 'Pessoas');
+  const fornecedores = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
+  const nome = (pessoa.nome || '').trim();
+
+  // Hierarquia
+  const lider = pessoa.liderImediato ? pessoasTodas.find((p) => String(p.id) === String(pessoa.liderImediato)) : null;
+  const subordinados = pessoasTodas.filter((p) => String(p.liderImediato || '') === String(pessoa.id));
+
+  // Acesso ao sistema
+  const acesso = _perfilDaPessoa(pessoa.email);
+
+  // Processos: Contato de Crise (bcpContatos) + Dependência Crítica (dependenciaItens), deduplicados.
+  const porProcesso = new Map();
+  processos.filter((p) => Array.isArray(p.bcpContatos) && p.bcpContatos.includes(pessoa.id))
+    .forEach((p) => porProcesso.set(p.id, { p, vinculos: ['Contato de Crise'] }));
+  _processosVinculadosADependencia(pessoa, processos).forEach((p) => {
+    const atual = porProcesso.get(p.id);
+    if (atual) atual.vinculos.push('Dependência Crítica');
+    else porProcesso.set(p.id, { p, vinculos: ['Dependência Crítica'] });
+  });
+  const processosDaPessoa = [...porProcesso.values()];
+
+  // Riscos e Indicadores: responsavel por nome.
+  const riscosDaPessoa = riscos.filter((r) => (r.responsavel || '').trim() === nome);
+  const indicadoresDaPessoa = indicadores.filter((i) => (i.responsavel || '').trim() === nome);
+
+  // Áreas onde é responsável.
+  const areasDaPessoa = areas.filter((a) => (a.responsavel || '').trim() === nome);
+
+  // Fornecedores onde é Gestor do Contrato (só vínculo com id confiável).
+  const fornecedoresDaPessoa = fornecedores.filter((f) => (f.gestoresContrato || []).some((g) => g.id && String(g.id) === String(pessoa.id)));
+
+  // Backups onde é Stakeholder.
+  const backupsDaPessoa = backups.filter((b) => b.stakeholderId && String(b.stakeholderId) === String(pessoa.id));
+
+  const temVinculoOperacional = processosDaPessoa.length || riscosDaPessoa.length || indicadoresDaPessoa.length
+    || areasDaPessoa.length || fornecedoresDaPessoa.length || backupsDaPessoa.length;
+
+  const linhaOuVazio = (lista, montarLinha) => lista.length ? lista.map(montarLinha).join('') : '';
+
+  let html = '<html><head><title>Relatório de Vínculos - ' + esc(nome) + '</title><style>'
+    + 'body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6;color:#222;}'
+    + 'h1{color:#d60014} h2{color:#d60014;border-bottom:2px solid #fce8ea;padding-bottom:6px;margin-top:24px}'
+    + 'table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt}'
+    + 'th{background:#d60014;color:white;padding:8px 10px;text-align:left} td{padding:7px 10px;border:1px solid #e0e0e0}'
+    + '.header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px}'
+    + '.header .sub{font-size:9pt;color:#888;margin-top:4px;font-weight:400}'
+    + '.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}'
+    + '.btn-print:hover{opacity:.9} @media print{.btn-print{display:none!important}}'
+    + '</style></head><body>';
+
+  html += '<div class="header"><div>'
+    + '<img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display=\'none\'">'
+    + '<div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>'
+    + '<h1>Relatório de Vínculos — ' + esc(nome) + '</h1>'
+    + '<div class="sub">' + esc(pessoa.detalhes || '-') + ' • ' + new Date().toLocaleDateString('pt-BR') + ' • Fortes Tecnologia</div>'
+    + '</div><button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button></div>';
+
+  html += '<h2>Identificação</h2><p>'
+    + '<b>Nome:</b> ' + esc(nome) + '<br>'
+    + '<b>Cargo:</b> ' + esc(pessoa.detalhes || '-') + '<br>'
+    + '<b>Área(s):</b> ' + esc((Array.isArray(pessoa.areas) && pessoa.areas.length ? pessoa.areas : [pessoa.setor]).filter(Boolean).join(', ') || '-') + '<br>'
+    + '<b>Telefone:</b> ' + esc(pessoa.telefone || '-') + '<br>'
+    + '<b>E-mail:</b> ' + esc(pessoa.email || '-')
+    + '</p>';
+
+  html += '<h2>Acesso ao Sistema</h2><p>'
+    + (acesso && Array.isArray(acesso.perfis) && acesso.perfis.length
+      ? '<b>Perfil(is):</b> ' + esc(acesso.perfis.map((p) => Perfis.rotulo(p)).join(', '))
+      : 'Sem acesso ao sistema (nenhum perfil vinculado a este e-mail).')
+    + '</p>';
+
+  html += '<h2>Hierarquia</h2><p>'
+    + '<b>Líder imediato:</b> ' + esc(lider ? lider.nome : '-') + '<br>'
+    + '<b>Subordinados diretos:</b> ' + esc(subordinados.length ? subordinados.map((p) => p.nome).join(', ') : '-')
+    + '</p>';
+
+  if (!temVinculoOperacional) {
+    html += '<h2>Vínculos Operacionais</h2><p style="color:#999;">Nenhum vínculo operacional encontrado.</p>';
+  } else {
+    if (processosDaPessoa.length) {
+      html += '<h2>Processos de Negócio</h2><table><tr><th>Área</th><th>Processo</th><th>Vínculo</th></tr>'
+        + linhaOuVazio(processosDaPessoa, ({ p, vinculos }) => '<tr><td>' + esc(p.area) + '</td><td><b>' + esc(p.processo) + '</b></td><td>' + esc(vinculos.join(' + ')) + '</td></tr>')
+        + '</table>';
+    }
+    if (riscosDaPessoa.length) {
+      html += '<h2>Riscos</h2><table><tr><th>Área</th><th>Título</th><th>Status</th><th>Score</th></tr>'
+        + linhaOuVazio(riscosDaPessoa, (r) => '<tr><td>' + esc(r.area || '-') + '</td><td><b>' + esc(r.titulo) + '</b></td><td>' + esc(r.status || '-') + '</td><td>' + esc(r.score != null ? r.score : '-') + '</td></tr>')
+        + '</table>';
+    }
+    if (indicadoresDaPessoa.length) {
+      html += '<h2>Indicadores de Segurança</h2>'
+        + '<p style="font-size:0.8em;color:#888;font-style:italic;">Correspondência por nome — Indicador usa campo de texto livre, confirme manualmente.</p>'
+        + '<table><tr><th>Pilar</th><th>Indicador</th></tr>'
+        + linhaOuVazio(indicadoresDaPessoa, (i) => '<tr><td>' + esc(i.pilar || '-') + '</td><td><b>' + esc(i.nome) + '</b></td></tr>')
+        + '</table>';
+    }
+    if (areasDaPessoa.length) {
+      html += '<h2>Áreas</h2><table><tr><th>Área</th></tr>'
+        + linhaOuVazio(areasDaPessoa, (a) => '<tr><td><b>' + esc(a.nome) + '</b></td></tr>')
+        + '</table>';
+    }
+    if (fornecedoresDaPessoa.length) {
+      html += '<h2>Fornecedores (Gestor do Contrato)</h2><table><tr><th>Fornecedor</th></tr>'
+        + linhaOuVazio(fornecedoresDaPessoa, (f) => '<tr><td><b>' + esc(f.nome) + '</b></td></tr>')
+        + '</table>';
+    }
+    if (backupsDaPessoa.length) {
+      html += '<h2>Backups (Stakeholder)</h2><table><tr><th>Backup</th></tr>'
+        + linhaOuVazio(backupsDaPessoa, (b) => '<tr><td><b>' + esc(b.nome) + '</b></td></tr>')
+        + '</table>';
+    }
+  }
+
+  html += '<div style="margin-top:30px;border-top:1px solid #ddd;padding-top:10px;font-size:8pt;color:#999;text-align:center;">Relatório gerado em ' + new Date().toLocaleDateString('pt-BR') + ' • Fortes Tecnologia</div></body></html>';
+  return html;
+}
 
 // ============================================================
 // ORGANOGRAMA -- hierarquia de Pessoas pelo Líder Imediato, com Área no nó.
@@ -1061,9 +1460,13 @@ window.fecharModalPessoa = () => document.getElementById('modalPessoa').classLis
 // ============================================================
 window.abrirModalOrganograma = () => {
   _atualizarModoOrganograma();
-  document.getElementById('modalOrganograma').classList.add('open');
+  document.getElementById('drawerOrganograma').classList.add('open');
+  document.getElementById('drawerOverlayOrganograma').classList.add('open');
 };
-window.fecharModalOrganograma = () => document.getElementById('modalOrganograma').classList.remove('open');
+window.fecharModalOrganograma = () => {
+  document.getElementById('drawerOrganograma').classList.remove('open');
+  document.getElementById('drawerOverlayOrganograma').classList.remove('open');
+};
 
 window._atualizarModoOrganograma = () => {
   const modo = (document.querySelector('input[name="orgModo"]:checked') || {}).value || 'geral';
@@ -1162,17 +1565,17 @@ function _htmlOrganograma(titulo, raizes, total) {
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',Arial,sans-serif;color:#222;background:#f5f6fa;padding:24px}
 .org-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:24px}
-.org-header h1{font-size:18pt;color:#1a237e}
+.org-header h1{font-size:18pt;color:#d60014}
 .org-header .sub{font-size:9pt;color:#888;margin-top:4px}
-.btn-print{padding:9px 18px;background:#1a237e;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}
+.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}
 .btn-print:hover{opacity:.9}
 .org-tree{display:flex;justify-content:center;flex-wrap:wrap;gap:24px;align-items:flex-start;padding:10px}
 /* Nó: cartão + filhos abaixo, com linhas conectoras */
 .org-no{display:flex;flex-direction:column;align-items:center;position:relative}
-.org-card{background:#fff;border:1.5px solid #c5cae9;border-top:4px solid #1a237e;border-radius:10px;padding:10px 16px;min-width:150px;max-width:220px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.1);position:relative;z-index:1}
-.org-nome{font-weight:700;color:#1a237e;font-size:10pt}
+.org-card{background:#fff;border:1.5px solid #c5cae9;border-top:4px solid #d60014;border-radius:10px;padding:10px 16px;min-width:150px;max-width:220px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.1);position:relative;z-index:1}
+.org-nome{font-weight:700;color:#d60014;font-size:10pt}
 .org-cargo{font-size:8.5pt;color:#555;margin-top:2px}
-.org-area{display:inline-block;margin-top:6px;padding:2px 9px;border-radius:10px;background:#e8eaf6;color:#1a237e;font-size:7.5pt;font-weight:700}
+.org-area{display:inline-block;margin-top:6px;padding:2px 9px;border-radius:10px;background:#fce8ea;color:#d60014;font-size:7.5pt;font-weight:700}
 .org-filhos{display:flex;justify-content:center;gap:20px;flex-wrap:nowrap;margin-top:26px;position:relative}
 /* Conectores */
 .org-filhos::before{content:'';position:absolute;top:-26px;left:50%;width:2px;height:26px;background:#c5cae9}
@@ -1188,6 +1591,8 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#222;background:#f5f6fa;paddi
 <body>
 <div class="org-header">
   <div>
+    <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
+    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
     <h1>${esc(titulo)}</h1>
     <div class="sub">${total} pessoa${total === 1 ? '' : 's'} • ${new Date().toLocaleDateString('pt-BR')} • Fortes Tecnologia</div>
   </div>
@@ -1203,6 +1608,30 @@ window.salvarPessoaCadastro = async () => {
   const nome = document.getElementById('pessoaNome').value.trim();
   if (!nome) return showToast('Informe o nome da pessoa.', '#e65100');
   const id = document.getElementById('pessoaId').value || null;
+  const email = document.getElementById('pessoaEmail').value.trim();
+
+  // Perfil de Sistema: atributo da Pessoa (dependencias.perfis), sempre
+  // reenviado no payload -- _salvarDependencia grava um objeto completo, e um
+  // campo ausente vira '[]' mesmo com merge:true. Quem nao gerencia perfis
+  // (nao-admin) nao tem os checkboxes visiveis; pra nao apagar o que ja
+  // estava gravado, reenvia o valor original carregado na abertura do modal.
+  const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIS);
+  const perfisMarcados = podeGerenciar
+    ? Array.from(document.querySelectorAll('#pessoaPerfilBox .pessoa-perfil-check:checked')).map((el) => el.value)
+    : [];
+
+  // Auto-protecao decidida ANTES de salvar qualquer coisa: se o admin esta
+  // tirando o proprio acesso de admin, confirma -- e se cancelar, a mudanca
+  // de perfil nao é gravada em lugar nenhum (nem no atributo da Pessoa, nem
+  // em config_perfis), só o resto do cadastro é salvo normalmente.
+  let perfilCancelado = false;
+  const meuEmail = String(window.USER_EMAIL || '').toLowerCase();
+  if (podeGerenciar && email && email.toLowerCase() === meuEmail && !Perfis.ehAdmin(perfisMarcados)
+    && !confirm('Você está retirando o seu próprio acesso de administrador.\n\nSe não houver outro administrador, ninguém mais consegue dar acesso a ninguém sem entrar no console do Firebase. Continuar?')) {
+    perfilCancelado = true;
+  }
+
+  const perfisParaEntidade = (podeGerenciar && !perfilCancelado) ? perfisMarcados : (window._pessoaPerfisOriginais || []);
 
   await comBotaoCarregando('btnSalvarPessoaCadastro', async () => {
     try {
@@ -1218,19 +1647,43 @@ window.salvarPessoaCadastro = async () => {
         // Líder imediato -- id de outra Pessoa (base do organograma).
         liderImediato: document.getElementById('pessoaLider').value,
         telefone: document.getElementById('pessoaTelefone').value.trim(),
-        email: document.getElementById('pessoaEmail').value.trim(),
+        email,
+        perfis: perfisParaEntidade,
       });
-      fecharModalPessoa();
+      if (_temDrawerPaiEmpilhado()) {
+        fecharModalPessoa();
+      } else if (!id) {
+        // Sem fechar o drawer, o próximo "Salvar" precisa gravar no MESMO
+        // registro em vez de criar uma segunda pessoa idêntica.
+        document.getElementById('pessoaId').value = r.id;
+        document.getElementById('modalPessoaTitulo').textContent = 'Editar Pessoa';
+      }
       API.invalidate('getDependencias');
       // Ja sabemos exatamente o que foi gravado (r.dado) -- so atualiza esta
       // pessoa no array ja carregado, sem buscar o catalogo inteiro de novo.
       const item = { ...r.dado, id: r.id };
       const idx = pessoasData.findIndex((x) => String(x.id) === String(r.id));
       if (idx >= 0) pessoasData[idx] = item; else pessoasData.push(item);
-      renderizarPessoas();
-      showToast('✅ Salvo!', '#2e7d32');
+      if (document.getElementById('rowsPessoas')) renderizarPessoas();
+      _popularSelectBackupStakeholder(r.id);
+      showToast(perfilCancelado ? '✅ Salvo. Perfil de sistema não foi alterado.' : '✅ Salvo!', perfilCancelado ? '#e65100' : '#2e7d32');
     } catch (e) {
       showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      return;
+    }
+
+    // Espelho em config_perfis (fonte real de RBAC) -- só quem gerencia
+    // perfis, com e-mail, sem cancelamento de auto-proteção, e com ao menos
+    // um perfil marcado (revogar acesso por completo continua exclusivo da
+    // tela Perfis de Acesso, com seu próprio confirm).
+    if (!podeGerenciar || !email || perfilCancelado || !perfisMarcados.length) return;
+
+    try {
+      const area = (window._pessoaAreas && window._pessoaAreas[0]) || '';
+      await API.salvarPerfilAcesso({ email, perfis: perfisMarcados, area });
+      perfisData = await API.getPerfis();
+    } catch (e) {
+      showToast('⚠️ Pessoa salva, mas não foi possível salvar o perfil de sistema: ' + (e.message || 'erro desconhecido'), '#e65100');
     }
   });
 };
@@ -1259,12 +1712,17 @@ window.excluirPessoaCadastro = async (id) => {
 let processosOrdenacao = criarOrdenacao('score', 'desc');
 let processosFiltroArea = '';
 let processosFiltroTier = '';
+// Edição em lote -- ids marcados na tabela (reset a cada carga da tela).
+let processosSelecionados = new Set();
 
 async function processos() {
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Processos de Negócio</h2><p class="page-sub">Cadastre os processos críticos de cada área</p></div>
-      <button class="btn btn-primary" onclick="abrirModalProcesso()">+ Novo Processo</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="abrirDrawerProcessosLote()" id="btnEditarProcessosLote" style="color:#1565c0;border-color:#1565c0;display:none;">✏️ Editar selecionados</button>
+        <button class="btn btn-primary" onclick="abrirModalProcesso()">+ Novo Processo</button>
+      </div>
     </div>
     <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
       <div>
@@ -1312,6 +1770,7 @@ async function processos() {
       <table>
         <thead>
           <tr>
+            <th style="width:3%;text-align:center;padding-left:6px;padding-right:6px;"><input type="checkbox" id="chkTodosProcessos" onchange="toggleTodosProcessos(this.checked)" title="Selecionar todos"></th>
             <th onclick="ordenarProcessos('area')" style="cursor:pointer;width:10%;">Área <span id="sort-area"></span></th>
             <th onclick="ordenarProcessos('processo')" style="cursor:pointer;width:14%;">Processo de Negócio <span id="sort-processo"></span></th>
             <th onclick="ordenarProcessos('responsavel')" style="cursor:pointer;width:9%;">Responsável <span id="sort-responsavel"></span></th>
@@ -1334,7 +1793,7 @@ async function processos() {
       </div>
     </div></div>
     <div class="modal-overlay" id="modalEnviar"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
-      <h3 style="font-size:1.1em;font-weight:700;color:#1a237e;border-bottom:2px solid #e8eaf6;padding-bottom:12px;margin-bottom:20px;">Enviar Questionário por E-mail</h3>
+      <h3 style="font-size:1.1em;font-weight:700;color:#d60014;border-bottom:2px solid #fce8ea;padding-bottom:12px;margin-bottom:20px;">Enviar Questionário por E-mail</h3>
       <input type="hidden" id="enviarProcessoId">
       <p id="enviarProcessoNome" style="font-size:0.9em;color:#555;margin-bottom:20px;"></p>
       <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">E-mail do Respondente</label>
@@ -1359,14 +1818,14 @@ async function processos() {
         <input type="hidden" id="qProcessoId">
         <input type="hidden" id="qArea">
         <input type="hidden" id="qProcesso">
-        <div style="background:#f0f4ff;border-left:4px solid #1a237e;border-radius:0 7px 7px 0;padding:14px 18px;margin-bottom:24px;">
-          <div style="font-size:0.78em;font-weight:700;color:#1a237e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Premissas da Avaliação</div>
+        <div style="background:#f0f4ff;border-left:4px solid #d60014;border-radius:0 7px 7px 0;padding:14px 18px;margin-bottom:24px;">
+          <div style="font-size:0.78em;font-weight:700;color:#d60014;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Premissas da Avaliação</div>
           <ul style="margin:0;padding-left:18px;">
             <li style="font-size:0.88em;color:#333;line-height:1.6;">O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.</li>
           </ul>
         </div>
         <div id="perguntas-container"></div>
-        <div style="background:linear-gradient(135deg,#1a237e,#283593);padding:20px;border-radius:8px;margin:20px 0;color:white;">
+        <div style="background:linear-gradient(135deg,#d60014,#e6262b);padding:20px;border-radius:8px;margin:20px 0;color:white;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
             <span style="font-weight:600;font-size:1.1em;">Score Total</span>
             <span id="scoreTotal" style="font-size:2.5em;font-weight:700;">0</span>
@@ -1391,8 +1850,8 @@ async function processos() {
         <button onclick="fecharModal()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
-        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
-          <button id="tab-identificacao" onclick="trocarAbaProcesso('identificacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Identificação</button>
+        <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
+          <button id="tab-identificacao" onclick="trocarAbaProcesso('identificacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Identificação</button>
           <button id="tab-avaliacao" onclick="trocarAbaProcesso('avaliacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Avaliação</button>
           <button id="tab-bia" onclick="trocarAbaProcesso('bia')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BIA</button>
           <button id="tab-bcp" onclick="trocarAbaProcesso('bcp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BCP</button>
@@ -1405,7 +1864,7 @@ async function processos() {
           <div id="painel-identificacao">
             <div style="margin-bottom:20px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Processo de Negócio</label>
-              <input type="text" id="fProcesso" placeholder="Ex: Gestão de Identidades e Acessos" style="width:100%;padding:10px 12px;border:2px solid #1a237e;border-radius:7px;font-size:1em;font-weight:600;box-sizing:border-box;">
+              <input type="text" id="fProcesso" placeholder="Ex: Gestão de Identidades e Acessos" style="width:100%;padding:10px 12px;border:2px solid #d60014;border-radius:7px;font-size:1em;font-weight:600;box-sizing:border-box;">
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
@@ -1435,9 +1894,9 @@ async function processos() {
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Levantamento PCN</label>
               <div id="levantamentoStatus" style="font-size:0.82em;color:#999;margin-bottom:8px;"></div>
               <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button class="btn btn-ghost" onclick="abrirLevantamento()" id="btnAbrirLev" style="font-size:0.82em;color:#1a237e;border-color:#1a237e;padding:6px 14px;display:none;">📄 Abrir Levantamento</button>
+                <button class="btn btn-ghost" onclick="abrirLevantamento()" id="btnAbrirLev" style="font-size:0.82em;color:#d60014;border-color:#d60014;padding:6px 14px;display:none;">📄 Abrir Levantamento</button>
                 <button class="btn btn-ghost" onclick="copiarLinkLevantamento()" style="font-size:0.82em;color:#555;border-color:#ccc;padding:6px 14px;">🔗 Copiar link</button>
-                <button class="btn btn-ghost" onclick="enviarLinkLevantamento()" style="font-size:0.82em;color:#1a237e;border-color:#1a237e;padding:6px 14px;">📧 Enviar por e-mail</button>
+                <button class="btn btn-ghost" onclick="enviarLinkLevantamento()" style="font-size:0.82em;color:#d60014;border-color:#d60014;padding:6px 14px;">📧 Enviar por e-mail</button>
               </div>
             </div>
           </div>
@@ -1511,7 +1970,7 @@ async function processos() {
               <input type="hidden" id="fDependencia">
               <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;">
                 <button class="btn btn-ghost" onclick="copiarLinkBIA()" style="font-size:0.82em;color:#555;border-color:#ccc;padding:6px 14px;" title="Gera o link e copia para a área de transferência">🔗 Copiar link</button>
-                <button class="btn btn-ghost" onclick="enviarBIADependencias()" style="font-size:0.82em;color:#1a237e;border-color:#1a237e;padding:6px 14px;" title="Envia formulário por e-mail">📧 Enviar por e-mail</button>
+                <button class="btn btn-ghost" onclick="enviarBIADependencias()" style="font-size:0.82em;color:#d60014;border-color:#d60014;padding:6px 14px;" title="Envia formulário por e-mail">📧 Enviar por e-mail</button>
               </div>
             </div>
 
@@ -1553,11 +2012,89 @@ async function processos() {
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="fecharModal()">Cancelar</button>
+        <button class="btn btn-ghost" onclick="fecharModal()">Fechar</button>
         <button class="btn btn-ghost" onclick="gerarDossieProcesso()" style="color:#1565c0;border-color:#1565c0;">📄 Dossiê</button>
         <button class="btn btn-ghost" onclick="abrirPCNSalvo()" id="btnPcnSalvo" style="color:#2e7d32;border-color:#2e7d32;display:none;">📂 Abrir PCN</button>
         <button class="btn btn-ghost" onclick="gerarPCNProcesso()" id="btnGerarPcn" style="color:#2e7d32;border-color:#2e7d32;">🤖 Gerar PCN</button>
         <button class="btn btn-primary" onclick="salvarProcesso()">Salvar</button>
+      </div>
+    </div>
+    <div class="drawer-overlay" id="drawerOverlayProcessosLote" onclick="fecharDrawerProcessosLote()"></div>
+    <div class="drawer" id="drawerProcessosLote">
+      <div class="drawer-header">
+        <h3 id="loteProcessosTitulo">Editar processos selecionados</h3>
+        <button onclick="fecharDrawerProcessosLote()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <p style="font-size:0.82em;color:#888;margin-bottom:16px;">Só os campos alterados abaixo são aplicados aos processos selecionados — deixe em "Não alterar" o que não deve mudar.</p>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Criticidade (Pré-Avaliação)</label>
+          <select id="loteTierManual" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+            <option value="__manter__" selected>— Não alterar —</option>
+            <option value="">Não definido</option>
+            <option value="Tier 1 (Crítico)">Tier 1 (Crítico)</option>
+            <option value="Tier 2 (Essencial)">Tier 2 (Essencial)</option>
+            <option value="Tier 3 (Suporte)">Tier 3 (Suporte)</option>
+          </select>
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Status</label>
+          <select id="loteBiaHomologada" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+            <option value="__manter__" selected>— Não alterar —</option>
+            <option value="">Selecione...</option>
+            <option>Processo Não Avaliado</option>
+            <option>Processo Avaliado</option>
+            <option>BIA Realizado</option>
+          </select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO Esperado</label>
+            <select id="loteRTO" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              <option value="__manter__" selected>— Não alterar —</option>
+              <option value="">Selecione...</option>
+              <option value="< 1 hora">Menos de 1 hora</option>
+              <option value="< 4 horas">Até 4 horas</option>
+              <option value="4h a 8h">4 a 8 horas</option>
+              <option value="8h a 24h">8 a 24 horas</option>
+              <option value="> 24 horas">Mais de 24 horas</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO Esperado</label>
+            <select id="loteRPO" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              <option value="__manter__" selected>— Não alterar —</option>
+              <option value="">Selecione...</option>
+              <option value="0 (nenhuma perda)">Nenhuma perda</option>
+              <option value="< 1 hora">Até 1 hora</option>
+              <option value="< 4 horas">Até 4 horas</option>
+              <option value="24 horas">24 horas</option>
+              <option value="> 24 horas">Mais de 24 horas</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">MTD</label>
+            <select id="loteMTD" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              <option value="__manter__" selected>— Não alterar —</option>
+              <option value="">Selecione...</option>
+              <option value="4 horas">4 horas</option>
+              <option value="8 horas">8 horas</option>
+              <option value="24 horas">24 horas</option>
+              <option value="48 horas">48 horas</option>
+              <option value="72 horas">72 horas</option>
+              <option value="> 72 horas">Mais de 72 horas</option>
+            </select>
+          </div>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Dependências Críticas</label>
+          <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Adicionadas aqui somam às dependências que cada processo já tem — nada é removido.</span>
+          <div id="loteDependenciasPorCategoria"></div>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerProcessosLote()">Cancelar</button>
+        <button class="btn btn-primary" id="btnAplicarLoteProcessos" onclick="aplicarEdicaoLoteProcessos()">Aplicar</button>
       </div>
     </div>`;
 
@@ -1615,6 +2152,7 @@ async function processos() {
   
   window.processosData = processosEnriquecidos;
   window.areasDisponiveis = areas;
+  processosSelecionados = new Set();
   renderizarProcessos();
 }
 
@@ -1674,10 +2212,11 @@ function renderizarProcessos() {
         const status = Criticidade.tierDoProcesso(p);
         const statusColor = Criticidade.corDoTier(status);
         return `<tr style="cursor:pointer;" onclick="editarProcesso('${p.id}')">
+        <td style="text-align:center;padding-left:6px;padding-right:6px;" onclick="event.stopPropagation();"><input type="checkbox" class="chk-processo" data-id="${esc(p.id)}" ${processosSelecionados.has(p.id) ? 'checked' : ''} onchange="toggleProcessoSelecionado('${p.id}', this.checked)"></td>
         <td>${esc(p.area)}</td>
         <td><strong>${esc(p.processo)}</strong></td>
         <td>${p.responsavelArea || p.responsavel || ''}</td>
-        <td><span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.8em;font-weight:600;color:white;background:${statusColor};">${status}</span></td>
+        <td>${_htmlBadge(_nivelTierProcesso(status), status)}</td>
         <td style="text-align:center;font-weight:700;color:${p.avaliado || p.score > 0 ? statusColor : '#bbb'};font-size:0.95em;">${p.avaliado || p.score > 0 ? p.score : '-'}</td>
         <td style="font-size:0.8em;color:#555;">${p.biaHomologada || '-'}</td>
         <td style="font-size:0.8em;color:#555;">${p.bcpStatus || '-'}</td>
@@ -1690,7 +2229,7 @@ function renderizarProcessos() {
             </svg>
           </button>
           <button class="btn-icon" onclick="avaliarProcesso('${p.id}')" title="Avaliar">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1a237e" stroke-width="2">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d60014" stroke-width="2">
               <path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
             </svg>
           </button>
@@ -1718,8 +2257,258 @@ function renderizarProcessos() {
         </td>
       </tr>`;
       }).join('')
-    : `<tr><td colspan="7" style="text-align:center;color:#999;padding:40px;">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
+    : `<tr><td colspan="8" style="text-align:center;color:#999;padding:40px;">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
+
+  // Coerência da seleção com a lista filtrada: linhas escondidas por filtro
+  // continuam marcadas em processosSelecionados (não perde seleção ao trocar
+  // filtro), mas o checkbox "marcar todos" e o botão refletem só o visível.
+  const chkTodos = document.getElementById('chkTodosProcessos');
+  if (chkTodos) {
+    chkTodos.checked = data.length > 0 && data.every((p) => processosSelecionados.has(p.id));
+    chkTodos.indeterminate = !chkTodos.checked && data.some((p) => processosSelecionados.has(p.id));
+  }
+  _atualizarBotaoLoteProcessos();
 }
+
+window.toggleProcessoSelecionado = (id, checked) => {
+  if (checked) processosSelecionados.add(id); else processosSelecionados.delete(id);
+  _atualizarBotaoLoteProcessos();
+  // Reflete no checkbox "marcar todos" sem re-renderizar a tabela inteira:
+  // olha só as linhas hoje visíveis (pós-filtro).
+  const chks = [...document.querySelectorAll('#rows .chk-processo')];
+  const chkTodos = document.getElementById('chkTodosProcessos');
+  if (chkTodos && chks.length) {
+    const todasMarcadas = chks.every((el) => processosSelecionados.has(el.dataset.id));
+    const algumaMarcada = chks.some((el) => processosSelecionados.has(el.dataset.id));
+    chkTodos.checked = todasMarcadas;
+    chkTodos.indeterminate = !todasMarcadas && algumaMarcada;
+  }
+};
+
+window.toggleTodosProcessos = (checked) => {
+  // Cobre as linhas atualmente renderizadas (já filtradas/buscadas) -- não
+  // existe paginação nesta tela hoje, então "todos" aqui é "todos os visíveis".
+  document.querySelectorAll('#rows .chk-processo').forEach((el) => {
+    const id = el.dataset.id;
+    if (!id) return;
+    if (checked) processosSelecionados.add(id); else processosSelecionados.delete(id);
+    el.checked = checked;
+  });
+  _atualizarBotaoLoteProcessos();
+};
+
+function _atualizarBotaoLoteProcessos() {
+  const btn = document.getElementById('btnEditarProcessosLote');
+  if (!btn) return;
+  const n = processosSelecionados.size;
+  btn.style.display = n > 0 ? 'inline-block' : 'none';
+  btn.textContent = n > 0 ? `✏️ Editar selecionados (${n})` : '✏️ Editar selecionados';
+}
+
+// ============================================================
+// EDIÇÃO EM LOTE DE PROCESSOS -- aplica os mesmos valores a N processos de
+// uma vez. Cada campo simples só entra no payload se saiu de "__manter__"
+// (nunca sobrescreve com vazio por esquecimento). Dependências Críticas soma
+// à lista que cada processo já tem, nunca substitui.
+// ============================================================
+window._loteDependencias = [];
+window._loteDependenciasCatalogoPorCategoria = {};
+
+window.abrirDrawerProcessosLote = () => {
+  if (!processosSelecionados.size) return;
+  document.getElementById('loteProcessosTitulo').textContent = `Editar ${processosSelecionados.size} processo(s) selecionado(s)`;
+  ['loteTierManual', 'loteBiaHomologada', 'loteRTO', 'loteRPO', 'loteMTD'].forEach((id) => {
+    document.getElementById(id).value = '__manter__';
+  });
+  window._loteDependencias = [];
+  // Mesmo catálogo do picker de dependência do drawer individual, agrupado
+  // por categoria: catálogo de Dependências + outros Processos como alvo
+  // pickável (já carregados nesta tela). "Processos Internos" nunca oferece
+  // um processo que já está no próprio lote -- não faz sentido um processo
+  // selecionado virar dependência de outro que também está sendo editado
+  // na mesma leva.
+  const porCategoria = {};
+  (window.dependenciasCatalogo || []).forEach((d) => {
+    if (!porCategoria[d.categoria]) porCategoria[d.categoria] = [];
+    porCategoria[d.categoria].push({ nome: d.nome, id: d.id || null });
+  });
+  (window.processosData || [])
+    .filter((p) => !processosSelecionados.has(p.id))
+    .forEach((p) => {
+      if (!porCategoria['Processos Internos']) porCategoria['Processos Internos'] = [];
+      porCategoria['Processos Internos'].push({ nome: p.processo, id: p.id });
+    });
+  window._loteDependenciasCatalogoPorCategoria = porCategoria;
+  _renderLoteDependenciasPorCategoria();
+  document.getElementById('drawerProcessosLote').classList.add('open');
+  document.getElementById('drawerOverlayProcessosLote').classList.add('open');
+};
+
+window.fecharDrawerProcessosLote = () => {
+  document.getElementById('drawerProcessosLote').classList.remove('open');
+  document.getElementById('drawerOverlayProcessosLote').classList.remove('open');
+};
+
+/**
+ * Uma seção por categoria de dependência (mesmas categorias fixas do
+ * componente individual, ver renderDependenciaTabela): ícone, exemplo, chips
+ * dos itens já adicionados naquela categoria e um campo de busca com
+ * dropdown de sugestões. Sem "+ Criar" (o lote só aplica dependências que já
+ * existem no catálogo) e sem a lista de "disponíveis" abaixo do campo --
+ * simplificação deliberada em relação ao componente individual.
+ */
+function _renderLoteDependenciasPorCategoria() {
+  const cont = document.getElementById('loteDependenciasPorCategoria');
+  if (!cont) return;
+  const porCategoria = window._loteDependenciasCatalogoPorCategoria || {};
+  const selecionadas = window._loteDependencias || [];
+
+  const categoriasSet = new Set(Object.keys(porCategoria));
+  ['Fornecedores', 'Pessoas', 'Processos Internos', ...DEPENDENCIA_CATEGORIAS_TECNICAS.filter((c) => c !== 'Outros')].forEach((c) => categoriasSet.add(c));
+  selecionadas.forEach((item) => categoriasSet.add(item.categoria || 'Outros'));
+  const categorias = [...categoriasSet].sort();
+
+  cont.innerHTML = categorias.map((cat) => {
+    const icon = DEPENDENCIA_CAT_ICONES[cat] || '📦';
+    const example = DEPENDENCIA_CAT_EXEMPLOS[cat] || '';
+    const itensCat = selecionadas.filter((item) => (item.categoria || 'Outros') === cat);
+    const chips = itensCat.map((item) => {
+      const globalIdx = selecionadas.indexOf(item);
+      return `<span style="display:inline-flex;align-items:center;gap:6px;background:#d60014;color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(item.nome)}<button onclick="removerDependenciaLote(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
+    }).join(' ');
+    return `
+      <div style="padding:12px 0;border-bottom:1px solid #f0f0f0;">
+        <div style="font-weight:600;font-size:0.88em;color:#222;margin-bottom:2px;"><span style="margin-right:4px;">${icon}</span>${esc(cat)}${itensCat.length ? ` <span style="font-size:0.8em;color:#888;font-weight:400;">(${itensCat.length})</span>` : ''}</div>
+        ${example ? `<div style="font-size:0.72em;color:#999;font-style:italic;margin-bottom:6px;">${esc(example)}</div>` : ''}
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;">${chips}</div>
+        <div style="position:relative;">
+          <input type="text" class="lote-dep-cat-input" data-categoria="${esc(cat)}" placeholder="Buscar ${esc(cat).toLowerCase()}..." autocomplete="off" style="width:100%;box-sizing:border-box;border:1.5px solid #e0e0e0;border-radius:7px;outline:none;font-size:0.88em;padding:7px 10px;" onfocus="mostrarDropdownLoteCategoria(this,'${escJs(cat)}')" oninput="mostrarDropdownLoteCategoria(this,'${escJs(cat)}')" onblur="setTimeout(()=>{const dd=this.parentElement.querySelector('.lote-dep-cat-dropdown');if(dd)dd.style.display='none';},300)">
+          <div class="lote-dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:180px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  cont.querySelectorAll('.lote-dep-cat-input').forEach((input) => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const cat = input.dataset.categoria;
+        const filtro = input.value.trim().toLowerCase();
+        if (!filtro) return;
+        const jaNaCategoria = new Set((window._loteDependencias || []).filter((d) => d.categoria === cat).map((d) => d.id || d.nome));
+        const match = (porCategoria[cat] || []).find((d) => !jaNaCategoria.has(d.id || d.nome) && d.nome.toLowerCase().includes(filtro));
+        if (match) {
+          selecionarDependenciaLoteCategoria(match.nome, cat, match.id);
+          input.value = '';
+          const dd = input.parentElement.querySelector('.lote-dep-cat-dropdown');
+          if (dd) dd.style.display = 'none';
+        }
+      } else if (e.key === 'Escape') {
+        const dd = input.parentElement.querySelector('.lote-dep-cat-dropdown');
+        if (dd) dd.style.display = 'none';
+        input.blur();
+      }
+    });
+  });
+}
+
+window.mostrarDropdownLoteCategoria = (input, categoria) => {
+  const dropdown = input.parentElement.querySelector('.lote-dep-cat-dropdown');
+  if (!dropdown) return;
+  const filtro = input.value.trim().toLowerCase();
+  const jaNaCategoria = new Set((window._loteDependencias || []).filter((d) => d.categoria === categoria).map((d) => d.id || d.nome));
+  const disponiveis = ((window._loteDependenciasCatalogoPorCategoria || {})[categoria] || [])
+    .filter((d) => !jaNaCategoria.has(d.id || d.nome) && (filtro === '' || d.nome.toLowerCase().includes(filtro)));
+
+  if (!disponiveis.length) { dropdown.style.display = 'none'; return; }
+
+  dropdown.innerHTML = disponiveis.map((d) => `<div class="lote-dep-option" onmousedown="selecionarDependenciaLoteCategoria('${escJs(d.nome)}','${escJs(categoria)}','${escJs(d.id)}')" style="padding:8px 12px;cursor:pointer;font-size:0.88em;color:#222;border-bottom:1px solid #f8f8f8;">${esc(d.nome)}</div>`).join('');
+  dropdown.style.display = 'block';
+  dropdown.querySelectorAll('.lote-dep-option').forEach((el) => {
+    el.addEventListener('mouseenter', () => { el.style.background = '#f0f4ff'; });
+    el.addEventListener('mouseleave', () => { el.style.background = 'transparent'; });
+  });
+};
+
+window.selecionarDependenciaLoteCategoria = (nome, categoria, id) => {
+  const idReal = id || null;
+  window._loteDependencias = window._loteDependencias || [];
+  const jaSelecionado = idReal
+    ? window._loteDependencias.some((d) => d.id === idReal)
+    : window._loteDependencias.some((d) => d.nome === nome && d.categoria === categoria);
+  if (!jaSelecionado) {
+    window._loteDependencias.push({ categoria, nome, id: idReal });
+    _renderLoteDependenciasPorCategoria();
+  }
+};
+
+window.removerDependenciaLote = (idx) => {
+  window._loteDependencias.splice(idx, 1);
+  _renderLoteDependenciasPorCategoria();
+};
+
+window.aplicarEdicaoLoteProcessos = async () => {
+  const ids = [...processosSelecionados];
+  if (!ids.length) return;
+
+  const camposSimples = {
+    tierManual: document.getElementById('loteTierManual').value,
+    biaHomologada: document.getElementById('loteBiaHomologada').value,
+    rto: document.getElementById('loteRTO').value,
+    rpo: document.getElementById('loteRPO').value,
+    mtd: document.getElementById('loteMTD').value,
+  };
+  const camposTocados = {};
+  Object.keys(camposSimples).forEach((campo) => {
+    if (camposSimples[campo] !== '__manter__') camposTocados[campo] = camposSimples[campo];
+  });
+  const novasDependencias = window._loteDependencias || [];
+
+  if (!Object.keys(camposTocados).length && !novasDependencias.length) {
+    return showToast('Escolha ao menos um campo para alterar.', '#e65100');
+  }
+  if (!confirm(`Aplicar as alterações a ${ids.length} processo(s) selecionado(s)?`)) return;
+
+  await comBotaoCarregando('btnAplicarLoteProcessos', async () => {
+    let sucesso = 0;
+    const erros = [];
+    for (const id of ids) {
+      const processo = (window.processosData || []).find((p) => p.id === id);
+      if (!processo) continue;
+      const payload = { id, ...camposTocados };
+      let uniao = null;
+      if (novasDependencias.length) {
+        const existentes = Array.isArray(processo.dependenciaItens) ? processo.dependenciaItens : [];
+        uniao = [...existentes];
+        novasDependencias.forEach((nova) => {
+          const jaTem = uniao.some((d) => (nova.id && d.id === nova.id) || (!nova.id && d.nome === nova.nome && d.categoria === nova.categoria));
+          if (!jaTem) uniao.push(nova);
+        });
+        payload.dependenciaItens = uniao;
+        payload.dependencia = uniao.map((d) => d.nome).join(', ');
+      }
+      try {
+        await API.salvarProcesso(payload);
+        Object.assign(processo, camposTocados);
+        if (uniao) { processo.dependenciaItens = uniao; processo.dependencia = uniao.map((d) => d.nome).join(', '); }
+        sucesso++;
+      } catch (e) {
+        erros.push(`${processo.processo || id}: ${e.message || 'erro desconhecido'}`);
+      }
+    }
+
+    API.invalidate('getProcessos');
+    processosSelecionados = new Set();
+    fecharDrawerProcessosLote();
+    renderizarProcessos();
+
+    if (!erros.length) {
+      showToast(`✅ ${sucesso} processo(s) atualizado(s)!`, '#2e7d32');
+    } else {
+      showToast(`⚠️ ${sucesso} de ${ids.length} atualizado(s). Erro em: ${erros.join('; ')}`, '#e65100');
+    }
+  });
+};
 
 window.filtrarPorArea = (area) => {
   processosFiltroArea = area;
@@ -1819,20 +2608,7 @@ function renderDependenciaTabela() {
   if (!tabelaContainer) return;
   const catalogo = window.dependenciasCatalogo || [];
   const selecionadas = window._dependenciaSelecionadas || [];
-  
-  // Ícones por categoria
-  const catIcons = {
-    'Fornecedores': '🏢', 'Fornecedor': '🏢',
-    'Pessoas': '👤', 'Pessoa': '👤',
-    'Processos Internos': '🔄', 'Processo Interno': '🔄',
-    'API': '🔌',
-    'Banco de Dados': '🗄️',
-    'Infraestrutura': '⚡',
-    'Segurança': '🔒',
-    'Servidor': '🖥️',
-    'Sistemas': '💻',
-    'Outros': '📦'
-  };
+  const catIcons = DEPENDENCIA_CAT_ICONES;
 
   // Obter categorias do catálogo
   const categoriasSet = new Set(catalogo.map(d => d.categoria));
@@ -1879,26 +2655,7 @@ function renderDependenciaTabela() {
     const recursos = grupos[cat] || [];
     const icon = catIcons[cat] || '📦';
     const count = recursos.length;
-    
-    // Exemplos por categoria
-    const catExamples = {
-      'Fornecedores': 'Ex: Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado',
-      'Fornecedor': 'Ex: Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado',
-      'Pessoas': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
-      'Pessoa': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
-      'Processos Internos': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
-      'Processo Interno': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
-      // As 7 categorias tecnicas -- absorveram o antigo catalogo de
-      // Componentes do Servico (ver dependencias() e DEPENDENCIA_CATEGORIAS_TECNICAS).
-      'API': 'Ex: API de pagamento (PIX/cartão), API de CEP, integração com Receita Federal, webhook de terceiros',
-      'Banco de Dados': 'Ex: PostgreSQL de produção, banco Oracle financeiro, réplica de leitura, data warehouse',
-      'Infraestrutura': 'Ex: Internet, energia elétrica, climatização, switches/roteadores, telefonia',
-      'Segurança': 'Ex: Firewall, VPN, certificado digital, antivírus corporativo, controle de acesso',
-      'Servidor': 'Ex: Servidor de aplicação, servidor de arquivos, cluster de virtualização',
-      'Sistemas': 'Ex: ERP Fortes, e-mail corporativo, Active Directory, sistema bancário',
-      'Outros': 'Ex: Qualquer recurso técnico que não se encaixa nas categorias acima',
-    };
-    const example = catExamples[cat] || '';
+    const example = DEPENDENCIA_CAT_EXEMPLOS[cat] || '';
     
     const tags = recursos.map((item) => {
       const globalIdx = selecionadas.indexOf(item);
@@ -1907,9 +2664,9 @@ function renderDependenciaTabela() {
       const isProcessoLink = item.categoria === 'Processos Internos' && item.id;
       const tooltipBase = (dep ? [dep.empresa, dep.detalhes, dep.telefone].filter(Boolean).join(' • ') : '') || item.nome;
       const tooltip = tooltipBase + (semVinculo ? ' (sem vínculo com o cadastro -- remova e adicione de novo pra linkar)' : isProcessoLink ? ' (clique para abrir o processo)' : '');
-      const corFundo = semVinculo ? '#fff' : '#1a237e';
+      const corFundo = semVinculo ? '#fff' : '#d60014';
       const corTexto = semVinculo ? '#555' : 'white';
-      const borda = semVinculo ? '1.5px dashed #bbb' : '1.5px solid #1a237e';
+      const borda = semVinculo ? '1.5px dashed #bbb' : '1.5px solid #d60014';
       const onclickTag = isProcessoLink ? ` onclick="editarProcesso('${item.id}')"` : '';
       return `<span class="dep-tag-item"${onclickTag} style="display:inline-flex;align-items:center;gap:3px;background:${corFundo};color:${corTexto};border:${borda};${isProcessoLink ? 'cursor:pointer;' : 'cursor:default;'}padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;" title="${esc(tooltip)}">${esc(item.nome)}${semVinculo ? ' <span style="opacity:0.7;">⚠</span>' : ''}<button onclick="event.stopPropagation();removerDependenciaTag(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:${semVinculo ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.7)'};line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
     }).join(' ');
@@ -1929,7 +2686,7 @@ function renderDependenciaTabela() {
       : catalogo.filter(d => d.categoria === cat && !selecionadas.some(s => s.id && s.id === d.id));
     const chips = disponiveisNaCat.map(d => {
       const label = d.empresa ? d.empresa + ' - ' + d.nome : d.nome;
-      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#1a237e'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="selecionarDependenciaCategoria('${escJs(d.nome)}','${escJs(d.categoria)}','${escJs(d.id)}')" title="${[d.detalhes, d.telefone].filter(Boolean).join(' • ') || d.nome}">${label}</span>`;
+      return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#d60014;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#d60014'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="selecionarDependenciaCategoria('${escJs(d.nome)}','${escJs(d.categoria)}','${escJs(d.id)}')" title="${[d.detalhes, d.telefone].filter(Boolean).join(' • ') || d.nome}">${label}</span>`;
     }).join(' ');
 
     html += `
@@ -1943,7 +2700,7 @@ function renderDependenciaTabela() {
             ${tags}
             ${emptyMsg}
             <div style="position:relative;flex:1;min-width:180px;display:flex;align-items:center;gap:4px;">
-              <input type="text" class="dep-cat-input" data-categoria="${cat}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #e8eaf6;outline:none;font-size:0.88em;padding:5px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#1a237e';mostrarDropdownCategoria(this,'${escJs(cat)}')" oninput="mostrarDropdownCategoria(this,'${escJs(cat)}')" onblur="this.style.borderColor='#e8eaf6';setTimeout(()=>{const dd=this.parentElement.querySelector('.dep-cat-dropdown');if(dd)dd.style.display='none';},300)">
+              <input type="text" class="dep-cat-input" data-categoria="${cat}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #fce8ea;outline:none;font-size:0.88em;padding:5px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#d60014';mostrarDropdownCategoria(this,'${escJs(cat)}')" oninput="mostrarDropdownCategoria(this,'${escJs(cat)}')" onblur="this.style.borderColor='#fce8ea';setTimeout(()=>{const dd=this.parentElement.querySelector('.dep-cat-dropdown');if(dd)dd.style.display='none';},300)">
               <div class="dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:200px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
             </div>
           </div>
@@ -2047,7 +2804,7 @@ window.mostrarDropdownCategoria = (input, categoria) => {
     const val = input.value.trim().toLowerCase();
     const existeNoCatalogo = catalogo.some(d => d.categoria === categoria && d.nome.toLowerCase() === val);
     if (!existeNoCatalogo) {
-      html += `<div class="dep-option" onmousedown="adicionarDependenciaCategoria('${escJs(input.value.trim())}','${escJs(categoria)}')" style="padding:9px 12px;cursor:pointer;color:#1a237e;font-weight:600;border-top:1.5px solid #e8eaf6;background:#f8f9ff;">+ Criar "${input.value.trim()}"</div>`;
+      html += `<div class="dep-option" onmousedown="adicionarDependenciaCategoria('${escJs(input.value.trim())}','${escJs(categoria)}')" style="padding:9px 12px;cursor:pointer;color:#d60014;font-weight:600;border-top:1.5px solid #fce8ea;background:#f8f9ff;">+ Criar "${input.value.trim()}"</div>`;
     }
   } else if (isProcessos && input.value.trim() && !disponiveis.length) {
     html += `<div style="padding:9px 12px;color:#999;font-size:0.85em;font-style:italic;">Nenhum processo encontrado -- cadastre primeiro em Continuidade de Negócio → Processos.</div>`;
@@ -2243,6 +3000,16 @@ window.removerPreventivaBcp = (idx) => {
   renderPreventivasBcp();
 };
 
+/** Título do drawer de Processo, com badge de tier/score quando já avaliado -- reaproveitado por abrirModalProcesso e, sem fechar, por salvarProcesso (depois de um "Salvar" que criou o registro). */
+function _atualizarTituloDrawerProcesso(p) {
+  const titulo = p ? 'Editar Processo' : 'Novo Processo';
+  const scoreHtml = p && p.score > 0 ? (() => {
+    const status = Criticidade.tierDoProcesso(p);
+    return `<span style="margin-left:12px;vertical-align:middle;">${_htmlBadge(_nivelTierProcesso(status), status + ' • Score ' + p.score)}</span>`;
+  })() : '';
+  document.getElementById('modalTitulo').innerHTML = titulo + scoreHtml + (p ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(p.processo)}</div>` : '');
+}
+
 window.abrirModalProcesso = (p) => {
   // Recarregar catálogos se foram invalidados
   API.getDependencias().then(deps => { window.dependenciasCatalogo = deps; }).catch(()=>{});
@@ -2281,13 +3048,7 @@ window.abrirModalProcesso = (p) => {
   document.getElementById('fArea').onchange = atualizarDono;
   atualizarDono();
   
-  const titulo = p ? 'Editar Processo' : 'Novo Processo';
-  const scoreHtml = p && p.score > 0 ? (() => {
-    const status = Criticidade.tierDoProcesso(p);
-    const cor = Criticidade.corDoTier(status);
-    return `<span style="margin-left:12px;font-size:0.82em;font-weight:600;padding:3px 10px;border-radius:10px;background:${cor};color:white;vertical-align:middle;">${status} &bull; Score ${p.score}</span>`;
-  })() : '';
-  document.getElementById('modalTitulo').innerHTML = titulo + scoreHtml + (p ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(p.processo)}</div>` : '');
+  _atualizarTituloDrawerProcesso(p);
   document.getElementById('drawerProcesso').classList.add('open');
   document.getElementById('drawerOverlayProcesso').classList.add('open');
   // Resetar botão salvar
@@ -2332,7 +3093,7 @@ window.abrirModalProcesso = (p) => {
   if (scoreInfo && p && p.score > 0) {
     const tierLabel = Criticidade.tierDoProcesso(p);
     const cor = Criticidade.corDoTier(tierLabel);
-    scoreInfo.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;"><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div><div style="font-size:1.8em;font-weight:700;color:${cor};">${p.score}</div></div><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div><div style="font-size:0.95em;font-weight:700;"><span style="background:${cor};color:white;padding:4px 12px;border-radius:12px;">${tierLabel}</span></div></div></div>`;
+    scoreInfo.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;"><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div><div style="font-size:1.8em;font-weight:700;color:${cor};">${p.score}</div></div><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div><div style="font-size:0.95em;font-weight:700;">${_htmlBadge(_nivelTierProcesso(tierLabel), tierLabel)}</div></div></div>`;
   } else if (scoreInfo) { scoreInfo.innerHTML = ''; }
   // Preencher RTO/RPO/MTD
   const fRTO = document.getElementById('fRTO'); if (fRTO) fRTO.value = p ? (p.rto || '') : '';
@@ -2449,24 +3210,28 @@ window.salvarProcesso = async () => {
     pEnriquecido.respostas = temResposta ? avalScores : {};
     window.processosData.push(pEnriquecido);
   }
-  fecharModal();
-  // Resetar botão salvar para próximo uso
-  if (btnSalvar) { btnSalvar.disabled = false; btnSalvar.innerHTML = 'Salvar'; btnSalvar.classList.remove('btn-loading'); }
+  // Fica aberto (padrão "Fechar + Salvar") -- o botão continua desabilitado
+  // até a gravação real terminar, pra um clique duplo não criar dois
+  // processos (antes não importava, porque o drawer já tinha fechado).
   renderizarProcessos();
-  showToast('✅ Salvando...', '#1a237e');
+  showToast('✅ Salvando...', '#d60014');
 
   try {
     const result = await API.salvarProcesso(p);
-    
+
     // Salvar avaliação se respondida
     if (temResposta) {
       await API.post('salvarRespostas', { area: p.area, processo: p.processo, scores: avalScores });
     }
-    
+
     // Atualizar ID real se era novo
     if (!p.id && result.id) {
       const tempIdx = window.processosData.findIndex(x => x.id === pEnriquecido.id);
       if (tempIdx !== -1) window.processosData[tempIdx].id = result.id;
+      // Sem fechar o drawer, o próximo "Salvar" precisa gravar no MESMO
+      // registro em vez de criar um segundo processo idêntico.
+      document.getElementById('fId').value = result.id;
+      _atualizarTituloDrawerProcesso({ ...pEnriquecido, id: result.id });
       renderizarProcessos();
     }
     showToast('✅ Salvo!', '#2e7d32');
@@ -2481,6 +3246,10 @@ window.salvarProcesso = async () => {
       window.processosData = window.processosData.filter(x => x.id !== pEnriquecido.id);
       renderizarProcessos();
     }
+  } finally {
+    // Resetar botão salvar para próximo uso -- só agora, com a gravação real
+    // (sucesso ou erro) já terminada.
+    if (btnSalvar) { btnSalvar.disabled = false; btnSalvar.innerHTML = 'Salvar'; btnSalvar.classList.remove('btn-loading'); }
   }
 };
 
@@ -2504,29 +3273,28 @@ window.verDetalhesProcesso = (id) => {
   if (!p) return;
   
   const status = Criticidade.tierDoProcesso(p);
-  const statusColor = Criticidade.corDoTier(status);
-  
+
   document.getElementById('modalDetalhesTitulo').textContent = p.processo;
   document.getElementById('modalDetalhesConteudo').innerHTML = `
     <div style="display:grid;gap:16px;">
       <div><strong>Área:</strong> ${esc(p.area)}</div>
       <div><strong>Responsável:</strong> ${p.responsavelArea || p.responsavel || '-'}</div>
       <div><strong>Solução:</strong> ${esc(p.solucao || '-')}</div>
-      <div><strong>Status:</strong> <span style="display:inline-block;padding:4px 12px;border-radius:12px;font-size:0.9em;font-weight:600;color:white;background:${statusColor};">${status}${p.score > 0 ? ' (Score: ' + p.score + ')' : ''}</span></div>
+      <div><strong>Status:</strong> ${_htmlBadge(_nivelTierProcesso(status), status + (p.score > 0 ? ' (Score: ' + p.score + ')' : ''))}</div>
       <div><strong>Descrição do Impacto:</strong><br>${esc(p.descricao || '-')}</div>
       <div><strong>Dependência Crítica:</strong> ${p.dependencia || '-'}</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
         <div style="background:#f5f5f5;padding:12px;border-radius:6px;text-align:center;">
           <div style="font-size:0.8em;color:#666;margin-bottom:4px;">RTO</div>
-          <div style="font-weight:600;color:#1a237e;">${p.rto || '-'}</div>
+          <div style="font-weight:600;color:#d60014;">${p.rto || '-'}</div>
         </div>
         <div style="background:#f5f5f5;padding:12px;border-radius:6px;text-align:center;">
           <div style="font-size:0.8em;color:#666;margin-bottom:4px;">RPO</div>
-          <div style="font-weight:600;color:#1a237e;">${p.rpo || '-'}</div>
+          <div style="font-weight:600;color:#d60014;">${p.rpo || '-'}</div>
         </div>
         <div style="background:#f5f5f5;padding:12px;border-radius:6px;text-align:center;">
           <div style="font-size:0.8em;color:#666;margin-bottom:4px;">MTPD</div>
-          <div style="font-weight:600;color:#1a237e;">${p.mtpd || '-'}</div>
+          <div style="font-weight:600;color:#d60014;">${p.mtpd || '-'}</div>
         </div>
       </div>
       <div><strong>BIA Homologada:</strong> ${p.biaHomologada || '-'}</div>
@@ -2680,20 +3448,20 @@ window.imprimirAvaliacao = () => {
   }).join('');
 
   const janela = window.open('', '_blank');
-  janela.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>BIA - ${titulo}</title>
-    <style>body{font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:32px;color:#1a1a2e;}h1{color:#1a237e;font-size:20px;margin-bottom:4px;}.rodape{margin-top:32px;text-align:center;font-size:11px;color:#999;border-top:1px solid #eee;padding-top:16px;}@media print{body{padding:16px;}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}}</style>
+  janela.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>GRC360 - ${titulo}</title>
+    <style>body{font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:32px;color:#1a1a2e;}h1{color:#d60014;font-size:20px;margin-bottom:4px;}.rodape{margin-top:32px;text-align:center;font-size:11px;color:#999;border-top:1px solid #eee;padding-top:16px;}@media print{body{padding:16px;}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}}</style>
     </head><body>
     <h1>${titulo}</h1>
     <div style="color:#888;font-size:13px;margin-bottom:24px;">${area}</div>
-    <div style="background:#f0f4ff;border-left:4px solid #1a237e;padding:12px 16px;margin-bottom:24px;font-size:13px;border-radius:0 6px 6px 0;">
+    <div style="background:#f0f4ff;border-left:4px solid #d60014;padding:12px 16px;margin-bottom:24px;font-size:13px;border-radius:0 6px 6px 0;">
       <strong>&#128203; Premissa:</strong> O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.
     </div>
     ${conteudoHtml}
-    <div style="background:#1a237e;color:white;padding:16px 20px;border-radius:8px;margin-top:24px;display:flex;justify-content:space-between;align-items:center;">
+    <div style="background:#d60014;color:white;padding:16px 20px;border-radius:8px;margin-top:24px;display:flex;justify-content:space-between;align-items:center;">
       <div><div style="font-size:14px;font-weight:600;">Score Total</div></div>
       <div style="text-align:right;"><div style="font-size:36px;font-weight:700;">${scoreTotal}</div><div style="background:rgba(255,255,255,0.2);padding:4px 14px;border-radius:20px;font-weight:700;font-size:13px;">${scoreTier}</div></div>
     </div>
-    <div class="rodape">Relatório gerado pelo Sistema BIA &middot; Fortes Tecnologia &middot; ${new Date().toLocaleDateString('pt-BR')}</div>
+    <div class="rodape">Relatório gerado pelo Sistema GRC360 &middot; Fortes Tecnologia &middot; ${new Date().toLocaleDateString('pt-BR')}</div>
     <script>window.onload=()=>{window.print();}<\/script></body></html>`);
   janela.document.close();
 };
@@ -2737,6 +3505,39 @@ let dependenciasOrdenacao = criarOrdenacao('categoria', 'asc');
 // tambem na lista de categorias da aba BIA (Fornecedores/Pessoas/Processos
 // Internos sao as outras 3, cada uma sua propria entidade).
 const DEPENDENCIA_CATEGORIAS_TECNICAS = ['API', 'Banco de Dados', 'Infraestrutura', 'Segurança', 'Servidor', 'Sistemas', 'Outros'];
+
+// Ícone e frase de exemplo por categoria de dependência -- usados tanto pelo
+// componente de dependência do drawer individual (renderDependenciaTabela)
+// quanto pelo picker por categoria da edição em lote de Processos. Dado
+// estático puro, sem comportamento; hoisted pra módulo pra não duplicar a
+// mesma lista de 12 categorias em dois lugares.
+const DEPENDENCIA_CAT_ICONES = {
+  'Fornecedores': '🏢', 'Fornecedor': '🏢',
+  'Pessoas': '👤', 'Pessoa': '👤',
+  'Processos Internos': '🔄', 'Processo Interno': '🔄',
+  'API': '🔌',
+  'Banco de Dados': '🗄️',
+  'Infraestrutura': '⚡',
+  'Segurança': '🔒',
+  'Servidor': '🖥️',
+  'Sistemas': '💻',
+  'Outros': '📦',
+};
+const DEPENDENCIA_CAT_EXEMPLOS = {
+  'Fornecedores': 'Ex: Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado',
+  'Fornecedor': 'Ex: Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado',
+  'Pessoas': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
+  'Pessoa': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
+  'Processos Internos': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
+  'Processo Interno': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
+  'API': 'Ex: API de pagamento (PIX/cartão), API de CEP, integração com Receita Federal, webhook de terceiros',
+  'Banco de Dados': 'Ex: PostgreSQL de produção, banco Oracle financeiro, réplica de leitura, data warehouse',
+  'Infraestrutura': 'Ex: Internet, energia elétrica, climatização, switches/roteadores, telefonia',
+  'Segurança': 'Ex: Firewall, VPN, certificado digital, antivírus corporativo, controle de acesso',
+  'Servidor': 'Ex: Servidor de aplicação, servidor de arquivos, cluster de virtualização',
+  'Sistemas': 'Ex: ERP Fortes, e-mail corporativo, Active Directory, sistema bancário',
+  'Outros': 'Ex: Qualquer recurso técnico que não se encaixa nas categorias acima',
+};
 const DEPENDENCIA_ESTRATEGIAS_BACKUP = [
   { valor: 'Backup & Restore', descricao: 'Recupera a partir de backups armazenados. RTO/RPO mais altos, custo mais baixo.' },
   { valor: 'Cold Site', descricao: 'Ambiente de recuperação sem infraestrutura ativa, provisionado sob demanda. RTO alto, custo baixo.' },
@@ -2753,7 +3554,7 @@ async function dependencias() {
     </div>
     <div style="border:1px solid #e0e0e0;background:#f8f9ff;border-radius:9px;padding:11px 14px;margin-bottom:16px;font-size:0.86em;color:#555;">
       Os <strong>fornecedores</strong> aparecem neste catálogo, mas são editados e avaliados em
-      <a href="#fornecedores" style="color:#1a237e;font-weight:700;">Fornecedores</a>.
+      <a href="#fornecedores" style="color:#d60014;font-weight:700;">Fornecedores</a>.
       Clique num fornecedor para gerenciá-lo lá.
     </div>
     <div style="margin-bottom:16px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
@@ -2851,7 +3652,7 @@ function renderizarDependencias() {
           ? `<span style="font-size:0.78em;color:#888;font-style:italic;">Gerenciado em Fornecedores</span>`
           : esc(d.detalhes || '-');
         return `<tr style="cursor:pointer;" onclick="${acao}">
-        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(d.categoria)}</span></td>
+        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#fce8ea;color:#d60014;">${esc(d.categoria)}</span></td>
         <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
         <td style="font-size:0.85em;color:#555;">${papel}</td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
@@ -2911,7 +3712,7 @@ function renderDrpLista(campo) {
   const comOrdem = true;
   container.innerHTML = itens.length ? itens.map((texto, i) => `
     <div style="display:flex;align-items:center;gap:8px;border:1px solid #e0e0e0;border-radius:7px;padding:8px 10px;margin-bottom:6px;">
-      ${comOrdem ? `<span style="font-weight:700;color:#1a237e;min-width:20px;">${i + 1}.</span>` : ''}
+      ${comOrdem ? `<span style="font-weight:700;color:#d60014;min-width:20px;">${i + 1}.</span>` : ''}
       <span style="flex:1;font-size:0.88em;color:#333;">${esc(texto)}</span>
       ${comOrdem ? `
         <button class="btn-icon" onclick="moverDrpItem('${campo}', ${i}, -1)" title="Mover para cima" ${i === 0 ? 'disabled' : ''}>▲</button>
@@ -2960,11 +3761,11 @@ window.moverDrpItem = (campo, idx, direcao) => {
 };
 
 window.trocarAbaDependencia = (aba) => {
-  ['geral', 'drp', 'plano', 'registros'].forEach(a => {
+  ['geral', 'drp', 'plano', 'registros', 'processos'].forEach(a => {
     document.getElementById('painel-dep-' + a).style.display = a === aba ? 'block' : 'none';
     const btn = document.getElementById('tab-dep-' + a);
-    btn.style.color = a === aba ? '#1a237e' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
+    btn.style.color = a === aba ? '#d60014' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
   });
   // Ao entrar na aba Plano, re-renderiza o preview do DRP salvo.
   if (aba === 'plano') renderDrpResumo();
@@ -2983,8 +3784,8 @@ function renderEstrategiaChips() {
   const atual = document.getElementById('depEstrategia').value;
   container.innerHTML = DEPENDENCIA_ESTRATEGIAS_BACKUP.map((e) => {
     const sel = e.valor === atual;
-    return `<button type="button" onclick="selecionarEstrategiaDep('${escJs(e.valor)}')" style="text-align:left;padding:8px 12px;border-radius:10px;cursor:pointer;min-width:160px;max-width:220px;border:1.5px solid ${sel ? '#1a237e' : '#c5cae9'};background:${sel ? '#e8eaf6' : '#fff'};">
-      <div style="font-weight:700;color:#1a237e;font-size:0.86em;">${esc(e.valor)}${sel ? ' ✓' : ''}</div>
+    return `<button type="button" onclick="selecionarEstrategiaDep('${escJs(e.valor)}')" style="text-align:left;padding:8px 12px;border-radius:10px;cursor:pointer;min-width:160px;max-width:220px;border:1.5px solid ${sel ? '#d60014' : '#c5cae9'};background:${sel ? '#fce8ea' : '#fff'};">
+      <div style="font-weight:700;color:#d60014;font-size:0.86em;">${esc(e.valor)}${sel ? ' ✓' : ''}</div>
       <div style="font-size:0.76em;color:#666;margin-top:3px;">${esc(e.descricao)}</div>
     </button>`;
   }).join('');
@@ -3059,7 +3860,7 @@ function renderDrpDependenciasTags() {
   if (!cont) return;
   const sel = window._depDrpDependenciasSel || [];
   cont.innerHTML = sel.length ? sel.map((item, i) =>
-    `<span style="display:inline-flex;align-items:center;gap:4px;background:#1a237e;color:white;border:1.5px solid #1a237e;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;" title="${esc(item.categoria || '')}">${esc(_iconeCategoriaDep(item.categoria))} ${esc(item.nome)}<button onclick="removerDrpDependencia(${i})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`
+    `<span style="display:inline-flex;align-items:center;gap:4px;background:#d60014;color:white;border:1.5px solid #d60014;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;" title="${esc(item.categoria || '')}">${esc(_iconeCategoriaDep(item.categoria))} ${esc(item.nome)}<button onclick="removerDrpDependencia(${i})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`
   ).join(' ') : '<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhuma dependência vinculada.</span>';
   renderDrpDependenciasDisponiveis();
 }
@@ -3071,7 +3872,7 @@ function renderDrpDependenciasDisponiveis() {
   const disp = _drpDepCatalogoDisponivel('');
   if (!disp.length) { cont.innerHTML = ''; return; }
   const chips = disp.slice(0, 40).map((d) =>
-    `<span onclick="selecionarDrpDependencia('${escJs(d.nome)}','${escJs(d.categoria)}','${escJs(d.id)}')" style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#1a237e;cursor:pointer;border:1px solid #e0e0e0;" onmouseenter="this.style.background='#c5cae9'" onmouseleave="this.style.background='#f5f6fa'" title="${esc(d.categoria || '')}">${esc(_iconeCategoriaDep(d.categoria))} ${esc(d.nome)}</span>`
+    `<span onclick="selecionarDrpDependencia('${escJs(d.nome)}','${escJs(d.categoria)}','${escJs(d.id)}')" style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#d60014;cursor:pointer;border:1px solid #e0e0e0;" onmouseenter="this.style.background='#c5cae9'" onmouseleave="this.style.background='#f5f6fa'" title="${esc(d.categoria || '')}">${esc(_iconeCategoriaDep(d.categoria))} ${esc(d.nome)}</span>`
   ).join(' ');
   cont.innerHTML = `<span style="font-size:0.7em;color:#999;">Disponíveis:</span><div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:4px;max-height:80px;overflow-y:auto;">${chips}</div>`;
 }
@@ -3088,7 +3889,7 @@ window.drpDepMostrarDropdown = () => {
   // Opção de criar -- só quando há texto que não corresponde exatamente a um item já disponível.
   const jaExiste = disp.some((d) => (d.nome || '').toLowerCase() === filtro.toLowerCase());
   if (filtro && !jaExiste) {
-    html += `<div onmousedown="event.preventDefault();criarDrpDependencia('${escJs(filtro)}');" style="padding:9px 12px;cursor:pointer;font-size:0.86em;color:#1a237e;font-weight:700;background:#f5f6fa;" onmouseenter="this.style.background='#e8eaf6'" onmouseleave="this.style.background='#f5f6fa'">+ Criar "${esc(filtro)}"</div>`;
+    html += `<div onmousedown="event.preventDefault();criarDrpDependencia('${escJs(filtro)}');" style="padding:9px 12px;cursor:pointer;font-size:0.86em;color:#d60014;font-weight:700;background:#f5f6fa;" onmouseenter="this.style.background='#fce8ea'" onmouseleave="this.style.background='#f5f6fa'">+ Criar "${esc(filtro)}"</div>`;
   }
   if (!html) { dd.style.display = 'none'; return; }
   dd.innerHTML = html;
@@ -3164,7 +3965,7 @@ function _htmlDrpTestes() {
       <label style="${lbl}">Testes do Procedimento — Estratégias de Teste</label>
       <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Cadastre quantas estratégias forem necessárias, cada uma com sua frequência.</span>
       <div id="drpEstrategiasTabela"></div>
-      <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:12px;margin-top:8px;">
+      <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;">
         <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
           <div>
             <label style="display:block;font-size:0.74em;font-weight:600;color:#666;margin-bottom:4px;">Tipo de Teste (Cenário)</label>
@@ -3215,6 +4016,254 @@ window.removerDrpEstrategiaTeste = (idx) => {
 };
 
 // ============================================================
+// Aba "Gestão de Testes" -- seção "Roteiros de Teste": documento gerado via
+// IA (Gemini) a partir do DRP já gerado da dependência, um por tipo de teste
+// (categoria = cenário de DRP_CENARIOS_TESTE, o mesmo vocabulário de
+// Estratégias de Teste). Substitui a versão anterior (links cadastrados à
+// mão): não existe mais "+ Adicionar" aqui, só "🤖 Gerar Roteiro de Teste".
+// window._depDrpRoteiros guarda METADADO só ({categoria,versao,data,autor},
+// sem html -- mesmo molde de drpSalvo/DRP) hidratado em abrirDrawerDependencia
+// a partir de d.drpRoteirosTeste; o html de verdade mora em roteiro_conteudo
+// (servidor, ver appLogic.js) e só volta pelo obterRoteiroTeste. Gerar de novo
+// o mesmo tipo de teste acrescenta versão, nunca sobrescreve -- por isso pode
+// haver mais de uma entrada por categoria no array; a tabela mostra só a mais
+// recente de cada uma.
+// ============================================================
+window._depDrpRoteiros = [];
+
+function _htmlDrpRoteiros() {
+  return `
+    <div>
+      <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Roteiros de Teste</label>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Gerados por IA a partir do DRP já gerado desta dependência, um roteiro por tipo de teste.</span>
+      <div id="drpRoteirosTabela"></div>
+      <button type="button" class="btn btn-ghost" id="btnGerarRoteiroTeste" onclick="gerarRoteiroTeste()" style="color:#2e7d32;border-color:#2e7d32;margin-top:8px;">🤖 Gerar Roteiro de Teste</button>
+    </div>`;
+}
+
+/** Última versão de cada categoria presente em window._depDrpRoteiros, ordenada por categoria. */
+function _roteirosTesteMaisRecentesPorCategoria() {
+  const itens = window._depDrpRoteiros || [];
+  const porCategoria = {};
+  itens.forEach((r) => {
+    const atual = porCategoria[r.categoria];
+    if (!atual || Number(r.versao) > Number(atual.versao)) porCategoria[r.categoria] = r;
+  });
+  return Object.values(porCategoria).sort((a, b) => (a.categoria || '').localeCompare(b.categoria || ''));
+}
+
+function renderDrpRoteirosTeste() {
+  const cont = document.getElementById('drpRoteirosTabela');
+  if (!cont) return;
+  const itens = _roteirosTesteMaisRecentesPorCategoria();
+  if (!itens.length) { cont.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum roteiro de teste gerado ainda.</p>'; return; }
+  cont.innerHTML = `<table class="data-table" style="box-shadow:none;">
+    <thead><tr>
+      <th style="font-size:0.78em;">Categoria</th>
+      <th style="font-size:0.78em;">Gerado em</th>
+      <th style="font-size:0.78em;">Por</th>
+      <th style="width:90px;"></th>
+    </tr></thead><tbody>` +
+    itens.map((r) => `<tr>
+        <td style="font-weight:600;color:#222;">${esc(r.categoria || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(r.data ? new Date(r.data).toLocaleString('pt-BR') : '-')}${r.versao > 1 ? ` <span style="color:#999;">(v${r.versao})</span>` : ''}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(r.autor || '-')}</td>
+        <td style="text-align:center;white-space:nowrap;">
+          <button class="btn-icon" onclick="abrirRoteiroTesteDireto('${escJs(r.categoria)}')" title="Abrir">🔗</button>
+          <button class="btn-icon" onclick="removerDrpRoteiroTeste('${escJs(r.categoria)}')" title="Excluir" style="color:#c62828;font-weight:700;">&times;</button>
+        </td>
+      </tr>`).join('') + `</tbody></table>`;
+}
+
+window.removerDrpRoteiroTeste = async (categoria) => {
+  if (!confirm(`Excluir o roteiro de teste de "${categoria}"? Todas as versões geradas pra este tipo de teste serão apagadas.`)) return;
+  const id = document.getElementById('depId').value || '';
+  if (!id) return;
+  try {
+    await API.post('excluirRoteiroTeste', { id, categoria });
+    window._depDrpRoteiros = (window._depDrpRoteiros || []).filter((r) => r.categoria !== categoria);
+    API.invalidate('getDependencias');
+    renderDrpRoteirosTeste();
+    showToast('🗑️ Roteiro excluído.', '#555');
+  } catch (e) {
+    showToast('❌ ' + e.message, '#c62828');
+  }
+};
+
+/** Cenários já previstos PARA ESTA dependência (Estratégias de Teste da aba Parâmetros DRP), não a lista inteira de DRP_CENARIOS_TESTE. */
+function _cenariosTesteCandidatos() {
+  const vistos = new Set();
+  return (window._depDrpEstrategias || [])
+    .filter((e) => e && typeof e === 'object')
+    .map((e) => e.cenario)
+    .filter((c) => c && !vistos.has(c) && vistos.add(c));
+}
+
+window.gerarRoteiroTeste = () => {
+  // Blindado com try/catch: um erro inesperado aqui nao pode passar em
+  // silencio (sem isso, uma excecao sincrona nesta funcao nao mostra nenhum
+  // toast nem console visivel pro usuario -- so aparece no console do
+  // DevTools, que a maioria nao abre). Descoberto em producao: clique no
+  // botao nao fazia nada, nem o toast esperado de "falta Estrategia de
+  // Teste".
+  try {
+    const id = (document.getElementById('depId') || {}).value || '';
+    if (!id) return showToast('Salve a dependência antes de gerar um roteiro de teste.', '#e65100');
+    const d = (dependenciasData || []).find((x) => String(x.id) === String(id));
+    if (!d || !d.drpSalvo) return showToast('Gere o DRP (aba Plano de Recuperação) antes de gerar um roteiro de teste.', '#e65100');
+    const candidatos = _cenariosTesteCandidatos();
+    if (!candidatos.length) return showToast('Cadastre ao menos uma Estratégia de Teste (aba Parâmetros DRP) antes de gerar um roteiro.', '#e65100');
+    if (candidatos.length === 1) return _gerarRoteiroTesteParaCategoria(candidatos[0]);
+    abrirModalEscolherTipoTeste(candidatos);
+  } catch (err) {
+    console.error('Erro em gerarRoteiroTeste:', err);
+    showToast('❌ Erro inesperado: ' + err.message, '#c62828');
+  }
+};
+
+async function _gerarRoteiroTesteParaCategoria(categoria) {
+  const id = document.getElementById('depId').value || '';
+  const d = (dependenciasData || []).find((x) => String(x.id) === String(id));
+  const btn = document.getElementById('btnGerarRoteiroTeste');
+  const textoOriginal = btn ? btn.innerHTML : '';
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Gerando...'; btn.style.opacity = '0.7'; }
+  try {
+    const result = await API.post('gerarRoteiroTeste', { id, categoria });
+    if (result.error) throw new Error(result.error);
+    const html = result.html || '';
+    await API.post('salvarRoteiroTeste', { id, categoria, html });
+    API.invalidate('getDependencias');
+    window._depDrpRoteiros = window._depDrpRoteiros || [];
+    const versaoAnterior = Math.max(0, ...window._depDrpRoteiros.filter((r) => r.categoria === categoria).map((r) => Number(r.versao) || 0));
+    const novaVersao = { categoria, versao: versaoAnterior + 1, data: new Date().toISOString(), autor: window.USER_EMAIL || 'sistema' };
+    window._depDrpRoteiros.push(novaVersao);
+    renderDrpRoteirosTeste();
+    showToast('✅ Roteiro de Teste gerado!', '#2e7d32');
+    await _abrirPopupRoteiroTeste(categoria, [{ ...novaVersao, html }], d);
+  } catch (err) {
+    console.error('Erro ao gerar Roteiro de Teste:', err);
+    showToast('❌ ' + err.message, '#c62828');
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerHTML = textoOriginal; btn.style.opacity = '1'; }
+  }
+}
+
+window.abrirRoteiroTesteDireto = async (categoria) => {
+  const id = document.getElementById('depId').value || '';
+  const d = (dependenciasData || []).find((x) => String(x.id) === String(id));
+  let versoes;
+  try {
+    versoes = (await API.get('obterRoteiroTeste', { id })).versoes || [];
+  } catch (e) {
+    return showToast('❌ ' + e.message, '#c62828');
+  }
+  const daCategoria = versoes.filter((v) => v.categoria === categoria);
+  if (!daCategoria.length) return showToast('Nenhuma versão encontrada para este tipo de teste.', '#e65100');
+  await _abrirPopupRoteiroTeste(categoria, daCategoria, d);
+};
+
+/** Popup editável (contenteditable + "💾 Salvar versão"), mesmo mecanismo de _buildDRPPage/_buildPCNPage -- edição vira uma versão nova, nunca sobrescreve. */
+async function _abrirPopupRoteiroTeste(categoria, versoesDaCategoria, dep) {
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
+  const ultima = versoesDaCategoria[versoesDaCategoria.length - 1];
+  const idToken = await _tokenParaPCN().catch(() => '');
+  win.document.write(_buildRoteiroTestePage(categoria, versoesDaCategoria, ultima, dep, idToken));
+  win.document.close();
+}
+
+function _buildRoteiroTestePage(categoria, versoesDaCategoria, versaoAtual, dep, idToken) {
+  const limpo = sanitizarPCN(versaoAtual.html || '');
+  const versoesJson = JSON.stringify(versoesDaCategoria).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/</g, '\\x3c');
+  const seletorVersoes = versoesDaCategoria.length > 1 ? `
+    <div style="position:fixed;bottom:16px;right:20px;z-index:60;background:white;border:1.5px solid #e0e0e0;border-radius:8px;padding:8px 14px;box-shadow:0 2px 12px rgba(0,0,0,0.15);font-size:9pt;display:flex;align-items:center;gap:8px;">
+      <span style="color:#666;">Versão:</span>
+      <select id="roteiro-versao-select" onchange="trocarVersaoRoteiroTeste(this.value)" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:9pt;">
+        ${versoesDaCategoria.map((v, i) => `<option value="${i}" ${v.versao === versaoAtual.versao ? 'selected' : ''}>v${v.versao} — ${new Date(v.data).toLocaleDateString('pt-BR')} ${new Date(v.data).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</option>`).join('')}
+      </select>
+    </div>` : '';
+  return `<!DOCTYPE html><html><head><title>Roteiro de Teste — ${esc(categoria)}</title><style>
+    :root{--risk-critical:#d60014;--risk-high:#b64a12;--risk-medium:#9a6700;--risk-low:#38bb0e}
+    body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6;color:#222;}
+    h1{color:#d60014} h2{color:#d60014;border-bottom:2px solid #fce8ea;padding-bottom:6px;margin-top:24px}
+    table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt}
+    th{background:#d60014;color:white;padding:8px 10px;text-align:left} td{padding:7px 10px;border:1px solid #e0e0e0}
+    .header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:20px;}
+    .header .sub{font-size:9pt;color:#888;margin-top:4px;font-weight:400}
+    .btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}
+    .btn-print:hover{opacity:.9} @media print{.btn-print,#roteiro-versao-select,#roteiro-versao-select+span{display:none!important}}
+  </style></head><body>
+    <div class="header">
+      <div>
+        <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
+        <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+        <h1>Roteiro de Teste — ${esc(categoria)}</h1>
+        <div class="sub">${esc(dep && dep.nome || '')} • ${esc(versaoAtual.autor || '')} • ${versaoAtual.data ? new Date(versaoAtual.data).toLocaleString('pt-BR') : ''} • Fortes Tecnologia</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn-print" onclick="salvarVersaoRoteiroTeste()" style="background:#2e7d32;">💾 Salvar versão</button>
+        <button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button>
+      </div>
+    </div>
+    <div id="roteiro-conteudo" contenteditable="true" style="outline:none;min-height:150px;">${limpo.html}</div>
+    ${seletorVersoes}
+    <script>
+      var ROTEIRO_API_URL = '` + APP_API_URL + `';
+      var ROTEIRO_TOKEN = '` + (idToken || '') + `';
+      var ROTEIRO_DEP_ID = '${escScript(dep && dep.id || '')}';
+      var ROTEIRO_CATEGORIA = '${escScript(categoria)}';
+      var ROTEIRO_VERSOES = JSON.parse('${versoesJson}');
+      function trocarVersaoRoteiroTeste(idx){
+        var v = ROTEIRO_VERSOES[Number(idx)];
+        if (v && v.html) document.getElementById('roteiro-conteudo').innerHTML = v.html;
+      }
+      async function salvarVersaoRoteiroTeste(){
+        var conteudo = document.getElementById('roteiro-conteudo').innerHTML;
+        var btn = document.querySelector('button[onclick="salvarVersaoRoteiroTeste()"]');
+        if(btn){btn.disabled=true;btn.textContent='⏳ Salvando...';}
+        try{
+          var payload = JSON.stringify({action:'salvarRoteiroTeste', id:ROTEIRO_DEP_ID, categoria:ROTEIRO_CATEGORIA, html:conteudo});
+          var res = await fetch(ROTEIRO_API_URL, {method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8','Authorization':'Bearer '+ROTEIRO_TOKEN},body:payload});
+          if(res.status===401){throw new Error('A sessão desta aba expirou. Feche esta aba, volte ao sistema e abra o roteiro de novo — o conteúdo editado não foi salvo.');}
+          var data = JSON.parse(await res.text());
+          if(data.error) throw new Error(data.error);
+          alert('✅ Versão ' + (data.versao || '') + ' salva com sucesso! (' + (data.totalVersoes || '') + ' versões no total)');
+        }catch(e){alert('❌ Erro: '+e.message);}
+        finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
+      }
+    </script>
+  </body></html>`;
+}
+
+function _htmlModalEscolherTipoTeste() {
+  return `
+    <div class="modal-overlay modal-sobre-drawer" id="modalEscolherTipoTeste"><div class="modal" onclick="event.stopPropagation()" style="max-width:420px;">
+      <h3>Qual tipo de teste?</h3>
+      <p style="font-size:0.85em;color:#666;margin-bottom:14px;">Esta dependência tem mais de um tipo de teste previsto (aba Parâmetros DRP). Escolha para qual gerar o roteiro.</p>
+      <select id="escolherTipoTesteSelect" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;"></select>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalEscolherTipoTeste()">Cancelar</button>
+        <button class="btn btn-primary" onclick="confirmarEscolhaTipoTeste()">Gerar</button>
+      </div>
+    </div></div>`;
+}
+
+window.abrirModalEscolherTipoTeste = (candidatos) => {
+  document.getElementById('escolherTipoTesteSelect').innerHTML = candidatos.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+  document.getElementById('modalEscolherTipoTeste').classList.add('open');
+};
+
+window.fecharModalEscolherTipoTeste = () => {
+  document.getElementById('modalEscolherTipoTeste').classList.remove('open');
+};
+
+window.confirmarEscolhaTipoTeste = () => {
+  const categoria = document.getElementById('escolherTipoTesteSelect').value;
+  fecharModalEscolherTipoTeste();
+  if (categoria) _gerarRoteiroTesteParaCategoria(categoria);
+};
+
+// ============================================================
 // Aba "Registros de Testes" -- histórico de execuções ao longo do tempo
 // (lista de {data, resultado, evidencia, pendencias}), ordenado por data desc.
 // ============================================================
@@ -3228,7 +4277,7 @@ function _htmlDrpRegistros() {
       <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Registros de Testes</label>
       <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Histórico das execuções de teste desta dependência ao longo do tempo.</span>
       <div id="drpRegistrosTabela"></div>
-      <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:12px;margin-top:8px;">
+      <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
           <div>
             <label style="${fieldLbl}">Data do teste</label>
@@ -3405,7 +4454,7 @@ function renderDrpResumo() {
     const style = document.createElement('style');
     style.id = 'drpPreviewStyle';
     style.textContent = `
-      .drp-preview h1, .drp-preview h2, .drp-preview h3 { color:#1a237e; margin:14px 0 8px; }
+      .drp-preview h1, .drp-preview h2, .drp-preview h3 { color:#d60014; margin:14px 0 8px; }
       .drp-preview h1 { font-size:1.25em; } .drp-preview h2 { font-size:1.1em; } .drp-preview h3 { font-size:1em; }
       .drp-preview p, .drp-preview li { font-size:0.95em; color:#333; }
       .drp-preview table { width:100%; border-collapse:collapse; margin:10px 0; font-size:0.85em; }
@@ -3440,11 +4489,12 @@ function _htmlDrawerDependencia() {
         <button onclick="fecharDrawerDependencia()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
-        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
-          <button id="tab-dep-geral" onclick="trocarAbaDependencia('geral')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Dados Gerais</button>
+        <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
+          <button id="tab-dep-geral" onclick="trocarAbaDependencia('geral')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Dados Gerais</button>
           <button id="tab-dep-drp" onclick="trocarAbaDependencia('drp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Parâmetros DRP</button>
           <button id="tab-dep-plano" onclick="trocarAbaDependencia('plano')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Plano de Recuperação</button>
-          <button id="tab-dep-registros" onclick="trocarAbaDependencia('registros')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Registros de Testes</button>
+          <button id="tab-dep-registros" onclick="trocarAbaDependencia('registros')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Gestão de Testes</button>
+          <button id="tab-dep-processos" onclick="trocarAbaDependencia('processos')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Processos</button>
         </div>
         <div style="flex:1;overflow-y:auto;padding:20px 24px;">
           <input type="hidden" id="depId">
@@ -3506,15 +4556,23 @@ function _htmlDrawerDependencia() {
           </div>
 
           <div id="painel-dep-registros" style="display:none;">
-            ${_htmlDrpRegistros()}
+            ${_htmlDrpRoteiros()}
+            <div style="border-top:1px solid #eee;margin-top:18px;padding-top:14px;">
+              ${_htmlDrpRegistros()}
+            </div>
+          </div>
+
+          <div id="painel-dep-processos" style="display:none;">
+            <div id="depProcessosTabela"></div>
           </div>
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="fecharDrawerDependencia()">Cancelar</button>
+        <button class="btn btn-ghost" onclick="fecharDrawerDependencia()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarDep" onclick="salvarDep()">Salvar</button>
       </div>
-    </div>`;
+    </div>
+    ${_htmlModalEscolherTipoTeste()}`;
 }
 
 /** Título do drawer de Dependência com o nome como subtítulo -- espelha _atualizarTituloDrawerRisco. */
@@ -3564,6 +4622,9 @@ window.abrirDrawerDependencia = (d) => {
   window._depDrpRegistros = d && Array.isArray(d.drpRegistrosTeste)
     ? d.drpRegistrosTeste.map((r) => ({ data: r.data || '', resultado: r.resultado || '', evidencia: r.evidencia || '', pendencias: r.pendencias || '' }))
     : [];
+  window._depDrpRoteiros = d && Array.isArray(d.drpRoteirosTeste)
+    ? d.drpRoteirosTeste.map((r) => ({ categoria: r.categoria || '', versao: r.versao || 0, data: r.data || '', autor: r.autor || '' }))
+    : [];
   // Migração não-destrutiva: se ainda não há listas mas existe o drpTestes
   // antigo (registro único) com conteúdo, semeia 1 estratégia + 1 registro.
   const t = (d && d.drpTestes && typeof d.drpTestes === 'object') ? d.drpTestes : {};
@@ -3574,20 +4635,85 @@ window.abrirDrawerDependencia = (d) => {
     window._depDrpRegistros.push({ data: t.dataUltimoTeste || '', resultado: t.resultado || '', evidencia: t.evidencia || '', pendencias: t.pendencias || '' });
   }
   renderDrpEstrategiasTeste();
+  renderDrpRoteirosTeste();
   renderDrpRegistrosTeste();
   // Aba "Plano de Recuperação": template importado + preview do DRP salvo.
   window._depDrpTemplate = d && d.drpTemplate ? String(d.drpTemplate) : '';
   window._depDrpTemplateNome = d && d.drpTemplateNome ? String(d.drpTemplateNome) : '';
   renderDrpResumo();
   _atualizarTituloDrawerDependencia(d);
+  _renderProcessosDaDependencia(d);
   trocarAbaDependencia('geral');
   document.getElementById('drawerDependencia').classList.add('open');
   document.getElementById('drawerOverlayDependencia').classList.add('open');
 };
 
+/**
+ * Processos de Negócio que dependem de uma dependência do catálogo: casa por
+ * dependenciaItens[].id -- ou, pra vínculo legado sem id, por nome (mesmo
+ * critério de _adivinharDependenciaLegada), com categoria como desempate
+ * quando o item legado já tiver uma gravada. Reaproveitado pela aba
+ * "Processos" do drawer de Dependência e pelo relatório "Processos por
+ * Dependência" -- mesma regra de vínculo, um único lugar.
+ */
+function _processosVinculadosADependencia(dependencia, processos) {
+  return (processos || []).filter((p) => Array.isArray(p.dependenciaItens) && p.dependenciaItens.some((item) =>
+    item.id ? item.id === dependencia.id : (item.nome === dependencia.nome && (!item.categoria || item.categoria === dependencia.categoria))
+  ));
+}
+
+/**
+ * Aba "Processos": lista os Processos de Negócio que dependem desta
+ * dependência. Só faz sentido pra dependência já salva (sem id, nenhum
+ * processo pode apontar pra ela ainda).
+ */
+async function _renderProcessosDaDependencia(d) {
+  const cont = document.getElementById('depProcessosTabela');
+  if (!cont) return;
+  if (!d || !d.id) {
+    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Salve a dependência para ver os processos vinculados.</p>';
+    return;
+  }
+  cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">⏳ Carregando...</p>';
+  let processos;
+  try {
+    processos = await API.getProcessos();
+  } catch (e) {
+    cont.innerHTML = '<p style="font-size:0.85em;color:#c62828;padding:8px 0;">Não foi possível carregar os processos.</p>';
+    return;
+  }
+  const vinculados = _processosVinculadosADependencia(d, processos);
+  if (!vinculados.length) {
+    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhum processo vinculado a esta dependência.</p>';
+    return;
+  }
+  cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
+    <thead>
+      <tr>
+        <th style="padding:10px 0;text-align:left;font-weight:600;color:#555;font-size:0.82em;border-bottom:1.5px solid #e0e0e0;">Área</th>
+        <th style="padding:10px 0;text-align:left;font-weight:600;color:#555;font-size:0.82em;border-bottom:1.5px solid #e0e0e0;">Processo</th>
+        <th style="padding:10px 0;text-align:left;font-weight:600;color:#555;font-size:0.82em;border-bottom:1.5px solid #e0e0e0;width:30%;">Tier</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${vinculados.map((p) => {
+        const tier = Criticidade.tierDoProcesso(p);
+        return `<tr style="cursor:pointer;" onclick="window.location.hash='processos'" title="Ir para a tela Processos">
+          <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;color:#222;">${esc(p.area)}</td>
+          <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;color:#222;font-weight:500;">${esc(p.processo)}</td>
+          <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;">${_htmlBadge(_nivelTierProcesso(tier), tier)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+}
+
 window.fecharDrawerDependencia = () => {
   document.getElementById('drawerDependencia').classList.remove('open');
   document.getElementById('drawerOverlayDependencia').classList.remove('open');
+  window._backupNovoServidor = null;
+  window._servicoNovaDependenciaCategoria = null;
+  _reabrirDrawerPaiSeEscondido();
 };
 
 window.editarDep = (id) => {
@@ -3638,6 +4764,10 @@ window.salvarDep = async () => {
     // Estratégias de Teste (Parâmetros DRP) e histórico de Registros (aba).
     drpEstrategiasTeste: (window._depDrpEstrategias || []).map((e) => ({ cenario: e.cenario || '', frequencia: e.frequencia || '' })),
     drpRegistrosTeste: (window._depDrpRegistros || []).map((r) => ({ data: r.data || '', resultado: r.resultado || '', evidencia: r.evidencia || '', pendencias: r.pendencias || '' })),
+    // Roteiros de Teste: gerado/apagado só pelo fluxo próprio (gerarRoteiroTeste/
+    // excluirRoteiroTeste) -- aqui só preserva o que já existe, mesmo tratamento
+    // de drpSalvo logo abaixo.
+    drpRoteirosTeste: existente ? (existente.drpRoteirosTeste || []) : [],
     // drpTestes (registro único antigo) não é mais editado pela UI -- preserva
     // o que já estava gravado (fonte da migração e fallback do gerarDRP).
     drpTestes: existente && existente.drpTestes ? existente.drpTestes : undefined,
@@ -3657,8 +4787,21 @@ window.salvarDep = async () => {
     return showToast('Fornecedor é cadastrado em Fornecedores → Cadastro.', '#e65100');
   }
 
-  // Optimistic: fechar drawer e atualizar UI imediatamente
-  fecharDrawerDependencia();
+  // Capturados ANTES de fechar o drawer: fecharDrawerDependencia() reabre o
+  // drawer de origem (se for o caso) e limpa essas flags como efeito colateral.
+  const veioDoBackup = !!window._backupNovoServidor;
+  const veioDoServico = !!window._servicoNovaDependenciaCategoria;
+  const aninhado = veioDoBackup || veioDoServico;
+
+  // Optimistic: atualizar a UI imediatamente; só FECHA o drawer quando foi
+  // aberto por cima de outro (cadastro rápido de Servidor/Serviço a partir do
+  // Backup/Serviço) -- aí sim o sentido é "crie rapidinho e volte". Direto do
+  // catálogo, fica aberto (padrão "Fechar + Salvar", igual o resto do sistema).
+  if (aninhado) fecharDrawerDependencia();
+  // Sem fechar, o usuário pode clicar "Salvar" de novo antes da gravação real
+  // terminar -- desabilita o botão até lá pra não criar duas dependências.
+  const btnSalvarDep = document.getElementById('btnSalvarDep');
+  if (!aninhado && btnSalvarDep) btnSalvarDep.disabled = true;
   const isNew = !d.id;
   let tempId = null;
   if (d.id) {
@@ -3671,7 +4814,7 @@ window.salvarDep = async () => {
   }
   _refreshAposSalvarDependencia();
   window.dependenciasCatalogo = dependenciasData;
-  showToast('✅ Salvando...', '#1a237e');
+  showToast('✅ Salvando...', '#d60014');
 
   try {
     // Enviar ao backend SEM o ID temporário para novos registros
@@ -3682,11 +4825,37 @@ window.salvarDep = async () => {
     if (isNew && result.id) {
       const tempIdx = dependenciasData.findIndex(x => x.id === tempId);
       if (tempIdx !== -1) dependenciasData[tempIdx].id = result.id;
+      if (!aninhado) {
+        // Sem fechar o drawer, o próximo "Salvar" precisa gravar no MESMO
+        // registro em vez de criar uma segunda dependência idêntica.
+        document.getElementById('depId').value = result.id;
+        _atualizarTituloDrawerDependencia({ ...d, id: result.id });
+      }
     }
+    if (!aninhado && btnSalvarDep) btnSalvarDep.disabled = false;
     API.invalidate('getDependencias');
+    // Cadastro rápido de Servidor a partir do Backup: seleciona com o id REAL
+    // (nunca o id temporário otimista acima) -- é exatamente o cuidado que
+    // evita recriar a "referência fantasma" já corrigida uma vez neste
+    // projeto (ver a decisão de 24/09/2026 sobre Componentes do Serviço).
+    if (veioDoBackup && document.getElementById('backupServidor')) {
+      _popularSelectBackupServidor(result.id);
+    }
+    // Mesmo cadastro rápido, agora a partir do drawer de Serviço (Dependências
+    // do Serviço) -- mesmo cuidado de só vincular com o id real.
+    if (veioDoServico && document.getElementById('servicoDependenciasPorCategoria')) {
+      window._servicoDependencias = window._servicoDependencias || [];
+      window._servicoDependencias.push({ categoria: d.categoria, nome: d.nome, id: result.id });
+      window._servicoDependenciasCatalogoPorCategoria = window._servicoDependenciasCatalogoPorCategoria || {};
+      if (!window._servicoDependenciasCatalogoPorCategoria[d.categoria]) window._servicoDependenciasCatalogoPorCategoria[d.categoria] = [];
+      window._servicoDependenciasCatalogoPorCategoria[d.categoria].push({ nome: d.nome, id: result.id });
+      _renderServicoDependenciasPorCategoria();
+      _renderServicoProcessosImpactados();
+    }
     showToast('✅ Salvo!', '#2e7d32');
   } catch(e) {
     showToast('❌ Erro: ' + e.message, '#c62828');
+    if (!aninhado && btnSalvarDep) btnSalvarDep.disabled = false;
     // Reverter (remove o registro temporário criado nesta operação)
     if (isNew && tempId) {
       dependenciasData = dependenciasData.filter(x => x.id !== tempId);
@@ -3710,12 +4879,1896 @@ function _refreshAposSalvarDependencia() {
 }
 
 // ============================================================
+// PÁGINA: RELATÓRIOS
+// ============================================================
+async function relatorios() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Relatórios</h2><p class="page-sub">Relatórios de apoio à Continuidade de Negócio</p></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:16px;">
+      <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
+        <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Processos por Dependência</h3>
+        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para cada dependência do catálogo técnico, quais Processos de Negócio dependem dela.</p>
+        <button class="btn btn-primary" onclick="abrirSelecaoDependenciasRelatorio()">📄 Gerar relatório</button>
+      </div>
+      <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
+        <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Relatório de Vínculos da Pessoa</h3>
+        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para uma Pessoa escolhida, a quais Processos, Riscos, Indicadores, Áreas, Fornecedores e Backups ela está vinculada.</p>
+        <button class="btn btn-primary" onclick="abrirSelecaoPessoaRelatorio()">📄 Gerar relatório</button>
+      </div>
+      <div style="background:#fafafa;border:1px dashed #ddd;border-radius:10px;padding:20px;">
+        <h3 style="font-size:1em;color:#999;margin-bottom:8px;">Dependências sem Processo vinculado</h3>
+        <p style="font-size:0.85em;color:#999;margin-bottom:16px;">Dependências cadastradas que nenhum Processo referencia hoje.</p>
+        <button class="btn btn-ghost" disabled style="opacity:0.6;cursor:default;">Em breve</button>
+      </div>
+      <div style="background:#fafafa;border:1px dashed #ddd;border-radius:10px;padding:20px;">
+        <h3 style="font-size:1em;color:#999;margin-bottom:8px;">Processos sem Dependências Críticas</h3>
+        <p style="font-size:0.85em;color:#999;margin-bottom:16px;">Processos (principalmente Tier 1/2) sem nenhuma dependência crítica mapeada.</p>
+        <button class="btn btn-ghost" disabled style="opacity:0.6;cursor:default;">Em breve</button>
+      </div>
+    </div>
+    <div class="drawer-overlay" id="drawerOverlaySelecaoDependenciasRelatorio" onclick="fecharSelecaoDependenciasRelatorio()"></div>
+    <div class="drawer" id="drawerSelecaoDependenciasRelatorio">
+      <div class="drawer-header">
+        <h3>Escolher dependências</h3>
+        <button onclick="fecharSelecaoDependenciasRelatorio()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <p style="font-size:0.82em;color:#888;margin-bottom:12px;">Selecione quais dependências entram no relatório "Processos por Dependência".</p>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button type="button" class="btn btn-ghost" onclick="selecionarTodasDependenciasRelatorio(true)" style="font-size:0.82em;padding:6px 12px;">Selecionar todas</button>
+          <button type="button" class="btn btn-ghost" onclick="selecionarTodasDependenciasRelatorio(false)" style="font-size:0.82em;padding:6px 12px;">Limpar seleção</button>
+        </div>
+        <div id="relatorioDepsChecklist"></div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharSelecaoDependenciasRelatorio()">Cancelar</button>
+        <button class="btn btn-primary" id="btnConfirmarRelatorioDeps" onclick="confirmarGerarRelatorioProcessosPorDependencia()">Gerar relatório</button>
+      </div>
+    </div>
+    <div class="modal-overlay" id="modalSelecaoPessoaRelatorio"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
+      <h3>Relatório de Vínculos da Pessoa</h3>
+      <label style="display:block;font-size:0.82em;font-weight:600;color:#555;margin:14px 0 5px;">Pessoa</label>
+      <select id="relatorioPessoaSelect" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;">
+        <option value="">Selecione...</option>
+      </select>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharSelecaoPessoaRelatorio()">Cancelar</button>
+        <button class="btn btn-primary" id="btnConfirmarRelatorioPessoa" onclick="confirmarGerarRelatorioPessoa()">Gerar relatório</button>
+      </div>
+    </div></div>`;
+}
+
+// ============================================================
+// Seleção de dependências antes de gerar "Processos por Dependência" --
+// tudo marcado por padrão (quem só quer o relatório completo continua em 2
+// cliques); Set de ids marcados em window._relatorioDepsSelecionadas.
+// ============================================================
+window._relatorioDepsCatalogo = [];
+window._relatorioDepsSelecionadas = new Set();
+
+window.abrirSelecaoDependenciasRelatorio = async () => {
+  let catalogo;
+  try {
+    catalogo = await API.getDependencias();
+  } catch (e) {
+    showToast('❌ Não foi possível carregar o catálogo de dependências: ' + (e.message || 'erro desconhecido'), '#c62828');
+    return;
+  }
+  window._relatorioDepsCatalogo = catalogo;
+  window._relatorioDepsSelecionadas = new Set(catalogo.map((d) => d.id));
+  _renderRelatorioDepsChecklist();
+  document.getElementById('drawerSelecaoDependenciasRelatorio').classList.add('open');
+  document.getElementById('drawerOverlaySelecaoDependenciasRelatorio').classList.add('open');
+};
+
+window.fecharSelecaoDependenciasRelatorio = () => {
+  document.getElementById('drawerSelecaoDependenciasRelatorio').classList.remove('open');
+  document.getElementById('drawerOverlaySelecaoDependenciasRelatorio').classList.remove('open');
+};
+
+/** Checklist agrupado por categoria técnica -- mesma ordem/ícones do relatório em si. */
+function _renderRelatorioDepsChecklist() {
+  const cont = document.getElementById('relatorioDepsChecklist');
+  if (!cont) return;
+  const catalogo = window._relatorioDepsCatalogo || [];
+  const selecionadas = window._relatorioDepsSelecionadas || new Set();
+  const grupos = DEPENDENCIA_CATEGORIAS_TECNICAS
+    .map((cat) => ({ categoria: cat, itens: catalogo.filter((d) => d.categoria === cat).sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR')) }))
+    .filter((g) => g.itens.length);
+
+  if (!grupos.length) {
+    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhuma dependência cadastrada no catálogo.</p>';
+    return;
+  }
+
+  cont.innerHTML = grupos.map((g) => `
+    <div style="margin-bottom:14px;">
+      <div style="font-weight:600;font-size:0.85em;color:#222;margin-bottom:6px;">${DEPENDENCIA_CAT_ICONES[g.categoria] || '📦'} ${esc(g.categoria)}</div>
+      ${g.itens.map((d) => `
+        <label style="display:flex;align-items:center;gap:8px;font-size:0.88em;cursor:pointer;padding:3px 0;">
+          <input type="checkbox" class="chk-relatorio-dep" data-id="${esc(d.id)}" ${selecionadas.has(d.id) ? 'checked' : ''} onchange="toggleDependenciaRelatorioSelecionada('${escJs(d.id)}', this.checked)">
+          ${esc(d.nome)}
+        </label>`).join('')}
+    </div>`).join('');
+}
+
+window.toggleDependenciaRelatorioSelecionada = (id, checked) => {
+  if (checked) window._relatorioDepsSelecionadas.add(id); else window._relatorioDepsSelecionadas.delete(id);
+};
+
+window.selecionarTodasDependenciasRelatorio = (checked) => {
+  window._relatorioDepsSelecionadas = checked ? new Set((window._relatorioDepsCatalogo || []).map((d) => d.id)) : new Set();
+  document.querySelectorAll('#relatorioDepsChecklist .chk-relatorio-dep').forEach((el) => { el.checked = checked; });
+};
+
+// ============================================================
+// Seleção de Pessoa antes de gerar "Relatório de Vínculos" -- mesmo relatório
+// do botão dentro do drawer de Pessoa (window.gerarRelatorioPessoa,
+// _buildRelatorioPessoaPage), só que a partir da tela Relatórios, que não
+// tem o drawer de Pessoa no DOM: busca o catálogo na hora e passa a pessoa
+// escolhida direto pro gerador, em vez de depender de #pessoaId.
+// ============================================================
+window.abrirSelecaoPessoaRelatorio = async () => {
+  let catalogo;
+  try {
+    catalogo = (await API.getDependencias()).filter((d) => d.categoria === 'Pessoas');
+  } catch (e) {
+    showToast('❌ Não foi possível carregar as pessoas: ' + (e.message || 'erro desconhecido'), '#c62828');
+    return;
+  }
+  window._relatorioPessoasCatalogo = catalogo;
+  const select = document.getElementById('relatorioPessoaSelect');
+  select.innerHTML = '<option value="">Selecione...</option>' +
+    [...catalogo].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR')).map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('');
+  document.getElementById('modalSelecaoPessoaRelatorio').classList.add('open');
+};
+
+window.fecharSelecaoPessoaRelatorio = () => {
+  document.getElementById('modalSelecaoPessoaRelatorio').classList.remove('open');
+};
+
+window.confirmarGerarRelatorioPessoa = async () => {
+  const id = document.getElementById('relatorioPessoaSelect').value;
+  if (!id) return showToast('Selecione uma pessoa.', '#e65100');
+  const pessoa = (window._relatorioPessoasCatalogo || []).find((p) => String(p.id) === String(id));
+  if (!pessoa) return showToast('Pessoa não encontrada.', '#e65100');
+  fecharSelecaoPessoaRelatorio();
+  await gerarRelatorioPessoa(pessoa);
+};
+
+/**
+ * Relatório "Processos por Dependência": para as dependências marcadas no
+ * checklist, lista os Processos de Negócio vinculados a cada uma (mesmo
+ * critério de _processosVinculadosADependencia, já usado na aba "Processos"
+ * do drawer de Dependência). Dependência sem nenhum processo vinculado
+ * também aparece, com aviso -- mostrar a lacuna é tão útil quanto mostrar o
+ * vínculo. Mesmo padrão 100% client-side do Organograma (_htmlOrganograma):
+ * template literal com <style> próprio, aberto em nova aba via window.open +
+ * document.write.
+ */
+window.confirmarGerarRelatorioProcessosPorDependencia = async () => {
+  const idsSelecionados = window._relatorioDepsSelecionadas || new Set();
+  if (!idsSelecionados.size) return showToast('Selecione ao menos uma dependência.', '#e65100');
+  const dependenciasFiltradas = (window._relatorioDepsCatalogo || []).filter((d) => idsSelecionados.has(d.id));
+
+  await comBotaoCarregando('btnConfirmarRelatorioDeps', async () => {
+    let processos;
+    try {
+      processos = await API.getProcessos();
+    } catch (e) {
+      showToast('❌ Não foi possível gerar o relatório: ' + (e.message || 'erro desconhecido'), '#c62828');
+      return;
+    }
+    fecharSelecaoDependenciasRelatorio();
+    const html = _htmlRelatorioProcessosPorDependencia(dependenciasFiltradas, processos);
+    const win = window.open('', '_blank');
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  });
+};
+
+function _htmlRelatorioProcessosPorDependencia(dependencias, processos) {
+  const categorias = DEPENDENCIA_CATEGORIAS_TECNICAS;
+  const porCategoria = categorias.map((cat) => ({
+    categoria: cat,
+    itens: (dependencias || []).filter((d) => d.categoria === cat).sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR')),
+  })).filter((grupo) => grupo.itens.length);
+
+  const corpo = porCategoria.map((grupo) => `
+    <div class="dep-categoria">
+      <h2>${DEPENDENCIA_CAT_ICONES[grupo.categoria] || '📦'} ${esc(grupo.categoria)}</h2>
+      ${grupo.itens.map((d) => {
+        const vinculados = _processosVinculadosADependencia(d, processos);
+        return `
+        <div class="dep-item">
+          <h3>${esc(d.nome)}</h3>
+          ${vinculados.length ? `
+            <table>
+              <thead><tr><th>Área</th><th>Processo</th><th>Tier</th></tr></thead>
+              <tbody>
+                ${vinculados.map((p) => {
+                  const tier = Criticidade.tierDoProcesso(p);
+                  const cor = Criticidade.corDoTier(tier);
+                  return `<tr><td>${esc(p.area)}</td><td>${esc(p.processo)}</td><td><span class="tier-badge" style="background:${cor};">${esc(tier)}</span></td></tr>`;
+                }).join('')}
+              </tbody>
+            </table>` : '<p class="vazio">Nenhum processo vinculado.</p>'}
+        </div>`;
+      }).join('')}
+    </div>`).join('');
+
+  const total = (dependencias || []).length;
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Processos por Dependência</title>
+<style>
+:root{--risk-critical:#d60014;--risk-high:#b64a12;--risk-medium:#9a6700;--risk-low:#38bb0e}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#222;background:#f5f6fa;padding:24px}
+.header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:24px}
+.header h1{font-size:18pt;color:#d60014}
+.header .sub{font-size:9pt;color:#888;margin-top:4px}
+.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}
+.btn-print:hover{opacity:.9}
+.dep-categoria{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:20px;margin-bottom:20px}
+.dep-categoria h2{font-size:13pt;color:#d60014;margin-bottom:14px;border-bottom:2px solid #fce8ea;padding-bottom:8px}
+.dep-item{margin-bottom:18px}
+.dep-item:last-child{margin-bottom:0}
+.dep-item h3{font-size:11pt;color:#222;margin-bottom:8px}
+table{width:100%;border-collapse:collapse;font-size:9.5pt}
+th{text-align:left;padding:8px 10px;background:#f5f6fa;color:#555;font-size:8.5pt;text-transform:uppercase;letter-spacing:.3px}
+td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
+.tier-badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:8.5pt;font-weight:600;color:#fff}
+.vazio{font-size:9.5pt;color:#999;font-style:italic;padding:4px 0}
+.footer{margin-top:30px;text-align:center;font-size:8pt;color:#aaa}
+@media print{body{background:#fff}.btn-print{display:none!important}.dep-categoria,.tier-badge{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
+    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+    <h1>Processos por Dependência</h1>
+    <div class="sub">${total} dependência${total === 1 ? '' : 's'} no catálogo • ${new Date().toLocaleDateString('pt-BR')} • Fortes Tecnologia</div>
+  </div>
+  <button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button>
+</div>
+${corpo || '<p style="text-align:center;color:#999;padding:60px 20px;">Nenhuma dependência cadastrada no catálogo.</p>'}
+<div class="footer">Relatório gerado a partir do catálogo de Dependências e dos vínculos em Dependências Críticas de cada Processo.</div>
+</body>
+</html>`;
+}
+
+// ============================================================
+// PÁGINA: SERVIÇOS
+//
+// Um Serviço agrupa dependências técnicas já cadastradas (sempre por id --
+// nunca por nome solto, ver a lição de "Componentes do Serviço" fundido em
+// Dependencias em 24/09/2026). Só organização/documentação nesta rodada:
+// Processo continua linkando direto em Dependência, como sempre -- Serviço
+// não substitui nem migra nada disso.
+// ============================================================
+let servicosData = [];
+let servicosOrdenacao = criarOrdenacao('nome', 'asc');
+// Backup não tem tela própria -- só existe dentro da aba "Backups" do Servico
+// dono, por isso é carregado aqui junto com o resto do Servico.
+let backupsData = [];
+
+async function servicos() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Serviços</h2><p class="page-sub">Agrupe dependências técnicas num serviço só, para organização e visão consolidada</p></div>
+      <button class="btn btn-primary" onclick="abrirDrawerServico()">+ Novo Serviço</button>
+    </div>
+    <div style="margin-bottom:16px;">
+      <input type="text" id="buscaServico" placeholder="🔍 Buscar serviço..." oninput="renderizarServicos()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;">
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div class="data-table" id="listaServicos" style="display:none;">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="ordenarServicos('nome')" style="cursor:pointer;">Nome <span id="sort-servico-nome"></span></th>
+            <th>Descrição</th>
+            <th style="width:12%;text-align:center;">Dependências</th>
+            <th style="width:10%;text-align:center;">Backups</th>
+            <th style="width:12%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody id="servicoRows"></tbody>
+      </table>
+    </div>
+    ${_htmlDrawerServico()}
+    ${_htmlDrawerDependencia()}`;
+
+  try {
+    const [servicosList, depsList, processosList, backupsList, areasList] = await Promise.all([
+      API.getServicos(), API.getDependencias(), API.getProcessos(), API.getBackups(), API.getAreas(),
+    ]);
+    servicosData = servicosList;
+    window.dependenciasCatalogo = depsList;
+    window.processosData = processosList;
+    backupsData = backupsList;
+    window.areasData = areasList;
+    // Mesmo filtro que a tela Dependências aplica -- dependenciasData é a
+    // variável que salvarDep() usa e depois espelha em window.dependenciasCatalogo;
+    // sem popular aqui também, essa sobrescrita apagaria o catálogo completo
+    // (mesmo cuidado já aplicado em backups()).
+    dependenciasData = depsList.filter((d) => !['Pessoas', 'Pessoa'].includes(d.categoria));
+  } catch (e) { servicosData = []; }
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('listaServicos').style.display = 'block';
+  renderizarServicos();
+}
+
+function renderizarServicos() {
+  let data = [...servicosData];
+  const busca = (document.getElementById('buscaServico') || {}).value || '';
+  if (busca.trim()) {
+    const termo = busca.toLowerCase();
+    data = data.filter((s) => (s.nome || '').toLowerCase().includes(termo) || (s.descricao || '').toLowerCase().includes(termo));
+  }
+  data = servicosOrdenacao.aplicar(data);
+  servicosOrdenacao.atualizarSetas('sort-servico-', ['nome']);
+
+  document.getElementById('servicoRows').innerHTML = data.length
+    ? data.map((s) => `<tr style="cursor:pointer;" onclick="abrirDrawerServico('${esc(s.id)}')">
+        <td style="font-weight:600;">${esc(s.nome)}</td>
+        <td>${esc(s.descricao || '')}</td>
+        <td style="text-align:center;">${(s.dependenciaItens || []).length}</td>
+        <td style="text-align:center;">${(backupsData || []).filter((b) => b.servicoId === s.id).length}</td>
+        <td style="text-align:center;" onclick="event.stopPropagation();">
+          <button class="btn-icon" onclick="abrirDrawerServico('${esc(s.id)}')" title="Editar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="excluirServico('${esc(s.id)}')" title="Excluir">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">Nenhum serviço cadastrado.</td></tr>';
+}
+
+window.ordenarServicos = (coluna) => { servicosOrdenacao.ordenar(coluna); renderizarServicos(); };
+
+function _htmlDrawerServico() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  return `
+    <div class="drawer-overlay" id="drawerOverlayServico" onclick="fecharDrawerServico()"></div>
+    <div class="drawer" id="drawerServico">
+      <div class="drawer-header">
+        <h3 id="servicoDrawerTitulo">Novo Serviço</h3>
+        <button onclick="fecharDrawerServico()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
+        <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
+          <button id="tab-servico-dados" onclick="trocarAbaServico('dados')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Dados</button>
+          <button id="tab-servico-backups" onclick="trocarAbaServico('backups')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Backups</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
+          <input type="hidden" id="servicoId">
+
+          <div id="painel-servico-dados">
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Nome</label>
+              <input type="text" id="servicoNome" placeholder="Ex: Serviço de E-mail Corporativo" style="${inp}">
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Descrição</label>
+              <textarea id="servicoDescricao" rows="3" placeholder="O que esse serviço entrega, para quem" style="${inp}resize:vertical;font-family:inherit;"></textarea>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Dependências do Serviço</label>
+              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Itens do catálogo técnico de Dependências que compõem este serviço.</span>
+              <div id="servicoDependenciasPorCategoria"></div>
+            </div>
+            <div style="margin-bottom:8px;padding-top:12px;border-top:1px solid #f0f0f0;">
+              <label style="${lbl}">Processos Impactados</label>
+              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Processos de Negócio que dependem de alguma das dependências acima (calculado, não editável aqui).</span>
+              <div id="servicoProcessosImpactados"></div>
+            </div>
+          </div>
+
+          <div id="painel-servico-backups" style="display:none;">
+            <div style="display:flex;justify-content:flex-end;margin-bottom:12px;" id="servicoBackupsAcao"></div>
+            <div id="servicoBackups"></div>
+          </div>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerServico()">Fechar</button>
+        <button class="btn btn-primary" id="btnSalvarServico" onclick="salvarServico()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+window.trocarAbaServico = (aba) => {
+  ['dados', 'backups'].forEach((a) => {
+    document.getElementById('painel-servico-' + a).style.display = a === aba ? 'block' : 'none';
+    const btn = document.getElementById('tab-servico-' + a);
+    btn.style.color = a === aba ? '#d60014' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
+  });
+};
+
+window._servicoDependencias = [];
+window._servicoDependenciasCatalogoPorCategoria = {};
+
+window.abrirDrawerServico = (id) => {
+  const s = id ? (servicosData || []).find((x) => String(x.id) === String(id)) : null;
+  document.getElementById('servicoId').value = s ? s.id : '';
+  document.getElementById('servicoNome').value = s ? (s.nome || '') : '';
+  document.getElementById('servicoDescricao').value = s ? (s.descricao || '') : '';
+  document.getElementById('servicoDrawerTitulo').textContent = s ? 'Editar Serviço' : 'Novo Serviço';
+
+  window._servicoDependencias = s && Array.isArray(s.dependenciaItens) ? [...s.dependenciaItens] : [];
+
+  // Catálogo pickável: só as 7 categorias técnicas (decisão confirmada) --
+  // Fornecedores/Pessoas/Processos Internos ficam de fora, apesar de
+  // morarem na mesma coleção, porque têm telas e significado próprios.
+  const catalogo = window.dependenciasCatalogo || [];
+  const porCategoria = {};
+  DEPENDENCIA_CATEGORIAS_TECNICAS.forEach((cat) => { porCategoria[cat] = []; });
+  catalogo.forEach((d) => {
+    if (porCategoria[d.categoria]) porCategoria[d.categoria].push({ nome: d.nome, id: d.id || null });
+  });
+  window._servicoDependenciasCatalogoPorCategoria = porCategoria;
+
+  _renderServicoDependenciasPorCategoria();
+  _renderServicoProcessosImpactados();
+  _renderServicoBackupsTab(s ? s.id : null);
+  trocarAbaServico('dados');
+  document.getElementById('drawerServico').classList.add('open');
+  document.getElementById('drawerOverlayServico').classList.add('open');
+};
+
+/**
+ * Aba "Backups": só consulta (ver DECISAO 04/10/2026 -- Backup voltou a ter tela
+ * própria, Catálogo do Backup; edição/exclusão só acontecem lá). Lista os backups
+ * deste serviço; clicar num item ou em "+ Novo Backup" leva pro Catálogo já
+ * filtrado por este serviço -- mesmo espírito do link "Gerenciar em Fornecedores"
+ * já usado em Dependências.
+ */
+function _renderServicoBackupsTab(servicoId) {
+  const acao = document.getElementById('servicoBackupsAcao');
+  const cont = document.getElementById('servicoBackups');
+  if (!cont || !acao) return;
+  if (!servicoId) {
+    acao.innerHTML = '';
+    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:4px 0;">Salve o serviço para então cadastrar backups.</p>';
+    return;
+  }
+  const irParaCatalogo = `window.location.hash='catalogo-backup?servico=' + encodeURIComponent('${escJs(servicoId)}')`;
+  acao.innerHTML = `<button class="btn btn-primary" onclick="${irParaCatalogo}">+ Novo Backup</button>`;
+  const vinculados = (backupsData || []).filter((b) => b.servicoId === servicoId);
+  if (!vinculados.length) {
+    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:4px 0;">Nenhum backup cadastrado ainda.</p>';
+    return;
+  }
+  cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
+    <thead><tr>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Nome</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Servidor</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Stakeholder</th>
+      <th style="padding:8px 0;text-align:center;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Jobs</th>
+    </tr></thead>
+    <tbody>
+      ${vinculados.map((b) => `<tr style="cursor:pointer;" onclick="${irParaCatalogo}" title="Abrir no Catálogo do Backup">
+        <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;font-weight:600;">${esc(b.nome)}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;">${esc(b.servidorNome || '-')}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;">${esc(b.stakeholderNome || '-')}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;text-align:center;">${(b.jobs || []).length}</td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+window.fecharDrawerServico = () => {
+  document.getElementById('drawerServico').classList.remove('open');
+  document.getElementById('drawerOverlayServico').classList.remove('open');
+  _reabrirDrawerPaiSeEscondido();
+};
+
+/**
+ * Uma seção por categoria técnica (mesmo padrão já usado 2x nesta sessão:
+ * seletor de Dependência do lote de Processos e do relatório): ícone,
+ * exemplo, chips dos itens já adicionados e um campo de busca com dropdown.
+ * Só as 7 categorias técnicas -- decisão confirmada com o usuário.
+ */
+function _renderServicoDependenciasPorCategoria() {
+  const cont = document.getElementById('servicoDependenciasPorCategoria');
+  if (!cont) return;
+  const porCategoria = window._servicoDependenciasCatalogoPorCategoria || {};
+  const selecionadas = window._servicoDependencias || [];
+
+  const categoriasSet = new Set(DEPENDENCIA_CATEGORIAS_TECNICAS);
+  selecionadas.forEach((item) => categoriasSet.add(item.categoria || 'Outros'));
+  const categorias = [...categoriasSet].sort();
+
+  cont.innerHTML = categorias.map((cat) => {
+    const icon = DEPENDENCIA_CAT_ICONES[cat] || '📦';
+    const example = DEPENDENCIA_CAT_EXEMPLOS[cat] || '';
+    const itensCat = selecionadas.filter((item) => (item.categoria || 'Outros') === cat);
+    const chips = itensCat.map((item) => {
+      const globalIdx = selecionadas.indexOf(item);
+      return `<span style="display:inline-flex;align-items:center;gap:6px;background:#d60014;color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(item.nome)}<button onclick="removerDependenciaServico(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
+    }).join(' ');
+    return `
+      <div style="padding:12px 0;border-bottom:1px solid #f0f0f0;">
+        <div style="font-weight:600;font-size:0.88em;color:#222;margin-bottom:2px;"><span style="margin-right:4px;">${icon}</span>${esc(cat)}${itensCat.length ? ` <span style="font-size:0.8em;color:#888;font-weight:400;">(${itensCat.length})</span>` : ''}</div>
+        ${example ? `<div style="font-size:0.72em;color:#999;font-style:italic;margin-bottom:6px;">${esc(example)}</div>` : ''}
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;">${chips}</div>
+        <div style="position:relative;">
+          <input type="text" class="servico-dep-cat-input" data-categoria="${esc(cat)}" placeholder="Buscar ${esc(cat).toLowerCase()}..." autocomplete="off" style="width:100%;box-sizing:border-box;border:1.5px solid #e0e0e0;border-radius:7px;outline:none;font-size:0.88em;padding:7px 10px;" onfocus="mostrarDropdownServicoCategoria(this,'${escJs(cat)}')" oninput="mostrarDropdownServicoCategoria(this,'${escJs(cat)}')" onblur="setTimeout(()=>{const dd=this.parentElement.querySelector('.servico-dep-cat-dropdown');if(dd)dd.style.display='none';},300)">
+          <div class="servico-dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:180px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
+        </div>
+      </div>`;
+  }).join('');
+
+  cont.querySelectorAll('.servico-dep-cat-input').forEach((input) => {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const cat = input.dataset.categoria;
+        const filtro = input.value.trim().toLowerCase();
+        if (!filtro) return;
+        const jaNaCategoria = new Set((window._servicoDependencias || []).filter((d) => d.categoria === cat).map((d) => d.id || d.nome));
+        const match = (porCategoria[cat] || []).find((d) => !jaNaCategoria.has(d.id || d.nome) && d.nome.toLowerCase().includes(filtro));
+        if (match) {
+          selecionarDependenciaServicoCategoria(match.nome, cat, match.id);
+          input.value = '';
+          const dd = input.parentElement.querySelector('.servico-dep-cat-dropdown');
+          if (dd) dd.style.display = 'none';
+        }
+      } else if (e.key === 'Escape') {
+        const dd = input.parentElement.querySelector('.servico-dep-cat-dropdown');
+        if (dd) dd.style.display = 'none';
+        input.blur();
+      }
+    });
+  });
+}
+
+window.mostrarDropdownServicoCategoria = (input, categoria) => {
+  const dropdown = input.parentElement.querySelector('.servico-dep-cat-dropdown');
+  if (!dropdown) return;
+  const filtroOriginal = input.value.trim();
+  const filtro = filtroOriginal.toLowerCase();
+  const jaNaCategoria = new Set((window._servicoDependencias || []).filter((d) => d.categoria === categoria).map((d) => d.id || d.nome));
+  const disponiveis = ((window._servicoDependenciasCatalogoPorCategoria || {})[categoria] || [])
+    .filter((d) => !jaNaCategoria.has(d.id || d.nome) && (filtro === '' || d.nome.toLowerCase().includes(filtro)));
+
+  // "+ Cadastrar" só aparece com texto digitado -- criar com um clique
+  // explícito, nunca sozinho num campo em foco (evita cadastro acidental).
+  const criarHtml = filtroOriginal
+    ? `<div class="servico-dep-option" onmousedown="abrirDrawerDependenciaDeServico('${escJs(categoria)}','${escJs(filtroOriginal)}')" style="padding:8px 12px;cursor:pointer;font-size:0.88em;color:#d60014;font-weight:600;${disponiveis.length ? 'border-top:1px solid #e0e0e0;' : ''}">+ Cadastrar "${esc(filtroOriginal)}" como nova dependência</div>`
+    : '';
+  if (!disponiveis.length && !criarHtml) { dropdown.style.display = 'none'; return; }
+
+  dropdown.innerHTML = disponiveis.map((d) => `<div class="servico-dep-option" onmousedown="selecionarDependenciaServicoCategoria('${escJs(d.nome)}','${escJs(categoria)}','${escJs(d.id)}')" style="padding:8px 12px;cursor:pointer;font-size:0.88em;color:#222;border-bottom:1px solid #f8f8f8;">${esc(d.nome)}</div>`).join('') + criarHtml;
+  dropdown.style.display = 'block';
+  dropdown.querySelectorAll('.servico-dep-option').forEach((el) => {
+    el.addEventListener('mouseenter', () => { el.style.background = '#f0f4ff'; });
+    el.addEventListener('mouseleave', () => { el.style.background = 'transparent'; });
+  });
+};
+
+window.selecionarDependenciaServicoCategoria = (nome, categoria, id) => {
+  const idReal = id || null;
+  window._servicoDependencias = window._servicoDependencias || [];
+  const jaSelecionado = idReal
+    ? window._servicoDependencias.some((d) => d.id === idReal)
+    : window._servicoDependencias.some((d) => d.nome === nome && d.categoria === categoria);
+  if (!jaSelecionado) {
+    window._servicoDependencias.push({ categoria, nome, id: idReal });
+    _renderServicoDependenciasPorCategoria();
+    _renderServicoProcessosImpactados();
+  }
+};
+
+window.removerDependenciaServico = (idx) => {
+  window._servicoDependencias.splice(idx, 1);
+  _renderServicoDependenciasPorCategoria();
+  _renderServicoProcessosImpactados();
+};
+
+/**
+ * Lista read-only: união dos Processos vinculados a cada dependência do
+ * serviço (reaproveita _processosVinculadosADependencia, já usado pela aba
+ * "Processos" do drawer de Dependência e pelo relatório -- nenhuma lógica de
+ * vínculo nova), deduplicada por processo.
+ */
+function _renderServicoProcessosImpactados() {
+  const cont = document.getElementById('servicoProcessosImpactados');
+  if (!cont) return;
+  const itens = window._servicoDependencias || [];
+  const processos = window.processosData || [];
+
+  if (!itens.length) {
+    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:4px 0;">Adicione dependências ao serviço para ver os processos impactados.</p>';
+    return;
+  }
+
+  const vistos = new Map();
+  itens.forEach((item) => {
+    _processosVinculadosADependencia(item, processos).forEach((p) => {
+      if (!vistos.has(p.id)) vistos.set(p.id, p);
+    });
+  });
+  const vinculados = [...vistos.values()];
+
+  if (!vinculados.length) {
+    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:4px 0;">Nenhum processo vinculado a estas dependências.</p>';
+    return;
+  }
+  cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.88em;">
+    <thead><tr>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Área</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Processo</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;width:30%;">Tier</th>
+    </tr></thead>
+    <tbody>
+      ${vinculados.map((p) => {
+        const tier = Criticidade.tierDoProcesso(p);
+        return `<tr>
+          <td style="padding:8px 0;border-bottom:1px solid #f5f5f5;">${esc(p.area)}</td>
+          <td style="padding:8px 0;border-bottom:1px solid #f5f5f5;font-weight:500;">${esc(p.processo)}</td>
+          <td style="padding:8px 0;border-bottom:1px solid #f5f5f5;">${_htmlBadge(_nivelTierProcesso(tier), tier)}</td>
+        </tr>`;
+      }).join('')}
+    </tbody>
+  </table>`;
+}
+
+window.salvarServico = async () => {
+  const nome = document.getElementById('servicoNome').value.trim();
+  if (!nome) return showToast('Informe o nome do serviço.', '#e65100');
+  const id = document.getElementById('servicoId').value || null;
+  const descricao = document.getElementById('servicoDescricao').value.trim();
+
+  await comBotaoCarregando('btnSalvarServico', async () => {
+    try {
+      const r = await API.salvarServico({ id, nome, descricao, dependenciaItens: window._servicoDependencias || [] });
+      const item = { id: r.id, nome, descricao, dependenciaItens: window._servicoDependencias || [] };
+      const idx = servicosData.findIndex((x) => String(x.id) === String(r.id));
+      if (idx >= 0) servicosData[idx] = item; else servicosData.push(item);
+      // Cadastro rápido de Serviço a partir do Catálogo do Backup: só tem efeito
+      // se #backupServico existir (ou seja, se viemos de abrirDrawerServicoDeBackup).
+      _popularSelectBackupServico(r.id);
+      if (_temDrawerPaiEmpilhado()) {
+        fecharDrawerServico();
+      } else if (!id) {
+        // Sem fechar o drawer, o próximo "Salvar" precisa gravar no MESMO
+        // registro em vez de criar um segundo serviço idêntico.
+        document.getElementById('servicoId').value = r.id;
+        document.getElementById('servicoDrawerTitulo').textContent = 'Editar Serviço';
+      }
+      if (document.getElementById('servicoRows')) renderizarServicos();
+      showToast('✅ Salvo!', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
+};
+
+window.excluirServico = async (id) => {
+  const s = servicosData.find((x) => String(x.id) === String(id));
+  if (!s) return;
+  const nBackups = (backupsData || []).filter((b) => b.servicoId === id).length;
+  const aviso = `Excluir o serviço "${s.nome}"?\n\nIsso não apaga as dependências que ele agrupa, só o agrupamento.` +
+    (nBackups ? `\n\n⚠️ ${nBackups} backup(s) continuam vinculados a este serviço — o vínculo fica "órfão" (não deixa de aparecer na tela Backups), ajuste-os lá se necessário.` : '');
+  if (!confirm(aviso)) return;
+  try {
+    await API.excluirServico(id);
+    servicosData = servicosData.filter((x) => String(x.id) !== String(id));
+    renderizarServicos();
+    showToast('🗑️ Excluído.', '#555');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ============================================================
+// PÁGINA: CATÁLOGO DO BACKUP
+//
+// Backup e vinculado a 1 Servico, 1 "Servidor" e 1 Stakeholder (Pessoa). Jobs
+// (varias rotinas de execucao por Backup) ficam como array dentro do proprio
+// documento -- nunca sao abertos/buscados sozinhos, nao precisam de colecao
+// propria (mesmo espirito de Pessoas Associadas/Gestor do Contrato do
+// Fornecedor). Posse (RBAC): Admin + Seguranca da Informacao, nao TI.
+//
+// DECISAO 04/10/2026 (reversao da DECISAO 03/10/2026): Backup volta a ter tela
+// propria -- pedido explicito de seguir o padrao da tela Fornecedores (busca,
+// grade, ordenacao, edicao por clique na linha). A aba "Backups" do drawer de
+// Servico vira so consulta (_renderServicoBackupsTab), linkando pra ca -- um
+// so lugar edita de verdade, mesmo principio documentado em
+// ui-referencias.md ("cadastro completo de verdade, nunca um caminho
+// paralelo").
+// ============================================================
+let backupsOrdenacao = criarOrdenacao('nome', 'asc');
+
+async function catalogoBackup() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Catálogo do Backup</h2><p class="page-sub">Política de backup de cada Serviço: servidor, stakeholder e jobs de execução</p></div>
+      <button class="btn btn-primary" onclick="abrirDrawerBackup()">+ Novo Backup</button>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end;">
+      <input type="text" id="buscaBackup" placeholder="🔍 Buscar backup..." oninput="renderizarCatalogoBackup()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;">
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Serviço</label>
+        <select id="filtroBackupServico" onchange="renderizarCatalogoBackup()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:220px;">
+          <option value="">Todos os serviços</option>
+        </select>
+      </div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div class="data-table" id="listaBackups" style="display:none;">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="ordenarCatalogoBackup('nome')" style="cursor:pointer;">Nome <span id="sort-backup-nome"></span></th>
+            <th onclick="ordenarCatalogoBackup('servico')" style="cursor:pointer;">Serviço <span id="sort-backup-servico"></span></th>
+            <th>Servidor</th>
+            <th>Stakeholder</th>
+            <th style="width:9%;text-align:center;">Jobs</th>
+            <th style="width:12%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody id="backupRows"></tbody>
+      </table>
+    </div>
+    ${_htmlDrawerBackup()}
+    ${_htmlDrawerServico()}
+    ${_htmlDrawerPessoa()}
+    ${_htmlDrawerDependencia()}`;
+
+  try {
+    const [backupsList, servicosList, depsList, processosList, areasList] = await Promise.all([
+      API.getBackups(), API.getServicos(), API.getDependencias(), API.getProcessos(), API.getAreas(),
+    ]);
+    backupsData = backupsList;
+    servicosData = servicosList;
+    window.dependenciasCatalogo = depsList;
+    pessoasData = depsList.filter((d) => d.categoria === 'Pessoas');
+    window.processosData = processosList;
+    window.areasData = areasList;
+    // Mesmo filtro que a tela Dependências aplica -- dependenciasData é a
+    // variável que salvarDep() usa e depois espelha em window.dependenciasCatalogo;
+    // sem popular aqui também, essa sobrescrita apagaria o catálogo completo
+    // (mesmo cuidado já aplicado em servicos()).
+    dependenciasData = depsList.filter((d) => !['Pessoas', 'Pessoa'].includes(d.categoria));
+  } catch (e) { backupsData = []; }
+
+  const filtroServico = document.getElementById('filtroBackupServico');
+  if (filtroServico) {
+    filtroServico.innerHTML = '<option value="">Todos os serviços</option>' +
+      [...servicosData].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')).map((s) => `<option value="${esc(s.id)}">${esc(s.nome)}</option>`).join('');
+  }
+
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('listaBackups').style.display = 'block';
+  renderizarCatalogoBackup();
+}
+
+function renderizarCatalogoBackup() {
+  let data = [...backupsData];
+  const busca = (document.getElementById('buscaBackup') || {}).value || '';
+  if (busca.trim()) {
+    const termo = busca.toLowerCase();
+    data = data.filter((b) => (b.nome || '').toLowerCase().includes(termo) || (b.descricao || '').toLowerCase().includes(termo));
+  }
+  const filtroServico = (document.getElementById('filtroBackupServico') || {}).value || '';
+  if (filtroServico) data = data.filter((b) => b.servicoId === filtroServico);
+
+  const nomeServico = (id) => { const s = (servicosData || []).find((x) => String(x.id) === String(id)); return s ? s.nome : '—'; };
+  data = backupsOrdenacao.aplicar(data, {
+    servico: (a, b, dir) => dir * nomeServico(a.servicoId).localeCompare(nomeServico(b.servicoId), 'pt-BR'),
+  });
+  backupsOrdenacao.atualizarSetas('sort-backup-', ['nome', 'servico']);
+
+  document.getElementById('backupRows').innerHTML = data.length
+    ? data.map((b) => `<tr style="cursor:pointer;" onclick="abrirDrawerBackup('${esc(b.id)}')">
+        <td style="font-weight:600;">${esc(b.nome)}</td>
+        <td>${esc(nomeServico(b.servicoId))}</td>
+        <td>${esc(b.servidorNome || '-')}</td>
+        <td>${esc(b.stakeholderNome || '-')}</td>
+        <td style="text-align:center;">${(b.jobs || []).length}</td>
+        <td style="text-align:center;" onclick="event.stopPropagation();">
+          <button class="btn-icon" onclick="abrirDrawerBackup('${esc(b.id)}')" title="Editar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="excluirBackup('${esc(b.id)}')" title="Excluir">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </td>
+      </tr>`).join('')
+    : '<tr><td colspan="6" style="text-align:center;color:#999;padding:20px;">Nenhum backup cadastrado.</td></tr>';
+}
+
+window.ordenarCatalogoBackup = (coluna) => { backupsOrdenacao.ordenar(coluna); renderizarCatalogoBackup(); };
+
+function _htmlDrawerBackup() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  return `
+    <div class="drawer-overlay" id="drawerOverlayBackup" onclick="fecharDrawerBackup()"></div>
+    <div class="drawer" id="drawerBackup">
+      <div class="drawer-header">
+        <h3 id="backupDrawerTitulo">Novo Backup</h3>
+        <button onclick="fecharDrawerBackup()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
+        <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
+          <button id="tab-backup-dados" onclick="trocarAbaBackup('dados')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Dados</button>
+          <button id="tab-backup-jobs" onclick="trocarAbaBackup('jobs')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Jobs</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
+          <input type="hidden" id="backupId">
+
+          <div id="painel-backup-dados">
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Nome</label>
+              <input type="text" id="backupNome" placeholder="Ex: Backup do ERP" style="${inp}">
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Descrição</label>
+              <textarea id="backupDescricao" rows="2" style="${inp}resize:vertical;font-family:inherit;"></textarea>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Serviço</label>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <select id="backupServico" style="${inp}flex:1;"><option value="">Selecione...</option></select>
+                <button type="button" onclick="abrirDrawerServicoDeBackup()" title="Cadastrar novo serviço" style="white-space:nowrap;padding:9px 14px;border:1.5px solid #d60014;border-radius:7px;background:white;color:#d60014;font-size:0.85em;font-weight:600;cursor:pointer;">+ Novo</button>
+              </div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Servidor</label>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <select id="backupServidor" style="${inp}flex:1;"><option value="">Selecione...</option></select>
+                <button type="button" onclick="abrirDrawerDependenciaDeBackup()" title="Cadastrar nova dependência" style="white-space:nowrap;padding:9px 14px;border:1.5px solid #d60014;border-radius:7px;background:white;color:#d60014;font-size:0.85em;font-weight:600;cursor:pointer;">+ Novo</button>
+              </div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Stakeholder</label>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <select id="backupStakeholder" style="${inp}flex:1;"><option value="">Selecione...</option></select>
+                <button type="button" onclick="abrirModalPessoaDeBackup()" title="Cadastrar nova pessoa" style="white-space:nowrap;padding:9px 14px;border:1.5px solid #d60014;border-radius:7px;background:white;color:#d60014;font-size:0.85em;font-weight:600;cursor:pointer;">+ Nova</button>
+              </div>
+            </div>
+          </div>
+
+          <div id="painel-backup-jobs" style="display:none;">
+            <label style="${lbl}margin-bottom:10px;">Jobs cadastrados</label>
+            <div id="backupJobsTabela"></div>
+            <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:14px;margin-top:10px;">
+              <div id="jobEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
+                ✎ Editando job — <a href="#" onclick="cancelarEdicaoJob();return false;" style="color:#1565c0;">cancelar edição</a>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div>
+                  <label style="${lbl}">Frequência</label>
+                  <select id="jobFrequencia" onchange="_ajustarCamposJobAgenda()" style="${inp}">
+                    <option value="Diário">Diário</option>
+                    <option value="Semanal">Semanal</option>
+                    <option value="Mensal">Mensal</option>
+                    <option value="Anual">Anual</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="${lbl}">A cada</label>
+                  <input type="number" id="jobIntervalo" min="1" value="1" style="${inp}">
+                </div>
+                <div>
+                  <label style="${lbl}">Horário de Início</label>
+                  <input type="time" id="jobHorario" style="${inp}">
+                </div>
+              </div>
+              <div id="jobDiasSemanaBox" style="margin-bottom:10px;display:none;">
+                <label style="${lbl}">Dias da Semana</label>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;">
+                  ${['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((d, i) => `<button type="button" class="job-dia-chip" data-dia="${i}" onclick="toggleJobDiaSemana(${i})" style="padding:6px 12px;border-radius:14px;border:1.5px solid #e0e0e0;background:white;color:#555;font-size:0.82em;cursor:pointer;">${d}</button>`).join('')}
+                </div>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
+                <div>
+                  <label style="${lbl}">Tipo de Backup</label>
+                  <select id="jobTipo" style="${inp}">
+                    <option value="Full">Full</option>
+                    <option value="Diferencial">Diferencial</option>
+                    <option value="Incremental">Incremental</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="${lbl}">Duração prevista</label>
+                  <div style="display:flex;gap:6px;">
+                    <input type="number" id="jobDuracaoValor" min="0" style="${inp}">
+                    <select id="jobDuracaoUnidade" style="${inp}">
+                      <option value="minutos">minutos</option>
+                      <option value="horas" selected>horas</option>
+                    </select>
+                  </div>
+                </div>
+                <div>
+                  <label style="${lbl}">Retenção</label>
+                  <div style="display:flex;gap:6px;">
+                    <input type="number" id="jobRetencaoValor" min="0" style="${inp}">
+                    <select id="jobRetencaoUnidade" style="${inp}">
+                      <option value="dias" selected>dias</option>
+                      <option value="semanas">semanas</option>
+                      <option value="meses">meses</option>
+                      <option value="anos">anos</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div style="margin-bottom:10px;">
+                <label style="${lbl}">Destino</label>
+                <input type="text" id="jobDestino" placeholder="Ex: Nuvem - AWS S3, Fita local..." style="${inp}">
+              </div>
+              <div style="text-align:right;">
+                <button type="button" class="btn btn-ghost" id="btnAdicionarJob" onclick="adicionarJob()">+ Adicionar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerBackup()">Fechar</button>
+        <button class="btn btn-primary" id="btnSalvarBackup" onclick="salvarBackup()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+window.trocarAbaBackup = (aba) => {
+  ['dados', 'jobs'].forEach((a) => {
+    document.getElementById('painel-backup-' + a).style.display = a === aba ? 'block' : 'none';
+    const btn = document.getElementById('tab-backup-' + a);
+    btn.style.color = a === aba ? '#d60014' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
+  });
+};
+
+window._backupJobs = [];
+window._backupJobEditando = null;
+window._jobDiasSemanaSelecionados = [];
+
+window.abrirDrawerBackup = (id) => {
+  const b = id ? (backupsData || []).find((x) => String(x.id) === String(id)) : null;
+  // Sem id (novo) e com um Serviço já filtrado na grade: pré-preenche --
+  // normalmente se chega no "+ Novo Backup" filtrando por um serviço específico.
+  const filtroServico = (document.getElementById('filtroBackupServico') || {}).value || '';
+  const servicoId = b ? b.servicoId : filtroServico;
+  document.getElementById('backupId').value = b ? b.id : '';
+  document.getElementById('backupNome').value = b ? (b.nome || '') : '';
+  document.getElementById('backupDescricao').value = b ? (b.descricao || '') : '';
+  document.getElementById('backupDrawerTitulo').textContent = b ? 'Editar Backup' : 'Novo Backup';
+
+  _popularSelectBackupServico(servicoId || '');
+  _popularSelectBackupStakeholder(b ? (b.stakeholderId || '') : '');
+  // Migração não-destrutiva: backups antigos gravaram vários servidores em
+  // servidorItens[] (seletor por categoria, removido -- Servidor agora é 1
+  // Dependência só, igual Stakeholder). Sem servidorId ainda, cai no primeiro
+  // item legado em vez de apagar a informação silenciosamente.
+  const servidorIdLegado = (b && Array.isArray(b.servidorItens) && b.servidorItens[0]) ? b.servidorItens[0].id : '';
+  _popularSelectBackupServidor(b ? (b.servidorId || servidorIdLegado || '') : '');
+
+  window._backupJobs = b && Array.isArray(b.jobs) ? [...b.jobs] : [];
+  _limparFormularioJob();
+  _renderBackupJobsTabela();
+
+  trocarAbaBackup('dados');
+  document.getElementById('drawerBackup').classList.add('open');
+  document.getElementById('drawerOverlayBackup').classList.add('open');
+};
+
+window.fecharDrawerBackup = () => {
+  document.getElementById('drawerBackup').classList.remove('open');
+  document.getElementById('drawerOverlayBackup').classList.remove('open');
+  _reabrirDrawerPaiSeEscondido();
+};
+
+/** Popula o <select> de Serviço do Backup a partir de servicosData; usado na abertura e depois de cadastrar um serviço novo por cima. */
+function _popularSelectBackupServico(valorSelecionado) {
+  const sel = document.getElementById('backupServico');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    [...(servicosData || [])].sort((a, c) => a.nome.localeCompare(c.nome, 'pt-BR')).map((s) => `<option value="${esc(s.id)}">${esc(s.nome)}</option>`).join('');
+  sel.value = valorSelecionado || '';
+}
+
+/** Popula o <select> de Stakeholder do Backup a partir de pessoasData; usado na abertura e depois de cadastrar uma pessoa nova por cima. */
+function _popularSelectBackupStakeholder(valorSelecionado) {
+  const sel = document.getElementById('backupStakeholder');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    [...(pessoasData || [])].sort((a, c) => (a.nome || '').localeCompare(c.nome || '', 'pt-BR')).map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('');
+  sel.value = valorSelecionado || '';
+}
+
+/**
+ * Cadastro rápido de uma entidade referenciada (Serviço/Pessoa/Dependência) a
+ * partir de outro drawer já aberto (Backup, Serviço, ...): esconde (sem
+ * destruir) o drawer "pai" pra abrir o cadastro completo da entidade por
+ * cima, e reabre assim que esse cadastro fechar (salvando ou cancelando) --
+ * nada do que já estava preenchido no formulário de origem se perde. Pilha
+ * (não um slot só): Serviço escondido → Backup aberto → Pessoa/Dependência
+ * aberta por cima do Backup precisa reabrir o Backup primeiro e só depois o
+ * Serviço -- um slot único perderia o registro de quem reabrir em que ordem.
+ */
+function _esconderDrawerPaiTemporariamente(idDrawer, idOverlay) {
+  const d = document.getElementById(idDrawer);
+  const o = document.getElementById(idOverlay);
+  if (d) d.classList.remove('open');
+  if (o) o.classList.remove('open');
+  window._drawerPaiEmpilhados = window._drawerPaiEmpilhados || [];
+  window._drawerPaiEmpilhados.push({ idDrawer, idOverlay });
+}
+
+function _reabrirDrawerPaiSeEscondido() {
+  const info = (window._drawerPaiEmpilhados || []).pop();
+  if (!info) return;
+  const d = document.getElementById(info.idDrawer);
+  const o = document.getElementById(info.idOverlay);
+  if (d) d.classList.add('open');
+  if (o) o.classList.add('open');
+}
+
+/**
+ * true quando este drawer foi aberto por cima de outro (cadastro rápido, ex.:
+ * "+ Novo Servidor" dentro do Backup). Nesse caso "Salvar" continua fechando
+ * e devolvendo pro pai -- é um "escolha ou crie rapidinho e volte", não uma
+ * edição de registro pra ficar aberta (padrão "Fechar + Salvar" dos drawers
+ * de catálogo, ver DECISÃO 06/10/2026 em ui-referencias.md).
+ */
+function _temDrawerPaiEmpilhado() {
+  return !!(window._drawerPaiEmpilhados && window._drawerPaiEmpilhados.length);
+}
+
+window.abrirDrawerServicoDeBackup = () => {
+  _esconderDrawerPaiTemporariamente('drawerBackup', 'drawerOverlayBackup');
+  abrirDrawerServico();
+};
+
+window.abrirModalPessoaDeBackup = () => {
+  _esconderDrawerPaiTemporariamente('drawerBackup', 'drawerOverlayBackup');
+  abrirModalPessoa();
+};
+
+window.abrirDrawerDependenciaDeBackup = () => {
+  _esconderDrawerPaiTemporariamente('drawerBackup', 'drawerOverlayBackup');
+  window._backupNovoServidor = true;
+  // Pré-preenche a Categoria -- só dependências da categoria "Servidor" aparecem
+  // no select de Servidor, então é a única categoria que faz sentido aqui.
+  abrirDrawerDependencia({ categoria: 'Servidor' });
+};
+
+window.abrirDrawerDependenciaDeServico = (categoria, nomeSeed) => {
+  _esconderDrawerPaiTemporariamente('drawerServico', 'drawerOverlayServico');
+  window._servicoNovaDependenciaCategoria = categoria;
+  abrirDrawerDependencia({ categoria, nome: nomeSeed || '' });
+};
+
+/**
+ * Popula o <select> de Servidor do Backup com as Dependências técnicas (as 7
+ * categorias, igual ao catálogo usado pelo "+ Novo") a partir de
+ * window.dependenciasCatalogo; usado na abertura e depois de cadastrar uma
+ * dependência nova por cima. Mesmo molde de _popularSelectBackupStakeholder.
+ */
+function _popularSelectBackupServidor(valorSelecionado) {
+  const sel = document.getElementById('backupServidor');
+  if (!sel) return;
+  // Só a categoria técnica "Servidor" (uma das 7 de DEPENDENCIA_CATEGORIAS_TECNICAS)
+  // -- não o catálogo técnico inteiro.
+  const disponiveis = (window.dependenciasCatalogo || [])
+    .filter((d) => d.categoria === 'Servidor')
+    .sort((a, c) => (a.nome || '').localeCompare(c.nome || '', 'pt-BR'));
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    disponiveis.map((d) => `<option value="${esc(d.id)}">${esc(d.nome)}</option>`).join('');
+  sel.value = valorSelecionado || '';
+}
+
+// ---- Jobs (mini-CRUD "item com várias colunas", mesmo padrão de Pessoas
+// Associadas/Gestor do Contrato do Fornecedor e Plano de Ação/KRIs de Risco) ----
+
+window._ajustarCamposJobAgenda = () => {
+  const freq = document.getElementById('jobFrequencia').value;
+  const box = document.getElementById('jobDiasSemanaBox');
+  if (box) box.style.display = freq === 'Semanal' ? 'block' : 'none';
+};
+
+window.toggleJobDiaSemana = (dia) => {
+  const set = new Set(window._jobDiasSemanaSelecionados || []);
+  if (set.has(dia)) set.delete(dia); else set.add(dia);
+  window._jobDiasSemanaSelecionados = [...set];
+  document.querySelectorAll('.job-dia-chip').forEach((el) => {
+    const d = Number(el.dataset.dia);
+    const ativo = set.has(d);
+    el.style.background = ativo ? '#d60014' : 'white';
+    el.style.color = ativo ? 'white' : '#555';
+    el.style.borderColor = ativo ? '#d60014' : '#e0e0e0';
+  });
+};
+
+function _limparFormularioJob() {
+  document.getElementById('jobFrequencia').value = 'Diário';
+  document.getElementById('jobIntervalo').value = '1';
+  document.getElementById('jobHorario').value = '';
+  document.getElementById('jobTipo').value = 'Full';
+  document.getElementById('jobDuracaoValor').value = '';
+  document.getElementById('jobDuracaoUnidade').value = 'horas';
+  document.getElementById('jobRetencaoValor').value = '';
+  document.getElementById('jobRetencaoUnidade').value = 'dias';
+  document.getElementById('jobDestino').value = '';
+  window._jobDiasSemanaSelecionados = [];
+  document.querySelectorAll('.job-dia-chip').forEach((el) => { el.style.background = 'white'; el.style.color = '#555'; el.style.borderColor = '#e0e0e0'; });
+  _ajustarCamposJobAgenda();
+  window._backupJobEditando = null;
+  const aviso = document.getElementById('jobEdicaoAviso');
+  if (aviso) aviso.style.display = 'none';
+  const btn = document.getElementById('btnAdicionarJob');
+  if (btn) btn.textContent = '+ Adicionar';
+}
+
+window.cancelarEdicaoJob = () => { _limparFormularioJob(); };
+
+function _lerFormularioJob() {
+  return {
+    agenda: {
+      frequencia: document.getElementById('jobFrequencia').value,
+      intervalo: Number(document.getElementById('jobIntervalo').value) || 1,
+      diasSemana: [...(window._jobDiasSemanaSelecionados || [])],
+    },
+    horarioInicio: document.getElementById('jobHorario').value,
+    tipo: document.getElementById('jobTipo').value,
+    duracaoValor: document.getElementById('jobDuracaoValor').value ? Number(document.getElementById('jobDuracaoValor').value) : null,
+    duracaoUnidade: document.getElementById('jobDuracaoUnidade').value,
+    destino: document.getElementById('jobDestino').value.trim(),
+    retencaoValor: document.getElementById('jobRetencaoValor').value ? Number(document.getElementById('jobRetencaoValor').value) : null,
+    retencaoUnidade: document.getElementById('jobRetencaoUnidade').value,
+  };
+}
+
+window.adicionarJob = async () => {
+  const dados = _lerFormularioJob();
+  if (!dados.horarioInicio) return showToast('Informe o horário de início.', '#e65100');
+  // Nome do job e' sempre derivado dos metadados (nunca digitado à mão), pra
+  // ficar estável e reconhecível quando outras telas forem referenciá-lo.
+  dados.nome = _nomearJob(dados);
+  window._backupJobs = window._backupJobs || [];
+  if (window._backupJobEditando !== null && window._backupJobEditando !== undefined) {
+    window._backupJobs[window._backupJobEditando] = { ...window._backupJobs[window._backupJobEditando], ...dados };
+  } else {
+    window._backupJobs.push({ id: 'job-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), ...dados });
+  }
+  _limparFormularioJob();
+  _renderBackupJobsTabela();
+  // Cada job adicionado já grava o Backup inteiro (não só fica em memória até
+  // clicar "Salvar") -- se os campos obrigatórios do Backup ainda não estiverem
+  // preenchidos, _gravarBackupAtual avisa e o job fica só local até o próximo save.
+  await comBotaoCarregando('btnAdicionarJob', async () => {
+    const id = await _gravarBackupAtual();
+    if (id) showToast('✅ Job salvo!', '#2e7d32');
+  });
+};
+
+/** Nome do job a partir dos próprios metadados: Tipo · Agenda · Horário. */
+function _nomearJob(dados) {
+  const nomeBackup = (document.getElementById('backupNome') || {}).value || '';
+  const prefixo = nomeBackup.trim() ? nomeBackup.trim() + ' · ' : '';
+  return `${prefixo}${dados.tipo} · ${_descreverAgendaJob(dados.agenda)} · ${dados.horarioInicio}`;
+}
+
+window.editarJob = (idx) => {
+  const job = (window._backupJobs || [])[idx];
+  if (!job) return;
+  window._backupJobEditando = idx;
+  document.getElementById('jobFrequencia').value = job.agenda.frequencia;
+  document.getElementById('jobIntervalo').value = job.agenda.intervalo;
+  window._jobDiasSemanaSelecionados = [...(job.agenda.diasSemana || [])];
+  document.querySelectorAll('.job-dia-chip').forEach((el) => {
+    const d = Number(el.dataset.dia);
+    const ativo = window._jobDiasSemanaSelecionados.includes(d);
+    el.style.background = ativo ? '#d60014' : 'white';
+    el.style.color = ativo ? 'white' : '#555';
+    el.style.borderColor = ativo ? '#d60014' : '#e0e0e0';
+  });
+  _ajustarCamposJobAgenda();
+  document.getElementById('jobHorario').value = job.horarioInicio || '';
+  document.getElementById('jobTipo').value = job.tipo;
+  document.getElementById('jobDuracaoValor').value = job.duracaoValor != null ? job.duracaoValor : '';
+  document.getElementById('jobDuracaoUnidade').value = job.duracaoUnidade || 'horas';
+  document.getElementById('jobRetencaoValor').value = job.retencaoValor != null ? job.retencaoValor : '';
+  document.getElementById('jobRetencaoUnidade').value = job.retencaoUnidade || 'dias';
+  document.getElementById('jobDestino').value = job.destino || '';
+  document.getElementById('jobEdicaoAviso').style.display = 'block';
+  document.getElementById('btnAdicionarJob').textContent = 'Salvar alteração';
+};
+
+window.removerJob = (idx) => {
+  window._backupJobs.splice(idx, 1);
+  if (window._backupJobEditando === idx) _limparFormularioJob();
+  _renderBackupJobsTabela();
+};
+
+/** Descrição curta da agenda pra exibir na tabela (ex.: "A cada 2 semana(s) (Seg, Qua)"). */
+function _descreverAgendaJob(agenda) {
+  const dias = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  const unidade = { 'Diário': 'dia(s)', 'Semanal': 'semana(s)', 'Mensal': 'mês(es)', 'Anual': 'ano(s)' }[agenda.frequencia] || '';
+  let texto = agenda.intervalo > 1 ? `A cada ${agenda.intervalo} ${unidade}` : agenda.frequencia;
+  if (agenda.frequencia === 'Semanal' && (agenda.diasSemana || []).length) {
+    texto += ` (${[...agenda.diasSemana].sort().map((d) => dias[d]).join(', ')})`;
+  }
+  return texto;
+}
+
+function _renderBackupJobsTabela() {
+  const cont = document.getElementById('backupJobsTabela');
+  if (!cont) return;
+  const jobs = window._backupJobs || [];
+  if (!jobs.length) {
+    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:4px 0;">Nenhum job cadastrado ainda.</p>';
+    return;
+  }
+  cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.88em;">
+    <thead><tr>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Nome</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Horário</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Tipo</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Duração</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Destino</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Retenção</th>
+      <th style="width:70px;border-bottom:1.5px solid #e0e0e0;"></th>
+    </tr></thead>
+    <tbody>
+      ${jobs.map((j, i) => `<tr>
+        <td style="padding:7px 0;border-bottom:1px solid #f5f5f5;">${esc(j.nome || _descreverAgendaJob(j.agenda))}</td>
+        <td style="padding:7px 0;border-bottom:1px solid #f5f5f5;">${esc(j.horarioInicio || '-')}</td>
+        <td style="padding:7px 0;border-bottom:1px solid #f5f5f5;">${esc(j.tipo || '-')}</td>
+        <td style="padding:7px 0;border-bottom:1px solid #f5f5f5;">${j.duracaoValor != null ? esc(j.duracaoValor + ' ' + j.duracaoUnidade) : '-'}</td>
+        <td style="padding:7px 0;border-bottom:1px solid #f5f5f5;">${esc(j.destino || '-')}</td>
+        <td style="padding:7px 0;border-bottom:1px solid #f5f5f5;">${j.retencaoValor != null ? esc(j.retencaoValor + ' ' + j.retencaoUnidade) : '-'}</td>
+        <td style="padding:7px 0;border-bottom:1px solid #f5f5f5;text-align:center;white-space:nowrap;">
+          <button class="btn-icon" onclick="editarJob(${i})" title="Editar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="removerJob(${i})" title="Remover">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </td>
+      </tr>`).join('')}
+    </tbody>
+  </table>`;
+}
+
+/**
+ * Monta o payload a partir do formulário e grava via API, sem fechar o drawer
+ * nem mexer na aba ativa -- usado pelo botão "Salvar" (que fecha depois) e por
+ * adicionarJob() (que fica na aba Jobs, salvando a cada job adicionado).
+ * Devolve o id salvo, ou null se a validação falhar (toast já mostrado).
+ */
+async function _gravarBackupAtual() {
+  const nome = document.getElementById('backupNome').value.trim();
+  if (!nome) { showToast('Informe o nome do backup.', '#e65100'); return null; }
+  const servicoId = document.getElementById('backupServico').value;
+  if (!servicoId) { showToast('Selecione o serviço vinculado.', '#e65100'); return null; }
+  const id = document.getElementById('backupId').value || null;
+  const descricao = document.getElementById('backupDescricao').value.trim();
+  const servidorId = document.getElementById('backupServidor').value;
+  const servidorNome = servidorId ? ((window.dependenciasCatalogo || []).find((d) => String(d.id) === String(servidorId)) || {}).nome || '' : '';
+  const stakeholderId = document.getElementById('backupStakeholder').value;
+  const stakeholderNome = stakeholderId ? ((pessoasData || []).find((p) => String(p.id) === String(stakeholderId)) || {}).nome || '' : '';
+
+  try {
+    const payload = {
+      id, nome, descricao, servicoId,
+      servidorId, servidorNome,
+      stakeholderId, stakeholderNome,
+      jobs: window._backupJobs || [],
+    };
+    const r = await API.salvarBackup(payload);
+    const item = { ...payload, id: r.id };
+    const idx = backupsData.findIndex((x) => String(x.id) === String(r.id));
+    if (idx >= 0) backupsData[idx] = item; else backupsData.push(item);
+    // Backup novo passa a ter id real -- os próximos jobs adicionados (ou um
+    // "Salvar" seguinte) atualizam o mesmo documento, em vez de criar outro.
+    if (!id) {
+      document.getElementById('backupId').value = r.id;
+      document.getElementById('backupDrawerTitulo').textContent = 'Editar Backup';
+    }
+    if (document.getElementById('backupRows')) renderizarCatalogoBackup();
+    return r.id;
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    return null;
+  }
+}
+
+window.salvarBackup = async () => {
+  await comBotaoCarregando('btnSalvarBackup', async () => {
+    const id = await _gravarBackupAtual();
+    if (id) {
+      if (_temDrawerPaiEmpilhado()) fecharDrawerBackup();
+      showToast('✅ Salvo!', '#2e7d32');
+    }
+  });
+};
+
+window.excluirBackup = async (id) => {
+  const b = backupsData.find((x) => String(x.id) === String(id));
+  if (!b) return;
+  const nJobs = (b.jobs || []).length;
+  if (!confirm(`Excluir o backup "${b.nome}"?${nJobs ? ` Os ${nJobs} job(s) cadastrados nele também somem.` : ''} Esta ação não pode ser desfeita.`)) return;
+  try {
+    await API.excluirBackup(id);
+    backupsData = backupsData.filter((x) => String(x.id) !== String(id));
+    if (document.getElementById('backupRows')) renderizarCatalogoBackup();
+    showToast('🗑️ Excluído.', '#555');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ============================================================
+// PÁGINA: VULNERABILIDADES
+//
+// Catálogo de vulnerabilidades reportadas (CVSS/CWE/CVE, status de correção).
+// Severidade vem de vulnerabilidade-severidade.js (CVSS manda; severidade
+// manual só é fallback quando CVSS não se aplica). A abertura/encerramento
+// automático de Risco NÃO acontece aqui -- roda no servidor (Cloud Function
+// riscoDeVulnerabilidade, igual ao risco automático de Fornecedor) sempre que
+// o documento é salvo; esta tela só mostra, quando existir, um link pro risco
+// já aberto.
+// ============================================================
+let vulnerabilidadesData = [];
+let vulnerabilidadesOrdenacao = criarOrdenacao('codigo', 'desc');
+let vulnerabilidadesPaginaAtual = 1;
+const VULNERABILIDADES_POR_PAGINA = 20;
+
+const VULNERABILIDADE_STATUS_CORRECAO = ['Aberto', 'Em Correção', 'Corrigida', 'Aceita'];
+
+/**
+ * Próximo código "AAAA-NNN" (ano atual + sequencial de 3 dígitos), pra nunca
+ * depender de alguém digitar/repetir um código à mão. Olha só os códigos do
+ * ANO ATUAL já carregados em vulnerabilidadesData -- a sequência reinicia a
+ * cada ano, igual o próprio histórico importado já fazia (2025-000x,
+ * 2026-0xx). Só roda no SALVAR de um registro novo, nunca na edição.
+ */
+function _proximoCodigoVulnerabilidade() {
+  const prefixo = new Date().getFullYear() + '-';
+  const maior = (vulnerabilidadesData || [])
+    .map((v) => v.codigo || '')
+    .filter((c) => c.startsWith(prefixo))
+    .map((c) => parseInt(c.slice(prefixo.length), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((m, n) => Math.max(m, n), 0);
+  return prefixo + String(maior + 1).padStart(3, '0');
+}
+
+/** Pill de workflow (status da correção), não é Badge de severidade -- mesma distinção já aplicada a _badgeStatusRisco. */
+function _pillStatusCorrecaoVulnerabilidade(status) {
+  const cores = {
+    'Aberto': { cor: '#e65100', fundo: '#fff3e0' },
+    'Em Correção': { cor: '#1565c0', fundo: '#e3f2fd' },
+    'Corrigida': { cor: '#2e7d32', fundo: '#e8f5e9' },
+    'Aceita': { cor: '#555', fundo: '#f0f0f0' },
+  };
+  const c = cores[status] || { cor: '#999', fundo: '#f5f5f5' };
+  return `<span style="display:inline-block;padding:3px 10px;border-radius:10px;font-size:0.78em;font-weight:600;color:${c.cor};background:${c.fundo};">${esc(status || 'Não informado')}</span>`;
+}
+
+/** Dias corridos entre detecção e correção, só exibido -- nunca gravado (mesmo espírito do score do Risco não confiar em valor do cliente). */
+function _tempoCorrecaoDias(dataDeteccao, dataCorrecao) {
+  if (!dataDeteccao || !dataCorrecao) return null;
+  const d1 = new Date(dataDeteccao + 'T00:00:00');
+  const d2 = new Date(dataCorrecao + 'T00:00:00');
+  if (isNaN(d1) || isNaN(d2)) return null;
+  return Math.round((d2 - d1) / 86400000);
+}
+
+async function vulnerabilidades() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Vulnerabilidades</h2><p class="page-sub">Catálogo de vulnerabilidades reportadas, com severidade e abertura automática de risco</p></div>
+      <button class="btn btn-primary" onclick="abrirDrawerVulnerabilidade()">+ Nova Vulnerabilidade</button>
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end;">
+      <input type="text" id="buscaVulnerabilidade" placeholder="🔍 Buscar vulnerabilidade..." oninput="renderizarVulnerabilidades()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;">
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Produto</label>
+        <select id="filtroVulnProduto" onchange="renderizarVulnerabilidades()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:180px;">
+          <option value="">Todos</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Severidade</label>
+        <select id="filtroVulnSeveridade" onchange="renderizarVulnerabilidades()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:160px;">
+          <option value="">Todas</option>
+          <option value="Crítica">Crítica</option>
+          <option value="Alta">Alta</option>
+          <option value="Média">Média</option>
+          <option value="Baixa">Baixa</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Status da Correção</label>
+        <select id="filtroVulnStatus" onchange="renderizarVulnerabilidades()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:160px;">
+          <option value="">Todos</option>
+          ${VULNERABILIDADE_STATUS_CORRECAO.map((s) => `<option value="${s}">${s}</option>`).join('')}
+        </select>
+      </div>
+      <span id="contadorVulnerabilidades" style="font-size:0.82em;color:#888;padding:8px 0;"></span>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div class="data-table" id="listaVulnerabilidades" style="display:none;">
+      <table>
+        <thead>
+          <tr>
+            <th onclick="ordenarVulnerabilidades('codigo')" style="cursor:pointer;">Código <span id="sort-vuln-codigo"></span></th>
+            <th onclick="ordenarVulnerabilidades('produto')" style="cursor:pointer;">Produto <span id="sort-vuln-produto"></span></th>
+            <th onclick="ordenarVulnerabilidades('nome')" style="cursor:pointer;">Vulnerabilidade <span id="sort-vuln-nome"></span></th>
+            <th onclick="ordenarVulnerabilidades('severidade')" style="cursor:pointer;">Severidade <span id="sort-vuln-severidade"></span></th>
+            <th onclick="ordenarVulnerabilidades('statusCorrecao')" style="cursor:pointer;">Status da Correção <span id="sort-vuln-statusCorrecao"></span></th>
+            <th onclick="ordenarVulnerabilidades('dataDeteccao')" style="cursor:pointer;">Detecção <span id="sort-vuln-dataDeteccao"></span></th>
+            <th>Responsável</th>
+            <th style="width:12%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody id="vulnerabilidadeRows"></tbody>
+      </table>
+      <div id="vulnPaginacao" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:0 4px;font-size:0.85em;color:#666;"></div>
+    </div>
+    ${_htmlDrawerVulnerabilidade()}`;
+
+  try {
+    const [vulnsList, riscosList] = await Promise.all([
+      API.getVulnerabilidades(),
+      API.getRiscos().catch((e) => { console.error('Vulnerabilidades: riscos não carregaram; link de "risco aberto" ficará indisponível', e); return riscosData || []; }),
+    ]);
+    vulnerabilidadesData = vulnsList;
+    riscosData = riscosList;
+  } catch (e) {
+    console.error('Vulnerabilidades: falha ao carregar', e);
+    vulnerabilidadesData = [];
+  }
+
+  const filtroProduto = document.getElementById('filtroVulnProduto');
+  if (filtroProduto) {
+    const produtos = [...new Set(vulnerabilidadesData.map((v) => v.produto).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    filtroProduto.innerHTML = '<option value="">Todos</option>' + produtos.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
+  }
+
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('listaVulnerabilidades').style.display = 'block';
+  vulnerabilidadesPaginaAtual = 1;
+  renderizarVulnerabilidades();
+}
+
+function renderizarVulnerabilidades() {
+  const RANK_SEVERIDADE = { 'Crítica': 4, 'Alta': 3, 'Média': 2, 'Baixa': 1, 'Não informado': 0 };
+  let data = [...vulnerabilidadesData];
+
+  const busca = (document.getElementById('buscaVulnerabilidade') || {}).value || '';
+  if (busca.trim()) {
+    const termo = busca.toLowerCase();
+    data = data.filter((v) =>
+      (v.codigo || '').toLowerCase().includes(termo) ||
+      (v.produto || '').toLowerCase().includes(termo) ||
+      (v.nome || '').toLowerCase().includes(termo) ||
+      (v.cve || '').toLowerCase().includes(termo) ||
+      (v.cwe || '').toLowerCase().includes(termo));
+  }
+  const filtroProduto = (document.getElementById('filtroVulnProduto') || {}).value || '';
+  if (filtroProduto) data = data.filter((v) => v.produto === filtroProduto);
+  const filtroSeveridade = (document.getElementById('filtroVulnSeveridade') || {}).value || '';
+  if (filtroSeveridade) data = data.filter((v) => VulnerabilidadeSeveridade.faixa(v).rotulo === filtroSeveridade);
+  const filtroStatus = (document.getElementById('filtroVulnStatus') || {}).value || '';
+  if (filtroStatus) data = data.filter((v) => v.statusCorrecao === filtroStatus);
+
+  data = vulnerabilidadesOrdenacao.aplicar(data, {
+    severidade: (a, b, dir) => dir * ((RANK_SEVERIDADE[VulnerabilidadeSeveridade.faixa(a).rotulo] || 0) - (RANK_SEVERIDADE[VulnerabilidadeSeveridade.faixa(b).rotulo] || 0)),
+  });
+  vulnerabilidadesOrdenacao.atualizarSetas('sort-vuln-', ['codigo', 'produto', 'nome', 'severidade', 'statusCorrecao', 'dataDeteccao']);
+
+  const contador = document.getElementById('contadorVulnerabilidades');
+  if (contador) {
+    const total = vulnerabilidadesData.length;
+    contador.textContent = data.length === total ? `${total} vulnerabilidade${total !== 1 ? 's' : ''}` : `${data.length} de ${total} vulnerabilidade${total !== 1 ? 's' : ''}`;
+  }
+
+  const totalFiltrado = data.length;
+  const totalPaginas = Math.max(1, Math.ceil(totalFiltrado / VULNERABILIDADES_POR_PAGINA));
+  if (vulnerabilidadesPaginaAtual > totalPaginas) vulnerabilidadesPaginaAtual = totalPaginas;
+  if (vulnerabilidadesPaginaAtual < 1) vulnerabilidadesPaginaAtual = 1;
+  const inicio = (vulnerabilidadesPaginaAtual - 1) * VULNERABILIDADES_POR_PAGINA;
+  const pagina = data.slice(inicio, inicio + VULNERABILIDADES_POR_PAGINA);
+
+  document.getElementById('vulnerabilidadeRows').innerHTML = pagina.length
+    ? pagina.map((v) => {
+        const faixa = VulnerabilidadeSeveridade.faixa(v);
+        const riscoAberto = (riscosData || []).find((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(v.id) && !['Aceito', 'Encerrado'].includes(r.status));
+        return `<tr style="cursor:pointer;" onclick="abrirDrawerVulnerabilidade('${esc(v.id)}')">
+        <td style="font-weight:600;">${esc(v.codigo || '-')}</td>
+        <td>${esc(v.produto || '-')}</td>
+        <td>${esc(v.nome || '-')}${riscoAberto ? `<br><a href="#riscos" onclick="event.stopPropagation();" style="font-size:0.78em;color:#c62828;font-weight:600;">⚠️ Risco aberto</a>` : ''}</td>
+        <td>${_htmlBadge(_nivelSeveridadeVulnerabilidade(faixa.rotulo), faixa.rotulo)}</td>
+        <td>${_pillStatusCorrecaoVulnerabilidade(v.statusCorrecao)}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(v.dataDeteccao ? new Date(v.dataDeteccao + 'T00:00:00').toLocaleDateString('pt-BR') : '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(v.responsavel || '-')}</td>
+        <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
+          <button class="btn-icon" onclick="abrirDrawerVulnerabilidade('${esc(v.id)}')" title="Editar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="excluirVulnerabilidade('${esc(v.id)}')" title="Excluir">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </td>
+      </tr>`;
+      }).join('')
+    : `<tr><td colspan="8" style="text-align:center;color:#999;padding:40px;">Nenhuma vulnerabilidade encontrada.</td></tr>`;
+
+  const paginacao = document.getElementById('vulnPaginacao');
+  if (paginacao) {
+    paginacao.innerHTML = `
+      <span>${totalFiltrado ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${totalFiltrado}` : ''}</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-ghost" onclick="irParaPaginaVulnerabilidades(-1)" ${vulnerabilidadesPaginaAtual <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
+        <span style="padding:6px 4px;">Página ${vulnerabilidadesPaginaAtual} de ${totalPaginas}</span>
+        <button class="btn btn-ghost" onclick="irParaPaginaVulnerabilidades(1)" ${vulnerabilidadesPaginaAtual >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
+      </div>`;
+  }
+}
+
+window.ordenarVulnerabilidades = (coluna) => { vulnerabilidadesOrdenacao.ordenar(coluna); vulnerabilidadesPaginaAtual = 1; renderizarVulnerabilidades(); };
+window.irParaPaginaVulnerabilidades = (delta) => { vulnerabilidadesPaginaAtual += delta; renderizarVulnerabilidades(); };
+
+function _htmlDrawerVulnerabilidade() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  return `
+    <div class="drawer-overlay" id="drawerOverlayVulnerabilidade" onclick="fecharDrawerVulnerabilidade()"></div>
+    <div class="drawer" id="drawerVulnerabilidade">
+      <div class="drawer-header">
+        <h3 id="vulnDrawerTitulo">Nova Vulnerabilidade</h3>
+        <button onclick="fecharDrawerVulnerabilidade()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
+        <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
+          <button id="tab-vuln-identificacao" onclick="trocarAbaVulnerabilidade('identificacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Identificação</button>
+          <button id="tab-vuln-severidade" onclick="trocarAbaVulnerabilidade('severidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Severidade</button>
+          <button id="tab-vuln-correcao" onclick="trocarAbaVulnerabilidade('correcao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Correção</button>
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
+          <input type="hidden" id="vulnId">
+
+          <div id="painel-vuln-identificacao">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="${lbl}">Código</label>
+                <input type="text" id="vulnCodigo" readonly placeholder="Gerado automaticamente ao salvar" style="${inp}background:#f5f5f5;color:#666;cursor:not-allowed;">
+              </div>
+              <div>
+                <label style="${lbl}">Ticket do Report</label>
+                <input type="text" id="vulnTicketReport" style="${inp}">
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="${lbl}">Produto</label>
+                <input type="text" id="vulnProduto" placeholder="Nome do servidor, estação ou aplicação" style="${inp}">
+              </div>
+              <div>
+                <label style="${lbl}">Versão</label>
+                <input type="text" id="vulnVersao" style="${inp}">
+              </div>
+            </div>
+            <div style="margin-bottom:14px;">
+              <label style="${lbl}">Nome da Vulnerabilidade</label>
+              <input type="text" id="vulnNome" style="${inp}">
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="${lbl}">CWE</label>
+                <input type="text" id="vulnCwe" placeholder="Ex: CWE-284 — Improper Access Control" style="${inp}">
+              </div>
+              <div>
+                <label style="${lbl}">CVE</label>
+                <input type="text" id="vulnCve" style="${inp}">
+              </div>
+            </div>
+            <div style="margin-bottom:14px;">
+              <label style="${lbl}">Descrição</label>
+              <textarea id="vulnDescricao" rows="4" placeholder="Resumo técnico da vulnerabilidade" style="${inp}resize:vertical;font-family:inherit;"></textarea>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="${lbl}">Data de Detecção</label>
+                <input type="date" id="vulnDataDeteccao" style="${inp}" onchange="atualizarTempoCorrecaoVulnerabilidade()">
+              </div>
+              <div>
+                <label style="${lbl}">Origem da Detecção</label>
+                <input type="text" id="vulnOrigemDeteccao" style="${inp}">
+              </div>
+            </div>
+            <div>
+              <label style="${lbl}">Exploit Disponível?</label>
+              <select id="vulnExploitDisponivel" style="${inp}">
+                <option value="">Não informado</option>
+                <option value="Sim">Sim</option>
+                <option value="Não">Não</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="painel-vuln-severidade" style="display:none;">
+            <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:16px;margin-bottom:16px;">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px;">
+                <div>
+                  <label style="${lbl}">CVSS (0 a 10)</label>
+                  <input type="number" id="vulnCvss" min="0" max="10" step="0.1" placeholder="Ex: 9.8" style="${inp}" oninput="atualizarBadgeSeveridadeVulnerabilidade()">
+                </div>
+                <div>
+                  <label style="${lbl}">Severidade manual (quando CVSS não se aplica)</label>
+                  <select id="vulnSeveridadeManual" style="${inp}" onchange="atualizarBadgeSeveridadeVulnerabilidade()">
+                    <option value="">Selecione...</option>
+                    <option value="Baixa">Baixa</option>
+                    <option value="Média">Média</option>
+                    <option value="Alta">Alta</option>
+                    <option value="Crítica">Crítica</option>
+                  </select>
+                </div>
+              </div>
+              <span style="font-size:0.75em;color:#888;display:block;margin-bottom:10px;">Enquanto houver CVSS preenchido, ele manda na severidade final -- o campo manual só é usado quando o CVSS não se aplica (ex.: falha de processo, não de um componente técnico avaliável por CVSS).</span>
+              <div>Severidade final: <span id="vulnBadgeSeveridade"></span></div>
+            </div>
+          </div>
+
+          <div id="painel-vuln-correcao" style="display:none;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="${lbl}">Equipe Responsável pela Correção</label>
+                <input type="text" id="vulnEquipeResponsavel" style="${inp}">
+              </div>
+              <div>
+                <label style="${lbl}">Responsável</label>
+                <input type="text" id="vulnResponsavel" style="${inp}">
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div>
+                <label style="${lbl}">Ticket da Correção</label>
+                <input type="text" id="vulnTicketCorrecao" style="${inp}">
+              </div>
+              <div>
+                <label style="${lbl}">Status da Correção</label>
+                <select id="vulnStatusCorrecao" style="${inp}">
+                  ${VULNERABILIDADE_STATUS_CORRECAO.map((s) => `<option value="${s}">${s}</option>`).join('')}
+                </select>
+              </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:6px;">
+              <div>
+                <label style="${lbl}">Data Prevista de Correção</label>
+                <input type="date" id="vulnDataPrevistaCorrecao" style="${inp}">
+              </div>
+              <div>
+                <label style="${lbl}">Data de Correção</label>
+                <input type="date" id="vulnDataCorrecao" style="${inp}" onchange="atualizarTempoCorrecaoVulnerabilidade()">
+              </div>
+            </div>
+            <div id="vulnTempoCorrecao" style="font-size:0.78em;color:#888;margin-bottom:14px;"></div>
+            <div style="margin-bottom:14px;">
+              <label style="${lbl}">Evidência da Correção</label>
+              <input type="text" id="vulnEvidenciaCorrecao" placeholder="Link ou caminho do relatório de validação" style="${inp}">
+            </div>
+            <div>
+              <label style="${lbl}">Observações</label>
+              <textarea id="vulnObservacoes" rows="3" style="${inp}resize:vertical;font-family:inherit;"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerVulnerabilidade()">Fechar</button>
+        <button class="btn btn-ghost" id="btnImportarVulnParaRisco" onclick="importarVulnerabilidadeParaRisco()" style="display:none;color:#c62828;border-color:#c62828;"></button>
+        <button class="btn btn-primary" id="btnSalvarVulnerabilidade" onclick="salvarVulnerabilidade()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+window.trocarAbaVulnerabilidade = (aba) => {
+  ['identificacao', 'severidade', 'correcao'].forEach((a) => {
+    document.getElementById('painel-vuln-' + a).style.display = a === aba ? 'block' : 'none';
+    const btn = document.getElementById('tab-vuln-' + a);
+    btn.style.color = a === aba ? '#d60014' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
+  });
+};
+
+window.atualizarBadgeSeveridadeVulnerabilidade = () => {
+  const vuln = {
+    cvss: (document.getElementById('vulnCvss') || {}).value || '',
+    severidadeManual: (document.getElementById('vulnSeveridadeManual') || {}).value || '',
+  };
+  const faixa = VulnerabilidadeSeveridade.faixa(vuln);
+  const el = document.getElementById('vulnBadgeSeveridade');
+  if (el) el.innerHTML = _htmlBadge(_nivelSeveridadeVulnerabilidade(faixa.rotulo), faixa.rotulo);
+};
+
+window.atualizarTempoCorrecaoVulnerabilidade = () => {
+  const el = document.getElementById('vulnTempoCorrecao');
+  if (!el) return;
+  const dias = _tempoCorrecaoDias(
+    (document.getElementById('vulnDataDeteccao') || {}).value,
+    (document.getElementById('vulnDataCorrecao') || {}).value
+  );
+  el.textContent = dias !== null ? `Tempo de correção: ${dias} dia${dias !== 1 ? 's' : ''}` : '';
+};
+
+window.abrirDrawerVulnerabilidade = (id) => {
+  const v = id ? vulnerabilidadesData.find((x) => String(x.id) === String(id)) : null;
+  document.getElementById('vulnId').value = v ? v.id : '';
+  document.getElementById('vulnDrawerTitulo').textContent = v ? 'Editar Vulnerabilidade' : 'Nova Vulnerabilidade';
+  // Novo registro: só uma prévia (o código real é recalculado no Salvar, com
+  // os dados mais atuais) -- evita a tela em branco antes de gerar nada.
+  document.getElementById('vulnCodigo').value = v ? v.codigo : _proximoCodigoVulnerabilidade();
+  document.getElementById('vulnTicketReport').value = v ? v.ticketReport : '';
+  document.getElementById('vulnProduto').value = v ? v.produto : '';
+  document.getElementById('vulnVersao').value = v ? v.versao : '';
+  document.getElementById('vulnNome').value = v ? v.nome : '';
+  document.getElementById('vulnCwe').value = v ? v.cwe : '';
+  document.getElementById('vulnCve').value = v ? v.cve : '';
+  document.getElementById('vulnDescricao').value = v ? v.descricao : '';
+  document.getElementById('vulnDataDeteccao').value = v ? v.dataDeteccao : '';
+  document.getElementById('vulnOrigemDeteccao').value = v ? v.origemDeteccao : '';
+  document.getElementById('vulnExploitDisponivel').value = v ? v.exploitDisponivel : '';
+  document.getElementById('vulnCvss').value = v && v.cvss != null ? v.cvss : '';
+  document.getElementById('vulnSeveridadeManual').value = v ? v.severidadeManual : '';
+  document.getElementById('vulnEquipeResponsavel').value = v ? v.equipeResponsavel : '';
+  document.getElementById('vulnResponsavel').value = v ? v.responsavel : '';
+  document.getElementById('vulnTicketCorrecao').value = v ? v.ticketCorrecao : '';
+  document.getElementById('vulnStatusCorrecao').value = v ? v.statusCorrecao : 'Aberto';
+  document.getElementById('vulnDataPrevistaCorrecao').value = v ? v.dataPrevistaCorrecao : '';
+  document.getElementById('vulnDataCorrecao').value = v ? v.dataCorrecao : '';
+  document.getElementById('vulnEvidenciaCorrecao').value = v ? v.evidenciaCorrecao : '';
+  document.getElementById('vulnObservacoes').value = v ? v.observacoes : '';
+  atualizarBadgeSeveridadeVulnerabilidade();
+  atualizarTempoCorrecaoVulnerabilidade();
+  _atualizarBotaoImportarVulnParaRisco(v ? v.id : '');
+  trocarAbaVulnerabilidade('identificacao');
+  document.getElementById('drawerVulnerabilidade').classList.add('open');
+  document.getElementById('drawerOverlayVulnerabilidade').classList.add('open');
+};
+
+/**
+ * Botão "Importar para Riscos" do rodapé: escondido pra um registro ainda
+ * não salvo (nada pra importar); senão, mostra "📤 Importar para Riscos" OU,
+ * se já existir um risco automático/manual aberto pra esta vulnerabilidade,
+ * "⚠️ Ver Risco aberto" (link direto pro Registro de Riscos, sem chamar a
+ * ação de novo -- evita o usuário achar que precisa clicar de novo).
+ */
+function _atualizarBotaoImportarVulnParaRisco(vulnId) {
+  const btn = document.getElementById('btnImportarVulnParaRisco');
+  if (!btn) return;
+  if (!vulnId) { btn.style.display = 'none'; return; }
+  const aberto = (riscosData || []).find((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(vulnId) && !['Aceito', 'Encerrado'].includes(r.status));
+  btn.style.display = 'inline-block';
+  if (aberto) {
+    btn.textContent = '⚠️ Ver Risco aberto';
+    btn.onclick = () => { window.location.hash = 'riscos'; };
+  } else {
+    btn.textContent = '📤 Importar para Riscos';
+    btn.onclick = () => importarVulnerabilidadeParaRisco();
+  }
+}
+
+window.importarVulnerabilidadeParaRisco = async () => {
+  const id = document.getElementById('vulnId').value;
+  if (!id) return;
+  if (!confirm('Criar um Risco no Registro de Riscos a partir desta vulnerabilidade?')) return;
+  const btn = document.getElementById('btnImportarVulnParaRisco');
+  const textoOriginal = btn ? btn.textContent : '';
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Importando...'; }
+  try {
+    const r = await API.post('importarVulnerabilidadeParaRisco', { id });
+    API.invalidate('getRiscos');
+    riscosData = await API.getRiscos();
+    _atualizarBotaoImportarVulnParaRisco(id);
+    renderizarVulnerabilidades();
+    showToast(r.jaExiste ? 'Já existe um risco aberto para esta vulnerabilidade.' : '✅ Risco criado no Registro de Riscos!', r.jaExiste ? '#e65100' : '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível importar.'), '#c62828');
+  } finally {
+    if (btn) { btn.disabled = false; if (btn.textContent === '⏳ Importando...') btn.textContent = textoOriginal; }
+  }
+};
+
+window.fecharDrawerVulnerabilidade = () => {
+  document.getElementById('drawerVulnerabilidade').classList.remove('open');
+  document.getElementById('drawerOverlayVulnerabilidade').classList.remove('open');
+};
+
+window.salvarVulnerabilidade = async () => {
+  const id = document.getElementById('vulnId').value || null;
+  const v = {
+    id,
+    // Novo registro -> gera o código agora (ano + sequencial); edição ->
+    // mantém o que já está gravado (o campo é só-leitura na tela).
+    codigo: id ? document.getElementById('vulnCodigo').value.trim() : _proximoCodigoVulnerabilidade(),
+    ticketReport: document.getElementById('vulnTicketReport').value.trim(),
+    produto: document.getElementById('vulnProduto').value.trim(),
+    versao: document.getElementById('vulnVersao').value.trim(),
+    nome: document.getElementById('vulnNome').value.trim(),
+    cwe: document.getElementById('vulnCwe').value.trim(),
+    cve: document.getElementById('vulnCve').value.trim(),
+    descricao: document.getElementById('vulnDescricao').value.trim(),
+    dataDeteccao: document.getElementById('vulnDataDeteccao').value,
+    origemDeteccao: document.getElementById('vulnOrigemDeteccao').value.trim(),
+    exploitDisponivel: document.getElementById('vulnExploitDisponivel').value,
+    cvss: document.getElementById('vulnCvss').value !== '' ? Number(document.getElementById('vulnCvss').value) : null,
+    severidadeManual: document.getElementById('vulnSeveridadeManual').value,
+    equipeResponsavel: document.getElementById('vulnEquipeResponsavel').value.trim(),
+    responsavel: document.getElementById('vulnResponsavel').value.trim(),
+    ticketCorrecao: document.getElementById('vulnTicketCorrecao').value.trim(),
+    statusCorrecao: document.getElementById('vulnStatusCorrecao').value,
+    dataPrevistaCorrecao: document.getElementById('vulnDataPrevistaCorrecao').value,
+    dataCorrecao: document.getElementById('vulnDataCorrecao').value,
+    evidenciaCorrecao: document.getElementById('vulnEvidenciaCorrecao').value.trim(),
+    observacoes: document.getElementById('vulnObservacoes').value.trim(),
+  };
+  if (!v.nome) return showToast('Informe o nome da vulnerabilidade.', '#e65100');
+  if (!v.produto) return showToast('Informe o produto.', '#e65100');
+
+  await comBotaoCarregando('btnSalvarVulnerabilidade', async () => {
+    try {
+      const result = await API.salvarVulnerabilidade(v);
+      if (id) {
+        const idx = vulnerabilidadesData.findIndex((x) => String(x.id) === String(id));
+        if (idx !== -1) vulnerabilidadesData[idx] = { ...v, id };
+      } else {
+        vulnerabilidadesData.push({ ...v, id: result.id });
+        // Sem fechar o drawer, o próximo "Salvar" precisa gravar no MESMO
+        // registro em vez de criar uma segunda vulnerabilidade idêntica.
+        document.getElementById('vulnId').value = result.id;
+        document.getElementById('vulnDrawerTitulo').textContent = 'Editar Vulnerabilidade';
+        _atualizarBotaoImportarVulnParaRisco(result.id);
+      }
+      renderizarVulnerabilidades();
+      showToast('✅ Salvo! Se a severidade cruzar o limiar, um risco é aberto automaticamente em instantes.', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
+};
+
+window.excluirVulnerabilidade = async (id) => {
+  const v = vulnerabilidadesData.find((x) => String(x.id) === String(id));
+  if (!v) return;
+  if (!confirm(`Excluir a vulnerabilidade "${v.nome}"? Esta ação não pode ser desfeita. Um eventual risco já aberto para ela precisa ser fechado manualmente no Registro de Riscos.`)) return;
+  try {
+    await API.excluirVulnerabilidade(id);
+    vulnerabilidadesData = vulnerabilidadesData.filter((x) => String(x.id) !== String(id));
+    renderizarVulnerabilidades();
+    showToast('🗑️ Excluído.', '#555');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ============================================================
 // PÁGINA: ADMIN (Painel)
 // ============================================================
 async function admin() {
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Painel</h2><p class="page-sub">Resumo geral do BIA</p></div>
+      <div><h2>Dashboard de Continuidade</h2><p class="page-sub">Resumo geral do BIA</p></div>
     </div>
     <div class="loading" id="loading">⏳ Carregando...</div>
     <div id="painel" style="display:none;"></div>
@@ -3762,25 +6815,21 @@ async function admin() {
     return { nome: a.nome, total: procs.length, avaliados: aval, t1, t2, t3 };
   }).filter(a => a.total > 0);
 
+  // Cartão de métrica no padrão GRC360 (bia-metric), com a borda superior
+  // colorida de sempre por cima -- o componente oficial não tem essa opção,
+  // então fica como um override pontual (mesma ideia do card() de Fornecedores).
+  const metric = (label, value, corBorda, trend) => `<div class="bia-metric" style="border-top:4px solid ${corBorda};">
+        <div class="bia-metric__label label">${esc(label)}</div>
+        <div class="bia-metric__value display" style="color:${corBorda};">${value}</div>
+        ${trend ? `<div class="bia-metric__trend body-sm">${esc(trend)}</div>` : ''}
+      </div>`;
+
   document.getElementById('painel').innerHTML = `
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px;">
-      <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-top:4px solid #1a237e;">
-        <div style="font-size:0.85em;color:#666;margin-bottom:8px;">Total de Processos</div>
-        <div style="font-size:2.2em;font-weight:700;color:#1a237e;">${total}</div>
-      </div>
-      <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-top:4px solid #2e7d32;">
-        <div style="font-size:0.85em;color:#666;margin-bottom:8px;">Avaliados</div>
-        <div style="font-size:2.2em;font-weight:700;color:#2e7d32;">${avaliados}</div>
-        <div style="font-size:0.8em;color:#999;margin-top:4px;">${pct}% do total</div>
-      </div>
-      <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-top:4px solid #999;">
-        <div style="font-size:0.85em;color:#666;margin-bottom:8px;">Pendentes</div>
-        <div style="font-size:2.2em;font-weight:700;color:#999;">${pendentes}</div>
-      </div>
-      <div style="background:white;border-radius:10px;padding:20px;box-shadow:0 1px 4px rgba(0,0,0,0.08);border-top:4px solid #c62828;">
-        <div style="font-size:0.85em;color:#666;margin-bottom:8px;">Tier 1 (Crítico)</div>
-        <div style="font-size:2.2em;font-weight:700;color:#c62828;">${tier1}</div>
-      </div>
+      ${metric('Total de Processos', total, '#d60014')}
+      ${metric('Avaliados', avaliados, '#2e7d32', pct + '% do total')}
+      ${metric('Pendentes', pendentes, '#999')}
+      ${metric('Tier 1 (Crítico)', tier1, '#c62828')}
     </div>
 
     <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);margin-bottom:28px;border-top:4px solid #c62828;">
@@ -3794,9 +6843,9 @@ async function admin() {
         <div style="font-weight:600;color:#333;margin-bottom:16px;">Progresso de Avaliação</div>
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
           <div style="flex:1;background:#f0f0f0;border-radius:20px;height:14px;overflow:hidden;">
-            <div style="width:${pct}%;background:linear-gradient(90deg,#1a237e,#3949ab);height:100%;border-radius:20px;transition:width 0.5s;"></div>
+            <div style="width:${pct}%;background:linear-gradient(90deg,#d60014,#3949ab);height:100%;border-radius:20px;transition:width 0.5s;"></div>
           </div>
-          <span style="font-weight:700;color:#1a237e;min-width:40px;">${pct}%</span>
+          <span style="font-weight:700;color:#d60014;min-width:40px;">${pct}%</span>
         </div>
         <div style="font-size:0.85em;color:#999;">${avaliados} de ${total} processos avaliados</div>
       </div>
@@ -3901,7 +6950,7 @@ async function admin() {
               <td style="padding:12px;min-width:120px;">
                 <div style="display:flex;align-items:center;gap:8px;">
                   <div style="flex:1;background:#f0f0f0;border-radius:20px;height:8px;overflow:hidden;">
-                    <div style="width:${pctA}%;background:linear-gradient(90deg,#1a237e,#3949ab);height:100%;border-radius:20px;"></div>
+                    <div style="width:${pctA}%;background:linear-gradient(90deg,#d60014,#3949ab);height:100%;border-radius:20px;"></div>
                   </div>
                   <span style="font-size:0.8em;color:#666;min-width:32px;">${pctA}%</span>
                 </div>
@@ -3995,7 +7044,7 @@ async function questionario() {
       
       <div id="perguntas-container"></div>
       
-      <div style="background:linear-gradient(135deg,#1a237e,#283593);padding:20px;border-radius:8px;margin:20px 0;color:white;">
+      <div style="background:linear-gradient(135deg,#d60014,#e6262b);padding:20px;border-radius:8px;margin:20px 0;color:white;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
           <span style="font-weight:600;font-size:1.1em;">Score Total</span>
           <span id="scoreTotal" style="font-size:2.5em;font-weight:700;">0</span>
@@ -4058,7 +7107,7 @@ window.filtrarProcessosQuestionario = (area) => {
   container.style.display = 'block';
   container.innerHTML = `
     <div class="group-card">
-      <div class="group-header" style="background:#1a237e;color:white;">Processos de ${area}</div>
+      <div class="group-header" style="background:#d60014;color:white;">Processos de ${area}</div>
       ${processosDaArea.map(p => `
         <div class="list-row">
           <div class="list-row-main">
@@ -4083,8 +7132,8 @@ window.abrirModalAvaliacaoProcesso = (processoId, area, processo) => {
   // Renderizar perguntas
   const container = document.getElementById('perguntas-container');
   container.innerHTML = window.questionarioPerguntas.map((p, i) => `
-    <div style="margin-bottom:32px;padding:20px;background:#f8f9fa;border-radius:8px;border-left:4px solid #1a237e;">
-      <div style="font-weight:600;color:#1a237e;margin-bottom:6px;font-size:0.95em;">${p.pergunta}</div>
+    <div style="margin-bottom:32px;padding:20px;background:#f8f9fa;border-radius:8px;border-left:4px solid #d60014;">
+      <div style="font-weight:600;color:#d60014;margin-bottom:6px;font-size:0.95em;">${p.pergunta}</div>
       <div style="font-size:0.85em;color:#666;margin-bottom:16px;line-height:1.5;">${esc(p.descricao || '')}</div>
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
         <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='#c62828'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
@@ -4208,7 +7257,7 @@ window.calcularScore = () => {
   const tierEl = document.getElementById('scoreTier');
   tierEl.textContent = tier;
   tierEl.style.background = tierColor;
-  tierEl.style.color = total > 0 ? '#1a237e' : 'white';
+  tierEl.style.color = total > 0 ? '#d60014' : 'white';
 };
 
 window.fecharModalQuestionario = () => {
@@ -4269,12 +7318,33 @@ window.salvarAvaliacaoProcesso = async () => {
 // ============================================================
 let riscosData = [];
 // Abre pelo maior risco: e a pergunta que a tela responde.
-let riscosOrdenacao = criarOrdenacao('score', 'desc');
+let riscosOrdenacao = criarOrdenacao('dataIdentificacao', 'desc');
 let riscosAreasCache = [];
 let riscosProcessosCache = [];
 let riscosFornecedoresCache = [];
 let riscosCriticidadePorFornecedorCache = {};
 const RISCO_STATUS = ['Identificado', 'Em Análise', 'Em Avaliação', 'Em Tratamento', 'Em Monitoramento', 'Aceito', 'Encerrado'];
+
+// Rótulo de exibição do campo origem -- o valor gravado no Firestore não
+// muda (usado em checagens de dedup: _atualizarBotaoImportarVulnParaRisco
+// aqui, decidir() em fornecedorRisco.js/vulnerabilidadeRisco.js), só o
+// texto mostrado no dropdown do drawer e na coluna da grade.
+const RISCO_ORIGENS = [
+  { valor: 'Manual', rotulo: 'Manual' },
+  { valor: 'Importado de PCN', rotulo: 'PCN' },
+  { valor: 'Importado de DRP', rotulo: 'DRP' },
+  { valor: 'Vulnerabilidade', rotulo: 'Vulnerabilidade Reportada' },
+  { valor: 'Fornecedor', rotulo: 'Fornecedor' },
+  { valor: 'Indicador de Segurança', rotulo: 'Indicador de Segurança' },
+];
+// Origens que o sistema preenche sozinho (import/gatilho automático) -- o
+// dropdown vem travado pra essas; só risco criado manualmente pode trocar.
+const RISCO_ORIGENS_AUTOMATICAS = ['Importado de PCN', 'Importado de DRP', 'Vulnerabilidade', 'Fornecedor', 'Indicador de Segurança'];
+function _rotuloOrigemRisco(valor) {
+  const o = RISCO_ORIGENS.find((x) => x.valor === valor);
+  return o ? o.rotulo : (valor || 'Manual');
+}
+
 const RISCO_CATEGORIAS = [
   { valor: 'Financeiro', descricao: 'Risco de perda monetária direta, multas ou custos inesperados. Ex.: fraude, erro de faturamento, multa regulatória.' },
   { valor: 'Operacional', descricao: 'Risco que compromete a execução normal dos processos do dia a dia. Ex.: falha de sistema, indisponibilidade de infraestrutura, erro humano em processo crítico.' },
@@ -4318,24 +7388,16 @@ function _badgeScoreRisco(r) {
     return `<span title="Probabilidade ou impacto fora da escala — reavalie este risco" style="color:#999;font-weight:600;">-</span>`;
   }
   const f = _faixaScoreRisco(n);
-  return `<span title="${f.rotulo} (${n} de 12)" style="display:inline-block;min-width:26px;padding:3px 8px;border-radius:10px;font-size:0.82em;font-weight:700;background:${f.fundo};color:${f.cor};">${n}</span>`;
+  return `<span title="${f.rotulo} (${n} de 12)">${_htmlBadge(_nivelFaixaRisco(f.rotulo), String(n))}</span>`;
 }
 
 function _badgeStatusRisco(status) {
   const s = status || 'Identificado';
   return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:white;background:${_corStatusRisco(s)};white-space:nowrap;">${s}</span>`;
 }
-// 'Crítica' (Prioridade, feminino) ao lado de 'Crítico' (Impacto) -- mesmas
-// cores, so a escala de Prioridade usa a forma feminina.
-function _corProbImpactoRisco(valor) {
-  const bg = { 'Alta': '#ffcdd2', 'Alto': '#fff3e0', 'Crítico': '#ffcdd2', 'Crítica': '#ffcdd2', 'Média': '#fff3e0', 'Moderado': '#e8f5e9', 'Baixa': '#e8f5e9', 'Baixo': '#f5f5f5' };
-  const texto = { 'Alta': '#c62828', 'Alto': '#e65100', 'Crítico': '#c62828', 'Crítica': '#c62828', 'Média': '#e65100', 'Moderado': '#2e7d32', 'Baixa': '#2e7d32', 'Baixo': '#666' };
-  return { bg: bg[valor] || '#f5f5f5', texto: texto[valor] || '#666' };
-}
 function _badgeProbImpactoRisco(valor) {
   if (!valor) return '<span style="color:#bbb;">-</span>';
-  const c = _corProbImpactoRisco(valor);
-  return `<span style="display:inline-block;padding:2px 8px;border-radius:8px;font-size:0.78em;font-weight:600;background:${c.bg};color:${c.texto};">${valor}</span>`;
+  return _htmlBadge(_nivelProbImpacto(valor), valor);
 }
 
 /** Quanto este risco soma na "Carga de Risco da Empresa" -- mesma regra do
@@ -4348,7 +7410,7 @@ function _badgeCargaRisco(r, processosPorId) {
   if (carga === null) {
     return '<span title="Probabilidade ou impacto fora da escala — reavalie este risco" style="color:#999;font-weight:600;">-</span>';
   }
-  return `<span style="font-weight:700;color:#1a237e;">${carga}</span>`;
+  return `<span style="font-weight:700;color:#d60014;">${carga}</span>`;
 }
 
 function _formatarReais(v) {
@@ -4361,7 +7423,7 @@ async function riscos() {
     <div class="page-header">
       <div><h2>Gestão de Riscos</h2><p class="page-sub">Registro, análise, tratamento e monitoramento dos riscos identificados</p></div>
       <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" onclick="abrirImportarRiscosPCN()" id="btnImportarRiscosPCN" style="color:#1a237e;border-color:#1a237e;display:none;">📥 Importar de um PCN</button>
+        <button class="btn btn-primary" onclick="abrirImportarRisco()" id="btnImportarRisco" style="display:none;">📥 Importar Risco</button>
         <button class="btn btn-primary" onclick="abrirDrawerRisco()" id="btnNovoRisco" style="display:none;">+ Novo Risco</button>
       </div>
     </div>
@@ -4396,11 +7458,14 @@ async function riscos() {
       <table>
         <thead>
           <tr>
+            <th onclick="ordenarRiscos('dataIdentificacao')" style="cursor:pointer;width:7%;">Data Identif. <span id="sort-risco-dataIdentificacao"></span></th>
             <th onclick="ordenarRiscos('area')" style="cursor:pointer;width:9%;">Área <span id="sort-risco-area"></span></th>
             <th style="width:9%;">Processo / Fornecedor</th>
+            <th style="width:8%;">Origem</th>
             <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;width:13%;">Título <span id="sort-risco-titulo"></span></th>
             <th style="width:7%;">Categoria</th>
             <th style="width:8%;">Responsável</th>
+            <th style="width:8%;">Reportado por</th>
             <th style="width:6%;">Probab.</th>
             <th style="width:6%;">Impacto</th>
             <th onclick="ordenarRiscos('score')" style="cursor:pointer;width:5%;text-align:center;" title="Probabilidade x Impacto, de 1 a 12">Score <span id="sort-risco-score"></span></th>
@@ -4416,11 +7481,14 @@ async function riscos() {
     </div>
 
     ${_htmlDrawerRisco()}
+    ${_htmlModalEscolherOrigemImportarRisco()}
     ${_htmlModalImportarRiscosPCN()}
+    ${_htmlModalImportarRiscoVulnerabilidade()}
+    ${_htmlModalImportarRiscosDRP()}
   `;
 
   document.getElementById('btnNovoRisco').style.display = isAdmin ? 'inline-block' : 'none';
-  document.getElementById('btnImportarRiscosPCN').style.display = isAdmin ? 'inline-block' : 'none';
+  document.getElementById('btnImportarRisco').style.display = isAdmin ? 'inline-block' : 'none';
 
   try {
     // Indicadores entram aqui para que a sugestao de probabilidade funcione ao
@@ -4457,7 +7525,7 @@ async function riscos() {
     riscosData = []; riscosAreasCache = []; riscosFornecedoresCache = []; riscosCriticidadePorFornecedorCache = {};
     const corpo = document.getElementById('riscoRows');
     if (corpo) {
-      corpo.innerHTML = `<tr><td colspan="13" style="padding:24px;text-align:center;color:#c62828;">
+      corpo.innerHTML = `<tr><td colspan="16" style="padding:24px;text-align:center;color:#c62828;">
         Não foi possível carregar os riscos.<br>
         <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
         <button class="btn btn-ghost" onclick="riscos()" style="margin-top:12px;">Tentar de novo</button>
@@ -4506,10 +7574,8 @@ function _renderPainelRiscoConsolidado() {
 
   const badgesComposicao = (comp, compacto) => RiscoConsolidado.FAIXAS
     .filter((f) => comp[f] > 0)
-    .map((f) => {
-      const cor = RiscoConsolidado.faixaScore(f === 'Crítico' ? 9 : f === 'Alto' ? 6 : f === 'Moderado' ? 3 : 1);
-      return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:${compacto ? '0.74em' : '0.78em'};font-weight:700;background:${cor.fundo};color:${cor.cor};margin-right:4px;" title="${comp[f]} risco(s) na faixa ${f}">${comp[f]} ${compacto ? f.charAt(0) : f}</span>`;
-    }).join('');
+    .map((f) => `<span style="margin-right:4px;" title="${comp[f]} risco(s) na faixa ${f}">${_htmlBadge(_nivelFaixaRisco(f), comp[f] + ' ' + (compacto ? f.charAt(0) : f))}</span>`)
+    .join('');
 
   const avisoSemAvaliacao = (n) => n > 0
     ? `<div style="font-size:0.74em;color:#e65100;margin-top:6px;">\u26a0 ${n} risco${n > 1 ? 's' : ''} sem probabilidade ou impacto — fora da conta, o que puxa a carga para baixo</div>`
@@ -4519,7 +7585,7 @@ function _renderPainelRiscoConsolidado() {
     <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;">
       <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Carga de risco da empresa</div>
       <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 10px;">
-        <span style="font-size:2.8em;font-weight:800;line-height:1;color:#1a237e;">${semNada ? '–' : emp.carga}</span>
+        <span style="font-size:2.8em;font-weight:800;line-height:1;color:#d60014;">${semNada ? '–' : emp.carga}</span>
         ${semNada ? '' : '<span style="font-size:0.85em;color:#aaa;">pontos</span>'}
       </div>
       <div>${badgesComposicao(emp.composicao, false) || '<span style="font-size:0.8em;color:#999;">Nenhum risco na conta</span>'}</div>
@@ -4540,7 +7606,7 @@ function _renderPainelRiscoConsolidado() {
           <div style="width:${maiorCarga ? Math.round((a.carga / maiorCarga) * 100) : 0}%;height:100%;background:${a.piorFaixa ? a.piorFaixa.cor : '#bbb'};"></div>
         </div>
       </td>
-      <td style="padding:7px 10px;text-align:right;font-weight:700;color:#1a237e;white-space:nowrap;">${a.contados ? a.carga : '–'}</td>
+      <td style="padding:7px 10px;text-align:right;font-weight:700;color:#d60014;white-space:nowrap;">${a.contados ? a.carga : '–'}</td>
       <td style="padding:7px 10px;white-space:nowrap;">
         ${badgesComposicao(a.composicao, true)}${a.semAvaliacao ? `<span style="color:#e65100;font-size:0.74em;" title="${a.semAvaliacao} sem probabilidade ou impacto — fora da conta">+${a.semAvaliacao} \u26a0</span>` : ''}
       </td>
@@ -4735,16 +7801,14 @@ async function monitor() {
 
   const badgesComposicao = (comp) => RiscoConsolidado.FAIXAS
     .filter((f) => comp[f] > 0)
-    .map((f) => {
-      const cor = RiscoConsolidado.faixaScore(f === 'Crítico' ? 9 : f === 'Alto' ? 6 : f === 'Moderado' ? 3 : 1);
-      return `<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.78em;font-weight:700;background:${cor.fundo};color:${cor.cor};margin-right:4px;">${comp[f]} ${f}</span>`;
-    }).join('');
+    .map((f) => `<span style="margin-right:4px;">${_htmlBadge(_nivelFaixaRisco(f), comp[f] + ' ' + f)}</span>`)
+    .join('');
 
   conteudo.innerHTML = `
     <div style="display:flex;gap:14px;align-items:center;margin-bottom:16px;">
       <div>
         <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Retrato mais recente</div>
-        <div style="font-size:1.3em;font-weight:800;color:#1a237e;">${_dataCurta(ultimo.dia)}</div>
+        <div style="font-size:1.3em;font-weight:800;color:#d60014;">${_dataCurta(ultimo.dia)}</div>
       </div>
       <span style="padding:4px 12px;border-radius:12px;font-size:0.82em;font-weight:700;background:${statusIdade.fundo};color:${statusIdade.cor};">
         ${idade === 0 ? 'hoje' : idade === 1 ? 'há 1 dia' : `há ${idade} dias`} · ${statusIdade.rotulo}
@@ -4755,13 +7819,13 @@ async function monitor() {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px;">
       <div style="border:1px solid #e0e0e0;border-radius:10px;padding:20px 22px;background:#fff;">
         <div style="font-size:0.74em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Carga da Empresa Hoje</div>
-        <div style="font-size:3.2em;font-weight:800;line-height:1;margin:10px 0 12px;color:#1a237e;">${ultimo.empresa.carga}</div>
+        <div style="font-size:3.2em;font-weight:800;line-height:1;margin:10px 0 12px;color:#d60014;">${ultimo.empresa.carga}</div>
         <div>${badgesComposicao(ultimo.empresa.composicao) || '<span style="font-size:0.8em;color:#999;">Nenhum risco na conta</span>'}</div>
         <div style="font-size:0.8em;color:#777;margin-top:12px;">${ultimo.empresa.contados} risco${ultimo.empresa.contados === 1 ? '' : 's'} somado${ultimo.empresa.contados === 1 ? '' : 's'}</div>
       </div>
       <div style="border:1px solid #e0e0e0;border-radius:10px;padding:20px 22px;background:#fff;">
         <div style="font-size:0.74em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Impacto Financeiro Estimado Hoje</div>
-        <div style="font-size:2.4em;font-weight:800;line-height:1;margin:10px 0 10px;color:#1a237e;">${_formatarReais(ultimo.empresa.impactoFinanceiro)}</div>
+        <div style="font-size:2.4em;font-weight:800;line-height:1;margin:10px 0 10px;color:#d60014;">${_formatarReais(ultimo.empresa.impactoFinanceiro)}</div>
         ${ultimo.semImpactoFinanceiro ? `<div style="font-size:0.8em;color:#e65100;margin-top:12px;">${ultimo.semImpactoFinanceiro} risco${ultimo.semImpactoFinanceiro > 1 ? 's' : ''} sem estimativa</div>` : ''}
       </div>
     </div>
@@ -4796,7 +7860,7 @@ async function monitor() {
           ${ultimo.areas.map((a) => `<tr>
             <td style="padding:7px 10px;font-weight:600;color:#333;">${esc(a.area)}</td>
             <td style="padding:7px 10px;text-align:right;color:#555;">${a.contados}</td>
-            <td style="padding:7px 10px;text-align:right;font-weight:700;color:#1a237e;">${a.carga}</td>
+            <td style="padding:7px 10px;text-align:right;font-weight:700;color:#d60014;">${a.carga}</td>
             <td style="padding:7px 10px;text-align:right;color:#555;">${_formatarReais(a.impactoFinanceiro)}</td>
             <td style="padding:7px 10px;color:#777;">${badgesComposicao(a.composicao)}</td>
           </tr>`).join('')}
@@ -4851,17 +7915,20 @@ function renderizarRiscos() {
     },
   });
 
-  riscosOrdenacao.atualizarSetas('sort-risco-', ['area', 'titulo', 'score']);
+  riscosOrdenacao.atualizarSetas('sort-risco-', ['dataIdentificacao', 'area', 'titulo', 'score']);
 
   const processosPorId = RiscoConsolidado.indexarProcessos(riscosProcessosCache);
 
   document.getElementById('riscoRows').innerHTML = data.length
     ? data.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${r.id}')">
-        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(r.area || '-')}</span></td>
+        <td style="font-size:0.85em;color:#555;white-space:nowrap;">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '-'}</td>
+        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#fce8ea;color:#d60014;">${esc(r.area || '-')}</span></td>
         <td style="font-size:0.85em;color:#555;">${r.processo || (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span style="color:#bbb;">Corporativo</span>')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(_rotuloOrigemRisco(r.origem))}</td>
         <td style="font-weight:600;color:#222;">${esc(r.titulo)}</td>
         <td style="font-size:0.85em;color:#555;">${esc((r.categorias || []).join(', ')) || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${esc(r.responsavel || '-')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(r.reportadoPor || '-')}</td>
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
         <td style="text-align:center;">${_badgeScoreRisco(r)}</td>
@@ -4874,14 +7941,14 @@ function renderizarRiscos() {
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
           ${isAdmin ? `<button class="btn-icon" onclick="clonarRisco('${r.id}')" title="Clonar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1a237e" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d60014" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>` : ''}
           ${isAdmin ? `<button class="btn-icon" onclick="excluirRisco('${r.id}')" title="Excluir">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           </button>` : ''}
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="13" style="text-align:center;color:#999;padding:40px;">Nenhum risco cadastrado.</td></tr>';
+    : '<tr><td colspan="16" style="text-align:center;color:#999;padding:40px;">Nenhum risco cadastrado.</td></tr>';
 }
 
 window.clonarRisco = (id) => {
@@ -4922,8 +7989,8 @@ function _htmlDrawerRisco() {
         <button onclick="fecharDrawerRisco()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
-        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;flex-wrap:wrap;">
-          <button id="tab-risco-identificacao" onclick="trocarAbaRisco('identificacao')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Identificação</button>
+        <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;flex-wrap:wrap;">
+          <button id="tab-risco-identificacao" onclick="trocarAbaRisco('identificacao')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Identificação</button>
           <button id="tab-risco-analise" onclick="trocarAbaRisco('analise')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Análise &amp; Avaliação</button>
           <button id="tab-risco-tratamento" onclick="trocarAbaRisco('tratamento')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Tratamento</button>
           <button id="tab-risco-monitoramento" onclick="trocarAbaRisco('monitoramento')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Monitoramento</button>
@@ -4936,7 +8003,7 @@ function _htmlDrawerRisco() {
           <div id="painel-risco-identificacao">
             <div style="margin-bottom:20px;">
               <label style="${lbl}">Título / Evento</label>
-              <input type="text" id="rTitulo" placeholder="Ex: Falha de energia no data center" style="${inp}border:2px solid #1a237e;font-weight:600;">
+              <input type="text" id="rTitulo" placeholder="Ex: Falha de energia no data center" style="${inp}border:2px solid #d60014;font-weight:600;">
             </div>
             <div style="margin-bottom:16px;">
               <label style="${lbl}">Descrição</label>
@@ -4988,7 +8055,15 @@ function _htmlDrawerRisco() {
                 <select id="rStatus" style="${inp}">${RISCO_STATUS.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
               </div>
             </div>
-            <div id="rOrigemInfo" style="font-size:0.8em;color:#888;"></div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Origem do Risco</label>
+              <select id="rOrigem" style="${inp}">${RISCO_ORIGENS.map(o => `<option value="${esc(o.valor)}">${esc(o.rotulo)}</option>`).join('')}</select>
+              <span id="rOrigemTravadaInfo" style="font-size:0.72em;color:#888;margin-top:3px;display:block;"></span>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Reportado por</label>
+              <select id="rReportadoPor" style="${inp}"><option value="">Selecione...</option></select>
+            </div>
           </div>
 
           <!-- ABA: ANÁLISE (IMPACTO FINANCEIRO) & AVALIAÇÃO -->
@@ -5036,7 +8111,7 @@ function _htmlDrawerRisco() {
             </div>
             <div style="margin-bottom:16px;">
               <label style="${lbl}">Impacto Financeiro Estimado (R$)</label>
-              <input type="number" id="rImpactoFinanceiro" readonly style="${inp}background:#f5f6fa;color:#1a237e;font-weight:700;">
+              <input type="number" id="rImpactoFinanceiro" readonly style="${inp}background:#f5f6fa;color:#d60014;font-weight:700;">
               <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Calculado automaticamente pela soma dos componentes acima.</span>
             </div>
             <div style="margin-bottom:16px;">
@@ -5046,7 +8121,7 @@ function _htmlDrawerRisco() {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
                 <label style="${lbl}">Score (Priorização)</label>
-                <input type="number" id="rScore" readonly style="${inp}background:#f5f6fa;color:#1a237e;font-weight:700;">
+                <input type="number" id="rScore" readonly style="${inp}background:#f5f6fa;color:#d60014;font-weight:700;">
                 <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Calculado automaticamente: Probabilidade × Impacto.</span>
               </div>
               <div>
@@ -5079,9 +8154,12 @@ function _htmlDrawerRisco() {
               <textarea id="rEstrategiaDescricao" rows="3" placeholder="Descreva a estratégia de tratamento" style="${inp}resize:vertical;"></textarea>
             </div>
             <div>
-              <label style="${lbl}margin-bottom:8px;">Plano de Ação (5W2H)</label>
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <label style="${lbl}margin-bottom:0;">Plano de Ação (5W2H)</label>
+                <button class="btn btn-ghost" onclick="exportarPlanoAcaoRisco()" style="padding:6px 14px;font-size:0.82em;">🖨️ Exportar Plano de Ação</button>
+              </div>
               <div id="planoAcaoTabela"></div>
-              <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:14px;margin-top:10px;">
+              <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:14px;margin-top:10px;">
                 <div id="paEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:10px;">
                   ✎ Editando ação — <a href="#" onclick="cancelarEdicaoPlanoAcao();return false;" style="color:#1565c0;">cancelar edição</a>
                 </div>
@@ -5091,7 +8169,7 @@ function _htmlDrawerRisco() {
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
                   <div><label style="${lbl}">Por quê</label><input type="text" id="paPorque" placeholder="Motivo da ação" style="${inp}"></div>
-                  <div><label style="${lbl}">Responsável (quem)</label><input type="text" id="paResponsavel" placeholder="Nome ou área" style="${inp}"></div>
+                  <div><label style="${lbl}">Responsável (quem)</label><select id="paResponsavel" style="${inp}"><option value="">Selecione...</option></select></div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
                   <div><label style="${lbl}">Onde</label><input type="text" id="paOnde" placeholder="Local ou sistema" style="${inp}"></div>
@@ -5121,7 +8199,7 @@ function _htmlDrawerRisco() {
           <div id="painel-risco-monitoramento" style="display:none;">
             <label style="${lbl}margin-bottom:8px;">Indicadores-Chave de Risco (KRIs)</label>
             <div id="krisTabela"></div>
-            <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:14px;margin-top:10px;">
+            <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:14px;margin-top:10px;">
               <div id="kriEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:10px;">
                 ✎ Editando lançamento — <a href="#" onclick="cancelarEdicaoKri();return false;" style="color:#1565c0;">cancelar edição</a>
               </div>
@@ -5190,8 +8268,8 @@ window.trocarAbaRisco = (aba) => {
   ['identificacao', 'analise', 'tratamento', 'monitoramento', 'encerramento'].forEach(a => {
     document.getElementById('painel-risco-' + a).style.display = a === aba ? 'block' : 'none';
     const btn = document.getElementById('tab-risco-' + a);
-    btn.style.color = a === aba ? '#1a237e' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
+    btn.style.color = a === aba ? '#d60014' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
   });
 };
 
@@ -5271,12 +8349,33 @@ window.abrirDrawerRisco = async (r) => {
     pessoasData.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
     (responsavelAtual && !temNaLista ? `<option value="${esc(responsavelAtual)}">${esc(responsavelAtual)} (não cadastrado como pessoa)</option>` : '');
   document.getElementById('rResponsavel').value = responsavelAtual;
+  const reportadoPorAtual = r ? (r.reportadoPor || '') : '';
+  // Mesmo catálogo/proteção de valor legado do Responsável acima.
+  const temNaListaReportadoPor = pessoasData.some((p) => p.nome === reportadoPorAtual);
+  document.getElementById('rReportadoPor').innerHTML = '<option value="">Selecione...</option>' +
+    pessoasData.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
+    (reportadoPorAtual && !temNaListaReportadoPor ? `<option value="${esc(reportadoPorAtual)}">${esc(reportadoPorAtual)} (não cadastrado como pessoa)</option>` : '');
+  document.getElementById('rReportadoPor').value = reportadoPorAtual;
+  // Responsável de cada item do Plano de Ação (5W2H) -- mesmo catálogo de
+  // Pessoas do Responsável do risco acima. Itens antigos podem ter mais de
+  // um nome livre fora do catálogo (um por item), então cada um vira opção
+  // extra selecionável (mesmo padrão do responsavelAtual acima, só que para
+  // vários valores possíveis em vez de um só).
+  const planoAcaoAtual = (r && Array.isArray(r.planoAcao)) ? r.planoAcao : [];
+  const responsaveisLegadosPA = [...new Set(planoAcaoAtual.map((it) => it.responsavel).filter(Boolean))]
+    .filter((nome) => !pessoasData.some((p) => p.nome === nome));
+  document.getElementById('paResponsavel').innerHTML = '<option value="">Selecione...</option>' +
+    pessoasData.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
+    responsaveisLegadosPA.map((nome) => `<option value="${esc(nome)}">${esc(nome)} (não cadastrado como pessoa)</option>`).join('');
   document.getElementById('rDataIdentificacao').value = r ? (r.dataIdentificacao || '') : new Date().toISOString().slice(0, 10);
   document.getElementById('rStatus').value = r ? (r.status || 'Identificado') : 'Identificado';
   document.getElementById('rDescricao').value = r ? (r.descricao || '') : '';
-  document.getElementById('rOrigemInfo').textContent = r && r.origem === 'Importado de PCN' ? '📥 Origem: importado de um PCN'
-    : r && r.origem === 'Indicador de Segurança' ? '📊 Origem: gerado automaticamente por desvio de indicador de segurança'
-    : r && r.origem === 'Fornecedor' ? '🏢 Origem: gerado automaticamente por nota de conformidade do fornecedor abaixo do limiar'
+  const origemAtual = r ? (r.origem || 'Manual') : 'Manual';
+  const origemAutomatica = RISCO_ORIGENS_AUTOMATICAS.includes(origemAtual);
+  document.getElementById('rOrigem').value = origemAtual;
+  document.getElementById('rOrigem').disabled = origemAutomatica;
+  document.getElementById('rOrigemTravadaInfo').textContent = origemAutomatica
+    ? `🔒 Preenchido automaticamente (${_rotuloOrigemRisco(origemAtual)}) — não pode ser alterado aqui.`
     : '';
 
   document.getElementById('rProbabilidade').value = r ? (r.probabilidade || '') : '';
@@ -5340,12 +8439,15 @@ window.excluirRisco = async (id) => {
   } catch (e) { showToast('Erro: ' + e.message, '#c62828'); }
 };
 
-window.salvarRisco = async () => {
+// Le o formulario do drawer de Risco pro estado atual da tela -- usado por
+// salvarRisco (grava) e exportarPlanoAcaoRisco (so le, pro PDF refletir
+// inclusive uma acao do Plano de Acao recem-adicionada e ainda nao salva).
+function _coletarFormularioRisco() {
   const procSel = document.getElementById('rProcesso');
   const procOpt = procSel.options[procSel.selectedIndex];
   const fornSel = document.getElementById('rFornecedor');
   const fornOpt = fornSel.options[fornSel.selectedIndex];
-  const r = {
+  return {
     id: document.getElementById('rId').value || null,
     area: document.getElementById('rArea').value.trim(),
     processoId: procSel.value || null,
@@ -5357,8 +8459,10 @@ window.salvarRisco = async () => {
     descricao: document.getElementById('rDescricao').value.trim(),
     categorias: Array.from(document.querySelectorAll('.risco-categoria-check:checked')).map((c) => c.value),
     responsavel: document.getElementById('rResponsavel').value.trim(),
+    reportadoPor: document.getElementById('rReportadoPor').value.trim(),
     dataIdentificacao: document.getElementById('rDataIdentificacao').value,
     status: document.getElementById('rStatus').value,
+    origem: document.getElementById('rOrigem').value,
     probabilidade: document.getElementById('rProbabilidade').value,
     impacto: document.getElementById('rImpacto').value,
     impactoFinanceiro: document.getElementById('rImpactoFinanceiro').value ? Number(document.getElementById('rImpactoFinanceiro').value) : null,
@@ -5376,11 +8480,14 @@ window.salvarRisco = async () => {
     dataEncerramento: document.getElementById('rDataEncerramento').value || null,
     justificativaEncerramento: document.getElementById('rJustificativaEncerramento').value.trim(),
   };
+}
+
+window.salvarRisco = async () => {
+  const r = _coletarFormularioRisco();
   if (!r.area) return showToast('Selecione a área.', '#e65100');
   if (!r.titulo) return showToast('Informe o título do risco.', '#e65100');
 
   const isNew = !r.id;
-  if (isNew) r.origem = 'Manual';
 
   await comBotaoCarregando('btnSalvarRisco', async () => {
     try {
@@ -5710,6 +8817,55 @@ window.removerKriItem = (idx) => {
 };
 
 // ------------------------------------------------------------
+// "Importar Risco": primeiro passo é escolher a ORIGEM (hoje PCN ou
+// Vulnerabilidade -- "nesse momento", por isso 2 botões simples em vez de um
+// if/else fechado; uma origem nova no futuro é só mais um botão aqui). Cada
+// origem abre o próprio picker (PCN: _htmlModalImportarRiscosPCN, logo
+// abaixo; Vulnerabilidade: _htmlModalImportarRiscoVulnerabilidade, mais
+// adiante) -- nenhum dos dois pickers muda por causa deste passo novo.
+// ------------------------------------------------------------
+function _htmlModalEscolherOrigemImportarRisco() {
+  const opcao = 'text-align:left;display:flex;flex-direction:column;gap:2px;padding:14px 16px;';
+  return `
+    <div class="modal-overlay" id="modalEscolherOrigemRisco"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
+      <h3>Importar Risco de onde?</h3>
+      <p style="font-size:0.85em;color:#666;margin-bottom:14px;">Escolha a origem dos dados do risco a importar.</p>
+      <div style="display:flex;flex-direction:column;gap:10px;">
+        <button class="btn btn-ghost" onclick="escolherOrigemImportarRisco('pcn')" style="${opcao}">
+          <span style="font-weight:700;">📄 PCN</span>
+          <span style="font-size:0.78em;color:#888;font-weight:400;">Riscos listados na Avaliação de Riscos de um PCN já gerado</span>
+        </button>
+        <button class="btn btn-ghost" onclick="escolherOrigemImportarRisco('vulnerabilidade')" style="${opcao}">
+          <span style="font-weight:700;">⚠️ Vulnerabilidade</span>
+          <span style="font-size:0.78em;color:#888;font-weight:400;">Uma vulnerabilidade cadastrada no catálogo de Vulnerabilidades</span>
+        </button>
+        <button class="btn btn-ghost" onclick="escolherOrigemImportarRisco('drp')" style="${opcao}">
+          <span style="font-weight:700;">🛠️ DRP</span>
+          <span style="font-size:0.78em;color:#888;font-weight:400;">Limitações/riscos residuais listados em um DRP já gerado</span>
+        </button>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalEscolherOrigemImportarRisco()">Cancelar</button>
+      </div>
+    </div></div>`;
+}
+
+window.abrirImportarRisco = () => {
+  document.getElementById('modalEscolherOrigemRisco').classList.add('open');
+};
+
+window.fecharModalEscolherOrigemImportarRisco = () => {
+  document.getElementById('modalEscolherOrigemRisco').classList.remove('open');
+};
+
+window.escolherOrigemImportarRisco = (origem) => {
+  fecharModalEscolherOrigemImportarRisco();
+  if (origem === 'pcn') abrirImportarRiscosPCN();
+  else if (origem === 'vulnerabilidade') abrirImportarRiscosVulnerabilidade();
+  else if (origem === 'drp') abrirImportarRiscosDRP();
+};
+
+// ------------------------------------------------------------
 // Importação de riscos identificados em um PCN já gerado
 // ------------------------------------------------------------
 function _htmlModalImportarRiscosPCN() {
@@ -5929,6 +9085,310 @@ function _extrairRiscosDoPCN(html) {
   });
   return riscos;
 }
+
+// Extrai os itens de "Limitações Conhecidas da Estratégia" de um DRP gerado,
+// como candidatos a risco. O DRP não tem uma tabela de avaliação de riscos
+// como o PCN (Evento/Probabilidade/Impacto/Mitigação); o texto-guia dessa
+// seção já fala em "restrições e riscos residuais", então cada item vira um
+// candidato com Probabilidade/Impacto em branco -- quem revisa preenche na
+// hora de importar (ver _htmlModalImportarRiscosDRP).
+function _extrairLimitacoesDoDRP(html) {
+  if (!html) return [];
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  const headings = doc.querySelectorAll('h1, h2, h3');
+  let heading = null;
+  headings.forEach(h => {
+    const t = h.textContent.toLowerCase();
+    if (!heading && t.includes('limita')) heading = h;
+  });
+  if (!heading) return [];
+
+  const itens = [];
+  let next = heading.nextElementSibling;
+  while (next && !/^H[1-3]$/.test(next.tagName)) {
+    if (next.tagName === 'UL' || next.tagName === 'OL') {
+      next.querySelectorAll('li').forEach(li => {
+        const t = (li.textContent || '').trim();
+        if (t) itens.push(t);
+      });
+    } else if (next.tagName === 'P') {
+      const t = (next.textContent || '').trim();
+      if (t) itens.push(t);
+    }
+    next = next.nextElementSibling;
+  }
+  return itens.map(texto => ({ evento: texto, probabilidade: '', impacto: '', mitigacao: '' }));
+}
+
+// ------------------------------------------------------------
+// Importação de um risco a partir de uma Vulnerabilidade do catálogo --
+// mesma ideia de "Importar de um PCN" acima, só que 1 vulnerabilidade gera
+// NO MÁXIMO 1 risco (não uma tabela de eventos pra marcar), e a gravação em
+// si já existia pronta: reaproveita a mesma ação de servidor do botão
+// "📤 Importar para Riscos" do drawer de Vulnerabilidade
+// (`importarVulnerabilidadeParaRisco`, appLogic.js) -- só muda a UI de
+// escolha, não a ação.
+// ------------------------------------------------------------
+function _htmlModalImportarRiscoVulnerabilidade() {
+  return `
+    <div class="modal-overlay" id="modalImportarRiscoVulnerabilidade"><div class="modal" onclick="event.stopPropagation()" style="max-width:600px;">
+      <h3>Importar Risco de uma Vulnerabilidade</h3>
+      <label style="display:block;font-size:0.82em;font-weight:600;color:#555;margin:14px 0 5px;">Vulnerabilidade</label>
+      <select id="importVulnSelect" onchange="onVulnerabilidadeImportRiscoChange()" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;">
+        <option value="">Selecione...</option>
+      </select>
+      <div id="importVulnResultado" style="margin-top:16px;"></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharImportarRiscoVulnerabilidade()">Cancelar</button>
+        <button class="btn btn-primary" onclick="confirmarImportarRiscoVulnerabilidade()" id="btnConfirmarImportarRiscoVulnerabilidade" style="display:none;">Importar</button>
+      </div>
+    </div></div>`;
+}
+
+window.abrirImportarRiscosVulnerabilidade = async () => {
+  document.getElementById('importVulnResultado').innerHTML = '';
+  document.getElementById('btnConfirmarImportarRiscoVulnerabilidade').style.display = 'none';
+  let vulns = [];
+  try {
+    vulns = await API.getVulnerabilidades();
+  } catch (e) {
+    showToast('❌ Não foi possível carregar as vulnerabilidades: ' + (e.message || 'erro desconhecido'), '#c62828');
+  }
+  window._riscoImportVulnsCache = vulns;
+  const select = document.getElementById('importVulnSelect');
+  select.innerHTML = '<option value="">Selecione...</option>' +
+    vulns.map((v) => `<option value="${esc(v.id)}">${esc(v.codigo || '-')} — ${esc(v.nome)} (${esc(v.produto)})</option>`).join('');
+  document.getElementById('modalImportarRiscoVulnerabilidade').classList.add('open');
+};
+
+window.onVulnerabilidadeImportRiscoChange = () => {
+  const id = document.getElementById('importVulnSelect').value;
+  const resultado = document.getElementById('importVulnResultado');
+  const btnConfirmar = document.getElementById('btnConfirmarImportarRiscoVulnerabilidade');
+  if (!id) { resultado.innerHTML = ''; btnConfirmar.style.display = 'none'; return; }
+
+  const v = (window._riscoImportVulnsCache || []).find((x) => String(x.id) === String(id));
+  if (!v) { resultado.innerHTML = ''; btnConfirmar.style.display = 'none'; return; }
+
+  const faixa = VulnerabilidadeSeveridade.faixa(v);
+  const aberto = (riscosData || []).find((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(v.id) && !['Aceito', 'Encerrado'].includes(r.status));
+
+  resultado.innerHTML = `
+    <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px 14px;">
+      <div style="margin-bottom:6px;"><strong>${esc(v.produto)}</strong> — ${esc(v.nome)}</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">${_htmlBadge(_nivelSeveridadeVulnerabilidade(faixa.rotulo), faixa.rotulo)}${_pillStatusCorrecaoVulnerabilidade(v.statusCorrecao)}</div>
+      ${aberto ? '<div style="font-size:0.82em;color:#c62828;font-weight:600;">⚠️ Esta vulnerabilidade já tem um risco aberto no Registro de Riscos.</div>' : ''}
+    </div>`;
+  btnConfirmar.style.display = aberto ? 'none' : 'inline-block';
+};
+
+window.fecharImportarRiscoVulnerabilidade = () => {
+  document.getElementById('modalImportarRiscoVulnerabilidade').classList.remove('open');
+};
+
+window.confirmarImportarRiscoVulnerabilidade = async () => {
+  const id = document.getElementById('importVulnSelect').value;
+  if (!id) return showToast('Selecione uma vulnerabilidade.', '#e65100');
+  try {
+    const r = await API.post('importarVulnerabilidadeParaRisco', { id });
+    fecharImportarRiscoVulnerabilidade();
+    API.invalidate('getRiscos');
+    riscosData = await API.getRiscos();
+    renderizarRiscos();
+    showToast(r.jaExiste ? 'Já existe um risco aberto para esta vulnerabilidade.' : '✅ Risco importado!', r.jaExiste ? '#e65100' : '#2e7d32');
+  } catch (e) {
+    showToast('❌ Erro ao importar: ' + (e.message || 'erro desconhecido'), '#c62828');
+  }
+};
+
+// ------------------------------------------------------------
+// Importação de riscos identificados em um DRP já gerado -- mesma ideia do
+// import de PCN acima, mas a fonte é a lista de "Limitações Conhecidas da
+// Estratégia" (o DRP não tem uma tabela de avaliação de riscos pronta), e
+// Probabilidade/Impacto ficam editáveis na revisão em vez de só-leitura.
+// Único desvio real do fluxo de PCN: o HTML do DRP não vem embutido no
+// documento (drpSalvo é só metadado), então carregarRiscosDRPImport precisa
+// buscar o conteúdo de verdade via obterDRP antes de extrair candidatos.
+// ------------------------------------------------------------
+function _htmlModalImportarRiscosDRP() {
+  return `
+    <div class="modal-overlay" id="modalImportarRiscosDRP"><div class="modal" onclick="event.stopPropagation()" style="max-width:720px;">
+      <h3>Importar Riscos de um DRP</h3>
+      <p style="font-size:0.82em;color:#666;margin-bottom:14px;">O DRP não tem uma tabela de avaliação de riscos como o PCN -- os candidatos abaixo vêm da seção "Limitações Conhecidas da Estratégia". Preencha Probabilidade e Impacto de cada item antes de importar.</p>
+      <label style="display:block;font-size:0.82em;font-weight:600;color:#555;margin:14px 0 5px;">Dependência</label>
+      <select id="importDrpDependencia" onchange="onDependenciaImportRiscoChange()" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;">
+        <option value="">Selecione uma dependência com DRP gerado...</option>
+      </select>
+      <div id="importDrpVersaoWrap" style="display:none;">
+        <label style="display:block;font-size:0.82em;font-weight:600;color:#555;margin:14px 0 5px;">Versão do DRP</label>
+        <select id="importDrpVersao" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;"></select>
+      </div>
+      <div style="margin-top:14px;">
+        <button class="btn btn-ghost" onclick="carregarRiscosDRPImport()" id="btnCarregarRiscosDRP" style="display:none;">Carregar riscos deste DRP</button>
+      </div>
+      <div id="importDrpResultado" style="margin-top:16px;max-height:360px;overflow-y:auto;"></div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharImportarRiscosDRP()">Cancelar</button>
+        <button class="btn btn-primary" onclick="confirmarImportarRiscosDRP()" id="btnConfirmarImportarRiscosDRP" style="display:none;">Importar selecionados</button>
+      </div>
+    </div></div>`;
+}
+
+window.abrirImportarRiscosDRP = async () => {
+  document.getElementById('importDrpResultado').innerHTML = '';
+  document.getElementById('importDrpVersaoWrap').style.display = 'none';
+  document.getElementById('btnCarregarRiscosDRP').style.display = 'none';
+  document.getElementById('btnConfirmarImportarRiscosDRP').style.display = 'none';
+  window._riscoImportExtraidosDRP = [];
+
+  // dependenciasData é pré-carregada em background assim que o usuário loga
+  // e nunca é resetada ao navegar -- se o DRP ganhou versões novas depois
+  // desse preload e o usuário veio direto pra Riscos (sem passar pela tela
+  // DRP, que invalida e recarrega essa cache antes de usá-la), reaproveitar
+  // o array sem buscar de novo mostra um drpSalvo desatualizado (lista de
+  // versões curta, pré-seleção errada). Por isso aqui é sempre invalidate +
+  // refetch, nunca "só se estiver vazio".
+  try {
+    API.invalidate('getDependencias');
+    dependenciasData = (await API.getDependencias()).filter(d => !['Pessoas', 'Pessoa'].includes(d.categoria));
+  } catch (e) { dependenciasData = []; }
+  const comDRP = _depsComDRP();
+  document.getElementById('importDrpDependencia').innerHTML = '<option value="">Selecione uma dependência com DRP gerado...</option>' +
+    comDRP.map(d => `<option value="${d.id}">${esc(d.categoria || '')} — ${esc(d.nome)}</option>`).join('');
+
+  document.getElementById('modalImportarRiscosDRP').classList.add('open');
+};
+
+window.fecharImportarRiscosDRP = () => {
+  document.getElementById('modalImportarRiscosDRP').classList.remove('open');
+};
+
+window.onDependenciaImportRiscoChange = () => {
+  const id = document.getElementById('importDrpDependencia').value;
+  document.getElementById('importDrpResultado').innerHTML = '';
+  document.getElementById('btnConfirmarImportarRiscosDRP').style.display = 'none';
+  if (!id) {
+    document.getElementById('importDrpVersaoWrap').style.display = 'none';
+    document.getElementById('btnCarregarRiscosDRP').style.display = 'none';
+    return;
+  }
+  const d = dependenciasData.find(x => String(x.id) === String(id));
+  const versoes = d && d.drpSalvo ? _parsePCNVersoes(d.drpSalvo) : [];
+  const versaoWrap = document.getElementById('importDrpVersaoWrap');
+  if (versoes.length > 1) {
+    document.getElementById('importDrpVersao').innerHTML = versoes.map((v, i) =>
+      `<option value="${i}" ${i === versoes.length - 1 ? 'selected' : ''}>Versão ${v.versao || i + 1} — ${v.data ? new Date(v.data).toLocaleDateString('pt-BR') : ''}</option>`
+    ).join('');
+    versaoWrap.style.display = 'block';
+  } else {
+    versaoWrap.style.display = 'none';
+  }
+  document.getElementById('btnCarregarRiscosDRP').style.display = 'inline-block';
+};
+
+window.carregarRiscosDRPImport = async () => {
+  const id = document.getElementById('importDrpDependencia').value;
+  const d = dependenciasData.find(x => String(x.id) === String(id));
+  if (!d || !d.drpSalvo) return;
+  const metaVersoes = _parsePCNVersoes(d.drpSalvo);
+  const versaoWrap = document.getElementById('importDrpVersaoWrap');
+  const idx = versaoWrap.style.display === 'block'
+    ? Number(document.getElementById('importDrpVersao').value)
+    : metaVersoes.length - 1;
+
+  // O HTML de verdade mora em drp_conteudo (coleção fechada); obterDRP confere
+  // o perfil no servidor antes de devolver algo -- quem não tem o perfil certo
+  // recebe o erro abaixo, não o conteúdo (mesmo padrão de abrirDRPDireto).
+  let versoes;
+  try {
+    versoes = (await API.get('obterDRP', { id })).versoes || [];
+  } catch (e) {
+    return showToast('❌ ' + (e.message || 'Não foi possível carregar o DRP.'), '#c62828');
+  }
+  const versao = versoes[idx];
+  if (!versao) return showToast('Nenhuma versão de DRP encontrada.', '#e65100');
+
+  const extraidos = _extrairLimitacoesDoDRP(versao.html || '');
+  window._riscoImportExtraidosDRP = extraidos.map(r => ({ ...r, selecionado: true }));
+
+  const resultado = document.getElementById('importDrpResultado');
+  if (!extraidos.length) {
+    resultado.innerHTML = '<p style="color:#e65100;font-size:0.9em;">Nenhuma limitação/risco residual encontrado neste DRP.</p>';
+    document.getElementById('btnConfirmarImportarRiscosDRP').style.display = 'none';
+    return;
+  }
+
+  const selectProb = (i) => `
+    <select onchange="window._riscoImportExtraidosDRP[${i}].probabilidade = this.value" style="font-size:0.82em;padding:4px 6px;border:1px solid #ddd;border-radius:5px;width:100%;">
+      <option value="">Selecione...</option>
+      <option value="Baixa">Baixa</option>
+      <option value="Média">Média</option>
+      <option value="Alta">Alta</option>
+    </select>`;
+  const selectImpacto = (i) => `
+    <select onchange="window._riscoImportExtraidosDRP[${i}].impacto = this.value" style="font-size:0.82em;padding:4px 6px;border:1px solid #ddd;border-radius:5px;width:100%;">
+      <option value="">Selecione...</option>
+      <option value="Baixo">Baixo</option>
+      <option value="Moderado">Moderado</option>
+      <option value="Alto">Alto</option>
+      <option value="Crítico">Crítico</option>
+    </select>`;
+
+  resultado.innerHTML = `
+    <label style="display:flex;align-items:center;gap:6px;font-size:0.85em;color:#555;margin-bottom:8px;cursor:pointer;">
+      <input type="checkbox" checked onchange="toggleTodosImportRiscosDRP(this.checked)"> Selecionar todos (${extraidos.length})
+    </label>
+    <table class="data-table" style="box-shadow:none;"><tbody>` +
+    extraidos.map((r, i) => `<tr>
+        <td style="width:5%;"><input type="checkbox" checked onchange="window._riscoImportExtraidosDRP[${i}].selecionado = this.checked"></td>
+        <td style="font-weight:600;color:#222;">${esc(r.evento)}</td>
+        <td style="width:140px;">${selectProb(i)}</td>
+        <td style="width:140px;">${selectImpacto(i)}</td>
+      </tr>`).join('') + `</tbody></table>`;
+
+  document.getElementById('btnConfirmarImportarRiscosDRP').style.display = 'inline-block';
+};
+
+window.toggleTodosImportRiscosDRP = (checked) => {
+  (window._riscoImportExtraidosDRP || []).forEach(r => r.selecionado = checked);
+  document.querySelectorAll('#importDrpResultado tbody input[type="checkbox"]').forEach(cb => cb.checked = checked);
+};
+
+window.confirmarImportarRiscosDRP = async () => {
+  const id = document.getElementById('importDrpDependencia').value;
+  const d = dependenciasData.find(x => String(x.id) === String(id));
+  const selecionados = (window._riscoImportExtraidosDRP || []).filter(r => r.selecionado);
+  if (!d || !selecionados.length) return showToast('Selecione ao menos um risco.', '#e65100');
+
+  try {
+    for (const row of selecionados) {
+      await API.salvarRisco({
+        area: '',
+        processoId: '',
+        processo: '',
+        titulo: row.evento,
+        descricao: `Risco residual identificado no DRP de "${d.nome}": ${row.evento}`,
+        categoria: '',
+        responsavel: '',
+        dataIdentificacao: new Date().toISOString().slice(0, 10),
+        status: 'Identificado',
+        origem: 'Importado de DRP',
+        probabilidade: row.probabilidade || '',
+        impacto: row.impacto || '',
+        estrategiaTratamento: '',
+        estrategiaDescricao: '',
+        planoAcao: [],
+        kris: [],
+      });
+    }
+    fecharImportarRiscosDRP();
+    showToast(`✅ ${selecionados.length} risco(s) importado(s)!`, '#2e7d32');
+    API.invalidate('getRiscos');
+    riscosData = await API.getRiscos();
+    renderizarRiscos();
+  } catch (e) { showToast('❌ Erro ao importar: ' + e.message, '#c62828'); }
+};
 
 // ============================================================
 // INDICADORES DE SEGURANÇA — estado e helpers compartilhados
@@ -6231,14 +9691,16 @@ function renderizarIndicadoresDashboard() {
   const porPilar = {};
   indicadoresData.forEach(d => { const p = d.pilar || 'Sem Pilar'; porPilar[p] = (porPilar[p] || 0) + 1; });
 
-  const cardBase = 'background:white;border-radius:10px;padding:14px 20px;min-width:140px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);cursor:pointer;';
-  const anelAtivo = 'outline:2.5px solid #1a237e;outline-offset:2px;';
+  // Cartão de métrica no padrão GRC360 (bia-metric), com clique/aro de filtro
+  // ativo por cima -- mesma técnica do card() de Fornecedores.
+  const cardBase = 'min-width:140px;text-align:center;cursor:pointer;';
+  const anelAtivo = 'outline:2.5px solid #d60014;outline-offset:2px;';
 
   const cardsPilar = Object.entries(porPilar).sort((a, b) => a[0].localeCompare(b[0])).map(([p, n]) => {
     const ativo = f.modo === 'pilar' && f.pilar === p;
-    return `<div style="${cardBase}border-top:3px solid #1a237e;${ativo ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('pilar','${p}')" title="Clique para filtrar por este pilar">
-      <div style="font-size:1.4em;font-weight:700;color:#1a237e;">${n}</div>
-      <div style="font-size:0.75em;color:#666;">${p}</div>
+    return `<div class="bia-metric" style="${cardBase}${ativo ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('pilar','${p}')" title="Clique para filtrar por este pilar">
+      <div class="bia-metric__value display">${n}</div>
+      <div class="bia-metric__label label">${p}</div>
     </div>`;
   }).join('');
 
@@ -6273,21 +9735,21 @@ function renderizarIndicadoresDashboard() {
       </select>
     </div>
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px;">
-      <div style="${cardBase}border-top:3px solid #1a237e;${f.modo === 'todos' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('todos')" title="Clique para ver todos os indicadores">
-        <div style="font-size:1.6em;font-weight:700;color:#1a237e;">${total}</div>
-        <div style="font-size:0.75em;color:#666;">Total de Indicadores</div>
+      <div class="bia-metric" style="${cardBase}${f.modo === 'todos' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('todos')" title="Clique para ver todos os indicadores">
+        <div class="bia-metric__value display">${total}</div>
+        <div class="bia-metric__label label">Total de Indicadores</div>
       </div>
-      <div style="${cardBase}border-top:3px solid #c62828;${f.modo === 'foraDaMeta' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('foraDaMeta')" title="Clique para filtrar os fora da meta">
-        <div style="font-size:1.6em;font-weight:700;color:#c62828;">${foraDaMeta.length}</div>
-        <div style="font-size:0.75em;color:#666;">Fora da Meta</div>
+      <div class="bia-metric" style="${cardBase}${f.modo === 'foraDaMeta' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('foraDaMeta')" title="Clique para filtrar os fora da meta">
+        <div class="bia-metric__value display" style="color:var(--risk-critical);">${foraDaMeta.length}</div>
+        <div class="bia-metric__label label">Fora da Meta</div>
       </div>
-      <div style="${cardBase}border-top:3px solid #757575;${f.modo === 'semMeta' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('semMeta')" title="Clique para filtrar os sem meta definida">
-        <div style="font-size:1.6em;font-weight:700;color:#757575;">${semMeta.length}</div>
-        <div style="font-size:0.75em;color:#666;">Sem Meta Definida</div>
+      <div class="bia-metric" style="${cardBase}${f.modo === 'semMeta' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('semMeta')" title="Clique para filtrar os sem meta definida">
+        <div class="bia-metric__value display" style="color:#757575;">${semMeta.length}</div>
+        <div class="bia-metric__label label">Sem Meta Definida</div>
       </div>
       ${cardsPilar}
     </div>
-    <h3 style="font-size:1em;color:#1a237e;margin-bottom:12px;">${titulo}</h3>
+    <h3 style="font-size:1em;color:#d60014;margin-bottom:12px;">${titulo}</h3>
     <div class="data-table">
       <table>
         <thead>
@@ -6306,7 +9768,7 @@ function renderizarIndicadoresDashboard() {
             const { mes, desempenho } = _pegarDesempenhoNoMes(d, mesRef);
             const foraMeta = desempenho != null && _indicadorForaDaMeta(d, desempenho);
             return `<tr>
-              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(d.pilar || '-')}</span></td>
+              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#fce8ea;color:#d60014;">${esc(d.pilar || '-')}</span></td>
               <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
               <td style="font-size:0.85em;color:#555;">${esc(d.responsavel || '-')}</td>
               <td style="font-size:0.85em;color:#555;">${mes ? _formatMes(mes) : '-'}</td>
@@ -6392,7 +9854,7 @@ window.iniciarEdicaoMetaMinima = (spanEl, id) => {
   const valorAtual = indicador && indicador.metaMinima != null ? indicador.metaMinima : '';
   const td = spanEl.closest('td');
   td.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;">
-      <input type="number" step="any" min="0" max="100" value="${valorAtual}" style="width:60px;padding:4px 6px;border:1.5px solid #1a237e;border-radius:5px;font-size:0.88em;">%
+      <input type="number" step="any" min="0" max="100" value="${valorAtual}" style="width:60px;padding:4px 6px;border:1.5px solid #d60014;border-radius:5px;font-size:0.88em;">%
       <button class="btn-icon" title="Salvar (Enter)" style="color:#2e7d32;" onclick="salvarEdicaoMetaMinima(this,'${id}')">✔</button>
       <button class="btn-icon" title="Cancelar (Esc)" style="color:#c62828;" onclick="cancelarEdicaoMetaMinima(this,'${id}')">✕</button>
     </span>`;
@@ -6473,7 +9935,7 @@ function renderizarIndicadoresCadastro() {
         <tbody>
           ${pagina.length ? pagina.map(d => `<tr>
               ${isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="chk-indicador" ${indicadoresSelecionados.has(d.id) ? 'checked' : ''} onchange="toggleIndicadorSelecionado('${d.id}', this.checked)"></td>` : ''}
-              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(d.pilar || '-')}</span></td>
+              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#fce8ea;color:#d60014;">${esc(d.pilar || '-')}</span></td>
               <td style="font-size:0.85em;color:#555;">${esc(d.responsavel || '-')}</td>
               <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
               <td style="font-size:0.85em;color:#555;">${esc(d.tipo || '-')}</td>
@@ -6569,7 +10031,7 @@ async function indicadoresLancamento() {
     <div class="loading">⏳ Carregando...</div>
     <div id="indicadoresLancamentoArea" style="display:none;">
       <div class="group-card" style="padding:20px;margin-bottom:20px;">
-        <h3 style="font-size:1em;color:#1a237e;margin-bottom:14px;">Lançamento manual</h3>
+        <h3 style="font-size:1em;color:#d60014;margin-bottom:14px;">Lançamento manual</h3>
         <div style="display:grid;grid-template-columns:2fr 1fr 1fr auto;gap:12px;align-items:end;">
           <div>
             <label style="${_estiloFiltroLabel}">Indicador</label>
@@ -6588,12 +10050,12 @@ async function indicadoresLancamento() {
       </div>
       <div class="group-card" style="padding:20px;margin-bottom:20px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
         <div>
-          <h3 style="font-size:1em;color:#1a237e;margin-bottom:4px;">Importação em lote (CSV)</h3>
+          <h3 style="font-size:1em;color:#d60014;margin-bottom:4px;">Importação em lote (CSV)</h3>
           <p style="font-size:0.85em;color:#888;">Para lançar vários indicadores e meses de uma vez, a partir de uma planilha.</p>
         </div>
-        <button class="btn btn-ghost" onclick="abrirImportarIndicadoresCSV()" id="btnImportarIndicadores" style="color:#1a237e;border-color:#1a237e;display:none;">📥 Importar CSV</button>
+        <button class="btn btn-ghost" onclick="abrirImportarIndicadoresCSV()" id="btnImportarIndicadores" style="color:#d60014;border-color:#d60014;display:none;">📥 Importar CSV</button>
       </div>
-      <h3 style="font-size:1em;color:#1a237e;margin-bottom:10px;">Lançamentos</h3>
+      <h3 style="font-size:1em;color:#d60014;margin-bottom:10px;">Lançamentos</h3>
       <div id="indicadoresFiltrosLancamento" style="margin-bottom:16px;"></div>
       <div id="indicadoresGradeLancamentos"></div>
     </div>
@@ -6686,7 +10148,7 @@ function renderizarGradeLancamentos() {
         </thead>
         <tbody>
           ${pagina.length ? pagina.map(r => `<tr>
-              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#e8eaf6;color:#1a237e;">${esc(r.pilar || '-')}</span></td>
+              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#fce8ea;color:#d60014;">${esc(r.pilar || '-')}</span></td>
               <td style="font-weight:600;color:#222;">${esc(r.indicadorNome)}</td>
               <td style="font-size:0.85em;color:#555;">${esc(r.responsavel || '-')}</td>
               <td style="font-size:0.85em;color:#555;">${_formatMes(r.mes)}</td>
@@ -6725,7 +10187,7 @@ window.iniciarEdicaoDesempenho = (spanEl, indicadorId, mes) => {
   const valorAtual = entrada && entrada.desempenho != null ? entrada.desempenho : '';
   const td = spanEl.closest('td');
   td.innerHTML = `<span style="display:inline-flex;align-items:center;gap:4px;">
-      <input type="number" step="any" min="0" max="100" value="${valorAtual}" style="width:60px;padding:4px 6px;border:1.5px solid #1a237e;border-radius:5px;font-size:0.88em;">%
+      <input type="number" step="any" min="0" max="100" value="${valorAtual}" style="width:60px;padding:4px 6px;border:1.5px solid #d60014;border-radius:5px;font-size:0.88em;">%
       <button class="btn-icon" title="Salvar (Enter)" style="color:#2e7d32;" onclick="salvarEdicaoDesempenho(this,'${indicadorId}','${mes}')">✔</button>
       <button class="btn-icon" title="Cancelar (Esc)" style="color:#c62828;" onclick="cancelarEdicaoDesempenho(this,'${indicadorId}','${mes}')">✕</button>
     </span>`;
@@ -6869,7 +10331,7 @@ function renderizarIndicadoresMatriz() {
   let html = '';
   Object.entries(porPilar).sort((a, b) => a[0].localeCompare(b[0])).forEach(([pilar, itens]) => {
     html += `<div style="margin-bottom:20px;">
-      <div style="background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:10px 18px;border-radius:8px 8px 0 0;font-weight:700;font-size:0.92em;">📁 ${pilar}</div>
+      <div style="background:linear-gradient(135deg,#d60014,#e6262b);color:white;padding:10px 18px;border-radius:8px 8px 0 0;font-weight:700;font-size:0.92em;">📁 ${pilar}</div>
       <div class="data-table" style="border-radius:0 0 8px 8px;overflow-x:auto;">
         <table style="table-layout:auto;min-width:${minWidth}px;">
           <thead>
@@ -7239,7 +10701,7 @@ window.enviarBIADependencias = async () => {
   if (!email) return;
 
   try {
-    showToast('📧 Enviando...', '#1a237e');
+    showToast('📧 Enviando...', '#d60014');
     const result = await API.post('gerarTokenBIA', { area: p.area, processo: p.processo, email });
     if (result.error) throw new Error(result.error);
     showToast('✅ Formulário enviado para ' + email, '#2e7d32');
@@ -7257,7 +10719,7 @@ window.copiarLinkBIA = async () => {
   if (!p) return showToast('Salve o processo antes.', '#e65100');
 
   try {
-    showToast('🔗 Gerando link...', '#1a237e');
+    showToast('🔗 Gerando link...', '#d60014');
     const result = await API.post('gerarTokenBIA', { area: p.area, processo: p.processo, email: '_link_only_' });
     if (result.error) throw new Error(result.error);
     await navigator.clipboard.writeText(result.link);
@@ -7280,7 +10742,7 @@ window.enviarLinkLevantamento = async () => {
   const email = prompt('E-mail do dono do processo:', emailPadrao);
   if (!email) return;
   try {
-    showToast('📧 Enviando...', '#1a237e');
+    showToast('📧 Enviando...', '#d60014');
     const result = await API.post('gerarTokenLevantamento', { area: p.area, processo: p.processo, email });
     if (result.error) throw new Error(result.error);
     showToast('✅ Formulário enviado para ' + email, '#2e7d32');
@@ -7292,7 +10754,7 @@ window.copiarLinkLevantamento = async () => {
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p) return showToast('Salve o processo antes.', '#e65100');
   try {
-    showToast('🔗 Gerando link...', '#1a237e');
+    showToast('🔗 Gerando link...', '#d60014');
     const result = await API.post('gerarTokenLevantamento', { area: p.area, processo: p.processo, email: '_link_only_' });
     if (result.error) throw new Error(result.error);
     await navigator.clipboard.writeText(result.link);
@@ -7305,7 +10767,7 @@ window.abrirLevantamento = () => {
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p || !p.levantamentoPCN) return showToast('Nenhum levantamento preenchido.', '#e65100');
   // Abrir visualização (buscar dados do backend)
-  showToast('📄 Carregando...', '#1a237e');
+  showToast('📄 Carregando...', '#d60014');
   API.get('getLevantamentoPCN', { area: p.area, processo: p.processo }).then(data => {
     if (data.error) return showToast('❌ ' + data.error, '#c62828');
     const win = window.open('', '_blank');
@@ -7319,7 +10781,7 @@ function _buildLevantamentoView(lev, p) {
   const field = (label, val) => val ? '<tr><td style="padding:8px 12px;font-weight:600;color:#444;width:35%;border-bottom:1px solid #f0f0f0;">' + label + '</td><td style="padding:8px 12px;border-bottom:1px solid #f0f0f0;">' + val + '</td></tr>' : '';
   const list = (val) => { try { return JSON.parse(val).join(', '); } catch(e) { return val; } };
   return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Levantamento PCN - ${esc(p.processo)}</title>
-  <style>body{font-family:Segoe UI,Arial;max-width:800px;margin:0 auto;padding:40px 20px;color:#333;} h1{color:#1a237e;font-size:1.4em;} h2{color:#1a237e;font-size:1.1em;margin-top:28px;padding:8px 12px;background:#e8eaf6;border-left:4px solid #1a237e;border-radius:0 6px 6px 0;} table{width:100%;border-collapse:collapse;margin:12px 0;} @media print{h2{page-break-after:avoid;}}</style></head><body>
+  <style>body{font-family:Segoe UI,Arial;max-width:800px;margin:0 auto;padding:40px 20px;color:#333;} h1{color:#d60014;font-size:1.4em;} h2{color:#d60014;font-size:1.1em;margin-top:28px;padding:8px 12px;background:#fce8ea;border-left:4px solid #d60014;border-radius:0 6px 6px 0;} table{width:100%;border-collapse:collapse;margin:12px 0;} @media print{h2{page-break-after:avoid;}}</style></head><body>
   <h1>📋 Levantamento PCN: ${esc(p.processo)}</h1>
   <p style="color:#666;">Área: ${esc(p.area)} • Preenchido em: ${lev.data ? new Date(lev.data).toLocaleDateString('pt-BR') : '-'}</p>
   <h2>1. Identificação</h2><table>${field('Gestor',lev.gestor)}${field('Substituto',lev.substituto)}</table>
@@ -7338,7 +10800,7 @@ function _buildLevantamentoView(lev, p) {
 window.abrirLevantamentoDireto = (id) => {
   const p = window.processosData.find(proc => proc.id === id);
   if (!p || !p.levantamentoPCN) return showToast('Nenhum levantamento preenchido.', '#e65100');
-  showToast('📄 Carregando...', '#1a237e');
+  showToast('📄 Carregando...', '#d60014');
   API.get('getLevantamentoPCN', { area: p.area, processo: p.processo }).then(data => {
     if (data.error) return showToast('❌ ' + data.error, '#c62828');
     const win = window.open('', '_blank');
@@ -7388,15 +10850,112 @@ window.gerarDossieProcesso = () => {
   const respostas = p.respostas || {};
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado.', '#e65100');
-  win.document.write('<html><head><title>Dossiê - ' + p.processo + '</title><style>body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6}h1{color:#1a237e}h2{color:#1a237e;border-bottom:2px solid #e8eaf6;padding-bottom:6px;margin-top:24px}table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt}th{background:#1a237e;color:white;padding:8px 10px;text-align:left}td{padding:7px 10px;border:1px solid #e0e0e0}.badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:9pt;font-weight:700;color:white;background:' + Criticidade.corDoTier(tier) + '}</style></head><body>');
-  win.document.write('<h1>' + p.processo + '</h1><p>' + p.area + ' — ' + responsavel + '</p><span class="badge">' + tier + ' • Score ' + score + '</span>');
+  win.document.write('<html><head><title>Dossiê - ' + p.processo + '</title><style>:root{--risk-critical:#d60014;--risk-high:#b64a12;--risk-medium:#9a6700;--risk-low:#38bb0e}body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6}h1{color:#d60014}h2{color:#d60014;border-bottom:2px solid #fce8ea;padding-bottom:6px;margin-top:24px}table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt}th{background:#d60014;color:white;padding:8px 10px;text-align:left}td{padding:7px 10px;border:1px solid #e0e0e0}.badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:9pt;font-weight:700;color:white;background:' + Criticidade.corDoTier(tier) + '}.header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px}.header .sub{font-size:9pt;color:#888;margin-top:4px;font-weight:400}.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}.btn-print:hover{opacity:.9}@media print{.btn-print{display:none!important}}</style></head><body>');
+  win.document.write('<div class="header"><div><img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display=\'none\'"><div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div><h1>' + p.processo + '</h1><div class="sub">' + p.area + ' — ' + responsavel + ' • ' + new Date().toLocaleDateString('pt-BR') + ' • Fortes Tecnologia</div></div><button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button></div><span class="badge">' + tier + ' • Score ' + score + '</span>');
   win.document.write('<h2>Identificação</h2><p><b>Descrição:</b> ' + (p.descricaoFuncional || '-') + '</p>');
   win.document.write('<h2>BIA</h2><p><b>Status:</b> ' + (p.biaHomologada || '-') + '</p><p><b>Impacto:</b> ' + (p.descricao || '-') + '</p><p><b>RTO:</b> ' + (p.rto || '-') + ' | <b>RPO:</b> ' + (p.rpo || '-') + ' | <b>MTD:</b> ' + (p.mtd || '-') + '</p>');
   if (depItens.length) { win.document.write('<h3>Dependências</h3><table><tr><th>Categoria</th><th>Recurso</th><th>Detalhe</th></tr>'); depItens.forEach(function(d) { win.document.write('<tr><td><b>' + d.categoria + '</b></td><td>' + d.nome + '</td><td>' + (d.detalhe || '-') + '</td></tr>'); }); win.document.write('</table>'); }
   win.document.write('<h2>BCP</h2><p><b>Status:</b> ' + (p.bcpStatus || '-') + '</p>');
   if (contatos.length) { win.document.write('<table><tr><th>Nome</th><th>Empresa</th><th>Setor</th><th>Telefone</th><th>Email</th></tr>'); contatos.forEach(function(d) { win.document.write('<tr><td><b>' + d.nome + '</b></td><td>' + (d.empresa||'-') + '</td><td>' + (d.setor||'-') + '</td><td>' + (d.telefone||'-') + '</td><td>' + (d.email||'-') + '</td></tr>'); }); win.document.write('</table>'); }
   win.document.write('<h2>DRP</h2><p><b>Status:</b> ' + (p.drpStatus || '-') + '</p><p style="color:#888;font-size:9pt;">Componentes técnicos do serviço aparecem na tabela de Dependências acima (categorias API, Banco de Dados, Infraestrutura, Segurança, Servidor, Sistema).</p>');
-  win.document.write('<div style="margin-top:30px;border-top:1px solid #ddd;padding-top:10px;font-size:8pt;color:#999;text-align:center;">Dossiê gerado em ' + new Date().toLocaleDateString('pt-BR') + '</div></body></html>');
+  win.document.write('<div style="margin-top:30px;border-top:1px solid #ddd;padding-top:10px;font-size:8pt;color:#999;text-align:center;">Dossiê gerado em ' + new Date().toLocaleDateString('pt-BR') + ' • Fortes Tecnologia</div></body></html>');
+  win.document.close();
+};
+
+// ============================================================
+// EXPORTAR PLANO DE AÇÃO DO RISCO (aba Tratamento) -- mesmo padrão de
+// "PDF" do Dossiê do Processo acima: página HTML em window.open() com
+// botão "Imprimir / PDF" (window.print()), não há geração de PDF real no
+// servidor. Badge de cor aqui NÃO reaproveita _htmlBadge (depende das
+// classes bia-badge do vendor/grc360/bundle.css, que este popup não
+// carrega) -- usa um span inline próprio, com fallback de :root{--risk-*}
+// pros helpers que devolvem var(--risk-*) (mesma necessidade já documentada
+// em ui-referencias.md pros relatórios em janela separada).
+// ============================================================
+function _badgePlanoAcaoPopup(nivel, rotulo) {
+  const cores = { critical: 'var(--risk-critical)', high: 'var(--risk-high)', medium: 'var(--risk-medium)', low: 'var(--risk-low)' };
+  return `<span style="display:inline-block;padding:4px 12px;border-radius:12px;font-size:0.82em;font-weight:700;color:white;background:${cores[nivel] || '#999'};">${esc(rotulo)}</span>`;
+}
+
+function _buildPlanoAcaoRiscoPage(r) {
+  const score = _scoreDoRisco(r);
+  const faixaScore = score !== null ? _faixaScoreRisco(score) : null;
+  const itens = Array.isArray(r.planoAcao) ? r.planoAcao : [];
+  const tabelaPlanoAcao = itens.length
+    ? `<table><thead><tr><th>Ação</th><th>Responsável</th><th>Onde</th><th>Quando</th><th>Quanto Custa</th><th>Status</th></tr></thead><tbody>${itens.map((it) => `
+        <tr>
+          <td><b>${esc(it.acao || '-')}</b>${it.porque ? `<br><span style="color:#888;font-size:9pt;">Por quê: ${esc(it.porque)}</span>` : ''}${it.como ? `<br><span style="color:#888;font-size:9pt;">Como: ${esc(it.como)}</span>` : ''}</td>
+          <td>${esc(it.responsavel || '-')}</td>
+          <td>${esc(it.onde || '-')}</td>
+          <td>${it.quando ? new Date(it.quando + 'T00:00:00').toLocaleDateString('pt-BR') : '-'}</td>
+          <td>${it.quantoCusta != null && it.quantoCusta !== '' ? 'R$ ' + Number(it.quantoCusta).toLocaleString('pt-BR') : '-'}</td>
+          <td>${esc(it.status || '-')}</td>
+        </tr>`).join('')}</tbody></table>`
+    : '<p style="color:#888;">Nenhuma ação de tratamento cadastrada.</p>';
+
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Plano de Ação - ${esc(r.titulo || '')}</title>
+<style>
+:root{--risk-critical:#d60014;--risk-high:#b64a12;--risk-medium:#9a6700;--risk-low:#38bb0e}
+body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6;color:#333}
+h1{color:#d60014;margin:0 0 4px;}
+h2{color:#d60014;border-bottom:2px solid #fce8ea;padding-bottom:6px;margin-top:24px;}
+table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt;}
+th{background:#d60014;color:white;padding:8px 10px;text-align:left;}
+td{padding:7px 10px;border:1px solid #e0e0e0;vertical-align:top;}
+.header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:12px;}
+.header .sub{font-size:9pt;color:#888;margin-top:4px;font-weight:400;}
+.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600;}
+.btn-print:hover{opacity:.9;}
+@media print{.btn-print{display:none!important;}}
+</style></head><body>
+<div class="header">
+  <div>
+    <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
+    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+    <h1>Plano de Ação — ${esc(r.titulo || '')}</h1>
+    <div class="sub">${esc(r.area || 'Corporativo')}${r.processo ? ' — ' + esc(r.processo) : (r.fornecedorNome ? ' — 🏢 ' + esc(r.fornecedorNome) : '')} • ${new Date().toLocaleDateString('pt-BR')} • Fortes Tecnologia</div>
+  </div>
+  <button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button>
+</div>
+<span style="display:inline-block;padding:4px 12px;border-radius:12px;font-size:9.5pt;font-weight:700;color:white;background:${_corStatusRisco(r.status)};">${esc(r.status || '-')}</span>
+
+<h2>Identificação do Risco</h2>
+<table>
+  <tr><td style="width:30%;"><b>Área</b></td><td>${esc(r.area || '-')}</td></tr>
+  <tr><td><b>Processo / Fornecedor</b></td><td>${r.processo ? esc(r.processo) : (r.fornecedorNome ? '🏢 ' + esc(r.fornecedorNome) : 'Corporativo')}</td></tr>
+  <tr><td><b>Categorias</b></td><td>${esc((r.categorias || []).join(', ')) || '-'}</td></tr>
+  <tr><td><b>Responsável</b></td><td>${esc(r.responsavel || '-')}</td></tr>
+  <tr><td><b>Reportado por</b></td><td>${esc(r.reportadoPor || '-')}</td></tr>
+  <tr><td><b>Data de Identificação</b></td><td>${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '-'}</td></tr>
+  <tr><td><b>Origem</b></td><td>${esc(_rotuloOrigemRisco(r.origem))}</td></tr>
+  <tr><td><b>Descrição</b></td><td>${esc(r.descricao || '-')}</td></tr>
+</table>
+
+<h2>Análise & Avaliação</h2>
+<table>
+  <tr><td style="width:30%;"><b>Probabilidade</b></td><td>${r.probabilidade ? _badgePlanoAcaoPopup(_nivelProbImpacto(r.probabilidade), r.probabilidade) : '-'}</td></tr>
+  <tr><td><b>Impacto</b></td><td>${r.impacto ? _badgePlanoAcaoPopup(_nivelProbImpacto(r.impacto), r.impacto) : '-'}</td></tr>
+  <tr><td><b>Score</b></td><td>${faixaScore ? _badgePlanoAcaoPopup(_nivelFaixaRisco(faixaScore.rotulo), String(score) + ' (' + faixaScore.rotulo + ')') : '-'}</td></tr>
+  <tr><td><b>Prioridade</b></td><td>${esc(r.prioridade || '-')}</td></tr>
+  <tr><td><b>Impacto Financeiro</b></td><td>${r.impactoFinanceiro != null ? _formatarReais(r.impactoFinanceiro) : '-'}</td></tr>
+</table>
+
+<h2>Tratamento</h2>
+<p><b>Estratégia de Tratamento:</b> ${esc(r.estrategiaTratamento || '-')}</p>
+<p><b>Medidas de Mitigação:</b> ${esc(r.estrategiaDescricao || '-')}</p>
+<h3 style="margin-top:20px;">Plano de Ação (5W2H)</h3>
+${tabelaPlanoAcao}
+
+<div style="margin-top:30px;border-top:1px solid #ddd;padding-top:10px;font-size:8pt;color:#999;text-align:center;">Plano de Ação gerado em ${new Date().toLocaleDateString('pt-BR')} • Fortes Tecnologia</div>
+</body></html>`;
+}
+
+window.exportarPlanoAcaoRisco = () => {
+  if (!document.getElementById('rId').value) return showToast('Salve o risco antes de exportar o plano de ação.', '#e65100');
+  const r = _coletarFormularioRisco();
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado.', '#e65100');
+  win.document.write(_buildPlanoAcaoRiscoPage(r));
   win.document.close();
 };
 
@@ -7552,7 +11111,7 @@ function renderPcnResumoBcp() {
     const style = document.createElement('style');
     style.id = 'bcpPcnPreviewStyle';
     style.textContent = `
-      .bcp-pcn-preview h1, .bcp-pcn-preview h2, .bcp-pcn-preview h3 { color:#1a237e; margin:14px 0 8px; }
+      .bcp-pcn-preview h1, .bcp-pcn-preview h2, .bcp-pcn-preview h3 { color:#d60014; margin:14px 0 8px; }
       .bcp-pcn-preview h1 { font-size:1.25em; }
       .bcp-pcn-preview h2 { font-size:1.1em; }
       .bcp-pcn-preview h3 { font-size:1em; }
@@ -7693,7 +11252,7 @@ function _buildPCNPage(pcnContent, info, processId, versoes, idToken) {
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',Arial,sans-serif;color:#333;font-size:10.5pt;line-height:1.6;margin:0}
-.sidebar{position:fixed;left:0;top:0;width:260px;height:100vh;overflow-y:auto;background:linear-gradient(180deg,#1a237e,#283593);padding:20px 16px;z-index:50;box-shadow:4px 0 16px rgba(0,0,0,0.15);transition:transform 0.3s ease}
+.sidebar{position:fixed;left:0;top:0;width:260px;height:100vh;overflow-y:auto;background:linear-gradient(180deg,#d60014,#e6262b);padding:20px 16px;z-index:50;box-shadow:4px 0 16px rgba(0,0,0,0.15);transition:transform 0.3s ease}
 .sidebar.collapsed{transform:translateX(-260px)}
 .sidebar h3{color:rgba(255,255,255,0.9);font-size:10pt;margin-bottom:12px}
 .sidebar ol{list-style:none;padding:0;margin:0}
@@ -7703,27 +11262,27 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#333;font-size:10.5pt;line-he
 .sidebar a.h1-link{font-weight:700;font-size:9pt}
 .sidebar a.h2-link{font-size:8.5pt}
 .sidebar a.h3-link{font-size:8pt;opacity:0.7;padding-left:16px}
-.toggle-btn{position:fixed;left:268px;top:12px;z-index:60;background:#1a237e;color:white;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,0.2);transition:left 0.3s ease}
+.toggle-btn{position:fixed;left:268px;top:12px;z-index:60;background:#d60014;color:white;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,0.2);transition:left 0.3s ease}
 .toggle-btn.collapsed{left:12px}
 .main{margin-left:280px;padding:40px 50px;max-width:950px;transition:margin-left 0.3s ease}
 .main.expanded{margin-left:20px}
-h1{font-size:22pt;color:#1a237e;margin-bottom:4px}
-h2{font-size:13pt;color:#1a237e;margin:30px 0 14px;padding:8px 14px;background:linear-gradient(135deg,#e8eaf6,#f5f6fa);border-left:4px solid #1a237e;border-radius:0 6px 6px 0}
+h1{font-size:22pt;color:#d60014;margin-bottom:4px}
+h2{font-size:13pt;color:#d60014;margin:30px 0 14px;padding:8px 14px;background:linear-gradient(135deg,#fce8ea,#f5f6fa);border-left:4px solid #d60014;border-radius:0 6px 6px 0}
 h3{font-size:11pt;color:#333;margin:20px 0 8px}
 p{margin-bottom:8px}
 ul,ol{margin:6px 0 12px 24px}
 li{margin-bottom:5px}
 table{width:100%;border-collapse:collapse;margin:10px 0 18px;font-size:9.5pt}
-th{background:#1a237e;color:white;padding:9px 12px;text-align:left;font-weight:600;font-size:9pt}
+th{background:#d60014;color:white;padding:9px 12px;text-align:left;font-weight:600;font-size:9pt}
 td{padding:8px 12px;border:1px solid #ddd;vertical-align:top}
 tr:nth-child(even){background:#fafbfc}
-.cover{background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:40px 50px;margin:-40px -50px 30px;border-radius:0 0 12px 12px}
+.cover{background:linear-gradient(135deg,#d60014,#e6262b);color:white;padding:40px 50px;margin:-40px -50px 30px;border-radius:0 0 12px 12px}
 .cover h1{color:white;font-size:24pt}
 .cover p{color:rgba(255,255,255,0.85)}
 .cover .badge{background:rgba(255,255,255,0.2);color:white;display:inline-block;padding:5px 16px;border-radius:14px;font-size:9.5pt;font-weight:700;margin-top:10px}
-.btn-action{position:fixed;top:12px;padding:10px 20px;background:#1a237e;color:white;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600;z-index:60;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
+.btn-action{position:fixed;top:12px;padding:10px 20px;background:#d60014;color:white;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600;z-index:60;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
 .btn-action:hover{opacity:0.9}
-.footer{margin-top:40px;padding-top:16px;border-top:2px solid #e8eaf6;font-size:8pt;color:#999;text-align:center}
+.footer{margin-top:40px;padding-top:16px;border-top:2px solid #fce8ea;font-size:8pt;color:#999;text-align:center}
 @media print{.sidebar,.toggle-btn,.btn-action,#pcn-versao-select,.version-panel{display:none!important}.main{margin-left:0!important;padding:20px 30px}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.cover{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;margin:-20px -30px 20px;padding:30px}th{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}h2{page-break-after:avoid}table{page-break-inside:avoid}}
 </style>
 </head>
@@ -7824,7 +11383,7 @@ async function salvarVersaoPCN(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
-<script src="https://bia-forte-2025.web.app/pcn-live.js?v=7"></script>
+<script src="https://bia-forte-2025.web.app/pcn-live.js?v=9"></script>
 </body>
 </html>`;
 }
@@ -7868,7 +11427,7 @@ window.gerarDRPDependencia = async () => {
 
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
-  win.document.write('<p style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#1a237e;">⏳ Gerando DRP...</p>');
+  win.document.write('<p style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#d60014;">⏳ Gerando DRP...</p>');
 
   const btn = document.getElementById('btnGerarDrp');
   const textoOriginal = btn ? btn.innerHTML : '';
@@ -7881,15 +11440,28 @@ window.gerarDRPDependencia = async () => {
     if (htmlStart > 0) drpContent = drpContent.substring(htmlStart);
     drpContent = drpContent.replace(/^```html\s*/i, '').replace(/```\s*$/i, '').trim();
 
-    // Auto-salvar como primeira versão.
-    let versoes = d && d.drpSalvo ? _parsePCNVersoes(d.drpSalvo) : [];
+    // Auto-salvar como primeira versão. drpSalvo local vira só metadado (sem
+    // html) -- o conteúdo de verdade mora em drp_conteudo, do lado do
+    // servidor, e só volta pelo obterDRP logo abaixo.
+    const autor = window.USER_EMAIL || 'sistema';
     try {
       await API.post('salvarDRP', { id: String(id), html: drpContent });
       API.invalidate('getDependencias');
-      versoes.push({ versao: versoes.length + 1, data: new Date().toISOString(), autor: window.USER_EMAIL || 'sistema', html: drpContent });
-      if (d) d.drpSalvo = JSON.stringify(versoes);
+      const metaAnterior = d && d.drpSalvo ? _parsePCNVersoes(d.drpSalvo) : [];
+      if (d) d.drpSalvo = JSON.stringify([...metaAnterior, { versao: metaAnterior.length + 1, data: new Date().toISOString(), autor }]);
       renderDrpResumo();
     } catch (saveErr) { console.warn('Auto-save DRP falhou:', saveErr); }
+
+    // Versões completas (com html) pro viewer que abre a seguir -- busca do
+    // servidor pra já incluir a que acabou de ser salva; se falhar, ainda
+    // assim mostra o que acabou de ser gerado (só sem o histórico anterior).
+    let versoes;
+    try {
+      versoes = (await API.get('obterDRP', { id })).versoes || [];
+      if (!versoes.length) throw new Error('vazio');
+    } catch (e) {
+      versoes = [{ versao: 1, data: new Date().toISOString(), autor, html: drpContent }];
+    }
 
     const drpHtml = _buildDRPPage(drpContent, { nome: result.nome, categoria: result.categoria }, id, versoes, await _tokenParaPCN());
     win.document.open();
@@ -7907,7 +11479,14 @@ window.abrirDRPSalvo = async () => {
   const id = document.getElementById('depId').value || '';
   const d = id ? (dependenciasData || []).find((x) => String(x.id) === String(id)) : null;
   if (!d || !d.drpSalvo) return showToast('Nenhum DRP salvo.', '#e65100');
-  const versoes = _parsePCNVersoes(d.drpSalvo);
+  // O HTML de verdade mora em drp_conteudo (colecao fechada); obterDRP confere
+  // o perfil no servidor antes de devolver alguma coisa.
+  let versoes;
+  try {
+    versoes = (await API.get('obterDRP', { id })).versoes || [];
+  } catch (e) {
+    return showToast('❌ ' + e.message, '#c62828');
+  }
   if (!versoes.length) return showToast('Nenhuma versão de DRP encontrada.', '#e65100');
   const ultima = versoes[versoes.length - 1];
   let drpHtml;
@@ -7953,7 +11532,7 @@ function _buildDRPPage(drpContent, info, depId, versoes, idToken) {
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Segoe UI',Arial,sans-serif;color:#333;font-size:10.5pt;line-height:1.6;margin:0}
-.sidebar{position:fixed;left:0;top:0;width:260px;height:100vh;overflow-y:auto;background:linear-gradient(180deg,#1a237e,#283593);padding:20px 16px;z-index:50;box-shadow:4px 0 16px rgba(0,0,0,0.15);transition:transform 0.3s ease}
+.sidebar{position:fixed;left:0;top:0;width:260px;height:100vh;overflow-y:auto;background:linear-gradient(180deg,#d60014,#e6262b);padding:20px 16px;z-index:50;box-shadow:4px 0 16px rgba(0,0,0,0.15);transition:transform 0.3s ease}
 .sidebar.collapsed{transform:translateX(-260px)}
 .sidebar h3{color:rgba(255,255,255,0.9);font-size:10pt;margin-bottom:12px}
 .sidebar ol{list-style:none;padding:0;margin:0}
@@ -7963,33 +11542,34 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#333;font-size:10.5pt;line-he
 .sidebar a.h1-link{font-weight:700;font-size:9pt}
 .sidebar a.h2-link{font-size:8.5pt}
 .sidebar a.h3-link{font-size:8pt;opacity:0.7;padding-left:16px}
-.toggle-btn{position:fixed;left:268px;top:12px;z-index:60;background:#1a237e;color:white;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,0.2);transition:left 0.3s ease}
+.toggle-btn{position:fixed;left:268px;top:12px;z-index:60;background:#d60014;color:white;border:none;border-radius:50%;width:34px;height:34px;cursor:pointer;font-size:16px;box-shadow:0 2px 8px rgba(0,0,0,0.2);transition:left 0.3s ease}
 .toggle-btn.collapsed{left:12px}
 .main{margin-left:280px;padding:40px 50px;max-width:950px;transition:margin-left 0.3s ease}
 .main.expanded{margin-left:20px}
-h1{font-size:22pt;color:#1a237e;margin-bottom:4px}
-h2{font-size:13pt;color:#1a237e;margin:30px 0 14px;padding:8px 14px;background:linear-gradient(135deg,#e8eaf6,#f5f6fa);border-left:4px solid #1a237e;border-radius:0 6px 6px 0}
+h1{font-size:22pt;color:#d60014;margin-bottom:4px}
+h2{font-size:13pt;color:#d60014;margin:30px 0 14px;padding:8px 14px;background:linear-gradient(135deg,#fce8ea,#f5f6fa);border-left:4px solid #d60014;border-radius:0 6px 6px 0}
 h3{font-size:11pt;color:#333;margin:20px 0 8px}
 p{margin-bottom:8px}
 ul,ol{margin:6px 0 12px 24px}
 li{margin-bottom:5px}
 table{width:100%;border-collapse:collapse;margin:10px 0 18px;font-size:9.5pt}
-th{background:#1a237e;color:white;padding:9px 12px;text-align:left;font-weight:600;font-size:9pt}
+th{background:#d60014;color:white;padding:9px 12px;text-align:left;font-weight:600;font-size:9pt}
 td{padding:8px 12px;border:1px solid #ddd;vertical-align:top}
 tr:nth-child(even){background:#fafbfc}
-.cover{background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:40px 50px;margin:-40px -50px 30px;border-radius:0 0 12px 12px}
+.cover{background:linear-gradient(135deg,#d60014,#e6262b);color:white;padding:40px 50px;margin:-40px -50px 30px;border-radius:0 0 12px 12px}
 .cover h1{color:white;font-size:24pt}
 .cover p{color:rgba(255,255,255,0.85)}
 .cover .badge{background:rgba(255,255,255,0.2);color:white;display:inline-block;padding:5px 16px;border-radius:14px;font-size:9.5pt;font-weight:700;margin-top:10px}
-.btn-action{position:fixed;top:12px;padding:10px 20px;background:#1a237e;color:white;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600;z-index:60;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
+.btn-action{position:fixed;top:12px;padding:10px 20px;background:#d60014;color:white;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600;z-index:60;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
 .btn-action:hover{opacity:0.9}
-.footer{margin-top:40px;padding-top:16px;border-top:2px solid #e8eaf6;font-size:8pt;color:#999;text-align:center}
+.footer{margin-top:40px;padding-top:16px;border-top:2px solid #fce8ea;font-size:8pt;color:#999;text-align:center}
 @media print{.sidebar,.toggle-btn,.btn-action,#drp-versao-select,.version-panel{display:none!important}.main{margin-left:0!important;padding:20px 30px}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.cover{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;margin:-20px -30px 20px;padding:30px}th{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}h2{page-break-after:avoid}table{page-break-inside:avoid}}
 </style>
 </head>
 <body>
 <nav class="sidebar" id="drp-sidebar"><h3>📋 Navegação</h3><ol id="drp-nav-list"></ol></nav>
 <button class="toggle-btn" id="drp-toggle" onclick="toggleDRPSidebar()">☰</button>
+<button class="btn-action" style="right:360px;background:#1565c0;" onclick="navigator.clipboard.writeText('${location.origin}/#drp?abrir=${escScript(depId)}').then(function(){alert('Link copiado!');})">🔗 Copiar link</button>
 <button class="btn-action" style="right:180px;" onclick="window.print()">🖨️ Imprimir / PDF</button>
 <button class="btn-action" style="right:20px;background:#2e7d32;" onclick="salvarVersaoDRP()">💾 Salvar versão</button>
 ${seletorVersoes}
@@ -8011,6 +11591,8 @@ ${seletorVersoes}
 </div>
 <script>
 var DRP_DEP_ID = '${escScript(depId)}';
+var DRP_DEP_NOME = '${escScript(info.nome || '')}';
+var DRP_DEP_CATEGORIA = '${escScript(info.categoria || '')}';
 var DRP_API_URL = '` + APP_API_URL + `';
 var DRP_TOKEN = '` + (idToken || '') + `';
 var DRP_VERSOES = JSON.parse('${versoesJson}');
@@ -8050,6 +11632,7 @@ async function salvarVersaoDRP(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
+<script src="https://bia-forte-2025.web.app/drp-live.js?v=1"></script>
 </body>
 </html>`;
 }
@@ -8202,8 +11785,8 @@ async function pcns() {
     document.getElementById('pcns-resumo').style.display = 'flex';
     document.getElementById('pcns-resumo').innerHTML = `
       <div style="display:flex;gap:12px;flex-wrap:wrap;">
-        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #1a237e;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-          <div style="font-size:1.6em;font-weight:700;color:#1a237e;">${comPCN.length}</div>
+        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #d60014;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+          <div style="font-size:1.6em;font-weight:700;color:#d60014;">${comPCN.length}</div>
           <div style="font-size:0.75em;color:#666;">Total PCNs</div>
         </div>
         <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #c62828;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
@@ -8255,14 +11838,13 @@ window.toggleAreaPCN = (areaId) => {
 
 function renderPCNLista(comPCN) {
   const porArea = _agruparPorArea(comPCN);
-  const tierColor = (p) => Criticidade.corDoTier(p);
   const tierLabel = (p) => Criticidade.tierCurto(p);
 
   let html = '';
   Object.entries(porArea).sort((a, b) => a[0].localeCompare(b[0])).forEach(([area, procs]) => {
     const areaId = 'pcn-area-' + area.replace(/[^a-zA-Z0-9]/g, '_');
     html += `<div style="margin-bottom:20px;">
-      <div onclick="toggleAreaPCN('${areaId}')" style="background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:12px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;">
+      <div onclick="toggleAreaPCN('${areaId}')" style="background:linear-gradient(135deg,#d60014,#e6262b);color:white;padding:12px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;">
         <span style="font-weight:700;font-size:0.95em;">📁 ${area}</span>
         <span style="font-size:0.78em;opacity:0.8;">${procs.length} processo${procs.length > 1 ? 's' : ''} ▾</span>
       </div>
@@ -8280,7 +11862,7 @@ function renderPCNLista(comPCN) {
           <div style="font-size:0.78em;color:#999;margin-top:2px;">Atualizado: ${dataVersao}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <span style="background:${tierColor(p)};color:white;padding:2px 8px;border-radius:8px;font-size:0.72em;font-weight:700;">${tierLabel(p)} • ${p.score || 0}</span>
+          ${_htmlBadge(_nivelTierProcesso(Criticidade.tierDoProcesso(p)), tierLabel(p) + ' • ' + (p.score || 0))}
           <button onclick="abrirPCNDireto('${p.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Abrir PCN">📄</button>
           <button onclick="event.stopPropagation();excluirPCN('${p.id}','${escJs(p.area)}','${escJs(p.processo)}')" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#bbb'" title="Excluir PCN">🗑️</button>
         </div>
@@ -8393,8 +11975,8 @@ function renderDRPResumo() {
   box.style.display = 'flex';
   box.innerHTML = `
     <div style="display:flex;gap:12px;flex-wrap:wrap;">
-      <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #1a237e;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-        <div style="font-size:1.6em;font-weight:700;color:#1a237e;">${comDRP.length}</div>
+      <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #d60014;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
+        <div style="font-size:1.6em;font-weight:700;color:#d60014;">${comDRP.length}</div>
         <div style="font-size:0.75em;color:#666;">Com DRP</div>
       </div>
       <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #999;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
@@ -8434,7 +12016,7 @@ function renderDRPLista(lista, tipo) {
   Object.entries(porCategoria).sort((a, b) => a[0].localeCompare(b[0])).forEach(([cat, deps]) => {
     const catId = 'drp-cat-' + cat.replace(/[^a-zA-Z0-9]/g, '_');
     html += `<div style="margin-bottom:20px;">
-      <div onclick="toggleCategoriaDRP('${catId}')" style="background:linear-gradient(135deg,#1a237e,#283593);color:white;padding:12px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;">
+      <div onclick="toggleCategoriaDRP('${catId}')" style="background:linear-gradient(135deg,#d60014,#e6262b);color:white;padding:12px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;">
         <span style="font-weight:700;font-size:0.95em;">📁 ${esc(cat)}</span>
         <span style="font-size:0.78em;opacity:0.8;">${deps.length} dependência${deps.length > 1 ? 's' : ''} ▾</span>
       </div>
@@ -8457,6 +12039,7 @@ function renderDRPLista(lista, tipo) {
         <div style="display:flex;align-items:center;gap:8px;">
           <button onclick="event.stopPropagation();gerenciarDrpDependencia('${d.id}')" class="btn btn-ghost" style="padding:5px 10px;font-size:0.82em;" title="Gerenciar Parâmetros DRP">⚙️ Gerenciar</button>
           ${temDRP ? `<button onclick="event.stopPropagation();abrirDRPDireto('${d.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Abrir DRP">📄</button>` : ''}
+          ${temDRP ? `<button onclick="event.stopPropagation();copiarLinkDrpDireto('${d.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Copiar link direto">🔗</button>` : ''}
           ${(temDRP && podeExcluir) ? `<button onclick="event.stopPropagation();excluirDRPDaLista('${d.id}','${escJs(d.nome)}')" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#bbb'" title="Excluir DRP">🗑️</button>` : ''}
         </div>
       </div>`;
@@ -8485,7 +12068,15 @@ window.gerenciarDrpDependencia = (id) => {
 window.abrirDRPDireto = async (id) => {
   const d = (window._drpData || dependenciasData || []).find(x => String(x.id) === String(id));
   if (!d || !d.drpSalvo) return showToast('Nenhum DRP salvo para esta dependência.', '#e65100');
-  const versoes = _parsePCNVersoes(d.drpSalvo);
+  // O HTML de verdade mora em drp_conteudo (colecao fechada); obterDRP confere
+  // o perfil no servidor antes de devolver alguma coisa -- quem cair aqui por
+  // um link direto sem o perfil certo recebe o erro abaixo, nao o conteudo.
+  let versoes;
+  try {
+    versoes = (await API.get('obterDRP', { id })).versoes || [];
+  } catch (e) {
+    return showToast('❌ ' + e.message, '#c62828');
+  }
   if (!versoes.length) return showToast('Nenhuma versão de DRP encontrada.', '#e65100');
   const ultima = versoes[versoes.length - 1];
   let drpHtml;
@@ -8499,6 +12090,14 @@ window.abrirDRPDireto = async (id) => {
   win.document.open();
   win.document.write(drpHtml);
   win.document.close();
+};
+
+/** Copia o link direto de acesso ao DRP desta dependência pra área de transferência. */
+window.copiarLinkDrpDireto = (id) => {
+  const link = `${location.origin}/#drp?abrir=${encodeURIComponent(id)}`;
+  navigator.clipboard.writeText(link)
+    .then(() => showToast('🔗 Link copiado!', '#2e7d32'))
+    .catch(() => showToast('❌ Não foi possível copiar o link.', '#c62828'));
 };
 
 /** Exclui todas as versões de DRP de uma dependência (admin), a partir da lista. */
@@ -8870,6 +12469,431 @@ window.excluirCategoriaFornecedor = async (id) => {
 };
 
 // ============================================================
+// PÁGINA: SUBCATEGORIAS DE FORNECEDORES -- mesmo molde de Categorias acima,
+// com o vínculo hierárquico a mais (cada Subcategoria pertence a uma
+// Categoria, por categoriaId -- ver nota em api.js/_lerSubcategoriasFornecedor
+// sobre por que isso é por id e não por nome).
+// ============================================================
+let subcategoriasFornecedorData = [];
+let criticidadeFornecedorPerguntasData = [];
+
+async function fornecedoresSubcategorias() {
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Subcategorias de Fornecedores</h2><p class="page-sub">Refinamento da Categoria de cada fornecedor</p></div>
+      <button class="btn btn-primary" onclick="abrirModalSubcategoriaFornecedor()" id="btnNovaSubcategoriaForn" style="display:none;">+ Nova Subcategoria</button>
+    </div>
+    <div class="loading" id="loadingSubcategoriasForn">⏳ Carregando...</div>
+    <div id="listaSubcategoriasForn"></div>
+    <div class="modal-overlay" id="modalSubcategoriaForn"><div class="modal" onclick="event.stopPropagation()">
+      <h3 id="modalSubcategoriaFornTitulo">Nova Subcategoria</h3>
+      <input type="hidden" id="subcatFornId">
+      <label>Categoria</label>
+      <select id="subcatFornCategoria"><option value="">Selecione...</option></select>
+      <label>Subcategoria</label>
+      <input type="text" id="subcatFornNome" placeholder="Ex: Hospedagem em Nuvem Pública">
+      <label class="check-label"><input type="checkbox" id="subcatFornAtivo" checked> Subcategoria ativa</label>
+      <span style="font-size:0.75em;color:#888;display:block;">Desativar tira a subcategoria do cadastro de fornecedores novos. Fornecedores já classificados nela continuam mostrando o nome dela.</span>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalSubcategoriaFornecedor()">Cancelar</button>
+        <button class="btn btn-primary" id="btnSalvarSubcategoriaFornecedor" onclick="salvarSubcategoriaFornecedor()">Salvar</button>
+      </div>
+    </div></div>`;
+
+  document.getElementById('btnNovaSubcategoriaForn').style.display = isAdmin ? 'inline-block' : 'none';
+
+  try {
+    [categoriasFornecedorData, subcategoriasFornecedorData] = await Promise.all([
+      API.getCategoriasFornecedor(),
+      API.getSubcategoriasFornecedor(),
+    ]);
+  } catch (e) {
+    console.error('Subcategorias de fornecedor: falha ao carregar', e);
+    document.getElementById('loadingSubcategoriasForn').style.display = 'none';
+    document.getElementById('listaSubcategoriasForn').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
+      Não foi possível carregar as subcategorias.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="fornecedoresSubcategorias()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+  document.getElementById('loadingSubcategoriasForn').style.display = 'none';
+  renderizarSubcategoriasFornecedor();
+}
+
+let subcategoriasFornOrdenacao = criarOrdenacao('nome', 'asc');
+window.ordenarSubcategoriasForn = (coluna) => { subcategoriasFornOrdenacao.ordenar(coluna); renderizarSubcategoriasFornecedor(); };
+
+function _nomeCategoriaFornecedorPorId(id) {
+  const c = categoriasFornecedorData.find((x) => x.id === id);
+  return c ? c.nome : '';
+}
+
+function renderizarSubcategoriasFornecedor() {
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
+  const lista = document.getElementById('listaSubcategoriasForn');
+  if (!lista) return;
+
+  if (!subcategoriasFornecedorData.length) {
+    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
+      Nenhuma subcategoria cadastrada ainda.<br>
+      <span style="font-size:0.9em;">Sem subcategoria, o cadastro de fornecedores fica sem essa opção pra escolher.</span></div>`;
+    return;
+  }
+
+  const data = subcategoriasFornOrdenacao.aplicar(subcategoriasFornecedorData, {
+    categoria: (a, b, dir) => dir * _nomeCategoriaFornecedorPorId(a.categoriaId).localeCompare(_nomeCategoriaFornecedorPorId(b.categoriaId), 'pt-BR'),
+    status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
+  });
+  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarSubcategoriasForn('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-subcatforn-${coluna}"></span></th>`;
+
+  lista.innerHTML = `
+    <div class="data-table">
+      <table>
+        <thead>
+          <tr>
+            ${th('nome', 'Subcategoria', 'width:40%;')}
+            ${th('categoria', 'Categoria', 'width:30%;')}
+            ${th('status', 'Status', 'width:15%;text-align:center;')}
+            <th style="width:15%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map((s) => `
+            <tr style="cursor:pointer;${s.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalSubcategoriaFornecedor('${s.id}')">
+              <td style="font-weight:600;">${esc(s.nome)}</td>
+              <td>${esc(_nomeCategoriaFornecedorPorId(s.categoriaId)) || '<span style="color:#c62828;">(categoria não encontrada)</span>'}</td>
+              <td style="text-align:center;">${s.ativo
+                ? '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#e8f5e9;color:#2e7d32;">Ativa</span>'
+                : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativa</span>'}</td>
+              <td style="text-align:center;" onclick="event.stopPropagation();">
+                ${isAdmin ? `
+                  <button class="btn-icon" onclick="abrirModalSubcategoriaFornecedor('${s.id}')" title="Editar">✏️</button>
+                  <button class="btn-icon" onclick="excluirSubcategoriaFornecedor('${s.id}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+
+  subcategoriasFornOrdenacao.atualizarSetas('sort-subcatforn-', ['nome', 'categoria', 'status']);
+}
+
+window.abrirModalSubcategoriaFornecedor = (id) => {
+  const s = id ? subcategoriasFornecedorData.find((x) => x.id === id) : null;
+  document.getElementById('modalSubcategoriaFornTitulo').textContent = s ? 'Editar Subcategoria' : 'Nova Subcategoria';
+  document.getElementById('subcatFornId').value = s ? s.id : '';
+  const categoriaAtualId = s ? s.categoriaId : '';
+  const categoriasAtivas = categoriasFornecedorData.filter((c) => c.ativo);
+  const temNaLista = categoriasAtivas.some((c) => c.id === categoriaAtualId);
+  document.getElementById('subcatFornCategoria').innerHTML = '<option value="">Selecione...</option>' +
+    categoriasAtivas.map((c) => `<option value="${esc(c.id)}">${esc(c.nome)}</option>`).join('') +
+    (categoriaAtualId && !temNaLista ? `<option value="${esc(categoriaAtualId)}">${esc(_nomeCategoriaFornecedorPorId(categoriaAtualId) || 'Categoria')} (inativa ou não encontrada)</option>` : '');
+  document.getElementById('subcatFornCategoria').value = categoriaAtualId;
+  document.getElementById('subcatFornNome').value = s ? s.nome : '';
+  document.getElementById('subcatFornAtivo').checked = s ? s.ativo : true;
+  document.getElementById('modalSubcategoriaForn').classList.add('open');
+};
+
+window.fecharModalSubcategoriaFornecedor = () => document.getElementById('modalSubcategoriaForn').classList.remove('open');
+
+window.salvarSubcategoriaFornecedor = async () => {
+  const categoriaId = document.getElementById('subcatFornCategoria').value;
+  const nome = document.getElementById('subcatFornNome').value.trim();
+  if (!categoriaId) return showToast('Selecione a categoria.', '#e65100');
+  if (!nome) return showToast('Informe a subcategoria.', '#e65100');
+
+  await comBotaoCarregando('btnSalvarSubcategoriaFornecedor', async () => {
+    try {
+      await API.salvarSubcategoriaFornecedor({
+        id: document.getElementById('subcatFornId').value || null,
+        categoriaId,
+        nome,
+        ativo: document.getElementById('subcatFornAtivo').checked,
+      });
+      fecharModalSubcategoriaFornecedor();
+      subcategoriasFornecedorData = await API.getSubcategoriasFornecedor();
+      renderizarSubcategoriasFornecedor();
+      showToast('✅ Salvo!', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
+};
+
+window.excluirSubcategoriaFornecedor = async (id) => {
+  const s = subcategoriasFornecedorData.find((x) => x.id === id);
+  if (!confirm(`Excluir a subcategoria "${s ? s.nome : id}"?\n\nFornecedores que já usam esta subcategoria continuam mostrando o nome dela até serem editados. Se a ideia é só parar de oferecê-la em fornecedores novos, é melhor desativar em vez de excluir.`)) return;
+  try {
+    await API.excluirSubcategoriaFornecedor(id);
+    subcategoriasFornecedorData = await API.getSubcategoriasFornecedor();
+    renderizarSubcategoriasFornecedor();
+    showToast('✅ Excluída.', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ============================================================
+// PÁGINA: PERGUNTAS DE CRITICIDADE DE FORNECEDOR -- cadastro das perguntas
+// usadas na aba "Criticidade" do Fornecedor (fornecedor-criticidade.js).
+// Cada pergunta tem sua própria lista de Opções (rótulo + peso), editada
+// como sub-lista embutida no drawer -- mesma família "item com várias
+// colunas" de Plano de Ação/KRIs do Risco (ver renderPlanoAcaoRisco como
+// referência de implementação).
+// ============================================================
+let criticidadePerguntaOrdenacao = criarOrdenacao('texto', 'asc');
+window.ordenarCriticidadePerguntas = (coluna) => { criticidadePerguntaOrdenacao.ordenar(coluna); renderizarCriticidadeFornecedorPerguntas(); };
+
+async function fornecedoresCriticidadePerguntas() {
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Perguntas de Criticidade</h2><p class="page-sub">Perguntas e pesos usados para avaliar a criticidade operacional de um fornecedor</p></div>
+      <button class="btn btn-primary" onclick="abrirDrawerCriticidadePergunta()" id="btnNovaCriticidadePergunta" style="display:none;">+ Nova Pergunta</button>
+    </div>
+    <div class="loading" id="loadingCriticidadePerguntas">⏳ Carregando...</div>
+    <div id="listaCriticidadePerguntas"></div>
+    ${_htmlDrawerCriticidadePergunta()}`;
+
+  document.getElementById('btnNovaCriticidadePergunta').style.display = isAdmin ? 'inline-block' : 'none';
+
+  try {
+    criticidadeFornecedorPerguntasData = await API.getCriticidadeFornecedorPerguntas();
+  } catch (e) {
+    console.error('Perguntas de Criticidade: falha ao carregar', e);
+    document.getElementById('loadingCriticidadePerguntas').style.display = 'none';
+    document.getElementById('listaCriticidadePerguntas').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
+      Não foi possível carregar as perguntas.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="fornecedoresCriticidadePerguntas()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+  document.getElementById('loadingCriticidadePerguntas').style.display = 'none';
+  renderizarCriticidadeFornecedorPerguntas();
+}
+
+function renderizarCriticidadeFornecedorPerguntas() {
+  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
+  const lista = document.getElementById('listaCriticidadePerguntas');
+  if (!lista) return;
+
+  if (!criticidadeFornecedorPerguntasData.length) {
+    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
+      Nenhuma pergunta cadastrada ainda.<br>
+      <span style="font-size:0.9em;">Sem pergunta ativa, a aba Criticidade do Fornecedor fica sem o que perguntar.</span></div>`;
+    return;
+  }
+
+  const data = criticidadePerguntaOrdenacao.aplicar(criticidadeFornecedorPerguntasData, {
+    status: (a, b, dir) => dir * ((a.ativa ? 1 : 0) - (b.ativa ? 1 : 0)),
+  });
+  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarCriticidadePerguntas('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-critperg-${coluna}"></span></th>`;
+
+  lista.innerHTML = `
+    <div class="data-table">
+      <table>
+        <thead>
+          <tr>
+            ${th('texto', 'Pergunta', 'width:50%;')}
+            <th style="width:20%;">Opções</th>
+            ${th('status', 'Status', 'width:15%;text-align:center;')}
+            <th style="width:15%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.map((p) => `
+            <tr style="cursor:pointer;${p.ativa ? '' : 'opacity:0.5;'}" onclick="abrirDrawerCriticidadePergunta('${p.id}')">
+              <td style="font-weight:600;">${esc(p.texto)}</td>
+              <td style="font-size:0.85em;color:#555;">${p.opcoes.length} opção${p.opcoes.length === 1 ? '' : 'ões'}</td>
+              <td style="text-align:center;">${p.ativa
+                ? '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#e8f5e9;color:#2e7d32;">Ativa</span>'
+                : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativa</span>'}</td>
+              <td style="text-align:center;" onclick="event.stopPropagation();">
+                ${isAdmin ? `
+                  <button class="btn-icon" onclick="abrirDrawerCriticidadePergunta('${p.id}')" title="Editar">✏️</button>
+                  <button class="btn-icon" onclick="excluirCriticidadeFornecedorPergunta('${p.id}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+
+  criticidadePerguntaOrdenacao.atualizarSetas('sort-critperg-', ['texto', 'status']);
+}
+
+function _htmlDrawerCriticidadePergunta() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  return `
+    <div class="drawer-overlay" id="drawerOverlayCriticidadePergunta" onclick="fecharDrawerCriticidadePergunta()"></div>
+    <div class="drawer" id="drawerCriticidadePergunta" style="width:620px;">
+      <div class="drawer-header">
+        <h3 id="criticidadePerguntaDrawerTitulo">Nova Pergunta</h3>
+        <button onclick="fecharDrawerCriticidadePergunta()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <input type="hidden" id="critPergId">
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}">Texto da pergunta</label>
+          <textarea id="critPergTexto" rows="2" placeholder="Ex: Qual é a importância desse fornecedor para a operação da empresa?" style="${inp}resize:vertical;"></textarea>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:0.9em;color:#333;">
+          <input type="checkbox" id="critPergAtiva" checked> Pergunta ativa
+        </label>
+        <span style="font-size:0.75em;color:#888;display:block;margin-bottom:16px;">Desativar tira a pergunta da próxima avaliação de Criticidade. Avaliações já feitas continuam mostrando o que foi respondido.</span>
+
+        <label style="${lbl}margin-bottom:8px;">Opções de resposta (rótulo + peso)</label>
+        <div id="critPergOpcoesTabela"></div>
+        <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:14px;margin-top:10px;">
+          <div id="critPergOpcaoEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:10px;">
+            ✎ Editando opção — <a href="#" onclick="cancelarEdicaoCriticidadeOpcao();return false;" style="color:#1565c0;">cancelar edição</a>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;">
+            <div>
+              <label style="${lbl}">Rótulo</label>
+              <input type="text" id="critPergOpcaoRotulo" placeholder="Ex: Essencial — indisponibilidade pode interromper processos críticos" style="${inp}">
+            </div>
+            <div>
+              <label style="${lbl}">Peso</label>
+              <input type="number" id="critPergOpcaoScore" placeholder="0" style="${inp}width:80px;">
+            </div>
+            <button class="btn btn-ghost" id="btnAdicionarCriticidadeOpcao" onclick="adicionarCriticidadeOpcaoItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+          </div>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerCriticidadePergunta()">Fechar</button>
+        <button class="btn btn-primary" id="btnSalvarCriticidadePergunta" onclick="salvarCriticidadePergunta()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+window._criticidadePerguntaOpcoes = [];
+window._criticidadeOpcaoEditandoIndex = null;
+
+function renderCriticidadePerguntaOpcoes() {
+  const container = document.getElementById('critPergOpcoesTabela');
+  if (!container) return;
+  const itens = window._criticidadePerguntaOpcoes || [];
+  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhuma opção cadastrada ainda.</p>'; return; }
+  container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
+    itens.map((op, i) => `<tr>
+        <td style="font-weight:600;color:#222;">${esc(op.rotulo)}</td>
+        <td style="font-size:0.85em;color:#555;width:15%;">peso ${esc(String(op.score))}</td>
+        <td style="text-align:center;white-space:nowrap;width:15%;">
+          <button class="btn-icon" onclick="editarCriticidadeOpcaoItem(${i})" title="Editar">✏️</button>
+          <button class="btn-icon" onclick="removerCriticidadeOpcaoItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
+        </td>
+      </tr>`).join('') + `</tbody></table>`;
+}
+
+function _limparFormularioCriticidadeOpcao() {
+  document.getElementById('critPergOpcaoRotulo').value = '';
+  document.getElementById('critPergOpcaoScore').value = '';
+}
+
+window.adicionarCriticidadeOpcaoItem = () => {
+  const rotulo = document.getElementById('critPergOpcaoRotulo').value.trim();
+  const scoreStr = document.getElementById('critPergOpcaoScore').value;
+  if (!rotulo) return showToast('Informe o rótulo da opção.', '#e65100');
+  if (scoreStr === '' || isNaN(Number(scoreStr))) return showToast('Informe o peso da opção.', '#e65100');
+  const item = { rotulo, score: Number(scoreStr) };
+  window._criticidadePerguntaOpcoes = window._criticidadePerguntaOpcoes || [];
+  if (window._criticidadeOpcaoEditandoIndex != null) {
+    window._criticidadePerguntaOpcoes[window._criticidadeOpcaoEditandoIndex] = item;
+    window._criticidadeOpcaoEditandoIndex = null;
+    document.getElementById('critPergOpcaoEdicaoAviso').style.display = 'none';
+    document.getElementById('btnAdicionarCriticidadeOpcao').textContent = '+ Adicionar';
+  } else {
+    window._criticidadePerguntaOpcoes.push(item);
+  }
+  _limparFormularioCriticidadeOpcao();
+  renderCriticidadePerguntaOpcoes();
+};
+
+window.editarCriticidadeOpcaoItem = (idx) => {
+  const it = window._criticidadePerguntaOpcoes[idx];
+  if (!it) return;
+  window._criticidadeOpcaoEditandoIndex = idx;
+  document.getElementById('critPergOpcaoRotulo').value = it.rotulo || '';
+  document.getElementById('critPergOpcaoScore').value = it.score != null ? it.score : '';
+  document.getElementById('critPergOpcaoEdicaoAviso').style.display = 'block';
+  document.getElementById('btnAdicionarCriticidadeOpcao').textContent = 'Salvar alteração';
+};
+
+window.cancelarEdicaoCriticidadeOpcao = () => {
+  window._criticidadeOpcaoEditandoIndex = null;
+  document.getElementById('critPergOpcaoEdicaoAviso').style.display = 'none';
+  document.getElementById('btnAdicionarCriticidadeOpcao').textContent = '+ Adicionar';
+  _limparFormularioCriticidadeOpcao();
+};
+
+window.removerCriticidadeOpcaoItem = (idx) => {
+  window._criticidadePerguntaOpcoes.splice(idx, 1);
+  if (window._criticidadeOpcaoEditandoIndex === idx) window.cancelarEdicaoCriticidadeOpcao();
+  renderCriticidadePerguntaOpcoes();
+};
+
+window.abrirDrawerCriticidadePergunta = (id) => {
+  const p = id ? criticidadeFornecedorPerguntasData.find((x) => x.id === id) : null;
+  document.getElementById('criticidadePerguntaDrawerTitulo').textContent = p ? 'Editar Pergunta' : 'Nova Pergunta';
+  document.getElementById('critPergId').value = p ? p.id : '';
+  document.getElementById('critPergTexto').value = p ? p.texto : '';
+  document.getElementById('critPergAtiva').checked = p ? p.ativa : true;
+  window._criticidadePerguntaOpcoes = p ? p.opcoes.map((o) => ({ ...o })) : [];
+  window.cancelarEdicaoCriticidadeOpcao();
+  renderCriticidadePerguntaOpcoes();
+  document.getElementById('drawerCriticidadePergunta').classList.add('open');
+  document.getElementById('drawerOverlayCriticidadePergunta').classList.add('open');
+};
+
+window.fecharDrawerCriticidadePergunta = () => {
+  document.getElementById('drawerCriticidadePergunta').classList.remove('open');
+  document.getElementById('drawerOverlayCriticidadePergunta').classList.remove('open');
+};
+
+window.salvarCriticidadePergunta = async () => {
+  const texto = document.getElementById('critPergTexto').value.trim();
+  if (!texto) return showToast('Informe o texto da pergunta.', '#e65100');
+  const opcoes = window._criticidadePerguntaOpcoes || [];
+  if (!opcoes.length) return showToast('Cadastre ao menos uma opção de resposta.', '#e65100');
+
+  await comBotaoCarregando('btnSalvarCriticidadePergunta', async () => {
+    try {
+      const result = await API.salvarCriticidadeFornecedorPergunta({
+        id: document.getElementById('critPergId').value || null,
+        texto,
+        ativa: document.getElementById('critPergAtiva').checked,
+        opcoes,
+      });
+      if (!document.getElementById('critPergId').value) {
+        document.getElementById('critPergId').value = result.id;
+        document.getElementById('criticidadePerguntaDrawerTitulo').textContent = 'Editar Pergunta';
+      }
+      criticidadeFornecedorPerguntasData = await API.getCriticidadeFornecedorPerguntas();
+      renderizarCriticidadeFornecedorPerguntas();
+      showToast('✅ Salvo!', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
+};
+
+window.excluirCriticidadeFornecedorPergunta = async (id) => {
+  const p = criticidadeFornecedorPerguntasData.find((x) => x.id === id);
+  if (!confirm(`Excluir a pergunta "${p ? p.texto : id}"?\n\nAvaliações já feitas continuam mostrando o que foi respondido na época. Se a ideia é só parar de usar esta pergunta em avaliações novas, é melhor desativar em vez de excluir.`)) return;
+  try {
+    await API.excluirCriticidadeFornecedorPergunta(id);
+    criticidadeFornecedorPerguntasData = await API.getCriticidadeFornecedorPerguntas();
+    renderizarCriticidadeFornecedorPerguntas();
+    showToast('✅ Excluída.', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ============================================================
 // PÁGINA: FORNECEDORES — AVALIAÇÃO
 //
 // A lista de fornecedores vem de Dependencias (categoria Fornecedores), que e o
@@ -8934,9 +12958,13 @@ function _dataCurtaForn(iso) {
 /** Badge de criticidade (aba nova da avaliação) para as tabelas de Fornecedores. */
 function _badgeCriticidadeFornecedor(av) {
   const score = av && av.completaCriticidade ? av.scoreCriticidade : null;
-  const faixa = FornecedorCriticidade.faixa(score);
+  // scoreMaximoCriticidade vem congelado na própria avaliação (ver
+  // _salvarAvaliacaoFornecedor/api.js) -- não o total de perguntas ATUAL,
+  // que pode ter mudado desde que esta avaliação foi salva.
+  const scoreMaximo = av ? av.scoreMaximoCriticidade : 0;
+  const faixa = FornecedorCriticidade.faixa(score, scoreMaximo);
   if (score === null) return '<span style="color:#999;font-weight:600;" title="Criticidade ainda não avaliada">–</span>';
-  return `<span title="${esc(faixa.rotulo)} — ${score} de ${FornecedorCriticidade.SCORE_MAXIMO}" style="display:inline-block;min-width:30px;padding:3px 8px;border-radius:10px;font-size:0.84em;font-weight:700;background:${faixa.fundo};color:${faixa.cor};">${score}</span>`;
+  return `<span title="${esc(faixa.rotulo)} — ${score} de ${scoreMaximo}">${_htmlBadge(_nivelCriticidadeFornecedor(faixa.rotulo), String(score))}</span>`;
 }
 
 /** Resumo das pessoas da empresa: primeiro contato + quantos ficaram de fora. */
@@ -8993,9 +13021,9 @@ async function fornecedores() {
   document.getElementById('btnNovoFornecedor').style.display = podeMexer ? 'inline-block' : 'none';
 
   try {
-    const [deps, crits, avals, cfg, cats, areasFornecedor] = await Promise.all([
+    const [deps, crits, avals, cfg, cats, subcats, critPerguntas, areasFornecedor] = await Promise.all([
       API.getDependencias(), API.getCriteriosFornecedor(), API.getAvaliacoesFornecedor(), API.getConfigFornecedor(),
-      API.getCategoriasFornecedor(), API.getAreas(),
+      API.getCategoriasFornecedor(), API.getSubcategoriasFornecedor(), API.getCriticidadeFornecedorPerguntas(), API.getAreas(),
     ]);
     fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
     // Gestor do Contrato (select) e Setor responsavel (select), no modal de
@@ -9006,6 +13034,8 @@ async function fornecedores() {
     avaliacoesFornecedorData = avals;
     configFornecedor = cfg;
     categoriasFornecedorData = cats;
+    subcategoriasFornecedorData = subcats;
+    criticidadeFornecedorPerguntasData = critPerguntas;
     // Montados uma vez so: renderizarFornecedores() roda a cada tecla da
     // busca, e remontar as opcoes toda hora apagaria o filtro escolhido.
     document.getElementById('filtroFornCadastroCategoria').innerHTML = '<option value="">Todas as categorias</option>' +
@@ -9046,7 +13076,7 @@ function renderizarFornecedores() {
 
   const ativos = criteriosFornecedorData.filter(FornecedorScore.criterioAtivo);
 
-  const anelAtivo = 'outline:2.5px solid #1a237e;outline-offset:2px;';
+  const anelAtivo = 'outline:2.5px solid #d60014;outline-offset:2px;';
 
   if (resumo) {
     const comNota = fornecedoresData.filter((f) => { const a = _avaliacaoDoFornecedor(f.id); return a && a.nota !== null; });
@@ -9056,9 +13086,13 @@ function renderizarFornecedores() {
     const qtdTic = fornecedoresData.filter((f) => f.tic !== false).length;
     const qtdNaoTic = fornecedoresData.length - qtdTic;
 
-    const card = (x) => `<div style="border-radius:10px;padding:12px 16px;background:#fff;min-width:130px;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.08);${x.ativo ? anelAtivo : ''}" onclick="${x.onclick}" title="${esc(x.titulo)}">
-                <div style="font-size:1.7em;font-weight:800;color:${x.c};line-height:1;">${x.n}</div>
-                <div style="font-size:0.74em;color:#888;margin-top:4px;">${esc(x.t)}</div>
+    // Cartão de métrica no padrão GRC360 (bia-metric), com clique/aro de
+    // filtro ativo por cima -- o componente oficial não tem esses dois
+    // comportamentos, então a estrutura é montada aqui, só reaproveitando as
+    // classes/visual do pacote (ver nota em _htmlMetricCard, no topo do arquivo).
+    const card = (x) => `<div class="bia-metric" style="cursor:pointer;min-width:130px;${x.ativo ? anelAtivo : ''}" onclick="${x.onclick}" title="${esc(x.titulo)}">
+                <div class="bia-metric__label label">${esc(x.t)}</div>
+                <div class="bia-metric__value display" style="color:${x.c};">${x.n}</div>
               </div>`;
 
     resumo.innerHTML = !ativos.length
@@ -9068,11 +13102,11 @@ function renderizarFornecedores() {
          </div>`
       : `<div style="display:flex;gap:12px;flex-wrap:wrap;">
            ${[
-             { n: fornecedoresData.length, t: 'fornecedores no catálogo', c: '#1a237e', titulo: 'Ver todos', ativo: fornecedoresFiltroResumo === 'todos', onclick: "filtrarFornecedoresResumo('todos')" },
+             { n: fornecedoresData.length, t: 'fornecedores no catálogo', c: '#d60014', titulo: 'Ver todos', ativo: fornecedoresFiltroResumo === 'todos', onclick: "filtrarFornecedoresResumo('todos')" },
              { n: semAvaliacao, t: 'sem avaliação', c: semAvaliacao ? '#e65100' : '#999', titulo: 'Filtrar sem avaliação', ativo: fornecedoresFiltroResumo === 'semAvaliacao', onclick: "filtrarFornecedoresResumo('semAvaliacao')" },
              { n: vencidas, t: 'com avaliação vencida', c: vencidas ? '#e65100' : '#999', titulo: 'Filtrar avaliação vencida', ativo: fornecedoresFiltroResumo === 'vencida', onclick: "filtrarFornecedoresResumo('vencida')" },
              { n: abaixo, t: `abaixo de ${configFornecedor.limiarRisco}`, c: abaixo ? '#c62828' : '#2e7d32', titulo: `Filtrar nota abaixo de ${configFornecedor.limiarRisco}`, ativo: fornecedoresFiltroResumo === 'abaixoLimiar', onclick: "filtrarFornecedoresResumo('abaixoLimiar')" },
-             { n: qtdTic, t: 'TIC', c: '#1a237e', titulo: 'Filtrar fornecedores de TIC', ativo: fornecedoresFiltroTic === 'tic', onclick: "filtrarFornecedoresTic('tic')" },
+             { n: qtdTic, t: 'TIC', c: '#d60014', titulo: 'Filtrar fornecedores de TIC', ativo: fornecedoresFiltroTic === 'tic', onclick: "filtrarFornecedoresTic('tic')" },
              { n: qtdNaoTic, t: 'Não TIC', c: '#555', titulo: 'Filtrar fornecedores que não são de TIC', ativo: fornecedoresFiltroTic === 'naoTic', onclick: "filtrarFornecedoresTic('naoTic')" },
            ].map(card).join('')}
          </div>`;
@@ -9153,12 +13187,12 @@ function renderizarFornecedores() {
               <td style="color:#666;font-size:0.88em;">${_resumoGestoresFornecedor(f)}</td>
               <td style="text-align:center;">
                 ${av && av.nota !== null
-                  ? `<span title="${esc(FornecedorScore.faixaNota(av.nota).rotulo)} — ${av.nota} de 100" style="display:inline-block;min-width:30px;padding:3px 8px;border-radius:10px;font-size:0.84em;font-weight:700;background:${FornecedorScore.faixaNota(av.nota).fundo};color:${FornecedorScore.faixaNota(av.nota).cor};">${av.nota}</span>`
+                  ? `<span title="${esc(FornecedorScore.faixaNota(av.nota).rotulo)} — ${av.nota} de 100">${_htmlBadge(_nivelNotaFornecedor(FornecedorScore.faixaNota(av.nota).rotulo), String(av.nota))}</span>`
                   : '<span style="color:#999;font-weight:600;" title="Sem nota — não é o mesmo que nota zero">–</span>'}
               </td>
               <td style="text-align:center;">${_badgeCriticidadeFornecedor(av)}</td>
               <td>
-                <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:${sit.fundo};color:${sit.cor};">${esc(sit.rotulo)}</span>
+                ${_htmlBadge(_nivelSituacaoFornecedor(sit), sit.rotulo)}
                 ${sit.aviso ? `<div style="font-size:0.72em;color:#e65100;margin-top:3px;">${esc(sit.aviso)}</div>` : ''}
               </td>
               <td style="color:#666;font-size:0.9em;">
@@ -9290,12 +13324,17 @@ window.atualizarPreviewNotaFornecedor = () => {
     ${abre ? `<div style="font-size:0.75em;color:#c62828;margin-top:6px;">Abaixo de ${limiar}: salvar assim abre um risco automático para este fornecedor</div>` : ''}`;
 };
 
-/** Lê o formulário e devolve o mapa { dados, atividade, dependencia } -> valor da opção marcada. */
+/** Perguntas de Criticidade ATIVAS no momento -- só essas entram no formulário/conta. */
+function _criticidadeFornecedorPerguntasAtivas() {
+  return (criticidadeFornecedorPerguntasData || []).filter((p) => p.ativa);
+}
+
+/** Lê o formulário e devolve o mapa { perguntaId: indice da opção marcada }. */
 function _coletarRespostasCriticidadeFornecedor() {
   const mapa = {};
-  FornecedorCriticidade.PERGUNTAS.forEach((p) => {
-    const marcado = document.querySelector(`input[name="fornCrit_${p.chave}"]:checked`);
-    if (marcado) mapa[p.chave] = marcado.value;
+  _criticidadeFornecedorPerguntasAtivas().forEach((p) => {
+    const marcado = document.querySelector(`input[name="fornCrit_${p.id}"]:checked`);
+    if (marcado) mapa[p.id] = Number(marcado.value);
   });
   return mapa;
 }
@@ -9308,17 +13347,18 @@ function _coletarRespostasCriticidadeFornecedor() {
 window.atualizarPreviewCriticidadeFornecedor = () => {
   const box = document.getElementById('fornCriticidadePreview');
   if (!box) return;
-  const calc = FornecedorCriticidade.calcular(_coletarRespostasCriticidadeFornecedor());
+  const perguntasAtivas = _criticidadeFornecedorPerguntasAtivas();
+  const calc = FornecedorCriticidade.calcular(perguntasAtivas, _coletarRespostasCriticidadeFornecedor());
 
   box.innerHTML = `
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
       <div style="display:flex;align-items:baseline;gap:6px;">
         <span style="font-size:2em;font-weight:800;line-height:1;color:${calc.faixa.cor};">${calc.score === null ? '–' : calc.score}</span>
-        ${calc.score === null ? '' : `<span style="font-size:0.8em;color:#aaa;">de ${FornecedorCriticidade.SCORE_MAXIMO}</span>`}
+        ${calc.score === null ? '' : `<span style="font-size:0.8em;color:#aaa;">de ${calc.scoreMaximo}</span>`}
       </div>
       <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:700;background:${calc.faixa.fundo};color:${calc.faixa.cor};">${esc(calc.faixa.rotulo)}</span>
     </div>
-    ${calc.pendentes.length ? `<div style="font-size:0.75em;color:#e65100;margin-top:6px;">⚠ ${calc.pendentes.length} pergunta${calc.pendentes.length > 1 ? 's' : ''} sem resposta — a criticidade só existe quando as 3 forem respondidas</div>` : ''}
+    ${calc.pendentes.length ? `<div style="font-size:0.75em;color:#e65100;margin-top:6px;">⚠ ${calc.pendentes.length} pergunta${calc.pendentes.length > 1 ? 's' : ''} sem resposta — a criticidade só existe quando as ${perguntasAtivas.length} forem respondidas</div>` : ''}
     ${calc.completa ? `<div style="font-size:0.72em;color:#888;margin-top:6px;">Usada como peso do risco automático deste fornecedor na carga de risco da empresa.</div>` : ''}`;
 };
 
@@ -9412,7 +13452,7 @@ async function perfis() {
       <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">O que cada perfil pode</div>
       ${Perfis.CATALOGO.map((p) => `
         <div style="display:flex;gap:10px;margin-bottom:7px;font-size:0.86em;">
-          <span style="font-weight:700;color:#1a237e;min-width:130px;">${esc(p.rotulo)}</span>
+          <span style="font-weight:700;color:#d60014;min-width:130px;">${esc(p.rotulo)}</span>
           <span style="color:#666;">${esc(p.descricao)}</span>
         </div>`).join('')}
       <div style="font-size:0.75em;color:#e65100;margin-top:10px;line-height:1.5;">
@@ -9438,7 +13478,10 @@ async function perfis() {
       <div id="perfPessoaBox">
         <label>Pessoa</label>
         <select id="perfPessoa" onchange="aoEscolherPessoaPerfil()"></select>
-        <div style="font-size:0.75em;color:#999;margin-top:4px;">Só aparecem pessoas com e-mail cadastrado na tela de Pessoas.</div>
+        <div style="font-size:0.75em;color:#999;margin-top:4px;">
+          Só aparecem pessoas com e-mail cadastrado na tela de Pessoas.
+          Não achou quem procura? <a href="#pessoas" target="_blank" style="color:#d60014;font-weight:600;">👤 Cadastrar / gerenciar Pessoas</a>
+        </div>
       </div>
       <label>E-mail corporativo</label>
       <input type="email" id="perfEmail" placeholder="nome@fortestecnologia.com.br" readonly style="background:#f5f6fa;">
@@ -9553,7 +13596,7 @@ function renderizarPerfis() {
             <tr${podeGerenciar ? ` style="cursor:pointer;" onclick="abrirModalPerfil('${esc(p.email)}')"` : ''}>
               <td style="font-weight:600;">${esc(p.email)}${euMesmo ? ' <span style="font-size:0.75em;color:#888;font-weight:400;">(você)</span>' : ''}</td>
               <td>
-                ${(p.perfis || [p.perfil]).map((v) => `<span style="display:inline-block;margin:0 4px 4px 0;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:${v === Perfis.PERFIL.ADMIN ? '#e8eaf6' : '#f5f5f5'};color:${v === Perfis.PERFIL.ADMIN ? '#1a237e' : '#555'};">${esc(Perfis.rotulo(v))}</span>`).join('')}
+                ${(p.perfis || [p.perfil]).map((v) => `<span style="display:inline-block;margin:0 4px 4px 0;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:${v === Perfis.PERFIL.ADMIN ? '#fce8ea' : '#f5f5f5'};color:${v === Perfis.PERFIL.ADMIN ? '#d60014' : '#555'};">${esc(Perfis.rotulo(v))}</span>`).join('')}
                 ${desconhecido ? `<div style="font-size:0.72em;color:#e65100;margin-top:3px;">Gravado como "${esc(p.perfilGravado)}", que não existe — está valendo o menor acesso</div>` : ''}
               </td>
               <td style="color:#666;">${esc(p.area || (Perfis.exigeArea(p.perfis || p.perfil) ? '— sem área, não altera nada' : '–'))}</td>
@@ -9769,8 +13812,8 @@ function _htmlDrawerFornecedorCadastro() {
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
         <input type="hidden" id="fornCadId">
         <input type="hidden" id="fornAvalId">
-        <div style="display:flex;border-bottom:2px solid #e8eaf6;background:white;flex-shrink:0;">
-          <button id="tab-forn-dados" onclick="trocarAbaFornecedor('dados')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#1a237e;border-bottom:3px solid #1a237e;cursor:pointer;">Dados</button>
+        <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
+          <button id="tab-forn-dados" onclick="trocarAbaFornecedor('dados')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Dados</button>
           <button id="tab-forn-criticidade" onclick="trocarAbaFornecedor('criticidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Criticidade</button>
           <button id="tab-forn-conformidade" onclick="trocarAbaFornecedor('conformidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Conformidade</button>
         </div>
@@ -9784,7 +13827,11 @@ function _htmlDrawerFornecedorCadastro() {
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
         <div><label style="${lbl}">CNPJ</label><input type="text" id="fornCadCnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="this.value=formatarCNPJ(this.value)" style="${inp}"></div>
-        <div><label style="${lbl}">Categoria</label><select id="fornCadCategoria" style="${inp}"><option value="">Selecione...</option></select></div>
+        <div><label style="${lbl}">Categoria</label><select id="fornCadCategoria" style="${inp}" onchange="onFornCadCategoriaChange()"><option value="">Selecione...</option></select></div>
+      </div>
+      <div style="margin-bottom:16px;">
+        <label style="${lbl}">Subcategoria</label>
+        <select id="fornCadSubcategoria" style="${inp}" disabled><option value="">Selecione a categoria primeiro...</option></select>
       </div>
       <label style="display:flex;align-items:center;gap:8px;margin-bottom:16px;font-size:0.9em;color:#333;">
         <input type="checkbox" id="fornCadTic" checked>
@@ -9802,7 +13849,7 @@ function _htmlDrawerFornecedorCadastro() {
       <label style="${lbl}">Pessoas associadas</label>
       <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Uma empresa pode ter mais de um contato.</span>
       <div id="pessoasFornecedorTabela"></div>
-      <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:12px;margin-top:8px;margin-bottom:16px;">
+      <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;margin-bottom:16px;">
         <div id="pessoaFornEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
           ✎ Editando pessoa — <a href="#" onclick="cancelarEdicaoPessoaFornecedor();return false;" style="color:#1565c0;">cancelar edição</a>
         </div>
@@ -9822,13 +13869,13 @@ function _htmlDrawerFornecedorCadastro() {
       <label style="${lbl}">Gestor do Contrato</label>
       <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Escolha uma ou mais pessoas cadastradas. Cargo, área, telefone e e-mail vêm do cadastro da Pessoa.</span>
       <div id="gestoresContratoTabela"></div>
-      <div style="background:#fafbff;border:1px solid #e8eaf6;border-radius:8px;padding:12px;margin-top:8px;margin-bottom:16px;">
+      <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;margin-bottom:16px;">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
           <select id="gestorContratoBusca" style="${inp}flex:1;min-width:180px;"><option value="">Buscar pessoa...</option></select>
           <button type="button" class="btn btn-ghost" id="btnAdicionarGestorContrato" onclick="adicionarGestorContrato()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
           <button type="button" class="btn-icon" onclick="_recarregarPessoasFornecedor()" title="Atualizar lista de pessoas">🔄</button>
         </div>
-        <a href="#pessoas" target="_blank" style="font-size:0.74em;color:#1a237e;font-weight:600;display:inline-block;margin-top:8px;">👤 Gerenciar Pessoas</a>
+        <a href="#pessoas" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:8px;">👤 Gerenciar Pessoas</a>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr;gap:16px;">
@@ -9838,7 +13885,7 @@ function _htmlDrawerFornecedorCadastro() {
             <select id="fornCadSetor" style="${inp}flex:1;"><option value="">Selecione...</option></select>
             <button type="button" class="btn-icon" onclick="_recarregarAreasFornecedor()" title="Atualizar lista de áreas">🔄</button>
           </div>
-          <a href="#areas" target="_blank" style="font-size:0.74em;color:#1a237e;font-weight:600;">+ Cadastrar nova área</a>
+          <a href="#areas" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;">+ Cadastrar nova área</a>
         </div>
       </div>
       </div>
@@ -9866,7 +13913,7 @@ function _htmlDrawerFornecedorCadastro() {
 
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="fecharDrawerFornecedorCadastro()">Cancelar</button>
+        <button class="btn btn-ghost" onclick="fecharDrawerFornecedorCadastro()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarFornecedorCadastro" onclick="salvarFornecedorCadastro()">Salvar</button>
         <button class="btn btn-primary" id="btnSalvarAvaliacaoForn" onclick="salvarAvaliacaoFornecedor()" style="display:none;">Salvar avaliação</button>
       </div>
@@ -9878,8 +13925,8 @@ window.trocarAbaFornecedor = (aba) => {
   ['dados', 'criticidade', 'conformidade'].forEach((a) => {
     document.getElementById('painel-forn-' + a).style.display = a === aba ? 'block' : 'none';
     const btn = document.getElementById('tab-forn-' + a);
-    btn.style.color = a === aba ? '#1a237e' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #1a237e' : '3px solid transparent';
+    btn.style.color = a === aba ? '#d60014' : '#999';
+    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
   });
   // Cada aba tem seu próprio salvar: Dados grava o cadastro; Criticidade/
   // Conformidade gravam a avaliação (backends distintos). O botão só aparece
@@ -10081,6 +14128,40 @@ window._recarregarAreasFornecedor = async () => {
   showToast('Lista de áreas atualizada.', '#2e7d32');
 };
 
+/**
+ * Popula #fornCadSubcategoria com as subcategorias da Categoria
+ * selecionada (por nome -- mesma convenção de fornCadCategoria). Sem
+ * categoria escolhida, o select fica vazio e desabilitado: não há lista
+ * pra filtrar ainda.
+ */
+function _popularSelectSubcategoriaFornecedor(categoriaNomeSelecionada, subcategoriaAtual) {
+  const sel = document.getElementById('fornCadSubcategoria');
+  if (!sel) return;
+  if (!categoriaNomeSelecionada) {
+    sel.innerHTML = '<option value="">Selecione a categoria primeiro...</option>';
+    sel.disabled = true;
+    return;
+  }
+  const categoria = categoriasFornecedorData.find((c) => c.nome === categoriaNomeSelecionada);
+  const subcategoriasDaCategoria = categoria
+    ? (subcategoriasFornecedorData || []).filter((s) => s.categoriaId === categoria.id && s.ativo)
+    : [];
+  // Subcategoria legada que nao bate com a lista filtrada (categoria trocou
+  // depois de salva, ou subcategoria foi desativada) -- mesma protecao de
+  // valor legado ja usada em fornCadCategoria, pra nao sumir em silencio.
+  const temNaLista = subcategoriasDaCategoria.some((s) => s.nome === subcategoriaAtual);
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    subcategoriasDaCategoria.map((s) => `<option value="${esc(s.nome)}">${esc(s.nome)}</option>`).join('') +
+    (subcategoriaAtual && !temNaLista ? `<option value="${esc(subcategoriaAtual)}">${esc(subcategoriaAtual)} (não cadastrada nesta categoria)</option>` : '');
+  sel.value = subcategoriaAtual || '';
+  sel.disabled = false;
+}
+
+/** Troca de Categoria no cadastro de Fornecedor: a Subcategoria antiga pode não pertencer à nova categoria, então relista do zero. */
+window.onFornCadCategoriaChange = () => {
+  _popularSelectSubcategoriaFornecedor(document.getElementById('fornCadCategoria').value, '');
+};
+
 window.abrirDrawerFornecedorCadastro = (id, abaInicial) => {
   const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   window._fornPodeMexer = podeMexer;
@@ -10100,6 +14181,7 @@ window.abrirDrawerFornecedorCadastro = (id, abaInicial) => {
     categoriasAtivas.map((c) => `<option value="${esc(c.nome)}">${esc(c.nome)}</option>`).join('') +
     (categoriaAtual && !temNaLista ? `<option value="${esc(categoriaAtual)}">${esc(categoriaAtual)} (inativa)</option>` : '');
   document.getElementById('fornCadCategoria').value = categoriaAtual || '';
+  _popularSelectSubcategoriaFornecedor(categoriaAtual, f ? (f.subcategoriaFornecedor || '') : '');
   // Gestores do Contrato: usa a lista nova; se só houver o legado (string),
   // hidrata com um item resolvido por nome em pessoasData.
   window._fornecedorGestores = f && Array.isArray(f.gestoresContrato) && f.gestoresContrato.length
@@ -10201,18 +14283,21 @@ function _popularAvaliacaoFornecedor(f) {
        </div>`;
 
   const respostasCriticidadeAnteriores = av ? (av.respostasCriticidade || {}) : {};
-  document.getElementById('fornCriticidadeLista').innerHTML = FornecedorCriticidade.PERGUNTAS.map((p) => {
-    const opcoes = p.opcoes.map((op) => `
+  const perguntasCriticidadeAtivas = _criticidadeFornecedorPerguntasAtivas();
+  document.getElementById('fornCriticidadeLista').innerHTML = perguntasCriticidadeAtivas.length ? perguntasCriticidadeAtivas.map((p) => {
+    const opcoes = p.opcoes.map((op, i) => `
       <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;font-size:0.88em;cursor:pointer;">
-        <input type="radio" name="fornCrit_${p.chave}" value="${op.valor}" ${respostasCriticidadeAnteriores[p.chave] === op.valor ? 'checked' : ''} onchange="atualizarPreviewCriticidadeFornecedor()" style="margin-top:3px;">
+        <input type="radio" name="fornCrit_${p.id}" value="${i}" ${Number(respostasCriticidadeAnteriores[p.id]) === i ? 'checked' : ''} onchange="atualizarPreviewCriticidadeFornecedor()" style="margin-top:3px;">
         <span>${esc(op.rotulo)} <span style="color:#888;font-weight:600;">(${op.score})</span></span>
       </label>`).join('');
     return `
       <div style="border:1px solid #eee;border-radius:9px;padding:13px 15px;margin-bottom:12px;">
-        <div style="font-weight:600;color:#333;margin-bottom:9px;">${esc(p.titulo)}</div>
+        <div style="font-weight:600;color:#333;margin-bottom:9px;">${esc(p.texto)}</div>
         ${opcoes}
       </div>`;
-  }).join('');
+  }).join('') : `<div style="padding:24px;text-align:center;color:#e65100;background:#fff8e1;border-radius:9px;">
+       Nenhuma pergunta de criticidade ativa cadastrada. Cadastre em "Perguntas de Criticidade" antes de avaliar.
+     </div>`;
 
   atualizarPreviewNotaFornecedor();
   atualizarPreviewCriticidadeFornecedor();
@@ -10240,6 +14325,7 @@ window.salvarFornecedorCadastro = async () => {
       nomeFantasia: document.getElementById('fornCadNomeFantasia').value.trim(),
       cnpj: document.getElementById('fornCadCnpj').value.trim(),
       categoriaFornecedor: document.getElementById('fornCadCategoria').value,
+      subcategoriaFornecedor: document.getElementById('fornCadSubcategoria').value,
       // Lista de gestores (snapshots de Pessoa). gestorContrato (string) segue
       // gravado espelhando o 1º, por compat com quem ainda lê o campo antigo.
       gestoresContrato: window._fornecedorGestores || [],
@@ -10255,7 +14341,13 @@ window.salvarFornecedorCadastro = async () => {
       // N pessoas, cada uma com seu proprio contato.
       pessoas: window._fornecedorPessoas || [],
     });
-    fecharDrawerFornecedorCadastro();
+    if (!id) {
+      // Sem fechar o drawer, o próximo "Salvar" (e o "Salvar avaliação" das
+      // abas Criticidade/Conformidade) precisa gravar no MESMO fornecedor em
+      // vez de criar um segundo registro idêntico.
+      document.getElementById('fornCadId').value = r.id;
+      document.getElementById('fornCadastroDrawerTitulo').textContent = 'Editar Fornecedor';
+    }
     API.invalidate('getDependencias');
     // Ja sabemos exatamente o que foi gravado (r.dado) -- em vez de buscar o
     // catalogo de dependencias inteiro de novo, so atualiza este fornecedor

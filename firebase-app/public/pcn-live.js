@@ -37,6 +37,7 @@ function injectEditButtons() {
     else if (text.includes('dependência') || text.includes('mapeamento de depend')) sectionType = 'dependencias';
     else if (text.includes('fornecedor') || text.includes('plano b') || text.includes('contingência')) sectionType = 'fornecedores';
     else if (text.includes('estratégia técnica de recuperação')) sectionType = 'estrategiaTecnica';
+    else if (text.includes('risco') && (text.includes('avaliação') || text.includes('análise'))) sectionType = 'riscos';
     // "componente" (generico) saiu daqui: Componentes do Servico se fundiu em
     // Dependencias, PCNs novos nao tem mais essa secao separada (PCNs antigos
     // ja salvos continuam legiveis, so sem botao de edicao inline nessa
@@ -46,8 +47,10 @@ function injectEditButtons() {
 
     if (sectionType && !h.querySelector('.pcn-live-btn')) {
       var btn = document.createElement('button');
-      btn.innerHTML = '✏️ Editar';
-      btn.style.cssText = 'margin-left:12px;padding:4px 12px;font-size:8.5pt;background:#e8eaf6;color:#1a237e;border:1.5px solid #1a237e;border-radius:5px;cursor:pointer;font-weight:600;vertical-align:middle;';
+      // "riscos" nao edita o PCN, so exporta pra fora -- rotulo proprio pra
+      // nao confundir com os outros 4 tipos (todos "✏️ Editar").
+      btn.innerHTML = sectionType === 'riscos' ? '📤 Exportar Riscos' : '✏️ Editar';
+      btn.style.cssText = 'margin-left:12px;padding:4px 12px;font-size:8.5pt;background:#fce8ea;color:#d60014;border:1.5px solid #d60014;border-radius:5px;cursor:pointer;font-weight:600;vertical-align:middle;';
       btn.className = 'pcn-live-btn no-print';
       btn.setAttribute('contenteditable', 'false');
       btn.onclick = function(e) { e.preventDefault(); e.stopPropagation(); openLiveEditor(sectionType, h); };
@@ -67,13 +70,15 @@ function openLiveEditor(type, heading) {
   panel.id = 'pcn-live-editor';
   panel.style.cssText = 'position:fixed;top:0;right:0;width:500px;height:100vh;background:white;box-shadow:-4px 0 20px rgba(0,0,0,0.2);z-index:1000;overflow-y:auto;padding:24px;font-family:Segoe UI,Arial,sans-serif;';
 
-  var titleMap = { contatos: 'Equipe de Crise', dependencias: 'Dependências Críticas', fornecedores: 'Fornecedores / Plano B', estrategiaTecnica: 'Estratégia Técnica de Recuperação' };
-  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #e8eaf6;padding-bottom:12px;"><h3 style="color:#1a237e;margin:0;">✏️ ' + (titleMap[type] || 'Editar') + '</h3><button onclick="closeLiveEditor()" style="background:none;border:none;font-size:1.5em;cursor:pointer;color:#666;">×</button></div>';
+  var titleMap = { contatos: 'Equipe de Crise', dependencias: 'Dependências Críticas', fornecedores: 'Fornecedores / Plano B', estrategiaTecnica: 'Estratégia Técnica de Recuperação', riscos: 'Avaliação de Riscos' };
+  var iconMap = { riscos: '📤' };
+  var html = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #fce8ea;padding-bottom:12px;"><h3 style="color:#d60014;margin:0;">' + (iconMap[type] || '✏️') + ' ' + (titleMap[type] || 'Editar') + '</h3><button onclick="closeLiveEditor()" style="background:none;border:none;font-size:1.5em;cursor:pointer;color:#666;">×</button></div>';
 
   if (type === 'contatos') html += buildContatosEditor(data);
   else if (type === 'dependencias') html += buildDependenciasEditor(data);
   else if (type === 'fornecedores') html += buildFornecedoresEditor(data);
   else if (type === 'estrategiaTecnica') html += buildEstrategiaTecnicaEditor(data);
+  else if (type === 'riscos') html += buildRiscoExportEditor(data);
 
   html += '<div style="margin-top:20px;text-align:right;border-top:1px solid #eee;padding-top:16px;"><button onclick="applyLiveEdit(\'' + type + '\')" style="padding:10px 24px;background:#2e7d32;color:white;border:none;border-radius:6px;font-weight:600;cursor:pointer;">✅ Aplicar ao PCN</button></div>';
 
@@ -99,7 +104,7 @@ function buildContatosEditor(data) {
     var papel = papeis[d.nome] || papeis[String(d.id)] || d.detalhes || '';
     html += '<div style="border:1px solid #e0e0e0;border-radius:8px;padding:12px;margin-bottom:8px;position:relative;" data-id="' + d.id + '">';
     html += '<button onclick="removeLiveContato(' + d.id + ')" style="position:absolute;top:8px;right:8px;background:none;border:none;color:#c62828;cursor:pointer;font-size:1.2em;" title="Remover">×</button>';
-    html += '<div style="font-weight:700;color:#1a237e;margin-bottom:8px;">' + d.nome + '</div>';
+    html += '<div style="font-weight:700;color:#d60014;margin-bottom:8px;">' + d.nome + '</div>';
     html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:6px;">';
     html += '<div><label style="font-size:0.7em;color:#888;display:block;">Papel na Crise</label><input type="text" class="live-papel" data-id="' + d.id + '" data-nome="' + (d.nome || '').replace(/"/g, '&quot;') + '" value="' + (papel || '').replace(/"/g, '&quot;') + '" style="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:0.88em;"></div>';
     html += '<div><label style="font-size:0.7em;color:#888;display:block;">Setor</label><input type="text" class="live-setor" data-id="' + d.id + '" value="' + (d.setor || '').replace(/"/g, '&quot;') + '" style="width:100%;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:0.88em;"></div>';
@@ -116,7 +121,7 @@ function buildContatosEditor(data) {
   data.dependencias.filter(function(d) { return !ids.includes(d.id); }).sort(function(a, b) { return a.nome.localeCompare(b.nome); }).forEach(function(d) {
     html += '<option value="' + d.id + '">' + d.nome + ' (' + d.categoria + ')' + '</option>';
   });
-  html += '</select><button onclick="addLiveContato()" style="margin-top:6px;padding:6px 14px;background:#1a237e;color:white;border:none;border-radius:4px;font-size:0.82em;cursor:pointer;">+ Adicionar</button></div>';
+  html += '</select><button onclick="addLiveContato()" style="margin-top:6px;padding:6px 14px;background:#d60014;color:white;border:none;border-radius:4px;font-size:0.82em;cursor:pointer;">+ Adicionar</button></div>';
   return html;
 }
 
@@ -135,7 +140,7 @@ function buildDependenciasEditor(data) {
   }
   var html = '<p style="font-size:0.85em;color:#666;margin-bottom:12px;">Dependências críticas do processo:</p><div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">';
   itens.forEach(function(it) {
-    html += '<span style="background:#e8eaf6;color:#1a237e;padding:4px 10px;border-radius:12px;font-size:0.82em;font-weight:500;">' + it.categoria + ': ' + it.nome + '</span>';
+    html += '<span style="background:#fce8ea;color:#d60014;padding:4px 10px;border-radius:12px;font-size:0.82em;font-weight:500;">' + it.categoria + ': ' + it.nome + '</span>';
   });
   html += '</div><p style="font-size:0.78em;color:#999;">Para editar, use a aba BIA do processo no sistema.</p>';
   return html;
@@ -223,11 +228,11 @@ function buildEstrategiaTecnicaEditor(data) {
 
   var html = '<p style="font-size:0.85em;color:#666;margin-bottom:12px;">Exporte a estratégia técnica de recuperação de volta para o cadastro de Dependências.</p>';
   html += temAlgumaExportavel
-    ? '<div style="margin-bottom:12px;"><button onclick="exportarTudoEstrategiaTecnica()" style="padding:8px 16px;background:#1a237e;color:white;border:none;border-radius:6px;font-size:0.85em;font-weight:600;cursor:pointer;">⭳ Exportar tudo</button></div>'
+    ? '<div style="margin-bottom:12px;"><button onclick="exportarTudoEstrategiaTecnica()" style="padding:8px 16px;background:#d60014;color:white;border:none;border-radius:6px;font-size:0.85em;font-weight:600;cursor:pointer;">⭳ Exportar tudo</button></div>'
     : '<div style="border:1px solid #ffe0b2;background:#fff8e1;border-radius:8px;padding:10px 12px;margin-bottom:12px;color:#e65100;font-size:0.82em;">Nenhuma linha desta tabela está vinculada a uma Dependência do catálogo deste processo — por isso não há nada pra exportar. Isso acontece quando o processo não tem Dependências críticas marcadas na aba BIA (o Gemini preenche a tabela com recursos genéricos nesse caso), ou quando o nome do recurso na tabela não bate com o nome cadastrado. Vincule as dependências na aba BIA e gere um PCN novo pra poder exportar.</div>';
   rows.forEach(function(r) {
     html += '<div style="border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;margin-bottom:8px;">';
-    html += '<div style="font-weight:700;color:#1a237e;margin-bottom:4px;">' + (r.nome || '(sem nome)') + '</div>';
+    html += '<div style="font-weight:700;color:#d60014;margin-bottom:4px;">' + (r.nome || '(sem nome)') + '</div>';
     html += '<div style="font-size:0.8em;color:#666;margin-bottom:8px;">' + [r.estrategia, r.rto ? 'RTO: ' + r.rto : '', r.rpo ? 'RPO: ' + r.rpo : '', r.responsavel ? 'Resp.: ' + r.responsavel : ''].filter(Boolean).join(' | ') + '</div>';
     if (r.dependenciaId) {
       html += '<button onclick="exportLiveEstrategiaTecnica(' + r.idx + ')" style="padding:5px 12px;background:#2e7d32;color:white;border:none;border-radius:5px;font-size:0.8em;cursor:pointer;">Exportar</button>';
@@ -263,6 +268,88 @@ async function exportarTudoEstrategiaTecnica() {
   var rows = (window._pcnEstrategiaTecnicaRows || []).filter(function(r) { return r.dependenciaId; });
   if (!rows.length) return alert('Nenhuma linha vinculada a uma Dependência do catálogo -- nada pra exportar.');
   for (var i = 0; i < rows.length; i++) { await exportLiveEstrategiaTecnica(rows[i].idx); }
+}
+
+// ============================================================
+// AVALIAÇÃO DE RISCOS — exportação linha a linha pro Registro de Riscos,
+// mesmo molde de Estratégia Técnica acima (fetch cru + token, 1 registro
+// por clique). Diferente dela, aqui não há vínculo com Dependência pra
+// checar -- toda linha com um "Evento" preenchido é exportável.
+// ============================================================
+function buildRiscoExportEditor() {
+  var content = document.getElementById('pcn-editavel');
+  var table = content ? _tabelaRiscoPCN(content) : null;
+  if (!table) return '<p style="font-size:0.85em;color:#999;">Tabela de Avaliação de Riscos não encontrada nesta versão do PCN.</p>';
+
+  var col = _colunasRiscoPCN(table);
+  var probOptions = ['Alta', 'Média', 'Baixa'];
+  var impactOptions = ['Crítico', 'Alto', 'Moderado', 'Baixo'];
+  var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr')).map(function(tr, idx) {
+    var cells = tr.querySelectorAll('td');
+    var ler = function(i) { return i >= 0 && cells[i] ? cells[i].textContent.trim() : ''; };
+    // Probabilidade/Impacto: se enhanceRiskMatrix já rodou, a célula virou
+    // um <select> -- _currentRiskValue lê o valor selecionado de verdade em
+    // vez do texto concatenado de todas as <option>.
+    return {
+      idx: idx,
+      evento: col.evento >= 0 && cells[col.evento] ? cells[col.evento].textContent.trim() : ler(0),
+      probabilidade: col.prob >= 0 && cells[col.prob] ? _currentRiskValue(cells[col.prob], probOptions) : '',
+      impacto: col.impacto >= 0 && cells[col.impacto] ? _currentRiskValue(cells[col.impacto], impactOptions) : '',
+      mitigacao: ler(col.mitigacao),
+    };
+  }).filter(function(r) { return r.evento; });
+
+  window._pcnRiscoRows = rows;
+  if (!rows.length) return '<p style="font-size:0.85em;color:#999;">Nenhuma linha com Evento preenchido nesta tabela.</p>';
+
+  var html = '<p style="font-size:0.85em;color:#666;margin-bottom:12px;">Exporte cada risco da Avaliação de Riscos para o Registro de Riscos.</p>';
+  html += '<div style="margin-bottom:12px;"><button onclick="exportarTudoRiscosPCN()" style="padding:8px 16px;background:#d60014;color:white;border:none;border-radius:6px;font-size:0.85em;font-weight:600;cursor:pointer;">⭳ Exportar tudo</button></div>';
+  rows.forEach(function(r) {
+    html += '<div style="border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;margin-bottom:8px;" id="pcn-risco-row-' + r.idx + '">';
+    html += '<div style="font-weight:700;color:#d60014;margin-bottom:4px;">' + r.evento + '</div>';
+    html += '<div style="font-size:0.8em;color:#666;margin-bottom:8px;">' + [r.probabilidade ? 'Probabilidade: ' + r.probabilidade : '', r.impacto ? 'Impacto: ' + r.impacto : '', r.mitigacao ? 'Mitigação: ' + r.mitigacao : ''].filter(Boolean).join(' | ') + '</div>';
+    html += '<button onclick="exportLiveRisco(' + r.idx + ')" style="padding:5px 12px;background:#2e7d32;color:white;border:none;border-radius:5px;font-size:0.8em;cursor:pointer;">📤 Exportar</button>';
+    html += '</div>';
+  });
+  return html;
+}
+
+async function exportLiveRisco(idx) {
+  var r = (window._pcnRiscoRows || [])[idx];
+  if (!r) return;
+  var row = document.getElementById('pcn-risco-row-' + idx);
+  var btn = row ? row.querySelector('button') : null;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Exportando...'; }
+  try {
+    var payload = {
+      action: 'exportarRiscoDocumento',
+      origem: 'Importado de PCN',
+      titulo: r.evento,
+      descricao: r.evento,
+      area: PCN_AREA,
+      processo: PCN_PROCESSO,
+      processoId: PROCESS_ID,
+      probabilidade: r.probabilidade || '',
+      impacto: r.impacto || '',
+      estrategiaDescricao: r.mitigacao || '',
+    };
+    var res = await fetch(PCN_API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=UTF-8', 'Authorization': 'Bearer ' + PCN_TOKEN }, body: JSON.stringify(payload) });
+    if (res.status === 401) throw new Error('A sessão desta aba expirou. Feche, volte ao sistema e abra o PCN de novo.');
+    var data = JSON.parse(await res.text());
+    if (data.error) throw new Error(data.error);
+    if (btn) { btn.textContent = '✅ Exportado'; }
+    alert('✅ Risco exportado para o Registro de Riscos: ' + r.evento);
+  } catch(e) {
+    alert('Erro ao exportar: ' + e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '📤 Exportar'; }
+  }
+}
+
+// Em sequencia (nao Promise.all), mesmo motivo de exportarTudoEstrategiaTecnica.
+async function exportarTudoRiscosPCN() {
+  var rows = window._pcnRiscoRows || [];
+  if (!rows.length) return alert('Nenhum risco pra exportar.');
+  for (var i = 0; i < rows.length; i++) { await exportLiveRisco(rows[i].idx); }
 }
 
 async function removeLiveContato(id) {
@@ -316,7 +403,7 @@ function applyLiveEdit(type) {
   // botoes de cada linha (exportLiveEstrategiaTecnica), diferente dos outros
   // 3 tipos, que reconstroem a tabela do PCN ao aplicar. O rodape do painel
   // sempre chama applyLiveEdit(type), entao so fecha o painel pra este tipo.
-  if (type === 'estrategiaTecnica') { closeLiveEditor(); return; }
+  if (type === 'estrategiaTecnica' || type === 'riscos') { closeLiveEditor(); return; }
   if (type === 'contatos') saveLiveContatos();
 
   var content = document.getElementById('pcn-editavel');
@@ -385,8 +472,42 @@ setTimeout(function() { buildNav(); }, 1500);
 setTimeout(function() { buildNav(); initPCNLive(); }, 3000);
 
 // ============================================================
-// MATRIZ DE RISCOS - Selects com cores para Probabilidade e Impacto
+// MATRIZ DE RISCOS - Selects com cores para Probabilidade e Impacto, e
+// exportação por registro pra Gestão de Riscos (window._pcnRiscoRows /
+// buildRiscoExportEditor, mais abaixo)
 // ============================================================
+
+// Acha a tabela de "Avaliação de Riscos" pelo heading (mesmo criterio de
+// _extrairRiscosDoPCN em app.js) -- compartilhado por enhanceRiskMatrix
+// (colore os selects) e buildRiscoExportEditor (le as linhas pra exportar).
+function _tabelaRiscoPCN(content) {
+  var headings = content.querySelectorAll('h1, h2, h3');
+  var riskHeading = null;
+  headings.forEach(function(h) {
+    var t = h.textContent.toLowerCase();
+    if (t.includes('risco') && (t.includes('avaliação') || t.includes('análise'))) riskHeading = h;
+  });
+  if (!riskHeading) return null;
+  var next = riskHeading.nextElementSibling;
+  while (next && next.tagName !== 'TABLE' && next.tagName !== 'H2' && next.tagName !== 'H3') next = next.nextElementSibling;
+  return (next && next.tagName === 'TABLE') ? next : null;
+}
+
+// Identifica as colunas por texto do cabecalho (mesma heuristica de
+// _extrairRiscosDoPCN em app.js) -- a ordem/grafia pode variar entre
+// geracoes mesmo pedindo uma ordem fixa no prompt.
+function _colunasRiscoPCN(table) {
+  var col = { evento: -1, prob: -1, impacto: -1, mitigacao: -1 };
+  table.querySelectorAll('thead th').forEach(function(th, i) {
+    var t = th.textContent.toLowerCase();
+    if (t.includes('evento') || t.includes('ameaça')) col.evento = i;
+    else if (t.includes('probabilidade')) col.prob = i;
+    else if (t.includes('impacto')) col.impacto = i;
+    else if (t.includes('mitiga') || t.includes('estratégia')) col.mitigacao = i;
+  });
+  return col;
+}
+
 var _riskMatrixEnhanced = false;
 function enhanceRiskMatrix() {
   if (_riskMatrixEnhanced) return;
@@ -401,28 +522,11 @@ function enhanceRiskMatrix() {
   var probOptions = ['Alta', 'Média', 'Baixa'];
   var impactOptions = ['Crítico', 'Alto', 'Moderado', 'Baixo'];
 
-  // Encontrar tabela de riscos pelo heading
-  var headings = content.querySelectorAll('h1, h2, h3');
-  var riskHeading = null;
-  headings.forEach(function(h) {
-    var t = h.textContent.toLowerCase();
-    if (t.includes('risco') && (t.includes('avaliação') || t.includes('análise'))) riskHeading = h;
-  });
-  if (!riskHeading) return;
+  var table = _tabelaRiscoPCN(content);
+  if (!table) return;
 
-  // Encontrar tabela após o heading
-  var next = riskHeading.nextElementSibling;
-  while (next && next.tagName !== 'TABLE' && next.tagName !== 'H2' && next.tagName !== 'H3') next = next.nextElementSibling;
-  if (!next || next.tagName !== 'TABLE') return;
-
-  var table = next;
-  var headers = table.querySelectorAll('thead th');
-  var probCol = -1, impactCol = -1;
-  headers.forEach(function(th, i) {
-    var t = th.textContent.toLowerCase();
-    if (t.includes('probabilidade')) probCol = i;
-    if (t.includes('impacto')) impactCol = i;
-  });
+  var colIdx = _colunasRiscoPCN(table);
+  var probCol = colIdx.prob, impactCol = colIdx.impacto;
   if (probCol === -1 && impactCol === -1) return;
   _riskMatrixEnhanced = true;
 

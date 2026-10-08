@@ -370,3 +370,336 @@ test('salvarDrpDependencia recusa chamada sem nenhum campo informado', async () 
 test('a allowlist do DRP cobre so os 4 campos de recuperacao', () => {
   assert.deepStrictEqual(CAMPOS_DRP_DEPENDENCIA, ['estrategia', 'rto', 'rpo', 'responsavel']);
 });
+
+// --- gerarDRP: perfil (Admin/Seguranca/TI) e a secao "Impactos Operacionais
+// nos Processos", alimentada com os Processos de verdade que dependem da
+// dependencia (mesmo criterio de vinculo do cliente, _processosVinculadosADependencia).
+function seedAdmin(s) {
+  s.config_perfis = { 'analista@fortestecnologia.com.br': { perfis: ['admin'] } };
+  return s;
+}
+
+test('gerarDRP recusa quem nao tem perfil de Admin/Seguranca/TI', async () => {
+  const s = seed();
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  s.config_perfis = { 'analista@fortestecnologia.com.br': { perfis: ['gestor'] } };
+  const db = makeDb(s);
+  await assert.rejects(
+    () => WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' })),
+    AppError
+  );
+});
+
+test('gerarDRP lista, na secao de Processos impactados, o processo vinculado por id com tier calculado do score real', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  s.processos.ti__backup.dependenciaItens = [{ categoria: 'Servidor', nome: 'SRV-01', id: 'd1' }];
+  s.respostas_bia = { r1: { area: 'TI', processo: 'Backup', score: 14, timestamp: '2026-01-01T00:00:00.000Z' } };
+  const db = makeDb(s);
+  let promptEnviado = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<p>ok</p>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.ok(promptEnviado.includes('Backup (TI) — Tier 1 (Crítico)'), 'deveria listar o processo com o tier calculado do score');
+  } finally { global.fetch = original; }
+});
+
+test('gerarDRP usa o tier manual quando o processo ainda nao foi avaliado (sem score)', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  s.processos.ti__backup.dependenciaItens = [{ categoria: 'Servidor', nome: 'SRV-01', id: 'd1' }];
+  s.processos.ti__backup.tierManual = 'Tier 1 (Crítico)';
+  const db = makeDb(s);
+  let promptEnviado = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<p>ok</p>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.ok(promptEnviado.includes('Backup (TI) — Tier 1 (Crítico)'), 'deveria usar o tier manual, nao "Pendente" nem um tier calculado de score zero');
+  } finally { global.fetch = original; }
+});
+
+test('gerarDRP marca "Pendente" quando o processo nao tem score nem tier manual', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  s.processos.ti__backup.dependenciaItens = [{ categoria: 'Servidor', nome: 'SRV-01', id: 'd1' }];
+  const db = makeDb(s);
+  let promptEnviado = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<p>ok</p>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.ok(promptEnviado.includes('Backup (TI) — Pendente'));
+  } finally { global.fetch = original; }
+});
+
+test('gerarDRP mostra a mensagem de fallback quando nenhum processo esta vinculado', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  const db = makeDb(s);
+  let promptEnviado = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<p>ok</p>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.ok(promptEnviado.includes('Nenhum processo de negócio vinculado a esta dependência na base.'));
+  } finally { global.fetch = original; }
+});
+
+// --- Roteiro de Teste (aba "Gestao de Testes"): documento gerado via IA
+// usando o DRP ja gerado como base, um por tipo de teste (categoria), com
+// historico de versoes por categoria -- mesmo mecanismo do DRP.
+
+test('gerarRoteiroTeste recusa quem nao tem perfil de Admin/Seguranca/TI', async () => {
+  const s = seed();
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor', drpSalvo: '[{"versao":1}]' } };
+  s.config_perfis = { 'analista@fortestecnologia.com.br': { perfis: ['gestor'] } };
+  const db = makeDb(s);
+  await assert.rejects(
+    () => WRITE_ACTIONS.gerarRoteiroTeste(db, { id: 'd1', categoria: 'Tabletop (Exercício de Mesa)' }, ctx({ geminiApiKey: 'chave-teste' })),
+    AppError
+  );
+});
+
+test('gerarRoteiroTeste exige API Key do Gemini configurada', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', drpSalvo: '[{"versao":1}]' } };
+  s.drp_conteudo = { d1: { versoes: [{ versao: 1, html: '<p>x</p>' }] } };
+  const db = makeDb(s);
+  await assert.rejects(
+    () => WRITE_ACTIONS.gerarRoteiroTeste(db, { id: 'd1', categoria: 'Tabletop (Exercício de Mesa)' }, ctx({ geminiApiKey: '' })),
+    AppError
+  );
+});
+
+test('gerarRoteiroTeste exige que o DRP ja tenha sido gerado', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } }; // sem drpSalvo
+  const db = makeDb(s);
+  await assert.rejects(
+    () => WRITE_ACTIONS.gerarRoteiroTeste(db, { id: 'd1', categoria: 'Tabletop (Exercício de Mesa)' }, ctx({ geminiApiKey: 'chave-teste' })),
+    AppError
+  );
+});
+
+test('gerarRoteiroTeste usa o DRP salvo e a frequencia da Estrategia de Teste como contexto do prompt', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = {
+    d1: {
+      nome: 'SRV-01',
+      categoria: 'Servidor',
+      drpSalvo: JSON.stringify([{ versao: 1, data: '2026-01-01T00:00:00.000Z', autor: 'x' }]),
+      drpEstrategiasTeste: [{ cenario: 'Tabletop (Exercício de Mesa)', frequencia: 'Semestral' }],
+    },
+  };
+  s.drp_conteudo = { d1: { versoes: [{ versao: 1, html: '<h1>DRP de SRV-01</h1>' }] } };
+  const db = makeDb(s);
+  let promptEnviado = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<h1>Roteiro</h1>' }] } }] }) };
+  };
+  try {
+    const r = await WRITE_ACTIONS.gerarRoteiroTeste(db, { id: 'd1', categoria: 'Tabletop (Exercício de Mesa)' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.strictEqual(r.html, '<h1>Roteiro</h1>');
+    assert.ok(promptEnviado.includes('Tabletop (Exercício de Mesa)'), 'deveria citar o tipo de teste escolhido');
+    assert.ok(promptEnviado.includes('Semestral'), 'deveria citar a frequencia prevista da Estrategia de Teste');
+    assert.ok(promptEnviado.includes('<h1>DRP de SRV-01</h1>'), 'deveria usar o HTML do DRP ja gerado como contexto');
+  } finally { global.fetch = original; }
+});
+
+test('salvarRoteiroTeste + obterRoteiroTeste: empilha versao por categoria e grava so o metadado na dependencia', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01' } };
+  const db = makeDb(s);
+  await WRITE_ACTIONS.salvarRoteiroTeste(db, { id: 'd1', categoria: 'Tabletop (Exercício de Mesa)', html: '<p>v1</p>' }, ctx());
+  await WRITE_ACTIONS.salvarRoteiroTeste(db, { id: 'd1', categoria: 'Teste Paralelo', html: '<p>paralelo v1</p>' }, ctx());
+  const r2 = await WRITE_ACTIONS.salvarRoteiroTeste(db, { id: 'd1', categoria: 'Tabletop (Exercício de Mesa)', html: '<p>v2</p>' }, ctx());
+  assert.strictEqual(r2.versao, 3);
+
+  const lido = await READ_ACTIONS.obterRoteiroTeste(db, { id: 'd1' }, ctx());
+  assert.strictEqual(lido.versoes.length, 3);
+  assert.strictEqual(lido.versoes.filter((v) => v.categoria === 'Tabletop (Exercício de Mesa)').length, 2);
+
+  const dep = (await db.collection('dependencias').doc('d1').get()).data();
+  assert.strictEqual(dep.drpRoteirosTeste.length, 3);
+  assert.ok(!dep.drpRoteirosTeste[0].html, 'metadado na dependencia nao deveria carregar o html');
+});
+
+test('excluirRoteiroTeste remove so as versoes da categoria pedida', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01' } };
+  const db = makeDb(s);
+  await WRITE_ACTIONS.salvarRoteiroTeste(db, { id: 'd1', categoria: 'Tabletop (Exercício de Mesa)', html: '<p>v1</p>' }, ctx());
+  await WRITE_ACTIONS.salvarRoteiroTeste(db, { id: 'd1', categoria: 'Teste Paralelo', html: '<p>paralelo v1</p>' }, ctx());
+  await WRITE_ACTIONS.excluirRoteiroTeste(db, { id: 'd1', categoria: 'Tabletop (Exercício de Mesa)' }, ctx());
+
+  const lido = await READ_ACTIONS.obterRoteiroTeste(db, { id: 'd1' }, ctx());
+  assert.strictEqual(lido.versoes.length, 1);
+  assert.strictEqual(lido.versoes[0].categoria, 'Teste Paralelo');
+});
+
+// --- importarVulnerabilidadeParaRisco: importacao MANUAL (botao na tela),
+// sem checar limiar de CVSS nem Status da Correcao -- diferente do gatilho
+// automatico riscoDeVulnerabilidade (index.js), que so roda em escrita no
+// Firestore e respeita o limiar/status.
+
+test('importarVulnerabilidadeParaRisco recusa quem nao tem perfil Admin/Seguranca', async () => {
+  const s = seed();
+  s.vulnerabilidades = { v1: { nome: 'Falha X', produto: 'Sistema Y', cvss: 1, statusCorrecao: 'Aberto' } };
+  s.config_perfis = { 'analista@fortestecnologia.com.br': { perfis: ['gestor'] } };
+  const db = makeDb(s);
+  await assert.rejects(
+    () => WRITE_ACTIONS.importarVulnerabilidadeParaRisco(db, { id: 'v1' }, ctx()),
+    AppError
+  );
+});
+
+test('importarVulnerabilidadeParaRisco recusa TI -- mais restrito que o DRP (TI nao opera Vulnerabilidades)', async () => {
+  const s = seed();
+  s.vulnerabilidades = { v1: { nome: 'Falha X', produto: 'Sistema Y' } };
+  s.config_perfis = { 'analista@fortestecnologia.com.br': { perfis: ['ti'] } };
+  const db = makeDb(s);
+  await assert.rejects(
+    () => WRITE_ACTIONS.importarVulnerabilidadeParaRisco(db, { id: 'v1' }, ctx()),
+    AppError
+  );
+});
+
+test('importarVulnerabilidadeParaRisco rejeita vulnerabilidade inexistente', async () => {
+  const s = seedAdmin(seed());
+  const db = makeDb(s);
+  await assert.rejects(
+    () => WRITE_ACTIONS.importarVulnerabilidadeParaRisco(db, { id: 'nao-existe' }, ctx()),
+    AppError
+  );
+});
+
+test('importarVulnerabilidadeParaRisco cria o risco mesmo com severidade baixa e status Corrigida (decisao manual ignora os dois)', async () => {
+  const s = seedAdmin(seed());
+  s.vulnerabilidades = { v1: { nome: 'Falha X', produto: 'Sistema Y', cvss: 1, statusCorrecao: 'Corrigida' } };
+  const db = makeDb(s);
+  const r = await WRITE_ACTIONS.importarVulnerabilidadeParaRisco(db, { id: 'v1' }, ctx());
+  assert.strictEqual(r.success, true);
+  assert.ok(!r.jaExiste);
+
+  const riscoDoc = (await db.collection('riscos').doc(r.id).get()).data();
+  assert.strictEqual(riscoDoc.origem, 'Vulnerabilidade');
+  assert.strictEqual(riscoDoc.vulnerabilidadeId, 'v1');
+  assert.strictEqual(riscoDoc.categoria, 'Operacional');
+  assert.strictEqual(riscoDoc.criadoPor, 'analista@fortestecnologia.com.br');
+  assert.match(riscoDoc.descricao, /manualmente/);
+});
+
+test('importarVulnerabilidadeParaRisco nao duplica quando ja existe risco aberto para a mesma vulnerabilidade', async () => {
+  const s = seedAdmin(seed());
+  s.vulnerabilidades = { v1: { nome: 'Falha X', produto: 'Sistema Y', cvss: 9.8, statusCorrecao: 'Aberto' } };
+  s.riscos = { r1: { origem: 'Vulnerabilidade', vulnerabilidadeId: 'v1', status: 'Identificado' } };
+  const db = makeDb(s);
+  const r = await WRITE_ACTIONS.importarVulnerabilidadeParaRisco(db, { id: 'v1' }, ctx());
+  assert.strictEqual(r.jaExiste, true);
+
+  const riscosSnap = await db.collection('riscos').get();
+  assert.strictEqual(riscosSnap.docs.length, 1, 'nao deveria ter criado um segundo risco');
+});
+
+// --- exportarRiscoDocumento: botao por registro dentro do visualizador do
+// DRP/PCN (drp-live.js/pcn-live.js) -- essas paginas abrem em janela
+// separada, so com fetch cru + token, entao precisam de uma Cloud Function
+// (mesmo motivo de importarVulnerabilidadeParaRisco acima). Sem checagem de
+// duplicata -- nem o picker de import em lote de PCN/DRP tem.
+
+test('exportarRiscoDocumento recusa quem nao tem perfil Admin/Seguranca', async () => {
+  const s = seed();
+  s.config_perfis = { 'analista@fortestecnologia.com.br': { perfis: ['gestor'] } };
+  const db = makeDb(s);
+  await assert.rejects(
+    () => WRITE_ACTIONS.exportarRiscoDocumento(db, { titulo: 'Falha de energia' }, ctx()),
+    AppError
+  );
+});
+
+test('exportarRiscoDocumento exige titulo', async () => {
+  const s = seedAdmin(seed());
+  const db = makeDb(s);
+  await assert.rejects(
+    () => WRITE_ACTIONS.exportarRiscoDocumento(db, {}, ctx()),
+    AppError
+  );
+});
+
+test('exportarRiscoDocumento cria o risco com os campos default quando so titulo e informado', async () => {
+  const s = seedAdmin(seed());
+  const db = makeDb(s);
+  const r = await WRITE_ACTIONS.exportarRiscoDocumento(db, { titulo: 'Risco de Rota Física Compartilhada' }, ctx());
+  assert.strictEqual(r.success, true);
+
+  const riscoDoc = (await db.collection('riscos').doc(r.id).get()).data();
+  assert.strictEqual(riscoDoc.titulo, 'Risco de Rota Física Compartilhada');
+  assert.strictEqual(riscoDoc.descricao, 'Risco de Rota Física Compartilhada');
+  assert.strictEqual(riscoDoc.status, 'Identificado');
+  assert.strictEqual(riscoDoc.origem, 'Importado de documento');
+  assert.strictEqual(riscoDoc.probabilidade, '');
+  assert.strictEqual(riscoDoc.impacto, '');
+  assert.strictEqual(riscoDoc.area, '');
+  assert.strictEqual(riscoDoc.processoId, '');
+  assert.deepStrictEqual(riscoDoc.planoAcao, []);
+  assert.deepStrictEqual(riscoDoc.kris, []);
+  assert.strictEqual(riscoDoc.criadoPor, 'analista@fortestecnologia.com.br');
+});
+
+test('exportarRiscoDocumento aceita o payload completo vindo do PCN (area/processo/probabilidade/impacto/mitigacao)', async () => {
+  const s = seedAdmin(seed());
+  const db = makeDb(s);
+  const r = await WRITE_ACTIONS.exportarRiscoDocumento(db, {
+    origem: 'Importado de PCN',
+    titulo: 'Falha de energia',
+    descricao: 'Falha de energia',
+    area: 'TI',
+    processo: 'Backup',
+    processoId: 'ti__backup',
+    probabilidade: 'Alta',
+    impacto: 'Crítico',
+    estrategiaDescricao: 'Gerador e nobreak redundantes',
+  }, ctx());
+
+  const riscoDoc = (await db.collection('riscos').doc(r.id).get()).data();
+  assert.strictEqual(riscoDoc.origem, 'Importado de PCN');
+  assert.strictEqual(riscoDoc.area, 'TI');
+  assert.strictEqual(riscoDoc.processoId, 'ti__backup');
+  assert.strictEqual(riscoDoc.probabilidade, 'Alta');
+  assert.strictEqual(riscoDoc.impacto, 'Crítico');
+  assert.strictEqual(riscoDoc.estrategiaDescricao, 'Gerador e nobreak redundantes');
+});
+
+test('exportarRiscoDocumento aceita o payload do DRP (sem area/processo, com descricao embutindo a dependencia)', async () => {
+  const s = seedAdmin(seed());
+  const db = makeDb(s);
+  const r = await WRITE_ACTIONS.exportarRiscoDocumento(db, {
+    origem: 'Importado de DRP',
+    titulo: 'Custo de Operação',
+    descricao: 'Risco residual identificado no DRP de "Internet - Fortes": Custo de Operação',
+    probabilidade: 'Baixa',
+    impacto: 'Moderado',
+  }, ctx());
+
+  const riscoDoc = (await db.collection('riscos').doc(r.id).get()).data();
+  assert.strictEqual(riscoDoc.origem, 'Importado de DRP');
+  assert.match(riscoDoc.descricao, /Internet - Fortes/);
+  assert.strictEqual(riscoDoc.area, '');
+  assert.strictEqual(riscoDoc.processo, '');
+});

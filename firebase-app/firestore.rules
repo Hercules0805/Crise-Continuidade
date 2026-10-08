@@ -153,6 +153,61 @@ service cloud.firestore {
       allow write: if podeMexerNaDependencia();
     }
 
+    // DECISAO 29/09/2026: o HTML de cada versao do DRP GERADO mora aqui, fora do
+    // documento de dependencias -- o campo drpSalvo em dependencias vira so
+    // metadado (versao/data/autor, sem o html). Antes disso, o conteudo do DRP
+    // vinha junto em QUALQUER leitura do catalogo de dependencias (o mesmo
+    // isCorpUser() acima), inclusive para quem nunca deveria ver o DRP em si
+    // (ex.: Gestor). So a Cloud Function (Admin SDK, ve.: obterDRP/salvarDRP em
+    // appLogic.js) le e escreve aqui, com o perfil (Admin/Seguranca/TI)
+    // conferido no servidor -- mesma receita ja usada para /tokens.
+    match /drp_conteudo/{id} {
+      allow read, write: if false;
+    }
+
+    // DECISAO 05/10/2026: mesma receita de /drp_conteudo acima, pro Roteiro de
+    // Teste (aba "Gestao de Testes" da Dependencia) -- documento gerado por IA
+    // a partir do DRP, versionado por tipo de teste. So a Cloud Function
+    // (gerarRoteiroTeste/salvarRoteiroTeste/obterRoteiroTeste/excluirRoteiroTeste
+    // em appLogic.js) le e escreve aqui.
+    match /roteiro_conteudo/{id} {
+      allow read, write: if false;
+    }
+
+    // DECISAO 01/10/2026: Servicos agrupa dependencias tecnicas ja cadastradas
+    // (por id, nunca por texto solto -- ver o historico de "Componentes do
+    // Servico" acima).
+    //
+    // DECISAO 02/10/2026: a posse de Servicos (e da nova entidade Backups, logo
+    // abaixo) estreitou -- nao e mais a mesma audiencia de /dependencias
+    // (Admin/Seguranca/TI). Quem gerencia agora e so Admin e Seguranca da
+    // Informacao ("Seguranca de Sistemas" no pedido do usuario); TI continua
+    // com Dependencias/DRP, mas nao com Servicos/Backups.
+    match /servicos/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin() || isSeguranca();
+    }
+
+    // Backup: "nova entidade" pedida pelo usuario, vinculada a 1 Servico.
+    // Jobs (varios por Backup) moram como array dentro do proprio documento --
+    // nunca sao abertos/buscados sozinhos, entao nao viram colecao a parte.
+    // Mesma posse de Servicos (ver decisao acima).
+    match /backups/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin() || isSeguranca();
+    }
+
+    // DECISAO 06/10/2026: Vulnerabilidades (catalogo de vulnerabilidades
+    // reportadas, com score e abertura automatica de Risco) -- mesma posse de
+    // Servicos/Backups (Admin + Seguranca da Informacao). A abertura do risco
+    // em si NAO escreve aqui pela tela: roda no servidor (Admin SDK, ve.:
+    // riscoDeVulnerabilidade/vulnerabilidadeRisco.js em functions/), porque
+    // /riscos so aceita escrita de isAdmin() (ver match /riscos/{id} abaixo).
+    match /vulnerabilidades/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin() || isSeguranca();
+    }
+
     match /componentes/{id} {
       allow read: if isCorpUser();
       allow write: if isAdmin();
@@ -269,6 +324,21 @@ service cloud.firestore {
     // Ciberseguranca") -- classificacao de negocio, nao entra em calculo
     // nenhum. Mesma permissao dos criterios de avaliacao.
     match /categorias_fornecedor/{id} {
+      allow read: if isCorpUser();
+      allow write: if podeGerenciarFornecedores();
+    }
+
+    // Subcategorias (filhas de uma categoria, por categoriaId) -- mesma
+    // permissao da categoria-pai.
+    match /subcategorias_fornecedor/{id} {
+      allow read: if isCorpUser();
+      allow write: if podeGerenciarFornecedores();
+    }
+
+    // Perguntas de Criticidade do fornecedor (cadastraveis desde 08/10/2026,
+    // antes eram fixas no codigo) -- mesma permissao dos criterios de
+    // avaliacao/categorias acima.
+    match /criticidade_fornecedor_perguntas/{id} {
       allow read: if isCorpUser();
       allow write: if podeGerenciarFornecedores();
     }

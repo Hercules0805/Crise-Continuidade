@@ -1,12 +1,22 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 /* Tokens de identidade visual — ver .amazonq/rules/ui-referencias.md antes de
-   adicionar cores/espaçamentos novos. Aditivo: nada abaixo depende destas
-   variáveis ainda, mas código novo deve preferi-las a hex literal. */
+   adicionar cores/espaçamentos novos. DECISÃO 04/10/2026 (rebrand GRC360):
+   conectados ao pacote vendor/grc360/tokens.css (carregado ANTES deste
+   arquivo, ver index.html) -- --brand/--brand-vivid/--radius-* vêm de lá; o
+   que o pacote não cobre (success/warning/danger/info/neutral, e o
+   --brand-tint abaixo) continua definido aqui. Não redeclara --radius-sm/md/lg
+   aqui -- declarar de novo sobrescreveria o valor do pacote pros componentes
+   bia-btn/bia-badge/bia-metric também (a cascata de CSS var é por última
+   declaração, não por arquivo). */
 :root {
-  --color-primary: #1a237e;
-  --color-primary-dark: #283593;
-  --color-primary-tint: #e8eaf6;
+  --color-primary: var(--brand);
+  --color-primary-dark: var(--brand-vivid);
+  --color-primary-tint: var(--brand-tint);
+  /* extensão local -- tokens.css não define um "fundo claro de marca"; tom
+     derivado do --brand pra manter os divisores/fundos decorativos que hoje
+     usavam o indigo claro (#e8eaf6). */
+  --brand-tint: #fce8ea;
   --color-success: #2e7d32;
   --color-success-bg: #e8f5e9;
   --color-warning: #f57c00;
@@ -19,39 +29,48 @@
   --color-text: #333;
   --color-text-muted: #888;
   --color-border: #e0e0e0;
-  --radius-sm: 4px;
-  --radius-md: 7px;
-  --radius-lg: 12px;
 }
 
 body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: #333; }
 
 /* NAV */
-.nav { background: linear-gradient(135deg, #1a237e, #283593); color: white; padding: 0 28px; display: flex; align-items: center; position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
-.nav-brand { font-size: 1em; font-weight: 700; padding: 16px 20px 16px 0; white-space: nowrap; }
-.nav-brand span { font-size: 0.75em; opacity: 0.7; font-weight: 400; display: block; }
+.nav { background: linear-gradient(135deg, var(--brand), var(--brand-vivid)); color: white; padding: 0 28px; display: flex; align-items: center; position: sticky; top: 0; z-index: 50; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+.nav-brand { font-size: 1em; font-weight: 700; padding: 16px 20px 16px 0; white-space: nowrap; display: flex; align-items: center; }
 .nav-links { display: flex; flex: 1; }
 .nav-link { color: rgba(255,255,255,0.75); text-decoration: none; padding: 18px 16px; font-size: 0.88em; font-weight: 500; border-bottom: 3px solid transparent; transition: all 0.15s; }
 .nav-link:hover { color: white; background: rgba(255,255,255,0.08); }
-.nav-link.active { color: white; border-bottom-color: #69f0ae; }
+.nav-link.active { color: white; border-bottom-color: var(--accent-green); }
 
 /* NAV - menus principais com submenu */
 .nav-group { position: relative; }
 .nav-group-label { display: flex; align-items: center; gap: 5px; height: 100%; background: none; border: none; font: inherit; cursor: pointer; color: rgba(255,255,255,0.75); padding: 18px 16px; font-size: 0.88em; font-weight: 500; border-bottom: 3px solid transparent; transition: all 0.15s; }
 .nav-group-label:hover { color: white; background: rgba(255,255,255,0.08); }
 .nav-group-label .caret { font-size: 0.7em; opacity: 0.8; }
-.nav-group.has-active > .nav-group-label { color: white; border-bottom-color: #69f0ae; }
-.nav-dropdown { display: none; position: absolute; top: 100%; left: 0; min-width: 220px; background: #1a237e; border-radius: 0 0 8px 8px; overflow: hidden; box-shadow: 0 10px 24px rgba(0,0,0,0.3); z-index: 60; }
+.nav-group.has-active > .nav-group-label { color: white; border-bottom-color: var(--accent-green); }
+.nav-dropdown { display: none; position: absolute; top: 100%; left: 0; min-width: 220px; background: var(--brand); border-radius: 0 0 8px 8px; overflow: hidden; box-shadow: 0 10px 24px rgba(0,0,0,0.3); z-index: 60; }
 .nav-group:hover .nav-dropdown, .nav-group.open .nav-dropdown { display: block; }
 .nav-dropdown .nav-link { display: block; padding: 12px 18px; border-bottom: none; }
-.nav-dropdown .nav-link.active { background: rgba(255,255,255,0.12); border-left: 3px solid #69f0ae; padding-left: 15px; }
+.nav-dropdown .nav-link.active { background: rgba(255,255,255,0.12); border-left: 3px solid var(--accent-green); padding-left: 15px; }
+
+/* BUSCA DE TELAS (menu superior) */
+.nav-busca { position: relative; margin-left: 12px; }
+.nav-busca input { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 8px 14px; border-radius: 8px; font-size: 0.85em; width: 200px; outline: none; }
+.nav-busca input::placeholder { color: rgba(255,255,255,0.7); }
+.nav-busca input:focus { background: rgba(255,255,255,0.25); border-color: white; }
+.nav-busca-resultados { display: none; position: absolute; top: 100%; right: 0; margin-top: 6px; min-width: 260px; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 24px rgba(0,0,0,0.3); z-index: 65; max-height: 360px; overflow-y: auto; }
+.nav-busca-resultados.open { display: block; }
+.nav-busca-resultados .item { display: block; padding: 10px 16px; color: #333; cursor: pointer; border-bottom: 1px solid #f0f0f0; font-size: 0.88em; }
+.nav-busca-resultados .item:last-child { border-bottom: none; }
+.nav-busca-resultados .item:hover, .nav-busca-resultados .item.sel { background: var(--brand-tint); color: var(--brand); }
+.nav-busca-resultados .item .grupo { display: block; font-size: 0.72em; color: #999; margin-top: 2px; }
+.nav-busca-resultados .vazio { padding: 14px 16px; color: #999; font-size: 0.85em; }
 
 /* CONTAINER */
 #app { max-width: 1600px; margin: 28px auto; padding: 0 16px 80px; }
 
 /* PAGE HEADER */
 .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
-.page-header h2 { font-size: 1.3em; color: #1a237e; }
+.page-header h2 { font-size: 1.3em; color: var(--brand); }
 .page-sub { font-size: 0.85em; color: #888; margin-top: 3px; }
 
 /* CARDS */
@@ -67,13 +86,17 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 .list-row-sub { font-size: 0.8em; color: #888; margin-top: 2px; }
 .list-row-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 
-/* BUTTONS */
-.btn { padding: 9px 20px; border: none; border-radius: 7px; font-size: 0.88em; font-weight: 600; cursor: pointer; transition: all 0.15s; }
-.btn-primary { background: #1a237e; color: white; }
-.btn-primary:hover { background: #283593; }
+/* BUTTONS -- raio e cor primária vêm do pacote GRC360 (bia-btn/bia-btn--primary
+   em vendor/grc360/bundle.css); .btn-ghost mantém o preenchimento cinza neutro
+   de propósito (é usado pra "Cancelar"/ações secundárias -- adotar o texto
+   vermelho do bia-btn--secondary pareceria ação destrutiva, não neutra). */
+.btn { padding: 9px 20px; border: none; border-radius: var(--radius-md); font-size: 0.88em; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+.btn-primary { background: var(--brand); color: var(--on-brand); }
+.btn-primary:hover { background: var(--brand-vivid); }
+.btn-primary:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .btn-ghost { background: #f0f0f0; color: #555; }
 .btn-ghost:hover { background: #e0e0e0; }
-.btn-icon { background: none; border: none; cursor: pointer; font-size: 1em; padding: 4px 6px; border-radius: 4px; transition: background 0.15s; }
+.btn-icon { background: none; border: none; cursor: pointer; font-size: 1em; padding: 4px 6px; border-radius: var(--radius-sm); transition: background 0.15s; }
 .btn-icon:hover { background: #f0f0f0; }
 
 /* BADGES */
@@ -83,13 +106,17 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 
 /* MODAL */
 .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 100; align-items: center; justify-content: center; }
+/* Modal aberto DE DENTRO de um drawer (ex.: #modalEscolherTipoTeste, Gestão de
+   Testes da Dependência) precisa ficar acima do drawer (.drawer, z-index:101),
+   senão o modal abre atrás dele -- clicável/presente no DOM, mas invisível. */
+.modal-overlay.modal-sobre-drawer { z-index: 110; }
 .modal-overlay.open { display: flex; }
 .modal { background: white; border-radius: 12px; padding: 28px; width: 100%; max-width: 480px; box-shadow: 0 8px 32px rgba(0,0,0,0.2); }
-.modal h3 { font-size: 1.1em; color: #1a237e; margin-bottom: 20px; }
+.modal h3 { font-size: 1.1em; color: var(--brand); margin-bottom: 20px; }
 .modal label { display: block; font-size: 0.82em; font-weight: 600; color: #555; margin: 14px 0 5px; }
 .modal input, .modal select { width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 0.92em; }
 .modal textarea { width: 100%; padding: 9px 12px; border: 1px solid #ddd; border-radius: 7px; font-size: 0.92em; font-family: inherit; resize: vertical; }
-.modal input:focus, .modal select:focus, .modal textarea:focus { border-color: #1a237e; outline: none; }
+.modal input:focus, .modal select:focus, .modal textarea:focus { border-color: var(--brand); outline: none; }
 .check-label { display: flex !important; align-items: center; gap: 8px; cursor: pointer; }
 .check-label input { width: auto; }
 .modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
@@ -99,13 +126,17 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 .drawer-overlay.open { display: block; }
 .drawer { position: fixed; top: 0; right: 0; height: 100vh; width: 70vw; min-width: 320px; max-width: 90vw; background: white; box-shadow: -4px 0 24px rgba(0,0,0,0.15); z-index: 101; display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.25s ease; }
 .drawer#drawerAvaliar { width: 680px; }
+.drawer#drawerPessoa { width: 480px; }
+.drawer#drawerProcessosLote { width: 680px; }
+.drawer#drawerSelecaoDependenciasRelatorio { width: 420px; }
+.drawer#drawerOrganograma { width: 420px; }
 .drawer.open { transform: translateX(0); }
 .drawer-resize { position: absolute; left: 0; top: 0; width: 5px; height: 100%; cursor: ew-resize; background: transparent; z-index: 10; }
-.drawer-resize:hover, .drawer-resize.resizing { background: #1a237e33; }
-.drawer-header { padding: 20px 24px 16px; border-bottom: 2px solid #e8eaf6; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
-.drawer-header h3 { font-size: 1.1em; font-weight: 700; color: #1a237e; margin: 0; }
+.drawer-resize:hover, .drawer-resize.resizing { background: #d6001433; }
+.drawer-header { padding: 20px 24px 16px; border-bottom: 2px solid var(--brand-tint); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }
+.drawer-header h3 { font-size: 1.1em; font-weight: 700; color: var(--brand); margin: 0; }
 .drawer-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
-.drawer-footer { padding: 16px 24px; border-top: 1px solid #e8eaf6; display: flex; justify-content: flex-end; gap: 10px; flex-shrink: 0; background: white; }
+.drawer-footer { padding: 16px 24px; border-top: 1px solid var(--brand-tint); display: flex; justify-content: flex-end; gap: 10px; flex-shrink: 0; background: white; }
 
 
 .loading { text-align: center; padding: 50px; color: #888; }
@@ -114,7 +145,7 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 /* TABLE */
 .data-table { background: white; border-radius: 10px; overflow: hidden; box-shadow: 0 1px 4px rgba(0,0,0,0.08); }
 .data-table table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-.data-table thead { background: #1a237e; color: white; }
+.data-table thead { background: var(--brand); color: var(--on-brand); }
 .data-table th { padding: 14px 12px; text-align: left; font-size: 0.82em; font-weight: 600; border-right: 1px solid rgba(255,255,255,0.1); text-transform: uppercase; letter-spacing: 0.3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .data-table th:last-child { border-right: none; }
 .data-table th span { font-size: 0.9em; margin-left: 4px; opacity: 0.8; }
@@ -122,8 +153,8 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 .data-table tbody tr:last-child { border-bottom: none; }
 .data-table tbody tr:hover { background: #f8f9fa; }
 .data-table td { padding: 14px 12px; font-size: 0.88em; color: #555; vertical-align: middle; line-height: 1.5; word-wrap: break-word; }
-.data-table td:nth-child(1) { font-weight: 600; color: #1a237e; }
-.data-table td:nth-child(2) strong { color: #1a237e; font-weight: 600; }
+.data-table td:nth-child(1) { font-weight: 600; color: var(--brand); }
+.data-table td:nth-child(2) strong { color: var(--brand); font-weight: 600; }
 
 @media (max-width: 1600px) {
   .data-table { overflow-x: auto; }

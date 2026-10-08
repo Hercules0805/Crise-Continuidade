@@ -3,24 +3,24 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BIA — Mapeamento de Dependências</title>
+  <title>GRC360 — Mapeamento de Dependências</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f6fa; min-height: 100vh; color: #333; }
-    .header { background: linear-gradient(135deg, #1a237e, #283593); color: white; padding: 30px 20px; text-align: center; }
+    .header { background: linear-gradient(135deg, #d60014, #e6262b); color: white; padding: 30px 20px; text-align: center; }
     .header h1 { font-size: 1.4em; margin-bottom: 6px; }
     .header p { font-size: 0.9em; opacity: 0.85; }
     .container { max-width: 800px; margin: -20px auto 40px; padding: 0 16px; }
     .card { background: white; border-radius: 12px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); padding: 28px 32px; margin-bottom: 20px; }
-    .card h2 { font-size: 1.1em; color: #1a237e; margin-bottom: 6px; }
+    .card h2 { font-size: 1.1em; color: #d60014; margin-bottom: 6px; }
     .card p.desc { font-size: 0.88em; color: #666; margin-bottom: 16px; line-height: 1.5; }
-    .info-box { background: #e8eaf6; border-left: 4px solid #1a237e; padding: 14px 18px; border-radius: 0 8px 8px 0; margin-bottom: 20px; }
-    .info-box strong { color: #1a237e; }
+    .info-box { background: #fce8ea; border-left: 4px solid #d60014; padding: 14px 18px; border-radius: 0 8px 8px 0; margin-bottom: 20px; }
+    .info-box strong { color: #d60014; }
     .info-box p { font-size: 0.88em; color: #333; margin-top: 4px; }
     .section-examples { font-size: 0.78em; color: #666; background: #f9f9f9; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; border: 1px dashed #ddd; }
     .section-examples strong { color: #555; }
     .tags-area { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 44px; padding: 10px; background: #fafbfc; border: 1.5px solid #e0e0e0; border-radius: 8px; margin-bottom: 10px; }
-    .tag { display: inline-flex; align-items: center; gap: 4px; background: #1a237e; color: white; padding: 5px 10px 5px 12px; border-radius: 14px; font-size: 0.85em; font-weight: 500; animation: tagIn 0.2s ease; }
+    .tag { display: inline-flex; align-items: center; gap: 4px; background: #d60014; color: white; padding: 5px 10px 5px 12px; border-radius: 14px; font-size: 0.85em; font-weight: 500; animation: tagIn 0.2s ease; }
     @keyframes tagIn { from { transform: scale(0.8); opacity: 0; } to { transform: scale(1); opacity: 1; } }
     .tag button { background: none; border: none; cursor: pointer; color: rgba(255,255,255,0.7); font-size: 1.2em; line-height: 1; padding: 0 2px; }
     .tag button:hover { color: white; }
@@ -28,22 +28,22 @@
     .catalog-area { margin-top: 8px; }
     .catalog-label { font-size: 0.75em; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 6px; }
     .catalog-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
-    .chip { display: inline-block; padding: 5px 12px; border-radius: 14px; font-size: 0.82em; font-weight: 500; background: #e8eaf6; color: #1a237e; cursor: pointer; border: 1.5px solid transparent; transition: all 0.15s; user-select: none; }
-    .chip:hover { background: #c5cae9; border-color: #1a237e; }
-    .chip.selected { background: #1a237e; color: white; cursor: default; opacity: 0.6; }
-    .chip-add { background: white; border: 1.5px dashed #1a237e; color: #1a237e; cursor: pointer; }
-    .chip-add:hover { background: #e8eaf6; }
+    .chip { display: inline-block; padding: 5px 12px; border-radius: 14px; font-size: 0.82em; font-weight: 500; background: #fce8ea; color: #d60014; cursor: pointer; border: 1.5px solid transparent; transition: all 0.15s; user-select: none; }
+    .chip:hover { background: #c5cae9; border-color: #d60014; }
+    .chip.selected { background: #d60014; color: white; cursor: default; opacity: 0.6; }
+    .chip-add { background: white; border: 1.5px dashed #d60014; color: #d60014; cursor: pointer; }
+    .chip-add:hover { background: #fce8ea; }
     .add-input-row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
     .add-input-row input { flex: 1; padding: 8px 12px; border: 1.5px solid #e0e0e0; border-radius: 8px; font-size: 0.9em; }
-    .add-input-row input:focus { border-color: #1a237e; outline: none; }
-    .add-input-row button { padding: 8px 16px; background: #1a237e; color: white; border: none; border-radius: 8px; font-size: 0.85em; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .add-input-row input:focus { border-color: #d60014; outline: none; }
+    .add-input-row button { padding: 8px 16px; background: #d60014; color: white; border: none; border-radius: 8px; font-size: 0.85em; font-weight: 600; cursor: pointer; white-space: nowrap; }
     .add-input-row button:hover { opacity: 0.9; }
     .campo { margin-bottom: 16px; }
     .campo label { display: block; font-size: 0.82em; font-weight: 600; color: #444; margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.3px; }
     .campo input, .campo textarea, .campo select { width: 100%; padding: 10px 12px; border: 1.5px solid #e0e0e0; border-radius: 8px; font-size: 0.93em; transition: border-color 0.2s; }
-    .campo input:focus, .campo textarea:focus, .campo select:focus { border-color: #1a237e; outline: none; }
+    .campo input:focus, .campo textarea:focus, .campo select:focus { border-color: #d60014; outline: none; }
     .campo .hint { font-size: 0.78em; color: #999; margin-top: 4px; }
-    .btn-primary { background: #1a237e; color: white; border: none; padding: 14px 32px; border-radius: 8px; font-size: 1em; font-weight: 600; cursor: pointer; width: 100%; transition: opacity 0.2s; }
+    .btn-primary { background: #d60014; color: white; border: none; padding: 14px 32px; border-radius: 8px; font-size: 1em; font-weight: 600; cursor: pointer; width: 100%; transition: opacity 0.2s; }
     .btn-primary:hover { opacity: 0.9; }
     .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
     .success-msg { text-align: center; padding: 40px 20px; }

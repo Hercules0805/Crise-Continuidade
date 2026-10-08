@@ -105,12 +105,12 @@
     return p * i;
   }
 
-  /** Faixas do score individual, de 1 a 12. */
+  /** Faixas do score individual, de 1 a 12. Cores: ver DECISAO 04/10/2026 em criticidade.js. */
   function faixaScore(n) {
-    if (n >= 9) return { rotulo: 'Crítico', cor: '#c62828', fundo: '#ffebee' };
-    if (n >= 6) return { rotulo: 'Alto', cor: '#e65100', fundo: '#fff3e0' };
-    if (n >= 3) return { rotulo: 'Moderado', cor: '#f57c00', fundo: '#fff8e1' };
-    return { rotulo: 'Baixo', cor: '#2e7d32', fundo: '#e8f5e9' };
+    if (n >= 9) return { rotulo: 'Crítico', cor: 'var(--risk-critical)', fundo: 'var(--risk-critical-surface)' };
+    if (n >= 6) return { rotulo: 'Alto', cor: 'var(--risk-high)', fundo: '#fff3e0' };
+    if (n >= 3) return { rotulo: 'Moderado', cor: 'var(--risk-medium)', fundo: '#fff8e1' };
+    return { rotulo: 'Baixo', cor: 'var(--risk-low)', fundo: '#e8f5e9' };
   }
 
   function contaNoConsolidado(r) {
@@ -133,7 +133,12 @@
     }
     var idFornecedor = r && r.fornecedor;
     if (idFornecedor && criticidadePorFornecedor) {
-      var pesoForn = FornecedorCriticidade.pesoPorScore(criticidadePorFornecedor[String(idFornecedor)]);
+      // {score, scoreMaximo} -- scoreMaximo congelado na epoca da avaliacao
+      // (perguntas de criticidade sao cadastraveis agora; sem o maximo da
+      // epoca, pesoPorScore reclassificaria uma nota antiga contra um total
+      // de perguntas diferente do que existia quando ela foi calculada).
+      var crit = criticidadePorFornecedor[String(idFornecedor)];
+      var pesoForn = crit && FornecedorCriticidade.pesoPorScore(crit.score, crit.scoreMaximo);
       if (pesoForn) return pesoForn;
     }
     return PESO_PADRAO;

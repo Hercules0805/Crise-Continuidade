@@ -271,12 +271,14 @@ const riscoForn = (extra) => Object.assign({
 }, extra);
 
 test('risco de fornecedor com criticidade Alta pesa 3, o mesmo peso do Tier 1', () => {
-  const criticidade = { f1: 15 }; // 15 = faixa Alta (escala 0-18, perguntas operacionais)
+  // {score, scoreMaximo} -- scoreMaximo congelado na avaliacao (perguntas
+  // de criticidade sao cadastraveis, ver fornecedor-criticidade.js).
+  const criticidade = { f1: { score: 15, scoreMaximo: 18 } }; // 15/18 = faixa Alta
   assert.strictEqual(RC.pesoDoRisco(riscoForn(), {}, criticidade), 3);
 });
 
 test('risco de fornecedor com criticidade Baixa pesa 1, o mesmo peso do Tier 3', () => {
-  const criticidade = { f1: 1 }; // 1 = faixa Baixa
+  const criticidade = { f1: { score: 1, scoreMaximo: 18 } }; // 1/18 = faixa Baixa
   assert.strictEqual(RC.pesoDoRisco(riscoForn(), {}, criticidade), 1);
 });
 
@@ -290,7 +292,7 @@ test('risco com processoId usa o Tier, mesmo que tambem tenha fornecedor', () =>
   // mas se acontecer, processo manda -- e a mesma ordem que decidir() do
   // servidor usa pra abrir risco (o processo e quem tem o dado mais concreto).
   const r = riscoForn({ processoId: 'p1' });
-  const criticidade = { f1: 1 }; // faixa Baixa, peso 1 -- nao deveria valer aqui
+  const criticidade = { f1: { score: 1, scoreMaximo: 18 } }; // faixa Baixa, peso 1 -- nao deveria valer aqui
   assert.strictEqual(RC.pesoDoRisco(r, { p1: PROCESSOS[0] }, criticidade), 3); // Tier 1
 });
 
@@ -298,8 +300,8 @@ test('a carga da empresa reflete a criticidade do fornecedor: Alta pesa mais que
   const riscos = [
     riscoForn({ fornecedor: 'critico', probabilidade: 'Alta', impacto: 'Crítico' }),
   ];
-  const cargaAlta = RC.consolidar(riscos, [], { critico: 15 }).empresa.carga;
-  const cargaBaixa = RC.consolidar(riscos, [], { critico: 0 }).empresa.carga;
+  const cargaAlta = RC.consolidar(riscos, [], { critico: { score: 15, scoreMaximo: 18 } }).empresa.carga;
+  const cargaBaixa = RC.consolidar(riscos, [], { critico: { score: 0, scoreMaximo: 18 } }).empresa.carga;
   assert.ok(cargaAlta > cargaBaixa, `criticidade Alta deveria pesar mais: ${cargaAlta} <= ${cargaBaixa}`);
   assert.strictEqual(cargaAlta, 12 * 3); // score 12, peso 3 (Alta)
   assert.strictEqual(cargaBaixa, 12 * 1); // score 12, peso 1 (Baixa)

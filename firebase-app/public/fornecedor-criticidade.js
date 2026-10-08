@@ -1,43 +1,34 @@
 /**
  * Regra unica da criticidade do fornecedor.
  *
- * DECISAO 22/09/2026 (3), a mais recente -- SUBSTITUIU POR INTEIRO as
- * perguntas das duas rodadas anteriores (nao ha compatibilidade com elas):
+ * DECISAO 08/10/2026 -- as perguntas deixam de ser fixas no codigo e viram
+ * cadastraveis (tela "Perguntas de Criticidade", colecao Firestore
+ * criticidade_fornecedor_perguntas). Este modulo so guarda a REGRA DE
+ * CALCULO, nao mais a lista de perguntas -- quem chama (app.js/api.js) busca
+ * a lista atual (perguntas ATIVAS) e passa pra calcular()/faixa()/
+ * scoreMaximoDe(). PERGUNTAS_SEED abaixo e só o estado inicial (usado pelo
+ * script de seed, uma vez, não pelo calculo em si).
  *
- *   Uma revisao externa apontou que as perguntas antigas (Tipo de Dados
- *   Tratados, Tipo de Atividade/Finalidade, Dependencia Tecnologica e
- *   Continuidade, Transferencia Internacional) misturavam DEPENDENCIA
- *   OPERACIONAL (o quanto a empresa quebra sem aquele fornecedor) com
- *   EXPOSICAO DE PRIVACIDADE/COMPLIANCE (que tipo de dado ele trata) -- e a
- *   soma virava peso de risco por motivos que nao tem relacao com o quanto a
- *   empresa depende do fornecedor. Sao 6 perguntas novas, todas puramente
- *   operacionais (importancia para a operacao, tempo sem operar, existe
- *   substituto, dependencia dos dados dele, acesso a sistemas, impacto a
- *   clientes) -- Tipo de Dados Tratados, Decisoes Automatizadas e
- *   Transferencia Internacional SAEM da Criticidade e nao viram outro eixo
- *   nesta rodada (fica para uma entrega futura, decisao explicita, nao
- *   esquecimento).
- *
- *   Score maximo sobe de 9 para 18 (6 perguntas x 3). Os limiares de faixa
- *   foram redivididos em 3 partes de tamanho parecido (Baixa 0-6, Media 7-12,
- *   Alta 13-18) -- ao contrario da ultima mudanca (que so abriu o teto de
- *   Alta), aqui nao ha como preservar o significado das faixas antigas: as
- *   perguntas sao outras, entao um fornecedor ja avaliado tem seu score
- *   antigo (0-9) reinterpretado pelas faixas novas ate ser reavaliado. Isso e
- *   uma consequencia aceita, nao um bug -- ver decisao no plano desta
- *   mudanca.
+ * Por que os cortes de faixa viraram proporcionais (e nao um numero fixo):
+ * se o cadastro permite adicionar/remover pergunta ou opcao, o score maximo
+ * possivel muda -- um corte fixo (ex.: ">=13") ficaria descalibrado (13 de
+ * um maximo de 15 e bem mais raro de evitar que 13 de um maximo de 18). Os
+ * cortes agora sao uma FRACAO do maximo atual (LIMIAR_ALTA_PROPORCAO/
+ * LIMIAR_MEDIA_PROPORCAO), calibrados pra dar exatamente os mesmos pontos de
+ * corte de hoje (13/18 e 7/18) quando o cadastro continuar do jeito que esta
+ * agora (6 perguntas x 3 pontos) -- editar/adicionar/remover pergunta depois
+ * reescala os cortes automaticamente, sem precisar de outro campo de config.
  *
  * DECISOES DE FUNDO, que continuam valendo (das rodadas anteriores):
- *   - As perguntas sao fixas (nao cadastraveis, ao contrario dos criterios de
- *     conformidade).
  *   - Cada pergunta e de ESCOLHA UNICA: a pessoa marca a opcao que mais se
  *     aplica. Nao e escolha multipla -- nao da pra marcar duas opcoes da
  *     mesma pergunta.
- *   - A criticidade final e a SOMA de todas as perguntas. Mesmo padrao "uma
- *     resposta por pergunta, soma no final" que o BIA e o Risco ja usam.
- *   - A criticidade vira o PESO do risco automatico do fornecedor na carga de
- *     risco da empresa (risco-consolidado.js), do mesmo jeito que o Tier do
- *     BIA ja pesa o risco de processo. So 3 niveis de peso (1/2/3), de
+ *   - A criticidade final e a SOMA de todas as perguntas ATIVAS. Mesmo
+ *     padrao "uma resposta por pergunta, soma no final" que o BIA e o Risco
+ *     ja usam.
+ *   - A criticidade vira o PESO do risco automatico do fornecedor na carga
+ *     de risco da empresa (risco-consolidado.js), do mesmo jeito que o Tier
+ *     do BIA ja pesa o risco de processo. So 3 niveis de peso (1/2/3), de
  *     proposito -- um 4o nivel exigiria mexer em CARGA_MAXIMA_POR_RISCO, que
  *     assume peso maximo 3 em risco-consolidado.js.
  *
@@ -51,8 +42,15 @@
  *   facil de substituir e sem acesso a sistemas -- isso da criticidade 0 de
  *   verdade, um fornecedor de baixo risco. E diferente de NINGUEM TER
  *   RESPONDIDO a pergunta ainda. Por isso a resposta traz `completa`, que so
- *   fica true quando todas as perguntas tem uma opcao marcada -- incluindo a
- *   de valor 0.
+ *   fica true quando todas as perguntas ATIVAS tem uma opcao marcada --
+ *   incluindo a de valor 0.
+ *
+ * Cada resposta grava o INDICE da opcao escolhida dentro de `pergunta.opcoes`
+ * (nao um slug) -- as opcoes sao cadastraveis agora, entao a ordem delas no
+ * array e a unica referencia estavel que o cadastro ja da de graca, sem
+ * precisar de mais um campo. Avaliacoes ja salvas sao append-only e ficam
+ * congeladas com o que foi gravado na epoca; isso so importa pra respostas
+ * NOVAS.
  *
  * Carregar ANTES de risco-consolidado.js (que usa pesoPorScore) e de app.js.
  * Tambem exporta como modulo CommonJS para poder ser testada com node --test.
@@ -66,125 +64,148 @@
 
   var SENTIDO = 'maiorPior';
 
-  /** As perguntas fixas, cada uma com as opcoes na ordem de exibicao. */
-  var PERGUNTAS = [
+  /**
+   * Estado inicial (DECISAO 22/09/2026) -- usado só pelo script de seed de
+   * `criticidade_fornecedor_perguntas`, uma vez. Depois do seed, a fonte de
+   * verdade é o Firestore; este array nunca mais é lido por calcular()/
+   * faixa()/scoreMaximoDe().
+   */
+  var PERGUNTAS_SEED = [
     {
-      chave: 'importanciaOperacional',
-      titulo: 'Qual é a importância desse fornecedor para a operação da empresa?',
+      texto: 'Qual é a importância desse fornecedor para a operação da empresa?',
+      ordem: 1,
       opcoes: [
-        { valor: 'baixa', rotulo: 'Baixa — o serviço não é necessário para a operação; sua indisponibilidade gera pouco ou nenhum impacto', score: 0 },
-        { valor: 'moderada', rotulo: 'Moderada — apoia atividades internas, mas a empresa continua trabalhando sem ele', score: 1 },
-        { valor: 'alta', rotulo: 'Alta — sua indisponibilidade prejudica significativamente uma ou mais áreas', score: 2 },
-        { valor: 'essencial', rotulo: 'Essencial — sua indisponibilidade pode interromper processos críticos, atendimento a clientes ou serviços essenciais', score: 3 },
+        { rotulo: 'Baixa — o serviço não é necessário para a operação; sua indisponibilidade gera pouco ou nenhum impacto', score: 0 },
+        { rotulo: 'Moderada — apoia atividades internas, mas a empresa continua trabalhando sem ele', score: 1 },
+        { rotulo: 'Alta — sua indisponibilidade prejudica significativamente uma ou mais áreas', score: 2 },
+        { rotulo: 'Essencial — sua indisponibilidade pode interromper processos críticos, atendimento a clientes ou serviços essenciais', score: 3 },
       ],
     },
     {
-      chave: 'tempoSemOperar',
-      titulo: 'Por quanto tempo a empresa conseguiria operar sem esse fornecedor?',
+      texto: 'Por quanto tempo a empresa conseguiria operar sem esse fornecedor?',
+      ordem: 2,
       opcoes: [
-        { valor: 'mais72h', rotulo: 'Mais de 72 horas', score: 0 },
-        { valor: 'ate72h', rotulo: 'Até 72 horas', score: 1 },
-        { valor: 'ate24h', rotulo: 'Até 24 horas', score: 2 },
-        { valor: 'ate4h', rotulo: 'Até 4 horas', score: 3 },
+        { rotulo: 'Mais de 72 horas', score: 0 },
+        { rotulo: 'Até 72 horas', score: 1 },
+        { rotulo: 'Até 24 horas', score: 2 },
+        { rotulo: 'Até 4 horas', score: 3 },
       ],
     },
     {
-      chave: 'substituibilidade',
-      titulo: 'Existe uma alternativa disponível caso esse fornecedor deixe de prestar o serviço?',
+      texto: 'Existe uma alternativa disponível caso esse fornecedor deixe de prestar o serviço?',
+      ordem: 3,
       opcoes: [
-        { valor: 'facil', rotulo: 'Sim, a empresa consegue substituí-lo rapidamente', score: 0 },
-        { valor: 'comTempo', rotulo: 'Sim, mas a substituição levaria algum tempo', score: 1 },
-        { valor: 'poucas', rotulo: 'Existem poucas alternativas e a substituição seria difícil', score: 2 },
-        { valor: 'nenhuma', rotulo: 'Não existe alternativa viável no curto prazo', score: 3 },
+        { rotulo: 'Sim, a empresa consegue substituí-lo rapidamente', score: 0 },
+        { rotulo: 'Sim, mas a substituição levaria algum tempo', score: 1 },
+        { rotulo: 'Existem poucas alternativas e a substituição seria difícil', score: 2 },
+        { rotulo: 'Não existe alternativa viável no curto prazo', score: 3 },
       ],
     },
     {
-      chave: 'dependenciaDados',
-      titulo: 'O que aconteceria se os dados ou informações mantidos pelo fornecedor ficassem indisponíveis?',
+      texto: 'O que aconteceria se os dados ou informações mantidos pelo fornecedor ficassem indisponíveis?',
+      ordem: 4,
       opcoes: [
-        { valor: 'semImpacto', rotulo: 'Não há impacto relevante', score: 0 },
-        { valor: 'pontual', rotulo: 'Haveria impacto pontual, mas os dados poderiam ser recuperados facilmente', score: 1 },
-        { valor: 'trabalhosa', rotulo: 'A recuperação seria trabalhosa e afetaria a operação', score: 2 },
-        { valor: 'critico', rotulo: 'A perda/indisponibilidade comprometeria processos críticos ou poderia causar perda significativa de informação', score: 3 },
+        { rotulo: 'Não há impacto relevante', score: 0 },
+        { rotulo: 'Haveria impacto pontual, mas os dados poderiam ser recuperados facilmente', score: 1 },
+        { rotulo: 'A recuperação seria trabalhosa e afetaria a operação', score: 2 },
+        { rotulo: 'A perda/indisponibilidade comprometeria processos críticos ou poderia causar perda significativa de informação', score: 3 },
       ],
     },
     {
-      chave: 'acessoSistemas',
-      titulo: 'Que tipo de acesso o fornecedor possui aos sistemas da empresa?',
+      texto: 'Que tipo de acesso o fornecedor possui aos sistemas da empresa?',
+      ordem: 5,
       opcoes: [
-        { valor: 'nenhum', rotulo: 'Não possui acesso aos sistemas da empresa', score: 0 },
-        { valor: 'usuarioComum', rotulo: 'Possui acesso apenas como usuário comum', score: 1 },
-        { valor: 'integracao', rotulo: 'Possui acesso para integração ou operação de sistemas', score: 2 },
-        { valor: 'privilegiado', rotulo: 'Possui acesso privilegiado, administrativo ou direto a ambientes críticos', score: 3 },
+        { rotulo: 'Não possui acesso aos sistemas da empresa', score: 0 },
+        { rotulo: 'Possui acesso apenas como usuário comum', score: 1 },
+        { rotulo: 'Possui acesso para integração ou operação de sistemas', score: 2 },
+        { rotulo: 'Possui acesso privilegiado, administrativo ou direto a ambientes críticos', score: 3 },
       ],
     },
     {
-      chave: 'impactoClientes',
-      titulo: 'O serviço do fornecedor é utilizado diretamente por clientes ou afeta serviços entregues aos clientes?',
+      texto: 'O serviço do fornecedor é utilizado diretamente por clientes ou afeta serviços entregues aos clientes?',
+      ordem: 6,
       opcoes: [
-        { valor: 'nao', rotulo: 'Não', score: 0 },
-        { valor: 'indireto', rotulo: 'Indiretamente — afeta processos internos que apoiam clientes', score: 1 },
-        { valor: 'limitado', rotulo: 'Sim, mas existe alternativa ou impacto limitado', score: 2 },
-        { valor: 'direto', rotulo: 'Sim — a indisponibilidade pode impedir ou comprometer diretamente um serviço prestado ao cliente', score: 3 },
+        { rotulo: 'Não', score: 0 },
+        { rotulo: 'Indiretamente — afeta processos internos que apoiam clientes', score: 1 },
+        { rotulo: 'Sim, mas existe alternativa ou impacto limitado', score: 2 },
+        { rotulo: 'Sim — a indisponibilidade pode impedir ou comprometer diretamente um serviço prestado ao cliente', score: 3 },
       ],
     },
   ];
 
-  /** Soma dos scores maximos das perguntas: 6 perguntas x 3 = 18. */
-  var SCORE_MAXIMO = PERGUNTAS.reduce(function (t, p) {
-    return t + Math.max.apply(null, p.opcoes.map(function (o) { return o.score; }));
-  }, 0);
+  /** Soma dos scores maximos das perguntas informadas (lista de ATIVAS). */
+  function scoreMaximoDe(perguntas) {
+    return (perguntas || []).reduce(function (t, p) {
+      var scores = (p.opcoes || []).map(function (o) { return Number(o.score) || 0; });
+      return t + (scores.length ? Math.max.apply(null, scores) : 0);
+    }, 0);
+  }
+
+  // Fracoes que davam os cortes de hoje (13 e 7 de um maximo de 18) --
+  // preservadas como a calibracao-base; ver nota no topo do arquivo.
+  var LIMIAR_ALTA_PROPORCAO = 13 / 18;
+  var LIMIAR_MEDIA_PROPORCAO = 7 / 18;
 
   /**
-   * Faixas de 0 a 18, em 3 partes de tamanho parecido. So 3 niveis, de
-   * proposito: mapeiam 1:1 pro mesmo peso de 1/2/3 que o Tier do BIA ja usa em
+   * Faixas em 3 partes, proporcionais ao score maximo possivel (nao mais um
+   * numero fixo -- ver nota no topo do arquivo). So 3 niveis, de proposito:
+   * mapeiam 1:1 pro mesmo peso de 1/2/3 que o Tier do BIA ja usa em
    * risco-consolidado.js (PESO_TIER). Um 4o nivel exigiria mexer em
    * CARGA_MAXIMA_POR_RISCO, que assume peso maximo 3.
    */
-  function faixa(score) {
+  function faixa(score, scoreMaximo) {
     if (score === null || score === undefined) return { rotulo: 'Não avaliado', cor: '#999', fundo: '#f5f5f5' };
-    if (score >= 13) return { rotulo: 'Alta', cor: '#c62828', fundo: '#ffebee' };
-    if (score >= 7) return { rotulo: 'Média', cor: '#e65100', fundo: '#fff3e0' };
-    return { rotulo: 'Baixa', cor: '#2e7d32', fundo: '#e8f5e9' };
+    var maximo = Number(scoreMaximo) || 0;
+    if (maximo > 0 && score >= maximo * LIMIAR_ALTA_PROPORCAO) return { rotulo: 'Alta', cor: 'var(--risk-critical)', fundo: 'var(--risk-critical-surface)' };
+    if (maximo > 0 && score >= maximo * LIMIAR_MEDIA_PROPORCAO) return { rotulo: 'Média', cor: 'var(--risk-medium)', fundo: '#fff3e0' };
+    return { rotulo: 'Baixa', cor: 'var(--risk-low)', fundo: '#e8f5e9' };
   }
 
   var PESO_POR_FAIXA = { 'Baixa': 1, 'Média': 2, 'Alta': 3 };
 
   /** Peso do risco automatico a partir do score. null (sem avaliacao) cai no peso padrao de quem chama. */
-  function pesoPorScore(score) {
+  function pesoPorScore(score, scoreMaximo) {
     if (score === null || score === undefined) return null;
-    return PESO_POR_FAIXA[faixa(score).rotulo] || null;
+    return PESO_POR_FAIXA[faixa(score, scoreMaximo).rotulo] || null;
   }
 
+  /** Opcao escolhida, pelo indice dela no array (ver nota no topo do arquivo). */
   function _opcao(pergunta, valor) {
-    return pergunta.opcoes.find(function (o) { return o.valor === String(valor || ''); }) || null;
+    var idx = Number(valor);
+    if (valor === undefined || valor === null || valor === '' || isNaN(idx)) return null;
+    return (pergunta.opcoes || [])[idx] || null;
   }
 
   /**
-   * Criticidade a partir das respostas.
+   * Criticidade a partir das perguntas ATIVAS (vindas do Firestore) e das
+   * respostas.
    *
-   * `respostas` e um mapa { dados, atividade, dependencia } -> valor da opcao
-   * escolhida (ou ausente/vazio se a pergunta nao foi respondida ainda).
+   * `perguntas` e a lista de perguntas ativas no momento (cada uma com `id`
+   * e `opcoes`). `respostas` e um mapa { [perguntaId]: indice da opcao
+   * escolhida } -- ausente/vazio se a pergunta nao foi respondida ainda.
    */
-  function calcular(respostas) {
+  function calcular(perguntas, respostas) {
+    var lista = perguntas || [];
     var mapa = respostas || {};
     var score = 0;
     var pendentes = [];
 
-    PERGUNTAS.forEach(function (p) {
-      var op = _opcao(p, mapa[p.chave]);
-      if (!op) { pendentes.push(p.chave); return; }
-      score += op.score;
+    lista.forEach(function (p) {
+      var op = _opcao(p, mapa[p.id]);
+      if (!op) { pendentes.push(p.id); return; }
+      score += Number(op.score) || 0;
     });
 
-    var completa = pendentes.length === 0;
+    var completa = lista.length > 0 && pendentes.length === 0;
+    var scoreMaximo = scoreMaximoDe(lista);
 
     return {
-      // Sem as 3 respostas, a criticidade nao existe -- 0 aqui mentiria que o
-      // fornecedor foi avaliado como baixo risco. Mesma regra do "nao avaliado"
-      // de fornecedor-score.js e do Tier Pendente do BIA.
+      // Sem todas as respostas, a criticidade nao existe -- 0 aqui mentiria
+      // que o fornecedor foi avaliado como baixo risco. Mesma regra do "nao
+      // avaliado" de fornecedor-score.js e do Tier Pendente do BIA.
       score: completa ? score : null,
-      faixa: completa ? faixa(score) : faixa(null),
+      scoreMaximo: scoreMaximo,
+      faixa: completa ? faixa(score, scoreMaximo) : faixa(null, scoreMaximo),
       completa: completa,
       pendentes: pendentes,
     };
@@ -192,9 +213,11 @@
 
   return {
     SENTIDO: SENTIDO,
-    PERGUNTAS: PERGUNTAS,
-    SCORE_MAXIMO: SCORE_MAXIMO,
+    PERGUNTAS_SEED: PERGUNTAS_SEED,
+    LIMIAR_ALTA_PROPORCAO: LIMIAR_ALTA_PROPORCAO,
+    LIMIAR_MEDIA_PROPORCAO: LIMIAR_MEDIA_PROPORCAO,
     PESO_POR_FAIXA: PESO_POR_FAIXA,
+    scoreMaximoDe: scoreMaximoDe,
     faixa: faixa,
     pesoPorScore: pesoPorScore,
     calcular: calcular,
