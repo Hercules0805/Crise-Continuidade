@@ -8,12 +8,15 @@
   <link rel="stylesheet" href="vendor/grc360/tokens.css?v=1">
   <link rel="stylesheet" href="vendor/grc360/bundle.css?v=1">
   <script src="vendor/grc360/bundle.js?v=4"></script>
-  <link rel="stylesheet" href="styles.css?v=15">
+  <!-- GRC360 v2 (layout/lay-v2): tokens depois do pacote v1 e antes de styles.css; fonte Open Sans (confirmar a oficial) -->
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="vendor/grc360/tokens-v2.css?v=1">
+  <link rel="stylesheet" href="styles.css?v=16">
 </head>
 <body>
   <nav class="nav">
     <div class="nav-brand" title="GRC360 · Governança, Riscos e Conformidade"><span id="nav-logo"></span></div>
-    <script>document.getElementById('nav-logo').appendChild(window.GRC360.Logo({ height: 22, tone: 'on-dark' }));</script>
+    <script>document.getElementById('nav-logo').appendChild(window.GRC360.Logo({ height: 28 }));</script>
     <div class="nav-links">
       <div class="nav-group" data-group="continuidade">
         <button type="button" class="nav-group-label">Continuidade de Negócio <span class="caret">▾</span></button>
@@ -235,9 +238,9 @@
       });
       // Mostrar usuario no nav
       document.getElementById('nav-user').innerHTML = `
-        <img src="${user.photoURL || ''}" style="width:28px;height:28px;border-radius:50%;border:2px solid rgba(255,255,255,0.4);" onerror="this.style.display='none'">
-        <span style="color:rgba(255,255,255,0.85);font-size:0.82em;">${user.displayName || user.email}</span>
-        <button onclick="firebase.auth().signOut().then(()=>window.location.href='/login.html')" style="background:rgba(255,255,255,0.15);border:none;color:white;padding:5px 12px;border-radius:6px;font-size:0.78em;cursor:pointer;font-weight:600;">Sair</button>
+        <img src="${user.photoURL || ''}" class="nav-user-avatar" onerror="this.style.display='none'">
+        <span class="nav-user-nome">${user.displayName || user.email}</span>
+        <button onclick="firebase.auth().signOut().then(()=>window.location.href='/login.html')" class="btn btn-ghost nav-user-sair">Sair</button>
       `;
       // Perfil carregado - iniciar rota
       window._perfilCarregado = true;

@@ -45,9 +45,14 @@ const CATEGORIA_CORES = ['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1
 // ============================================================
 const GRC360_LEVEL_LABEL = { low: 'Baixo', medium: 'Médio', high: 'Alto', critical: 'Crítico' };
 
+// DECISÃO 08/10/2026 (GRC360 v2): o nível agora é codificado por FORMA além de
+// cor (anel/meio/cheio/sólido, ver .chip--l1..l4 em styles.css), não mais pelas
+// 4 cores do v1. level continua low|medium|high|critical; só a marcação mudou.
+const GRC360_LEVEL_CHIP = { low: 'l1', medium: 'l2', high: 'l3', critical: 'l4' };
 function _htmlBadge(level, label) {
-  if (!level) return `<span class="badge badge-gray">${esc(label)}</span>`;
-  return `<span class="bia-badge bia-badge--${level}"><span class="bia-badge__dot"></span><span class="bia-badge__label label">${esc(label)}</span></span>`;
+  const chip = GRC360_LEVEL_CHIP[level];
+  if (!chip) return `<span class="badge badge-gray">${esc(label)}</span>`;
+  return `<span class="chip chip--${chip}">${esc(label)}</span>`;
 }
 
 function _htmlMetricCard({ label, value, level, trend }) {
@@ -7385,18 +7390,18 @@ function _badgeScoreRisco(r) {
   if (n === null) {
     // Escala nao reconhecida (risco importado de PCN) ou ainda sem avaliar.
     // Cinza e "-" em vez de zero: ausencia nao e risco baixo.
-    return `<span title="Probabilidade ou impacto fora da escala — reavalie este risco" style="color:#999;font-weight:600;">-</span>`;
+    return `<span class="muted" title="Probabilidade ou impacto fora da escala — reavalie este risco">–</span>`;
   }
   const f = _faixaScoreRisco(n);
-  return `<span title="${f.rotulo} (${n} de 12)">${_htmlBadge(_nivelFaixaRisco(f.rotulo), String(n))}</span>`;
+  return `<span class="chip-score" title="${f.rotulo} (${n} de 12)">${n}</span>`;
 }
 
 function _badgeStatusRisco(status) {
   const s = status || 'Identificado';
-  return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:white;background:${_corStatusRisco(s)};white-space:nowrap;">${s}</span>`;
+  return `<span class="chip-status">${esc(s)}</span>`;
 }
 function _badgeProbImpactoRisco(valor) {
-  if (!valor) return '<span style="color:#bbb;">-</span>';
+  if (!valor) return '<span class="muted">–</span>';
   return _htmlBadge(_nivelProbImpacto(valor), valor);
 }
 
@@ -7404,13 +7409,14 @@ function _badgeProbImpactoRisco(valor) {
  *  card acima da grade (risco-consolidado.js), nunca recalculada aqui. */
 function _badgeCargaRisco(r, processosPorId) {
   if (!RiscoConsolidado.contaNoConsolidado(r)) {
-    return '<span title="Encerrado não soma na Carga da Empresa" style="color:#bbb;">-</span>';
+    return '<span class="muted" title="Encerrado não soma na Carga da Empresa">–</span>';
   }
   const carga = RiscoConsolidado.cargaDoRisco(r, processosPorId, riscosCriticidadePorFornecedorCache);
   if (carga === null) {
-    return '<span title="Probabilidade ou impacto fora da escala — reavalie este risco" style="color:#999;font-weight:600;">-</span>';
+    return '<span class="muted" title="Probabilidade ou impacto fora da escala — reavalie este risco">–</span>';
   }
-  return `<span style="font-weight:700;color:#d60014;">${carga}</span>`;
+  const critico = (_scoreDoRisco(r) || 0) >= 9;
+  return `<span class="load${critico ? ' hi' : ''}">${carga}</span>`;
 }
 
 function _formatarReais(v) {
@@ -7421,36 +7427,37 @@ async function riscos() {
   const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Gestão de Riscos</h2><p class="page-sub">Registro, análise, tratamento e monitoramento dos riscos identificados</p></div>
+      <div><h2>Registro de riscos</h2><p class="page-sub">Registro, análise, tratamento e monitoramento dos riscos identificados</p></div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-primary" onclick="abrirImportarRisco()" id="btnImportarRisco" style="display:none;">📥 Importar Risco</button>
         <button class="btn btn-primary" onclick="abrirDrawerRisco()" id="btnNovoRisco" style="display:none;">+ Novo Risco</button>
       </div>
     </div>
     <div id="painelRiscoConsolidado" style="margin-bottom:20px;"></div>
-    <div style="margin-bottom:16px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Área:</label>
-        <select id="filtroRiscoArea" onchange="filtrarRiscos()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+    <div class="filters">
+      <div class="field">
+        <label class="field-label">Área</label>
+        <select id="filtroRiscoArea" onchange="filtrarRiscos()" class="field-control">
           <option value="">Todas as áreas</option>
         </select>
       </div>
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Status:</label>
-        <select id="filtroRiscoStatus" onchange="filtrarRiscos()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+      <div class="field">
+        <label class="field-label">Status</label>
+        <select id="filtroRiscoStatus" onchange="filtrarRiscos()" class="field-control">
           <option value="">Todos os status</option>
           ${RISCO_STATUS.map(s => `<option value="${s}">${s}</option>`).join('')}
         </select>
       </div>
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Fornecedor:</label>
-        <select id="filtroRiscoFornecedor" onchange="filtrarRiscos()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+      <div class="field">
+        <label class="field-label">Fornecedor</label>
+        <select id="filtroRiscoFornecedor" onchange="filtrarRiscos()" class="field-control">
           <option value="">Todos (inclui sem fornecedor)</option>
           <option value="_qualquer_">Somente riscos de fornecedores</option>
         </select>
       </div>
-      <div>
-        <input type="text" id="buscaRisco" placeholder="🔍 Buscar risco..." oninput="filtrarRiscos()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:250px;">
+      <div class="field">
+        <label class="field-label">&nbsp;</label>
+        <input type="search" id="buscaRisco" placeholder="Buscar risco…" aria-label="Buscar risco" oninput="filtrarRiscos()" class="field-control field-control--busca">
       </div>
     </div>
     <div class="loading">⏳ Carregando...</div>
@@ -7921,19 +7928,19 @@ function renderizarRiscos() {
 
   document.getElementById('riscoRows').innerHTML = data.length
     ? data.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${r.id}')">
-        <td style="font-size:0.85em;color:#555;white-space:nowrap;">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '-'}</td>
-        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#fce8ea;color:#d60014;">${esc(r.area || '-')}</span></td>
-        <td style="font-size:0.85em;color:#555;">${r.processo || (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span style="color:#bbb;">Corporativo</span>')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(_rotuloOrigemRisco(r.origem))}</td>
-        <td style="font-weight:600;color:#222;">${esc(r.titulo)}</td>
-        <td style="font-size:0.85em;color:#555;">${esc((r.categorias || []).join(', ')) || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(r.responsavel || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(r.reportadoPor || '-')}</td>
+        <td class="num">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '–'}</td>
+        <td>${r.area ? `<span class="chip-area">${esc(r.area)}</span>` : '<span class="chip-area">–</span>'}</td>
+        <td>${r.processo || (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span class="muted">Corporativo</span>')}</td>
+        <td>${esc(_rotuloOrigemRisco(r.origem))}</td>
+        <td class="title">${esc(r.titulo)}</td>
+        <td class="muted">${esc((r.categorias || []).join(', ')) || '–'}</td>
+        <td>${esc(r.responsavel || '–')}</td>
+        <td>${esc(r.reportadoPor || '–')}</td>
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
         <td style="text-align:center;">${_badgeScoreRisco(r)}</td>
         <td style="text-align:center;">${_badgeCargaRisco(r, processosPorId)}</td>
-        <td style="text-align:right;">${r.impactoFinanceiro === null || r.impactoFinanceiro === undefined ? '<span style="color:#bbb;">-</span>' : _formatarReais(r.impactoFinanceiro)}</td>
+        <td class="num" style="text-align:right;">${r.impactoFinanceiro === null || r.impactoFinanceiro === undefined ? '<span class="muted">–</span>' : _formatarReais(r.impactoFinanceiro)}</td>
         <td>${_badgeStatusRisco(r.status)}</td>
         <td>${_badgeProbImpactoRisco(r.prioridade)}</td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
@@ -7948,7 +7955,7 @@ function renderizarRiscos() {
           </button>` : ''}
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="16" style="text-align:center;color:#999;padding:40px;">Nenhum risco cadastrado.</td></tr>';
+    : '<tr><td colspan="16" class="muted" style="text-align:center;padding:40px;">Nenhum risco cadastrado.</td></tr>';
 }
 
 window.clonarRisco = (id) => {

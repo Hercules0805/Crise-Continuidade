@@ -218,3 +218,93 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 .toast[style*="display: block"], .toast[style*="display:block"] {
   transform: translateY(0);
 }
+
+
+/* ============================================================
+   GRC360 v2 (DECISÃO 08/10/2026) -- modelo layout/lay-v2/grc360-modelo_1.html.
+   Bloco de sobreposição: vem por último de propósito, redefine só o que o v2
+   muda (superfície clara/neutra, nav branca, tabela sunken, chips por forma,
+   filtros uppercase, foco por outline). Tokens em vendor/grc360/tokens-v2.css.
+   Tema escuro NÃO ativado (ver tokens-v2.css). Ver ui-referencias.md.
+   ============================================================ */
+body { background: var(--surface); color: var(--ink); font: 400 14px/20px var(--font-sans); }
+:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; }
+.btn-primary:focus-visible { outline: 2px solid var(--focus-ring-color); outline-offset: 2px; box-shadow: none; }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-muted); }
+.title { font-weight: 600; }
+#app { margin: 24px auto; padding: 0 24px 80px; }
+
+/* NAV -- barra branca, aba ativa com sublinhado vermelho (o verde da nav v1 sai) */
+.nav { background: var(--surface); color: var(--ink); height: 64px; padding: 0 24px; border-bottom: 1px solid var(--border); box-shadow: none; }
+.nav-brand { padding: 0 16px 0 0; }
+.nav-link, .nav-group-label { color: var(--ink-muted); font-size: 14px; font-weight: 600; padding: 21px 12px 19px; }
+.nav-link:hover, .nav-group-label:hover { color: var(--ink); background: var(--surface-sunken); }
+.nav-link.active, .nav-group.has-active > .nav-group-label { color: var(--ink); border-bottom-color: var(--red); }
+.nav-dropdown { background: var(--surface); border: 1px solid var(--border); border-top: none; border-radius: 0 0 var(--r-md) var(--r-md); box-shadow: 0 8px 20px rgba(42,38,35,0.12); }
+.nav-dropdown .nav-link { padding: 12px 16px; border-bottom: none; }
+.nav-dropdown .nav-link.active { background: var(--red-tint); border-left: 3px solid var(--red); padding-left: 13px; }
+.nav-busca input { background: var(--surface); border: 1px solid var(--border-strong); color: var(--ink); height: 36px; padding: 0 12px; border-radius: var(--r-md); font-size: 14px; }
+.nav-busca input::placeholder { color: var(--ink-muted); }
+.nav-busca input:focus { background: var(--surface); border-color: var(--red); }
+.nav-busca-resultados { border: 1px solid var(--border); box-shadow: 0 8px 20px rgba(42,38,35,0.12); }
+.nav-user-avatar { width: 32px; height: 32px; border-radius: var(--r-pill); border: 1px solid var(--border-strong); object-fit: cover; }
+.nav-user-nome { color: var(--ink); font-size: 14px; font-weight: 600; }
+.nav-user-sair { padding: 0 16px; }
+
+/* CABEÇALHO DE PÁGINA -- h1 do modelo (markup segue h2) + lead */
+.page-header { margin-bottom: 24px; }
+.page-header h2 { font: 700 32px/38px var(--font-sans); color: var(--ink); margin: 0 0 4px; }
+.page-sub { font-size: 14px; line-height: 20px; color: var(--ink-muted); margin-top: 0; max-width: 80ch; }
+
+/* BOTÕES -- 32px, borda strong no neutro; primário continua vermelho */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; padding: 0 16px; border: 1px solid transparent; border-radius: var(--r-md); font: 600 14px var(--font-sans); }
+.btn-primary { background: var(--red); border-color: var(--red); color: var(--on-red); }
+.btn-primary:hover { background: var(--brand-vivid); border-color: var(--brand-vivid); }
+.btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--border-strong); }
+.btn-ghost:hover { background: var(--surface-sunken); }
+.btn-icon:hover { background: var(--surface-sunken); }
+
+/* FILTROS */
+.filters { display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 24px; }
+.field { display: flex; flex-direction: column; gap: 4px; }
+.field-label { font: 600 13px/16px var(--font-sans); letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-muted); }
+.field-control { height: 40px; border: 1px solid var(--border-strong); border-radius: var(--r-sm); background: var(--surface); color: var(--ink); padding: 0 12px; font: 400 14px var(--font-sans); min-width: 200px; }
+.field-control--busca { min-width: 260px; }
+.field-control::placeholder { color: var(--ink-muted); }
+
+/* TABELA -- wrapper com borda (sem sombra), cabeçalho sunken uppercase */
+.data-table { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: none; }
+.data-table thead { background: var(--surface-sunken); color: var(--ink-muted); }
+.data-table th { padding: 12px; font: 600 12px/16px var(--font-sans); letter-spacing: 0.14em; color: var(--ink-muted); border-right: none; border-bottom: 1px solid var(--border); white-space: normal; overflow-wrap: anywhere; }
+.data-table tbody tr { border-bottom: none; }
+.data-table tbody tr:hover { background: var(--surface-sunken); }
+.data-table td { padding: 16px 12px; font-size: 14px; color: var(--ink); border-bottom: 1px solid var(--border); }
+.data-table tbody tr:last-child td { border-bottom: none; }
+.data-table td:nth-child(1) { color: var(--ink); }
+.data-table td:nth-child(2) strong { color: var(--ink); }
+#listaRiscos td:nth-child(1) { font-weight: 400; }
+
+/* CHIPS -- o nível vai por FORMA (anel / meio / cheio / sólido), não só por cor */
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: var(--r-pill); font: 600 12px var(--font-sans); white-space: nowrap; }
+.chip::before { content: ""; width: 8px; height: 8px; border-radius: 50%; border: 2px solid currentColor; box-sizing: border-box; }
+.chip--l1 { border: 1px solid var(--border-strong); color: var(--ink); }
+.chip--l2 { background: var(--surface-sunken); color: var(--ink); }
+.chip--l2::before { background: linear-gradient(90deg, currentColor 50%, transparent 50%); }
+.chip--l3 { background: var(--red-tint); color: var(--red); }
+.chip--l3::before { background: currentColor; }
+.chip--l4 { background: var(--red); color: var(--on-red); }
+.chip--l4::before { background: currentColor; }
+.chip-area { display: inline-block; padding: 2px 10px; border-radius: var(--r-pill); background: var(--surface-sunken); color: var(--ink); font-weight: 600; font-size: 12px; line-height: 18px; }
+.chip-status { display: inline-flex; height: 24px; align-items: center; padding: 0 12px; border-radius: var(--r-pill); border: 1px solid var(--border-strong); color: var(--ink); font: 600 12px var(--font-sans); white-space: nowrap; }
+.chip-score { display: inline-grid; place-items: center; min-width: 28px; height: 24px; border-radius: var(--r-pill); background: var(--surface-sunken); color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+.load { font-weight: 700; font-variant-numeric: tabular-nums; }
+.load.hi { color: var(--red); }
+
+/* CARDS / MODAL / DRAWER -- borda no lugar de sombra, título em ink */
+.group-card { border: 1px solid var(--border); box-shadow: none; }
+.bia-metric { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: none; }
+.modal { border: 1px solid var(--border); border-radius: var(--r-md); }
+.modal h3, .drawer-header h3 { color: var(--ink); }
+.drawer-header { border-bottom: 1px solid var(--border); }
+.drawer-footer { border-top: 1px solid var(--border); }
