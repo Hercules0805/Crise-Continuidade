@@ -48,7 +48,7 @@ async function main() {
 
   let gravados = 0;
   while (cursor.getTime() <= hoje.getTime()) {
-    const fimDoDiaISO = new Date(cursor.getTime() + (12 * 60 * 60 * 1000 - 1)).toISOString(); // ~23:59:59 do dia, no fuso da empresa
+    const fimDoDiaISO = new Date(cursor.getTime() + (12 * 60 * 60 * 1000 - 1)).toISOString(); // = retratoRisco.fimDoDiaISO(dia): 23:59:59.999 UTC
     const retrato = await retratoRisco.gerarRetrato(db, fimDoDiaISO);
     const dia = await retratoRisco.salvarRetrato(db, retrato);
     console.log(`${dia}: carga da empresa = ${retrato.empresa.carga} (${retrato.empresa.contados} riscos contados, ${retrato.foraPorStatus} fora por status)`);

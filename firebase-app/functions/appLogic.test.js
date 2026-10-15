@@ -459,6 +459,159 @@ test('gerarDRP mostra a mensagem de fallback quando nenhum processo esta vincula
   } finally { global.fetch = original; }
 });
 
+test('gerarDRP: IA que estoura o limite de tempo vira mensagem clara, nao erro cru', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  const db = makeDb(s);
+  const original = global.fetch;
+  let sinal = null;
+  global.fetch = async (_url, opts) => {
+    sinal = opts.signal;
+    const e = new Error('The operation was aborted due to timeout'); e.name = 'TimeoutError'; throw e;
+  };
+  try {
+    await assert.rejects(
+      () => WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' })),
+      (err) => err instanceof AppError && /demorou mais de 4 minutos/.test(err.message)
+    );
+    assert.ok(sinal, 'a chamada a IA deveria ir com limite de tempo (signal)');
+  } finally { global.fetch = original; }
+});
+
+test('gerarDRP: outros erros de rede continuam com a mensagem de antes', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  const db = makeDb(s);
+  const original = global.fetch;
+  global.fetch = async () => { throw new Error('ECONNRESET'); };
+  try {
+    await assert.rejects(
+      () => WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' })),
+      (err) => err instanceof AppError && err.message === 'Erro ao gerar DRP: ECONNRESET'
+    );
+  } finally { global.fetch = original; }
+});
+
+test('gerarDRP lista os canais de suporte do fornecedor vinculado, em ordem de nivel', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = {
+    d1: { nome: 'Internet', categoria: 'Infraestrutura', drpDependencias: [{ id: 'f1', nome: 'Operadora X', categoria: 'Fornecedores' }] },
+    f1: { nome: 'Operadora X', categoria: 'Fornecedores', canaisSuporte: [
+      { tipo: 'Portal de chamados', contato: 'https://suporte.x.com', nivel: 'N2', sla: '8h' },
+      { tipo: 'Telefone/0800', contato: '0800 123 4567', horario: '24x7', nivel: 'N1', sla: '4h', observacao: 'contrato 99' },
+    ] },
+  };
+  const db = makeDb(s);
+  let promptEnviado = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<p>ok</p>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
+    const n1 = promptEnviado.indexOf('- Operadora X — Telefone/0800 | Contato: 0800 123 4567 | Horário: 24x7 | Nível: N1 | SLA: 4h | Obs.: contrato 99');
+    const n2 = promptEnviado.indexOf('- Operadora X — Portal de chamados | Contato: https://suporte.x.com');
+    assert.ok(n1 !== -1 && n2 !== -1, 'os dois canais deveriam ir no prompt');
+    assert.ok(n1 < n2, 'N1 antes de N2');
+  } finally { global.fetch = original; }
+});
+
+test('gerarDRP avisa quando nenhum fornecedor vinculado tem canal de suporte', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  const db = makeDb(s);
+  let promptEnviado = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<p>ok</p>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.ok(promptEnviado.includes('Nenhum canal de suporte cadastrado para os fornecedores vinculados.'));
+  } finally { global.fetch = original; }
+});
+
+// --- Cadeado por secao (drpSecoes.js): secao ajustada pelo humano sobrevive
+// a uma nova geracao.
+test('gerarDRP preserva a secao bloqueada da ultima versao e devolve o cadeado', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  s.drp_conteudo = { d1: { versoes: [{
+    versao: 1, data: '2026-10-01T00:00:00.000Z', autor: 'x',
+    html: '<h2>2. Estratégia</h2><p>RTO 4h</p><h2>6. Runbook</h2><p>passo humano</p>',
+    bloqueadas: ['6'],
+  }] } };
+  const db = makeDb(s);
+  const original = global.fetch;
+  let promptEnviado = '';
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '```html\n<h2>2. Estratégia</h2><p>RTO 2h</p><h2>6. Runbook</h2><p>passo IA</p>\n```' }] } }] }) };
+  };
+  try {
+    const r = await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.strictEqual(r.drp, '<h2>2. Estratégia</h2><p>RTO 2h</p><h2>6. Runbook</h2><p>passo humano</p>');
+    assert.deepStrictEqual(r.bloqueadas, ['6']);
+    // Contexto: a secao travada vai no prompt, e a nao travada nao.
+    assert.ok(promptEnviado.includes('SEÇÕES JÁ REVISADAS POR UMA PESSOA'));
+    assert.ok(promptEnviado.includes('<h2>6. Runbook</h2><p>passo humano</p>'));
+    assert.ok(!promptEnviado.includes('RTO 4h'));
+  } finally { global.fetch = original; }
+});
+
+test('gerarDRP troca o "(seção mantida)" devolvido pela IA pela secao revisada', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  s.drp_conteudo = { d1: { versoes: [{ versao: 1, html: '<h2>6. Runbook</h2><p>passo humano</p>', bloqueadas: ['6'] }] } };
+  const db = makeDb(s);
+  const original = global.fetch;
+  global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<h2>2. Estratégia</h2><p>RTO 2h</p><h2>6. Runbook</h2><p>(seção mantida)</p>' }] } }] }) });
+  try {
+    const r = await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.strictEqual(r.drp, '<h2>2. Estratégia</h2><p>RTO 2h</p><h2>6. Runbook</h2><p>passo humano</p>');
+  } finally { global.fetch = original; }
+});
+
+test('gerarDRP sem secao travada nao manda o bloco de secoes revisadas', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  s.drp_conteudo = { d1: { versoes: [{ versao: 1, html: '<h2>6. Runbook</h2><p>x</p>' }] } };
+  const db = makeDb(s);
+  const original = global.fetch;
+  let promptEnviado = '';
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<p>ok</p>' }] } }] }) };
+  };
+  try {
+    const r = await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.ok(!promptEnviado.includes('SEÇÕES JÁ REVISADAS'));
+    assert.deepStrictEqual(r.bloqueadas, []);
+  } finally { global.fetch = original; }
+});
+
+test('salvarDRP guarda so as 5 ultimas versoes e continua a numeracao', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  s.drp_conteudo = { d1: { versoes: Array.from({ length: 19 }, (_, i) => ({ versao: i + 1, data: 'x', autor: 'a', html: 'v' + (i + 1) })) } };
+  const db = makeDb(s);
+  const r = await WRITE_ACTIONS.salvarDRP(db, { id: 'd1', html: '<p>nova</p>' }, ctx());
+  const versoes = db._store.drp_conteudo.d1.versoes;
+  assert.deepStrictEqual(versoes.map((v) => v.versao), [16, 17, 18, 19, 20]);
+  assert.deepStrictEqual({ versao: r.versao, total: r.totalVersoes }, { versao: 20, total: 5 });
+  assert.strictEqual(JSON.parse(db._store.dependencias.d1.drpSalvo).length, 5);
+});
+
+test('salvarDRP grava as secoes bloqueadas na versao nova', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  const db = makeDb(s);
+  await WRITE_ACTIONS.salvarDRP(db, { id: 'd1', html: '<h2>6. X</h2>', bloqueadas: ['6', '6', ' 3 ', ''] }, ctx());
+  assert.deepStrictEqual(db._store.drp_conteudo.d1.versoes[0].bloqueadas, ['6', '3']);
+});
+
 // --- Roteiro de Teste (aba "Gestao de Testes"): documento gerado via IA
 // usando o DRP ja gerado como base, um por tipo de teste (categoria), com
 // historico de versoes por categoria -- mesmo mecanismo do DRP.
@@ -560,7 +713,7 @@ test('excluirRoteiroTeste remove so as versoes da categoria pedida', async () =>
 
 test('importarVulnerabilidadeParaRisco recusa quem nao tem perfil Admin/Seguranca', async () => {
   const s = seed();
-  s.vulnerabilidades = { v1: { nome: 'Falha X', produto: 'Sistema Y', cvss: 1, statusCorrecao: 'Aberto' } };
+  s.vulnerabilidades = { v1: { nome: 'Falha X', produto: 'Sistema Y', cvss: 1, statusCorrecao: 'Pendente' } };
   s.config_perfis = { 'analista@fortestecnologia.com.br': { perfis: ['gestor'] } };
   const db = makeDb(s);
   await assert.rejects(
@@ -603,6 +756,25 @@ test('importarVulnerabilidadeParaRisco cria o risco mesmo com severidade baixa e
   assert.strictEqual(riscoDoc.categoria, 'Operacional');
   assert.strictEqual(riscoDoc.criadoPor, 'analista@fortestecnologia.com.br');
   assert.match(riscoDoc.descricao, /manualmente/);
+});
+
+test('importarVulnerabilidadeParaRisco usa o nome do Produto de Software vinculado no titulo', async () => {
+  const s = seedAdmin(seed());
+  s.produtos_software = { ps1: { nome: 'Fortes RH', ativo: true } };
+  s.vulnerabilidades = { v1: { nome: 'Falha X', produto: 'Área Restrita', produtoSoftwareId: 'ps1', cvss: 8 } };
+  const db = makeDb(s);
+  const r = await WRITE_ACTIONS.importarVulnerabilidadeParaRisco(db, { id: 'v1' }, ctx());
+  const riscoDoc = (await db.collection('riscos').doc(r.id).get()).data();
+  assert.match(riscoDoc.titulo, /em Fortes RH \/ Área Restrita \(CVSS 8\)/);
+});
+
+test('importarVulnerabilidadeParaRisco: produto vinculado que nao existe mais cai so no texto do ativo', async () => {
+  const s = seedAdmin(seed());
+  s.vulnerabilidades = { v1: { nome: 'Falha X', produto: 'Sistema Y', produtoSoftwareId: 'sumiu', cvss: 8 } };
+  const db = makeDb(s);
+  const r = await WRITE_ACTIONS.importarVulnerabilidadeParaRisco(db, { id: 'v1' }, ctx());
+  const riscoDoc = (await db.collection('riscos').doc(r.id).get()).data();
+  assert.match(riscoDoc.titulo, /em Sistema Y \(CVSS 8\)/);
 });
 
 test('importarVulnerabilidadeParaRisco nao duplica quando ja existe risco aberto para a mesma vulnerabilidade', async () => {

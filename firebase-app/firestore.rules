@@ -46,7 +46,7 @@ service cloud.firestore {
     // um perfil unico. temPerfil() cobre os dois — se um dia todo documento
     // tiver `perfis`, o segundo termo simplesmente nunca casa.
     //
-    // Os nomes ('admin','seguranca','ti','gestor') espelham public/perfis.js;
+    // Os nomes ('admin','seguranca','ti','gestor','operador') espelham public/perfis.js;
     // um teste falha se as duas listas divergirem. O perfil 'fornecedores' foi
     // extinto: quem o tinha passa a Seguranca da Informacao (migracao no
     // cliente, em api.js _lerPerfil).
@@ -75,10 +75,24 @@ service cloud.firestore {
       return temPerfil('ti');
     }
 
-    // Modulo de fornecedores: antes tinha perfil proprio; agora e Admin ou
-    // Seguranca da Informacao. (Espelha Perfis.podeGerenciarFornecedores.)
+    // Operador Administrativo (14/10/2026): assistente de TI/SI. Gerencia
+    // fornecedores e so le o resto. Espelha PERFIL.OPERADOR em public/perfis.js.
+    function isOperador() {
+      return temPerfil('operador');
+    }
+
+    // Modulo de fornecedores: antes tinha perfil proprio; agora e Admin,
+    // Seguranca da Informacao ou Operador Administrativo. (Espelha
+    // Perfis.podeGerenciarFornecedores.) O cadastro do fornecedor em si mora em
+    // /dependencias, onde o operador tem recorte por categoria (ver la).
     function podeGerenciarFornecedores() {
-      return isAdmin() || isSeguranca();
+      return isAdmin() || isSeguranca() || isOperador();
+    }
+
+    // Categorias de /dependencias que sao fornecedor. Espelha
+    // Perfis.CATEGORIAS_FORNECEDOR.
+    function categoriaFornecedor(c) {
+      return c in ['Fornecedores', 'Fornecedor'];
     }
 
     // Quem mexe no catalogo de dependencias: Admin, SI e TI. TI precisa editar
@@ -148,9 +162,19 @@ service cloud.firestore {
     // os modulos) e TI (precisa editar dependencias para montar o DRP). Nenhum
     // deles fica preso a uma categoria — o recorte por categoria existia so para
     // conter o antigo perfil de fornecedores, que nao existe mais.
+    //
+    // DECISAO 14/10/2026: o Operador Administrativo escreve AQUI, mas so em
+    // fornecedor: a categoria tem de ser Fornecedor antes E depois da escrita,
+    // senao ele editaria Pessoas/Sistemas/parametros de DRP, ou reclassificaria
+    // um documento para dentro/fora da categoria.
     match /dependencias/{id} {
       allow read: if isCorpUser();
       allow write: if podeMexerNaDependencia();
+      allow create: if isOperador() && categoriaFornecedor(request.resource.data.categoria);
+      allow update: if isOperador()
+        && categoriaFornecedor(resource.data.categoria)
+        && categoriaFornecedor(request.resource.data.categoria);
+      allow delete: if isOperador() && categoriaFornecedor(resource.data.categoria);
     }
 
     // DECISAO 29/09/2026: o HTML de cada versao do DRP GERADO mora aqui, fora do
@@ -223,9 +247,13 @@ service cloud.firestore {
     // area falha INTEIRA para o gestor, e nao devolve menos. O cliente tem de
     // consultar com where('area','==',<area do gestor>) — ver _lerRiscos em
     // api.js. Mudar um lado sem o outro quebra a tela de riscos.
+    // DECISAO 15/10/2026: Seguranca da Informacao opera o Registro de Riscos
+    // (Perfis.podeEditarRiscos ja dizia isso na tela, e PERFIS_RISCO no
+    // servidor tambem); so a regra do banco ficava em Admin -- SI via a tela e
+    // recebia "sem acesso".
     match /riscos/{id} {
-      allow read: if isAdmin() || isGestorDaArea(resource.data.area);
-      allow write: if isAdmin();
+      allow read: if isAdmin() || isSeguranca() || isGestorDaArea(resource.data.area);
+      allow write: if isAdmin() || isSeguranca();
     }
 
     match /indicadores_seguranca/{id} {
@@ -326,6 +354,15 @@ service cloud.firestore {
     match /categorias_fornecedor/{id} {
       allow read: if isCorpUser();
       allow write: if podeGerenciarFornecedores();
+    }
+
+    // Produtos de Software da empresa (Fortes Ponto, Fortes RH...). A Pessoa
+    // aponta para eles por id (Tech Lead / Team Lead). Leitura para o dominio
+    // (os seletores de Pessoas e Vulnerabilidades precisam), escrita Admin e
+    // Seguranca da Informacao.
+    match /produtos_software/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin() || isSeguranca();
     }
 
     // Subcategorias (filhas de uma categoria, por categoriaId) -- mesma

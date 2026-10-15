@@ -183,15 +183,13 @@ function medicaoDeLancamento(origemId, lanc) {
  * viesse — diferente do BIA, que recalcula no servidor. Um ponto da curva de
  * risco nao pode depender do que o cliente mandou: aqui ele e recalculado.
  */
-const PESO_PROBABILIDADE = { Baixa: 1, 'Média': 2, Alta: 3 };
-const PESO_IMPACTO = { Baixo: 1, Moderado: 2, Alto: 3, 'Crítico': 4 };
+// DECISAO 15/10/2026: escala NIST 5x5 (escalaRisco.js, copia testada da do
+// cliente). Rotulos da escala antiga (3x4) sao normalizados na leitura.
+const escalaRisco = require('./escalaRisco');
 
-/** Score do risco, ou null quando a escala nao e reconhecida. */
+/** Score do risco (1-25), ou null quando a escala nao e reconhecida. */
 function scoreDeRisco(probabilidade, impacto) {
-  const p = PESO_PROBABILIDADE[String(probabilidade || '').trim()];
-  const i = PESO_IMPACTO[String(impacto || '').trim()];
-  if (!p || !i) return null;
-  return p * i;
+  return escalaRisco.scoreDeRisco(probabilidade, impacto);
 }
 
 /**
@@ -265,7 +263,9 @@ function medicaoDeRisco(origemId, risco, anterior) {
     coletadoEm,
     registradoEm: new Date().toISOString(),
     registradoPor: String(risco.atualizadoPor || risco.criadoPor || '').trim(),
-    reguaVersao: 1,
+    // 2 = escala NIST 5x5 (score 1-25). Medicoes com 1 sao da escala 3x4; o
+    // historico recalcula o score pelos rotulos normalizados, nao pelo `valor`.
+    reguaVersao: 2,
     validoAte: _somarDias(coletadoEm, VALIDADE_DIAS[FONTE.RISCO]),
     origemColecao: 'riscos',
     origemId,
@@ -307,7 +307,9 @@ function medicaoDeExclusaoRisco(origemId, riscoAntes) {
     coletadoEm,
     registradoEm: coletadoEm,
     registradoPor: '',
-    reguaVersao: 1,
+    // 2 = escala NIST 5x5 (score 1-25). Medicoes com 1 sao da escala 3x4; o
+    // historico recalcula o score pelos rotulos normalizados, nao pelo `valor`.
+    reguaVersao: 2,
     validoAte: _somarDias(coletadoEm, VALIDADE_DIAS[FONTE.RISCO]),
     origemColecao: 'riscos',
     origemId,
@@ -364,8 +366,6 @@ function medicaoDeAvaliacaoFornecedor(origemId, av) {
 }
 
 module.exports = {
-  PESO_PROBABILIDADE,
-  PESO_IMPACTO,
   scoreDeRisco,
   medicaoDeRisco,
   medicaoDeExclusaoRisco,

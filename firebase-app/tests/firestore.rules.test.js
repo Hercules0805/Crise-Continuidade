@@ -199,6 +199,29 @@ describe('Security Rules — riscos recortados por area', () => {
     await assertFails(db(GESTOR).doc('riscos/r-rh').get());
   });
 
+  // DECISAO 15/10/2026: SI opera o Registro de Riscos (antes so Admin).
+  test('Segurança da Informação lê e grava risco de qualquer área, inclusive sem filtro', async () => {
+    const SI_R = { email: 'si-riscos@fortestecnologia.com.br' };
+    await seedPerfil(SI_R.email, { perfis: ['seguranca'] });
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('riscos/r-si').set({ area: 'RH', titulo: 'X' });
+    });
+    await assertSucceeds(db(SI_R).doc('riscos/r-si').get());
+    await assertSucceeds(db(SI_R).collection('riscos').get());
+    await assertSucceeds(db(SI_R).doc('riscos/r-si').set({ titulo: 'Y' }, { merge: true }));
+    await assertSucceeds(db(SI_R).doc('riscos/r-si2').set({ area: '', titulo: 'Corporativo' }));
+  });
+
+  test('TI continua sem ler nem gravar riscos', async () => {
+    const TI_R = { email: 'ti-riscos@fortestecnologia.com.br' };
+    await seedPerfil(TI_R.email, { perfis: ['ti'] });
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('riscos/r-ti2').set({ area: 'RH', titulo: 'X' });
+    });
+    await assertFails(db(TI_R).doc('riscos/r-ti2').get());
+    await assertFails(db(TI_R).doc('riscos/r-ti3').set({ area: 'RH', titulo: 'X' }));
+  });
+
   test('admin lê risco de qualquer área', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       await ctx.firestore().doc('riscos/r-rh2').set({ area: 'RH', titulo: 'X' });
@@ -313,6 +336,22 @@ describe('Security Rules — fornecedores, perfis e dependências', () => {
     });
     await assertSucceeds(db(GESTOR).doc('criterios_fornecedor/c1').get());
     await assertFails(db(GESTOR).doc('criterios_fornecedor/c1').set({ peso: 1 }));
+  });
+
+  // ---- Produtos de Software (catálogo-base: Admin ou Segurança escrevem, domínio lê) ----
+
+  test('produtos de software: domínio lê; admin e Segurança escrevem; gestor e TI não', async () => {
+    await seedPerfil(SI.email, { perfis: ['seguranca'] });
+    await seedPerfil(TI_USER.email, { perfis: ['ti'] });
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('produtos_software/ps1').set({ nome: 'Fortes Ponto', ativo: true });
+    });
+    await assertSucceeds(db(GESTOR).doc('produtos_software/ps1').get());
+    await assertFails(db(FORA).doc('produtos_software/ps1').get());
+    await assertSucceeds(db(ADMIN).doc('produtos_software/ps2').set({ nome: 'Fortes RH', ativo: true }));
+    await assertSucceeds(db(SI).doc('produtos_software/ps3').set({ nome: 'Colabore', ativo: true }));
+    await assertFails(db(GESTOR).doc('produtos_software/ps4').set({ nome: 'X' }));
+    await assertFails(db(TI_USER).doc('produtos_software/ps5').set({ nome: 'X' }));
   });
 
   test('admin cadastra e altera critério de fornecedor', async () => {
@@ -468,6 +507,39 @@ describe('Security Rules — fornecedores, perfis e dependências', () => {
     await assertSucceeds(db(ADMIN).doc('dependencias/d-forn').set({ categoria: 'Fornecedores', nome: 'Alfa' }));
     await assertSucceeds(db(ADMIN).doc('dependencias/d-forn').set({ nome: 'Alfa S.A.' }, { merge: true }));
     await assertSucceeds(db(ADMIN).doc('dependencias/d-forn').delete());
+  });
+
+  // ---- Operador Administrativo: so fornecedor em /dependencias ----
+
+  test('operador gerencia fornecedor em /dependencias, mas nao outras categorias nem reclassifica', async () => {
+    const OP = { email: 'operador@fortestecnologia.com.br' };
+    await seedPerfil(OP.email, { perfis: ['operador'] });
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('dependencias/d-pessoa').set({ categoria: 'Pessoas', nome: 'Ana' });
+      await ctx.firestore().doc('dependencias/d-forn2').set({ categoria: 'Fornecedores', nome: 'Beta' });
+    });
+    await assertSucceeds(db(OP).doc('dependencias/d-novo').set({ categoria: 'Fornecedores', nome: 'Alfa' }));
+    await assertSucceeds(db(OP).doc('dependencias/d-forn2').set({ nome: 'Beta S.A.' }, { merge: true }));
+    await assertFails(db(OP).doc('dependencias/d-forn2').set({ categoria: 'Sistemas' }, { merge: true }));
+    await assertFails(db(OP).doc('dependencias/d-pessoa').set({ categoria: 'Fornecedores' }, { merge: true }));
+    await assertFails(db(OP).doc('dependencias/d-pessoa').set({ nome: 'Outra' }, { merge: true }));
+    await assertFails(db(OP).doc('dependencias/d-x').set({ categoria: 'Sistemas', nome: 'ERP' }));
+    await assertFails(db(OP).doc('dependencias/d-pessoa').delete());
+    await assertSucceeds(db(OP).doc('dependencias/d-forn2').delete());
+  });
+
+  test('operador escreve criterios/categorias/avaliacoes de fornecedor; nao mexe em processos, areas, riscos nem perfis', async () => {
+    const OP = { email: 'operador@fortestecnologia.com.br' };
+    await seedPerfil(OP.email, { perfis: ['operador'] });
+    await assertSucceeds(db(OP).doc('criterios_fornecedor/c1').set({ nome: 'Preco' }));
+    await assertSucceeds(db(OP).doc('categorias_fornecedor/cat1').set({ nome: 'Nuvem' }));
+    await assertSucceeds(db(OP).doc('avaliacoes_fornecedor/a1').set({ fornecedorId: 'd-forn', nota: 80 }));
+    await assertSucceeds(db(OP).doc('processos/ti__proc').get());
+    await assertSucceeds(db(OP).doc('areas/a1').get());
+    await assertFails(db(OP).doc('processos/ti__proc').set({ area: 'TI', processo: 'Alterado' }));
+    await assertFails(db(OP).doc('areas/a1').set({ nome: 'X' }));
+    await assertFails(db(OP).doc('riscos/r1').set({ titulo: 'X' }));
+    await assertFails(db(OP).doc('config_perfis/operador@fortestecnologia.com.br').set({ perfis: ['admin'] }));
   });
 
   test('gestor não mexe no catálogo de dependências', async () => {

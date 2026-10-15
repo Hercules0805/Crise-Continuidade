@@ -89,3 +89,48 @@ test('escScript sobrevive ao round-trip de valores comuns', () => {
     assert.strictEqual(eval("'" + escScript(v) + "'"), v, 'quebrou em ' + v);
   }
 });
+
+// --- criarRastreadorEdicao: "Fechar" so grava se o formulario mudou.
+const { criarRastreadorEdicao } = require('../public/util.js');
+
+test('rastreador: sem marcar() conta como sujo (grava, como antes)', () => {
+  const r = criarRastreadorEdicao(() => ({ a: 1 }));
+  assert.strictEqual(r.sujo(), true);
+});
+
+test('rastreador: igual ao marcado = limpo; mudou = sujo; voltou ao original = limpo', () => {
+  const f = { nome: 'A', itens: [1] };
+  const r = criarRastreadorEdicao(() => ({ nome: f.nome, itens: f.itens.slice() }));
+  r.marcar();
+  assert.strictEqual(r.sujo(), false);
+  f.nome = 'B';
+  assert.strictEqual(r.sujo(), true);
+  f.nome = 'A';
+  assert.strictEqual(r.sujo(), false);
+  f.itens.push(2);
+  assert.strictEqual(r.sujo(), true);
+});
+
+test('rastreador: marcar(payload) usa o que foi enviado, nao o formulario atual', () => {
+  const f = { nome: 'A' };
+  const r = criarRastreadorEdicao(() => ({ nome: f.nome }));
+  const enviado = { nome: 'A' };
+  f.nome = 'A digitado durante a gravacao';
+  r.marcar(enviado);
+  assert.strictEqual(r.sujo(), true);
+});
+
+test('rastreador: esquecer() volta a sujo (rascunho que ainda nao existe no banco)', () => {
+  const r = criarRastreadorEdicao(() => ({ a: 1 }));
+  r.marcar();
+  r.esquecer();
+  assert.strictEqual(r.sujo(), true);
+});
+
+test('rastreador: coletor que falha conta como sujo, nunca como limpo', () => {
+  let falha = false;
+  const r = criarRastreadorEdicao(() => { if (falha) throw new Error('DOM sumiu'); return { a: 1 }; });
+  r.marcar();
+  falha = true;
+  assert.strictEqual(r.sujo(), true);
+});

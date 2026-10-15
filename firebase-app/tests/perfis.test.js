@@ -135,8 +135,8 @@ test('TI + Gestor soma poderes: opera DRP (TI) e cai na propria area (gestor)', 
 // CATALOGO
 // ============================================================
 
-test('sao exatamente quatro perfis, e o catalogo descreve todos', () => {
-  assert.strictEqual(Perfis.CATALOGO.length, 4);
+test('sao exatamente cinco perfis, e o catalogo descreve todos', () => {
+  assert.strictEqual(Perfis.CATALOGO.length, 5);
   Object.values(Perfis.PERFIL).forEach((v) => {
     assert.ok(Perfis.CATALOGO.some((p) => p.valor === v), `${v} falta no catalogo`);
   });
@@ -167,6 +167,7 @@ test('rotulo devolve nome legivel, nunca o valor cru', () => {
   assert.strictEqual(Perfis.rotulo('seguranca'), 'Segurança da Informação');
   assert.strictEqual(Perfis.rotulo('ti'), 'TI');
   assert.strictEqual(Perfis.rotulo('gestor'), 'Gestor de área');
+  assert.strictEqual(Perfis.rotulo('operador'), 'Operador Administrativo');
 });
 
 // ============================================================
@@ -182,7 +183,7 @@ test('os perfis que as regras testam por nome existem nesta lista', () => {
   const regras = lerRegras();
   // 'gestor' NAO aparece por nome nas regras de proposito: la o gestor e
   // identificado por TER uma area, nao pelo texto do perfil.
-  [Perfis.PERFIL.ADMIN, Perfis.PERFIL.SEGURANCA, Perfis.PERFIL.TI].forEach((v) => {
+  [Perfis.PERFIL.ADMIN, Perfis.PERFIL.SEGURANCA, Perfis.PERFIL.TI, Perfis.PERFIL.OPERADOR].forEach((v) => {
     assert.ok(regras.includes(`temPerfil('${v}')`),
       `o perfil '${v}' nao aparece em firestore.rules via temPerfil()`);
   });
@@ -250,7 +251,7 @@ const TODAS_AS_TELAS = [
   'processos', 'pcns', 'drp', 'areas', 'pessoas', 'riscos', 'vulnerabilidades',
   'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
   'dependencias', 'componentes', 'perguntas', 'relatorios', 'servicos', 'catalogo-backup',
-  'admin', 'perfis',
+  'admin', 'perfis', 'produtos-software',
   'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
 ];
 
@@ -261,7 +262,7 @@ test('admin ve todas as telas', () => {
 });
 
 test('SI ve quase tudo, menos as tres telas proprias do Admin', () => {
-  ['processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades', 'areas', 'pessoas', 'dependencias', 'relatorios', 'servicos', 'catalogo-backup',
+  ['processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades', 'areas', 'pessoas', 'dependencias', 'relatorios', 'servicos', 'catalogo-backup', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'indicadores-dashboard', 'admin'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.SEGURANCA, t), true, `SI deveria ver ${t}`);
@@ -345,4 +346,72 @@ test('categoriaDeFornecedor aceita as duas grafias em uso e recusa o resto', () 
   assert.strictEqual(Perfis.categoriaDeFornecedor(' Fornecedores '), true);
   assert.strictEqual(Perfis.categoriaDeFornecedor('fornecedores'), false, 'minuscula nao e a grafia gravada no catalogo');
   assert.strictEqual(Perfis.categoriaDeFornecedor('Sistemas'), false);
+});
+
+// ============================================================
+// OPERADOR ADMINISTRATIVO (14/10/2026): assistente de TI/SI, nao tecnico.
+// Gerencia fornecedores; so consulta Processos, Pessoas e Areas.
+// ============================================================
+
+const TELAS_DO_OPERADOR = [
+  'areas', 'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
+  'fornecedores-criticidade', 'fornecedores-subcategorias', 'pessoas', 'processos', 'relatorios',
+];
+
+test('operador ve exatamente as 9 telas combinadas, e nenhuma outra', () => {
+  const vistas = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela(Perfis.PERFIL.OPERADOR, t));
+  assert.deepStrictEqual(vistas.sort(), TELAS_DO_OPERADOR);
+});
+
+test('operador NAO ve nada tecnico: DRP, PCN, riscos, vulnerabilidades, indicadores, perfis, perguntas, dependencias', () => {
+  ['drp', 'pcns', 'riscos', 'vulnerabilidades', 'indicadores-dashboard', 'indicadores-cadastro',
+    'indicadores-lancamento', 'indicadores-matriz', 'dependencias', 'componentes', 'perfis', 'perguntas',
+    'servicos', 'catalogo-backup', 'produtos-software', 'admin'].forEach((t) => {
+    assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.OPERADOR, t), false, `operador nao deveria ver ${t}`);
+  });
+});
+
+test('a pagina inicial do operador e Processos', () => {
+  assert.strictEqual(Perfis.telasDoPerfil(Perfis.PERFIL.OPERADOR)[0], 'processos');
+});
+
+test('operador gerencia fornecedores e nada alem disso', () => {
+  const o = Perfis.PERFIL.OPERADOR;
+  assert.strictEqual(Perfis.podeGerenciarFornecedores(o), true);
+  assert.strictEqual(Perfis.ehOperador(o), true);
+  assert.strictEqual(Perfis.exigeArea(o), false);
+  [Perfis.podeMexerNaDependencia, Perfis.podeMexerNaArea, Perfis.podeGerenciarProdutosSoftware,
+    Perfis.podeGerenciarPerfis, Perfis.podeGerarPCN, Perfis.podeGerarDRP, Perfis.podeOperarDRP,
+    Perfis.podeEditarRiscos, Perfis.podeEditarIndicadores, Perfis.podeEditarPerguntas,
+    Perfis.podeEditarRegua, Perfis.podeEditarProcessos, Perfis.podeEditarPessoas].forEach((fn) => {
+    assert.strictEqual(fn(o), false, `${fn.name} deveria ser false para o operador`);
+  });
+});
+
+test('quem ja editava processos e pessoas continua editando', () => {
+  assert.strictEqual(Perfis.podeEditarProcessos('admin'), true);
+  assert.strictEqual(Perfis.podeEditarProcessos('seguranca'), true);
+  assert.strictEqual(Perfis.podeEditarProcessos('gestor'), true);
+  assert.strictEqual(Perfis.podeEditarProcessos('ti'), false);
+  assert.strictEqual(Perfis.podeEditarPessoas('admin'), true);
+  assert.strictEqual(Perfis.podeEditarPessoas('seguranca'), true);
+  assert.strictEqual(Perfis.podeEditarPessoas('ti'), true);
+  assert.strictEqual(Perfis.podeEditarPessoas('gestor'), false);
+});
+
+test('operador + TI soma os poderes (uniao), sem dar fornecedor ao TI sozinho', () => {
+  assert.strictEqual(Perfis.podeMexerNaDependencia(['operador', 'ti']), true);
+  assert.strictEqual(Perfis.podeVerTela(['operador', 'ti'], 'drp'), true);
+  assert.strictEqual(Perfis.podeGerenciarFornecedores('ti'), false);
+});
+
+test('as regras limitam o operador em /dependencias a categoria de fornecedor', () => {
+  const regras = lerRegras();
+  const bloco = regras.slice(regras.indexOf('match /dependencias/{id}'));
+  const corpo = bloco.slice(0, bloco.indexOf('\n    }'));
+  assert.ok(/allow update:[^;]*isOperador\(\)[^;]*categoriaFornecedor\(resource\.data\.categoria\)[^;]*categoriaFornecedor\(request\.resource\.data\.categoria\)/s.test(corpo),
+    'update do operador tem que exigir fornecedor antes E depois (sem reclassificar)');
+  assert.ok(/allow create:[^;]*isOperador\(\)[^;]*categoriaFornecedor\(request\.resource/s.test(corpo));
+  assert.ok(/allow delete:[^;]*isOperador\(\)[^;]*categoriaFornecedor\(resource/s.test(corpo));
+  assert.ok(!/podeMexerNaDependencia\(\)\s*\|\|\s*isOperador/.test(corpo), 'operador nao entra na regra ampla');
 });

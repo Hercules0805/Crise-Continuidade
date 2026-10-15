@@ -131,6 +131,33 @@
     };
   }
 
+  /**
+   * Rastreia se o formulario de um drawer mudou desde que foi aberto/salvo.
+   * `coletor` devolve o payload que o Salvar enviaria (puro: sem toast, sem
+   * efeito). A comparacao e o JSON desse payload -- as chaves saem sempre na
+   * mesma ordem porque o coletor e um literal so.
+   *
+   *   marcar()        marca o estado ATUAL do formulario como "limpo" (fim do abrirX)
+   *   marcar(payload) marca o que foi de fato enviado (depois de gravar) -- nao o
+   *                   formulario atual, pra nao "perdoar" o que foi digitado
+   *                   durante a gravacao
+   *   esquecer()      volta a "sempre sujo" (ex.: rascunho que ainda nao existe no banco)
+   *   sujo()          true se mudou, se nunca foi marcado ou se o coletor falhar --
+   *                   na duvida, grava (comportamento de antes).
+   */
+  function criarRastreadorEdicao(coletor) {
+    var base = null;
+    function assinatura(valor) { return JSON.stringify(valor === undefined ? coletor() : valor); }
+    return {
+      marcar: function (valor) { try { base = assinatura(valor); } catch (e) { base = null; } },
+      esquecer: function () { base = null; },
+      sujo: function () {
+        if (base === null) return true;
+        try { return assinatura() !== base; } catch (e) { return true; }
+      },
+    };
+  }
+
   /** '12345678000190' | '12.345.678/0001-90' -> '12.345.678/0001-90'. Trunca em 14 digitos. */
   function formatarCNPJ(valor) {
     var d = String(valor || '').replace(/\D/g, '').slice(0, 14);
@@ -162,6 +189,7 @@
   return {
     esc: esc, escJs: escJs, escScript: escScript,
     comBotaoCarregando: comBotaoCarregando, criarOrdenacao: criarOrdenacao,
+    criarRastreadorEdicao: criarRastreadorEdicao,
     formatarCNPJ: formatarCNPJ, formatarTelefoneBR: formatarTelefoneBR,
   };
 });

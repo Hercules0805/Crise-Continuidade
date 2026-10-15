@@ -21,6 +21,7 @@ const { READ_ACTIONS, WRITE_ACTIONS, TokenError } = require('./tokenLogic');
 const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia, medicaoDeLancamento, medicaoDeRisco, medicaoDeExclusaoRisco, medicaoDeAvaliacaoFornecedor, scoreDeRisco } = require('./medicoes');
 const fornecedorRisco = require('./fornecedorRisco');
 const vulnerabilidadeRisco = require('./vulnerabilidadeRisco');
+const vulnerabilidadeContexto = require('./vulnerabilidadeContexto');
 const retratoRisco = require('./retratoRisco');
 const {
   READ_ACTIONS: APP_READ,
@@ -161,7 +162,10 @@ async function autenticar(req) {
   };
 }
 
-exports.appApi = onRequest({ region: 'us-central1', cors: false, secrets: [GEMINI_API_KEY] }, async (req, res) => {
+// timeoutSeconds: gerar DRP/PCN/Roteiro pela IA passa de 60 s (padrao) em
+// documento grande -- a plataforma cortava a conexao e o navegador so dizia
+// "Failed to fetch". A chamada a IA tem limite proprio de 4 min (appLogic.js).
+exports.appApi = onRequest({ region: 'us-central1', cors: false, secrets: [GEMINI_API_KEY], timeoutSeconds: 300 }, async (req, res) => {
   aplicarCors(req, res);
   // Este endpoint le o cabecalho Authorization, entao precisa declara-lo.
   res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -369,50 +373,123 @@ exports.riscoDeFornecedor = onDocumentCreated(
 // existir caminho que grave a vulnerabilidade e esqueca o risco.
 //
 // DIFERENCA do Fornecedor: onDocumentWritten, nao onDocumentCreated -- uma
-// Vulnerabilidade e UM documento so, editado no lugar (o Status da Correcao
-// muda de "Aberto" pra "Corrigida" quando o time resolve), entao o gatilho
-// precisa reagir tambem a updates, nao so a criacao.
+// Vulnerabilidade e UM documento so, editado no lugar, entao o gatilho reage a
+// criacao, edicao E exclusao.
+//
+// DECISAO 15/10/2026 (NIST): alem de abrir/encerrar, o gatilho mantem o risco
+// ativo sincronizado com a vulnerabilidade (vulnerabilidadeRisco.decidir ->
+// 'atualizar'); a exclusao da vulnerabilidade encerra o risco (antes ficava
+// orfao); o limiar vem de config_regua/vulnerabilidade.
+
+/**
+ * Decide e aplica o risco de UMA vulnerabilidade. Compartilhado pelo gatilho e
+ * pela varredura diaria. `dados` = documento (ou o de antes, se excluida).
+ */
+async function sincronizarRiscoDaVulnerabilidade(id, dados, excluida, cache) {
+  const vulnerabilidade = Object.assign({ id }, dados || {});
+  const riscosSnap = await db.collection('riscos').where('vulnerabilidadeId', '==', id).get();
+  const riscos = riscosSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+  const ctx = excluida
+    ? { limiar: undefined, produtoNome: '', processosAfetados: [] }
+    : await vulnerabilidadeContexto.contextoDaVulnerabilidade(db, vulnerabilidade, cache);
+
+  const decisao = vulnerabilidadeRisco.decidir({
+    vulnerabilidade, excluida, riscos, limiar: ctx.limiar, produtoNome: ctx.produtoNome, processosAfetados: ctx.processosAfetados,
+  });
+  const agora = new Date().toISOString();
+
+  if (decisao.acao === 'abrir') {
+    await db.collection('riscos').add(Object.assign({}, decisao.risco, {
+      criadoEm: agora,
+      atualizadoEm: agora,
+      criadoPor: String((dados && dados.atualizadoPor) || ''),
+    }));
+  } else if (decisao.acao === 'encerrar' || decisao.acao === 'atualizar') {
+    const lote = db.batch();
+    const alvos = decisao.acao === 'encerrar'
+      ? decisao.ids.map((rid) => ({ id: rid, patch: decisao.patch }))
+      : decisao.atualizacoes;
+    alvos.forEach((a) => {
+      lote.set(db.collection('riscos').doc(a.id), Object.assign({}, a.patch, { atualizadoEm: agora }), { merge: true });
+    });
+    await lote.commit();
+  }
+  return decisao;
+}
+
 exports.riscoDeVulnerabilidade = onDocumentWritten(
   { region: 'us-central1', document: 'vulnerabilidades/{id}' },
   async (event) => {
-    const depois = event.data && event.data.after && event.data.after.exists
-      ? event.data.after.data() : null;
-    if (!depois) return; // vulnerabilidade excluida: nada a decidir aqui.
-
-    const vulnerabilidade = Object.assign({ id: event.params.id }, depois);
-
+    const depois = event.data && event.data.after && event.data.after.exists ? event.data.after.data() : null;
+    const antes = event.data && event.data.before && event.data.before.exists ? event.data.before.data() : null;
+    const excluida = !depois;
     try {
-      const riscosSnap = await db.collection('riscos').where('vulnerabilidadeId', '==', event.params.id).get();
-      const riscos = riscosSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
-
-      const decisao = vulnerabilidadeRisco.decidir({ vulnerabilidade, riscos });
-
-      if (decisao.acao === 'abrir') {
-        const agora = new Date().toISOString();
-        await db.collection('riscos').add(Object.assign({}, decisao.risco, {
-          criadoEm: agora,
-          atualizadoEm: agora,
-          criadoPor: String(depois.atualizadoPor || ''),
-        }));
-        logger.info('riscoDeVulnerabilidade: risco aberto', { vulnerabilidadeId: event.params.id });
-        return;
-      }
-
-      if (decisao.acao === 'encerrar') {
-        const lote = db.batch();
-        decisao.ids.forEach((id) => {
-          lote.set(db.collection('riscos').doc(id),
-            Object.assign({}, decisao.patch, { atualizadoEm: new Date().toISOString() }),
-            { merge: true });
-        });
-        await lote.commit();
-        logger.info('riscoDeVulnerabilidade: risco(s) encerrado(s)', { vulnerabilidadeId: event.params.id, ids: decisao.ids });
-        return;
-      }
-
-      logger.info('riscoDeVulnerabilidade: nada a fazer', { vulnerabilidadeId: event.params.id, motivo: decisao.motivo });
+      const decisao = await sincronizarRiscoDaVulnerabilidade(event.params.id, depois || antes, excluida);
+      logger.info(`riscoDeVulnerabilidade: ${decisao.acao}`, { vulnerabilidadeId: event.params.id, motivo: decisao.motivo });
     } catch (err) {
       logger.error('riscoDeVulnerabilidade: falha ao tratar o risco automatico', { vulnerabilidadeId: event.params.id, erro: err.message });
+    }
+  }
+);
+
+// Varredura diaria (05:30, antes do retrato das 06:00): reavalia todas as
+// vulnerabilidades ainda nao corrigidas. Pega o que muda sem ninguem editar a
+// vulnerabilidade: Data Prevista que venceu (item de correcao -> Atrasado), o
+// Tier de um processo afetado que mudou no BIA, o limiar que foi reconfigurado.
+// So grava o que de fato muda (decidir devolve 'nada' quando ja esta em dia).
+exports.varreduraDiariaVulnerabilidades = onSchedule(
+  { region: 'us-central1', schedule: '30 5 * * *', timeZone: 'America/Sao_Paulo' },
+  async () => {
+    const snap = await db.collection('vulnerabilidades').get();
+    const cache = {};
+    const contagem = { abrir: 0, atualizar: 0, encerrar: 0, nada: 0, erro: 0 };
+    for (const d of snap.docs) {
+      if (String((d.data() || {}).statusCorrecao || '') === 'Corrigida') continue;
+      try {
+        const decisao = await sincronizarRiscoDaVulnerabilidade(d.id, d.data(), false, cache);
+        contagem[decisao.acao] = (contagem[decisao.acao] || 0) + 1;
+      } catch (err) {
+        contagem.erro++;
+        logger.error('varreduraDiariaVulnerabilidades: falha', { vulnerabilidadeId: d.id, erro: err.message });
+      }
+    }
+    logger.info('varreduraDiariaVulnerabilidades: concluida', contagem);
+  }
+);
+
+// Risco -> Vulnerabilidade (rastreabilidade nos dois sentidos, 15/10/2026).
+// Quando uma PESSOA aceita o risco de uma vulnerabilidade (status -> Aceito),
+// a vulnerabilidade passa a "Aceita", com a justificativa nas observacoes --
+// a decisao de aceitar (NIST: resposta ao risco) fica registrada nos dois
+// lugares. Sem laco: se a vulnerabilidade ja esta Aceita/Corrigida, nada; e a
+// sincronizacao de volta encontra o risco ja Aceito e nao muda nada.
+// Encerrar o risco a mao NAO marca a vulnerabilidade como corrigida: so a
+// correcao prova isso.
+exports.vulnerabilidadeDeRiscoAceito = onDocumentWritten(
+  { region: 'us-central1', document: 'riscos/{id}' },
+  async (event) => {
+    const depois = event.data && event.data.after && event.data.after.exists ? event.data.after.data() : null;
+    const antes = event.data && event.data.before && event.data.before.exists ? event.data.before.data() : null;
+    if (!depois || depois.origem !== vulnerabilidadeRisco.ORIGEM || !depois.vulnerabilidadeId) return;
+    if (depois.status !== 'Aceito' || (antes && antes.status === 'Aceito')) return;
+    try {
+      const ref = db.collection('vulnerabilidades').doc(String(depois.vulnerabilidadeId));
+      const vSnap = await ref.get();
+      if (!vSnap.exists) return;
+      const v = vSnap.data() || {};
+      if (['Aceita', 'Corrigida'].includes(String(v.statusCorrecao || ''))) return;
+      const hoje = new Date().toISOString().slice(0, 10);
+      const just = String(depois.justificativaAceite || depois.estrategiaDescricao || '').trim();
+      const linha = `${hoje} — Risco aceito no Registro de Riscos${just ? `: ${just}` : '.'}`;
+      await ref.set({
+        statusCorrecao: 'Aceita',
+        observacoes: v.observacoes ? `${v.observacoes}\n${linha}` : linha,
+        atualizadoEm: new Date().toISOString(),
+        atualizadoPor: 'automacao:registro-de-riscos',
+      }, { merge: true });
+      logger.info('vulnerabilidadeDeRiscoAceito: vulnerabilidade marcada como Aceita', { riscoId: event.params.id, vulnerabilidadeId: depois.vulnerabilidadeId });
+    } catch (err) {
+      logger.error('vulnerabilidadeDeRiscoAceito: falha', { riscoId: event.params.id, erro: err.message });
     }
   }
 );

@@ -146,26 +146,28 @@ const riscoOk = () => ({
 });
 
 test('score do risco é recalculado no servidor, não aceito do cliente', () => {
-  // O cliente mandou 99; o que entra na curva é 2 x 3 = 6.
+  // O cliente mandou 99; o que entra na curva é Média->Moderada(3) x Alto(4) = 12 (escala NIST 5x5).
   const m = medicaoDeRisco('r1', { ...riscoOk(), score: 99 }, null);
-  assert.strictEqual(m.valor, 6);
+  assert.strictEqual(m.valor, 12);
+  assert.strictEqual(m.reguaVersao, 2, 'régua 2 = escala 5x5');
 });
 
-test('escala do PCN não é reconhecida e não vira medição', () => {
-  // A tabela de riscos do PCN usa Baixo/Médio/Alto para probabilidade; o
-  // registro usa Baixa/Média/Alta. Registrar número errado é pior que não
-  // registrar — o log avisa e alguém corrige a origem.
-  assert.strictEqual(scoreDeRisco('Médio', 'Alto'), null);
-  assert.strictEqual(medicaoDeRisco('r', { ...riscoOk(), probabilidade: 'Médio' }, null), null);
-  assert.strictEqual(medicaoDeRisco('r', { ...riscoOk(), impacto: 'Médio' }, null), null);
+test('rótulo fora de qualquer escala não vira medição; variantes de gênero (Médio) são reconhecidas', () => {
+  // Registrar número errado é pior que não registrar. Desde a escala 5x5
+  // (15/10/2026) os rótulos são normalizados: "Médio" do PCN vira Moderada/
+  // Moderado; "Grave" não pertence a escala nenhuma.
+  assert.strictEqual(scoreDeRisco('Médio', 'Alto'), 12);
+  assert.strictEqual(scoreDeRisco('Grave', 'Alto'), null);
+  assert.strictEqual(medicaoDeRisco('r', { ...riscoOk(), probabilidade: 'Grave' }, null), null);
+  assert.strictEqual(medicaoDeRisco('r', { ...riscoOk(), impacto: 'Grave' }, null), null);
 });
 
 test('reavaliação que muda o score vira ponto novo', () => {
   const antes = riscoOk();
-  const depois = { ...riscoOk(), impacto: 'Crítico' };  // 2 x 4 = 8
+  const depois = { ...riscoOk(), impacto: 'Crítico' };  // Moderada(3) x Crítico->Muito alto(5) = 15
   const m = medicaoDeRisco('r1', depois, antes);
   assert.ok(m);
-  assert.strictEqual(m.valor, 8);
+  assert.strictEqual(m.valor, 15);
 });
 
 test('mudança de status também vira ponto', () => {
@@ -224,13 +226,14 @@ test('sem risco anterior (nada a fechar), não gera medição', () => {
   assert.strictEqual(medicaoDeExclusaoRisco('r1', null), null);
 });
 
-test('todas as combinações da escala dão score entre 1 e 12', () => {
-  for (const p of ['Baixa', 'Média', 'Alta']) {
-    for (const i of ['Baixo', 'Moderado', 'Alto', 'Crítico']) {
+test('todas as combinações da escala NIST 5x5 dão score entre 1 e 25 (e os rótulos antigos também)', () => {
+  for (const p of ['Muito baixa', 'Baixa', 'Moderada', 'Alta', 'Muito alta', 'Média']) {
+    for (const i of ['Muito baixo', 'Baixo', 'Moderado', 'Alto', 'Muito alto', 'Crítico']) {
       const s = scoreDeRisco(p, i);
-      assert.ok(s >= 1 && s <= 12, `${p} x ${i} = ${s}`);
+      assert.ok(s >= 1 && s <= 25, `${p} x ${i} = ${s}`);
     }
   }
+  assert.strictEqual(scoreDeRisco('Muito alta', 'Muito alto'), 25);
 });
 
 // ============================================================

@@ -123,7 +123,8 @@ function decidir({ avaliacao, fornecedor, riscos, limiar, hoje }) {
         // quanto doi se este fornecedor falhar e decisao de gente. Enquanto
         // estiver vazio, o risco aparece no registro e no aviso do painel, e
         // nao move a carga.
-        probabilidade: nota < 50 ? 'Alta' : 'Média',
+        // Escala NIST 5x5 (15/10/2026): o meio da escala e "Moderada".
+        probabilidade: nota < 50 ? 'Alta' : 'Moderada',
         planoAcao: [],
         kris: [],
       },

@@ -73,10 +73,28 @@ async function montarInsumos(db) {
   return { medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor };
 }
 
-/** Reconstroi o retrato do risco consolidado como estava em `dataAlvoISO`. */
+/**
+ * Fim do dia `chave` (YYYY-MM-DD): 23:59:59.999 UTC. E o MESMO instante que o
+ * backfill sempre usou para "o retrato daquele dia" -- o que o gráfico mostra.
+ */
+function fimDoDiaISO(chave) {
+  return new Date(chave + 'T23:59:59.999Z').toISOString();
+}
+
+/** A chave do dia anterior a `chave` (YYYY-MM-DD), por aritmetica de data pura. */
+function diaAnterior(chave) {
+  return new Date(Date.parse(chave + 'T00:00:00.000Z') - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+
+/**
+ * Reconstroi o retrato do risco consolidado como estava em `dataAlvoISO`, mais
+ * `mudancas`: o que mudou, risco a risco, desde o fim do dia anterior (a
+ * resposta para "por que a curva subiu neste dia?").
+ */
 async function gerarRetrato(db, dataAlvoISO) {
   const { medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor } = await montarInsumos(db);
-  return historicoRisco.reconstruirEmData(medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor, dataAlvoISO);
+  const baselineISO = fimDoDiaISO(diaAnterior(chaveDoDia(dataAlvoISO)));
+  return historicoRisco.reconstruirComMudancas(medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor, dataAlvoISO, baselineISO);
 }
 
 /**
@@ -93,4 +111,4 @@ async function salvarRetrato(db, retrato) {
   return dia;
 }
 
-module.exports = { COLECAO_RETRATOS, chaveDoDia, montarInsumos, gerarRetrato, salvarRetrato };
+module.exports = { COLECAO_RETRATOS, chaveDoDia, fimDoDiaISO, diaAnterior, montarInsumos, gerarRetrato, salvarRetrato };

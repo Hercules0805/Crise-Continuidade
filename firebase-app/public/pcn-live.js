@@ -282,8 +282,8 @@ function buildRiscoExportEditor() {
   if (!table) return '<p style="font-size:0.85em;color:#999;">Tabela de Avaliação de Riscos não encontrada nesta versão do PCN.</p>';
 
   var col = _colunasRiscoPCN(table);
-  var probOptions = ['Alta', 'Média', 'Baixa'];
-  var impactOptions = ['Crítico', 'Alto', 'Moderado', 'Baixo'];
+  var probOptions = PROB_OPCOES_RISCO;
+  var impactOptions = IMPACTO_OPCOES_RISCO;
   var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr')).map(function(tr, idx) {
     var cells = tr.querySelectorAll('td');
     var ler = function(i) { return i >= 0 && cells[i] ? cells[i].textContent.trim() : ''; };
@@ -515,12 +515,12 @@ function enhanceRiskMatrix() {
   if (!content) return;
 
   var colors = {
-    'Alta': '#ffcdd2', 'Alto': '#fff3e0', 'Crítico': '#ffcdd2',
-    'Média': '#fff3e0', 'Médio': '#fff3e0', 'Moderado': '#e8f5e9',
-    'Baixa': '#e8f5e9', 'Baixo': '#f5f5f5'
+    'Muito alta': '#ffcdd2', 'Muito alto': '#ffcdd2', 'Alta': '#ffe0b2', 'Alto': '#ffe0b2',
+    'Moderada': '#fff8e1', 'Moderado': '#fff8e1', 'Baixa': '#e8f5e9', 'Baixo': '#e8f5e9',
+    'Muito baixa': '#f5f5f5', 'Muito baixo': '#f5f5f5'
   };
-  var probOptions = ['Alta', 'Média', 'Baixa'];
-  var impactOptions = ['Crítico', 'Alto', 'Moderado', 'Baixo'];
+  var probOptions = PROB_OPCOES_RISCO;
+  var impactOptions = IMPACTO_OPCOES_RISCO;
 
   var table = _tabelaRiscoPCN(content);
   if (!table) return;
@@ -558,16 +558,36 @@ function enhanceRiskMatrix() {
 // <option> nova marcada selected, gravada assim pra sempre no proximo save.
 // select.value reflete o que estava de fato selecionado, ignorando as demais
 // opções, entao é isso que usamos quando a célula já foi transformada antes.
+// Escala NIST 5x5 (15/10/2026). Do maior para o menor -- e "Muito ..." antes
+// do rotulo simples, para o casamento parcial nao confundir "Muito alta" com "Alta".
+var PROB_OPCOES_RISCO = ['Muito alta', 'Alta', 'Moderada', 'Baixa', 'Muito baixa'];
+var IMPACTO_OPCOES_RISCO = ['Muito alto', 'Alto', 'Moderado', 'Baixo', 'Muito baixo'];
+
+// PCN salvo antes da escala 5x5 tem "Média"/"Médio"/"Crítico": vira o rotulo
+// atual da mesma escala das opcoes (probabilidade feminina, impacto masculino).
+function _normRiscoPCN(valor, options) {
+  var v = String(valor || '').trim().toLowerCase();
+  var feminino = options === PROB_OPCOES_RISCO;
+  var mapa = {
+    'média': feminino ? 'Moderada' : 'Moderado', 'media': feminino ? 'Moderada' : 'Moderado',
+    'médio': feminino ? 'Moderada' : 'Moderado', 'medio': feminino ? 'Moderada' : 'Moderado',
+    'crítico': feminino ? 'Muito alta' : 'Muito alto', 'critico': feminino ? 'Muito alta' : 'Muito alto',
+    'crítica': feminino ? 'Muito alta' : 'Muito alto', 'critica': feminino ? 'Muito alta' : 'Muito alto'
+  };
+  return mapa[v] || String(valor || '').trim();
+}
+
 function _currentRiskValue(cell, options) {
   var select = cell.querySelector('select');
-  if (!select) return cell.textContent.trim();
-  var valor = select.value || '';
+  if (!select) return _normRiscoPCN(cell.textContent.trim(), options);
+  var valor = _normRiscoPCN(select.value || '', options);
   return options.indexOf(valor) !== -1 ? valor : '';
 }
 
 function buildRiskSelect(currentValue, options, colors, prefix) {
-  // Normalizar o valor atual (pode vir com espaços, acentos inconsistentes)
-  var normalizedCurrent = currentValue.trim();
+  // Normalizar o valor atual (pode vir com espaços, acentos inconsistentes,
+  // ou com a escala antiga 3x4 -- Média/Crítico)
+  var normalizedCurrent = _normRiscoPCN(currentValue, options);
   // Tentar match parcial se não encontrar exato
   var matchedOption = options.find(function(opt) { return normalizedCurrent.toLowerCase() === opt.toLowerCase(); });
   if (!matchedOption) {
@@ -588,9 +608,9 @@ function buildRiskSelect(currentValue, options, colors, prefix) {
 
 function getTextColor(value) {
   var textColors = {
-    'Alta': '#c62828', 'Alto': '#e65100', 'Crítico': '#c62828',
-    'Média': '#e65100', 'Médio': '#e65100', 'Moderado': '#2e7d32',
-    'Baixa': '#2e7d32', 'Baixo': '#666'
+    'Muito alta': '#c62828', 'Muito alto': '#c62828', 'Alta': '#e65100', 'Alto': '#e65100',
+    'Moderada': '#8d6e00', 'Moderado': '#8d6e00', 'Baixa': '#2e7d32', 'Baixo': '#2e7d32',
+    'Muito baixa': '#666', 'Muito baixo': '#666'
   };
   return textColors[value] || '#333';
 }

@@ -36,9 +36,9 @@ test('o risco nasce SEM impacto — quem decide o quanto dói é gente', () => {
   assert.ok(d.risco.probabilidade, 'a probabilidade vem da nota');
 });
 
-test('nota muito baixa sugere probabilidade Alta; pouco abaixo do limiar, Média', () => {
+test('nota muito baixa sugere probabilidade Alta; pouco abaixo do limiar, Moderada (escala NIST 5x5)', () => {
   assert.strictEqual(decidir({ avaliacao: aval({ nota: 30 }) }).risco.probabilidade, 'Alta');
-  assert.strictEqual(decidir({ avaliacao: aval({ nota: 65 }) }).risco.probabilidade, 'Média');
+  assert.strictEqual(decidir({ avaliacao: aval({ nota: 65 }) }).risco.probabilidade, 'Moderada');
 });
 
 test('nota zero abre risco — zero e nota real, nao ausencia', () => {

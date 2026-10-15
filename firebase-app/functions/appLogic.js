@@ -17,6 +17,8 @@
 
 const { calcularTier, calcularRTO } = require('./tokenLogic');
 const vulnerabilidadeRisco = require('./vulnerabilidadeRisco');
+const vulnerabilidadeContexto = require('./vulnerabilidadeContexto');
+const drpSecoes = require('./drpSecoes');
 
 const COLLECTION = {
   processos: 'processos',
@@ -261,6 +263,19 @@ function _tierProcessoServidor(score, tierManual) {
  * contrato de retorno identicos ao original — o app.js que consome isso
  * (gerarPCNProcesso/_buildPCNPage) nao mudou.
  */
+// Limite da chamada a IA, abaixo dos 300 s da Function appApi (index.js):
+// estourar aqui vira uma mensagem clara, em vez de a plataforma cortar a
+// conexao e o navegador so mostrar "Failed to fetch".
+const LIMITE_IA_MS = 240000;
+
+function _erroChamadaIA(err, rotulo) {
+  if (err instanceof AppError) return err;
+  if (err && (err.name === 'TimeoutError' || err.name === 'AbortError')) {
+    return new AppError('A IA demorou mais de 4 minutos para responder. Tente gerar de novo.');
+  }
+  return new AppError('Erro ao gerar ' + rotulo + ': ' + (err && err.message));
+}
+
 async function gerarPCN(db, data, ctx) {
   const id = exigir(data.id, 'id');
   if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
@@ -401,7 +416,7 @@ ${Object.keys(slasData).length ? Object.entries(slasData).map(([dep, sla]) => `-
 ## REGRAS ESPECÍFICAS
 
 - MATRIZ DE RESPONSABILIDADE: Se houver contatos fornecidos na seção "Equipe de Crise (Contatos)" acima, use os dados reais (nome, telefone, e-mail, setor) EXATAMENTE como fornecidos. Complete o "Papel na Crise" com sugestões adequadas ao contexto. Se NÃO houver contatos fornecidos, preencha apenas "Papel na Crise" e "Setor" com sugestões funcionais (ex: "Coordenador de Crise", "Líder Técnico"), deixando "Nome", "Telefone" e "E-mail" EM BRANCO — NÃO invente dados pessoais fictícios.
-- MATRIZ DE RISCOS: Analise CADA evento de risco individualmente e atribua Probabilidade (Alta, Média ou Baixa) e Impacto (Crítico, Alto, Moderado ou Baixo) de forma REALISTA e DIFERENCIADA — NÃO use o mesmo valor para todos os riscos. Considere o contexto do processo, setor e dependências para variar as classificações. Por exemplo: falha de energia pode ser "Baixa" probabilidade mas "Crítico" impacto; erro humano pode ser "Alta" probabilidade mas "Moderado" impacto.
+- MATRIZ DE RISCOS: Analise CADA evento de risco individualmente e atribua Probabilidade (Muito alta, Alta, Moderada, Baixa ou Muito baixa) e Impacto (Muito alto, Alto, Moderado, Baixo ou Muito baixo) — escala NIST SP 800-30 de forma REALISTA e DIFERENCIADA — NÃO use o mesmo valor para todos os riscos. Considere o contexto do processo, setor e dependências para variar as classificações. Por exemplo: falha de energia pode ser "Baixa" probabilidade mas "Crítico" impacto; erro humano pode ser "Alta" probabilidade mas "Moderado" impacto.
 - ESTRATÉGIA TÉCNICA DE RECUPERAÇÃO (Parte 3, item 2): monte uma linha por dependência crítica listada em "Dependências Críticas" que seja de categoria técnica (API, Banco de Dados, Infraestrutura, Segurança, Servidor, Sistemas, Outros — NÃO inclua Fornecedores/Pessoas nesta tabela). Colunas: Recurso/Dependência, Estratégia, RTO, RPO, Responsável. Onde a dependência já tiver Estratégia/RTO/RPO/Responsável informados acima, use ESSES VALORES EXATOS, palavra por palavra — não invente, não reformule. Onde faltar algum desses dados, infira um valor tecnicamente razoável a partir da categoria e do contexto do processo, do mesmo jeito que já faz pros demais campos sem dado informado.`;
 
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + ctx.geminiApiKey;
@@ -420,14 +435,14 @@ ${Object.keys(slasData).length ? Object.entries(slasData).map(([dep, sla]) => `-
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(LIMITE_IA_MS),
     });
     body = await response.json();
     if (!response.ok) {
       throw new AppError('Erro na API do Gemini: ' + (body.error ? body.error.message : 'Status ' + response.status));
     }
   } catch (err) {
-    if (err instanceof AppError) throw err;
-    throw new AppError('Erro ao gerar PCN: ' + err.message);
+    throw _erroChamadaIA(err, 'PCN');
   }
 
   const content = body.candidates && body.candidates[0] && body.candidates[0].content;
@@ -576,6 +591,33 @@ async function gerarDRP(db, data, ctx) {
     ? contatosUnicos.map((c) => `- ${c.nome || 'Contato'}${c.origem ? ' (' + c.origem + ')' : ''}${c.finalidade ? ' — ' + c.finalidade : ''} | Telefone: ${c.telefone || '—'} | E-mail: ${c.email || '—'}`).join('\n')
     : 'Nenhum contato com telefone/e-mail cadastrado na base para esta dependência.';
 
+  // ---- Canais de suporte dos fornecedores (cadastro do Fornecedor) ----
+  // Da própria dependência e das vinculadas. Ordenados por nível (N1 antes de
+  // N2...) dentro de cada fornecedor, que é a ordem de escalonamento.
+  const ORDEM_NIVEL = { N1: 1, N2: 2, N3: 3, 'Emergência': 4 };
+  const canais = [];
+  const _pushCanais = (d) => {
+    if (!d || !Array.isArray(d.canaisSuporte)) return;
+    d.canaisSuporte
+      .filter((c) => c && c.contato)
+      .slice()
+      .sort((a, b) => (ORDEM_NIVEL[a.nivel] || 9) - (ORDEM_NIVEL[b.nivel] || 9))
+      .forEach((c) => canais.push(`- ${d.nome || 'Fornecedor'} — ${c.tipo || 'Canal'} | Contato: ${c.contato}`
+        + ` | Horário: ${c.horario || 'não informado'} | Nível: ${c.nivel || 'não informado'}`
+        + ` | SLA: ${c.sla || 'não informado'}${c.observacao ? ' | Obs.: ' + c.observacao : ''}`));
+  };
+  _pushCanais(dep);
+  const _depsVistas = new Set([String(id)]);
+  deps.forEach((item) => {
+    const d = acharDep(item);
+    if (!d || _depsVistas.has(String(d.id))) return;
+    _depsVistas.add(String(d.id));
+    _pushCanais(d);
+  });
+  const canaisTexto = canais.length
+    ? canais.join('\n')
+    : 'Nenhum canal de suporte cadastrado para os fornecedores vinculados.';
+
   // ---- Processos de Negócio impactados (seção "Impactos Operacionais nos Processos") ----
   let processosLigados = [];
   try {
@@ -609,6 +651,29 @@ async function gerarDRP(db, data, ctx) {
   const registrosTexto = registrosTeste.length
     ? registrosTeste.map((r) => `- Data: ${r.data || 'Não informada'} | Resultado: ${r.resultado || 'Não informado'} | Evidência: ${r.evidencia || 'Não informada'} | Pendências: ${r.pendencias || 'Não informadas'}`).join('\n')
     : 'Nenhum registro de teste.';
+
+  // Cadeado por secao: a ultima versao diz quais secoes o humano ajustou.
+  // Sem try/catch de proposito -- falhar a leitura e seguir sem o cadeado
+  // apagaria justamente o ajuste humano.
+  const conteudoSnap = await db.collection(COLLECTION.drpConteudo).doc(String(id)).get();
+  const versoesAnteriores = conteudoSnap.exists && Array.isArray((conteudoSnap.data() || {}).versoes)
+    ? conteudoSnap.data().versoes : [];
+  const ultima = versoesAnteriores[versoesAnteriores.length - 1];
+  const travadasAnteriores = (ultima && ultima.html && Array.isArray(ultima.bloqueadas)) ? ultima.bloqueadas : [];
+  const secoesTravadas = travadasAnteriores.length ? drpSecoes.secoesBloqueadas(ultima.html, travadasAnteriores) : [];
+
+  // Contexto (opcao A): as secoes travadas vao no prompt para a IA escrever
+  // as outras coerentes com elas. A preservacao em si nao depende disto --
+  // e garantida pela mescla depois da resposta (opcao B).
+  const blocoSecoesTravadas = secoesTravadas.length ? `
+---
+## SEÇÕES JÁ REVISADAS POR UMA PESSOA (serão mantidas como estão)
+
+As seções abaixo foram ajustadas manualmente e entram no documento final exatamente como estão — o sistema as insere, você não precisa reescrevê-las.
+${secoesTravadas.map((s) => s.html).join('\n\n')}
+` : '';
+  const regraSecoesTravadas = secoesTravadas.length ? `
+- SEÇÕES JÁ REVISADAS: para cada seção listada em "SEÇÕES JÁ REVISADAS POR UMA PESSOA", escreva apenas o título <h2> exatamente igual ao de lá, seguido de <p>(seção mantida)</p> — não reescreva o conteúdo. Nas DEMAIS seções, use as revisadas como referência: mantenha coerência com elas (termos, passos, responsáveis, decisões) e não as contradiga. Exceção: se um dado dos parâmetros acima (RTO, RPO, responsável, contatos, processos) divergir do que está numa seção revisada, use nas demais seções o dado dos parâmetros, que é o atual.` : '';
 
   const prompt = `Você é o "Fortes Resiliente", um arquiteto sênior de Continuidade de Negócios e Resiliência Organizacional, com profundo conhecimento das normas ISO 22301, ISO 27031 e NIST SP 800-34.
 
@@ -659,9 +724,12 @@ ${registrosTexto}
 ### Contatos disponíveis (dados reais da base)
 ${contatosTexto}
 
+### Canais de suporte dos fornecedores (dados reais da base)
+${canaisTexto}
+
 ### Processos de Negócio impactados (dados reais da base)
 ${processosImpactadosTexto}
-
+${blocoSecoesTravadas}
 ---
 ## TEMPLATE OBRIGATÓRIO DO DRP (siga esta estrutura exata)
 
@@ -681,7 +749,8 @@ ${template}
 - Linguagem: Português do Brasil, técnica e direta.
 - Onde a dependência já tiver dados (RTO/RPO/Estratégia/Responsável/listas), use ESSES VALORES EXATOS; onde faltar, infira valores tecnicamente razoáveis a partir da categoria e do contexto.
 - CONTATOS DE CONTINGÊNCIA: se o template tiver uma seção/tabela de contatos (colunas como Contato, Organização/Área, Finalidade, Canal, Informação), preencha com os itens de "Contatos disponíveis (dados reais da base)" acima. A coluna "Canal" deve conter os dados REAIS de contato (telefone e/ou e-mail exatamente como fornecidos), NÃO rótulos genéricos como "Telefone" ou "Portal". NÃO invente contatos, telefones ou e-mails: use somente os que estão na lista. Se a lista disser que não há contatos cadastrados, deixe a tabela com uma única linha indicando "Contato não cadastrado na base" em vez de inventar nomes/canais.
-- IMPACTOS OPERACIONAIS NOS PROCESSOS: a seção "Impactos Operacionais nos Processos" (ou equivalente no template) deve usar EXCLUSIVAMENTE os itens de "Processos de Negócio impactados (dados reais da base)" acima — processo, área e tier exatamente como fornecidos, descrevendo o impacto operacional de cada um com base na descrição de impacto fornecida (quando houver) e no tier (quanto mais crítico, mais grave o impacto a destacar). NÃO invente processos que não estejam na lista. Se a lista disser que não há processo vinculado, deixe a seção indicando isso claramente, sem inventar exemplos.`;
+- CANAIS DE SUPORTE DOS FORNECEDORES: inclua também, na mesma seção/tabela de contatos de contingência, cada item de "Canais de suporte dos fornecedores (dados reais da base)" — fornecedor, tipo do canal e o contato EXATAMENTE como fornecido (número, e-mail ou link), com horário, nível e SLA quando informados. Apresente-os na ordem de escalonamento (N1, N2, N3, Emergência). NÃO invente canais, números ou links que não estejam na lista; se ela disser que não há canal cadastrado, não acrescente nenhum.
+- IMPACTOS OPERACIONAIS NOS PROCESSOS: a seção "Impactos Operacionais nos Processos" (ou equivalente no template) deve usar EXCLUSIVAMENTE os itens de "Processos de Negócio impactados (dados reais da base)" acima — processo, área e tier exatamente como fornecidos, descrevendo o impacto operacional de cada um com base na descrição de impacto fornecida (quando houver) e no tier (quanto mais crítico, mais grave o impacto a destacar). NÃO invente processos que não estejam na lista. Se a lista disser que não há processo vinculado, deixe a seção indicando isso claramente, sem inventar exemplos.${regraSecoesTravadas}`;
 
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + ctx.geminiApiKey;
   const payload = {
@@ -699,21 +768,36 @@ ${template}
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(LIMITE_IA_MS),
     });
     body = await response.json();
     if (!response.ok) {
       throw new AppError('Erro na API do Gemini: ' + (body.error ? body.error.message : 'Status ' + response.status));
     }
   } catch (err) {
-    if (err instanceof AppError) throw err;
-    throw new AppError('Erro ao gerar DRP: ' + err.message);
+    throw _erroChamadaIA(err, 'DRP');
   }
 
   const content = body.candidates && body.candidates[0] && body.candidates[0].content;
-  const drpHtml = content && content.parts && content.parts[0] && content.parts[0].text;
-  if (!drpHtml) throw new AppError('Resposta vazia do Gemini.');
+  const drpBruto = content && content.parts && content.parts[0] && content.parts[0].text;
+  if (!drpBruto) throw new AppError('Resposta vazia do Gemini.');
 
-  return { success: true, drp: drpHtml, nome: dep.nome || '', categoria: dep.categoria || '' };
+  // Mesma limpeza que o cliente ja fazia (texto antes do primeiro '<', code
+  // fences) -- precisa vir antes da mescla, senao a cerca vira parte do
+  // cabecalho/ultima secao.
+  let drpHtml = drpBruto.substring(Math.max(0, drpBruto.indexOf('<')))
+    .replace(/^```html\s*/i, '').replace(/```\s*$/i, '').trim();
+
+  // Secoes travadas voltam identicas, por codigo -- inclusive se a IA
+  // ignorar a instrucao e reescrever ou omitir alguma.
+  let bloqueadas = [];
+  if (travadasAnteriores.length) {
+    const mescla = drpSecoes.mesclarBloqueadas(drpHtml, ultima.html, travadasAnteriores);
+    drpHtml = mescla.html;
+    bloqueadas = mescla.bloqueadas;
+  }
+
+  return { success: true, drp: drpHtml, bloqueadas, nome: dep.nome || '', categoria: dep.categoria || '' };
 }
 
 /**
@@ -722,6 +806,8 @@ ${template}
  * guarda so o metadado (versao/data/autor, sem html) -- e tudo que a lista de
  * DRPs (renderDRPLista/renderDRPResumo) precisa pra mostrar contagem e data.
  */
+const MAX_VERSOES_DRP = 5;
+
 async function salvarDRP(db, data, ctx) {
   if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode operar o DRP.');
   const id = exigir(data.id, 'id');
@@ -737,18 +823,30 @@ async function salvarDRP(db, data, ctx) {
     versoes = conteudoSnap.data().versoes;
   }
 
+  // Chaves das secoes travadas por cadeado (drpSecoes.js); so strings curtas.
+  const bloqueadas = Array.isArray(data.bloqueadas)
+    ? [...new Set(data.bloqueadas.map((k) => String(k).trim()).filter((k) => k && k.length <= 120))].slice(0, 50)
+    : [];
+
+  // Numera a partir da ultima versao, nao do tamanho da lista: com o corte
+  // abaixo, versoes.length + 1 faria a numeracao recomecar.
+  const ultimaVersao = versoes.length ? Number(versoes[versoes.length - 1].versao) || versoes.length : 0;
   versoes.push({
-    versao: versoes.length + 1,
+    versao: ultimaVersao + 1,
     data: new Date().toISOString(),
     autor: ctx.email,
     html,
+    bloqueadas,
   });
+  // Historico limitado: todas as versoes moram num documento so, e o
+  // Firestore recusa documento acima de 1 MiB (um DRP chegou a 950 KB com 19).
+  versoes = versoes.slice(-MAX_VERSOES_DRP);
 
   await conteudoRef.set({ versoes });
   const metadados = versoes.map((v) => ({ versao: v.versao, data: v.data, autor: v.autor }));
   await depRef.set({ drpSalvo: JSON.stringify(metadados) }, { merge: true });
 
-  return { success: true, versao: versoes.length, totalVersoes: versoes.length };
+  return { success: true, versao: ultimaVersao + 1, totalVersoes: versoes.length };
 }
 
 /** Apaga todas as versoes do DRP da dependencia (metadado + conteudo). */
@@ -886,14 +984,14 @@ ${drpHtml}
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(LIMITE_IA_MS),
     });
     body = await response.json();
     if (!response.ok) {
       throw new AppError('Erro na API do Gemini: ' + (body.error ? body.error.message : 'Status ' + response.status));
     }
   } catch (err) {
-    if (err instanceof AppError) throw err;
-    throw new AppError('Erro ao gerar Roteiro de Teste: ' + err.message);
+    throw _erroChamadaIA(err, 'Roteiro de Teste');
   }
 
   const content = body.candidates && body.candidates[0] && body.candidates[0].content;
@@ -1003,7 +1101,12 @@ async function importarVulnerabilidadeParaRisco(db, data, ctx) {
   const abertos = vulnerabilidadeRisco.riscosAbertosDaVulnerabilidade(riscos, id);
   if (abertos.length) return { success: true, jaExiste: true };
 
-  const risco = vulnerabilidadeRisco.construirRisco(vulnerabilidade, { manual: true });
+  // Mesmo contexto do gatilho (produto, processos afetados pela cadeia do BIA),
+  // para o risco importado nascer igual ao automatico.
+  const contexto = await vulnerabilidadeContexto.contextoDaVulnerabilidade(db, vulnerabilidade);
+  const risco = vulnerabilidadeRisco.construirRisco(vulnerabilidade, {
+    manual: true, produtoNome: contexto.produtoNome, processosAfetados: contexto.processosAfetados,
+  });
   const agora = new Date().toISOString();
   const novoId = ctx.novoUuid();
   await db.collection(COLLECTION.riscos).doc(novoId).set(Object.assign({}, risco, {

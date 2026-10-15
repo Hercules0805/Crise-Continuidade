@@ -148,12 +148,28 @@ function pesoDoRisco(vinculo, processosPorId, criticidadePorFornecedor) {
   return PESO_PADRAO;
 }
 
-/** Faixa do score individual (1 a 12), so o rotulo -- e o que entra na composicao. */
-function faixaScore(n) {
-  if (n >= 9) return 'Crítico';
-  if (n >= 6) return 'Alto';
-  if (n >= 3) return 'Moderado';
-  return 'Baixo';
+// DECISAO 15/10/2026: escala NIST 5x5. O nivel vem da matriz do SP 800-30
+// (escalaRisco.nivelPorMatriz), com os rotulos da medicao.
+const escalaRisco = require('./escalaRisco');
+
+/**
+ * Nivel (rotulo da composicao) de uma medicao: pela matriz NIST com a
+ * probabilidade/impacto da propria medicao. Medicao sem rotulos reconheciveis
+ * (nao deveria existir: medicaoDeRisco so grava com escala valida) cai em
+ * Moderado, o meio da escala, em vez de sumir da composicao.
+ */
+function nivelDaMedicao(m) {
+  return escalaRisco.nivelPorMatriz(m && m.probabilidade, m && m.impacto) || 'Moderado';
+}
+
+/**
+ * Score de uma medicao: recalculado pelos rotulos normalizados (assim medicao
+ * da escala antiga 3x4 vale na escala nova sem regravar); sem rotulos, o
+ * `valor` gravado.
+ */
+function scoreDaMedicao(m) {
+  const s = escalaRisco.scoreDeRisco(m && m.probabilidade, m && m.impacto);
+  return s !== null ? s : Number(m && m.valor);
 }
 
 /**
@@ -181,7 +197,9 @@ function _estadoPorRiscoEmData(medicoesRisco, dataAlvoISO) {
 }
 
 function _novoAcumulado() {
-  return { carga: 0, contados: 0, impactoFinanceiro: 0, composicao: { 'Crítico': 0, Alto: 0, Moderado: 0, Baixo: 0 } };
+  const composicao = {};
+  escalaRisco.FAIXAS.forEach((f) => { composicao[f] = 0; });
+  return { carga: 0, contados: 0, impactoFinanceiro: 0, composicao };
 }
 
 /**
@@ -190,11 +208,11 @@ function _novoAcumulado() {
  * chama e responsavel por contar em semImpactoFinanceiro (a soma sozinha nao
  * distingue "somou zero de verdade" de "nao tinha estimativa nenhuma").
  */
-function _somar(acc, score, carga, valorFinanceiro) {
+function _somar(acc, nivel, carga, valorFinanceiro) {
   acc.carga += carga;
   acc.contados += 1;
   acc.impactoFinanceiro += (valorFinanceiro || 0);
-  acc.composicao[faixaScore(score)] += 1;
+  acc.composicao[nivel] += 1;
 }
 
 /**
@@ -214,21 +232,36 @@ function reconstruirEmData(medicoesRisco, vinculosPorRiscoId, processosPorId, cr
   let semAvaliacao = 0;
   let semVinculo = 0;
   let semImpactoFinanceiro = 0;
+  // Contribuicao de CADA risco neste dia (so para comparar um dia com o outro --
+  // ver mudancasEntre; reconstruirComMudancas nao persiste esta lista).
+  const riscos = [];
 
   Object.keys(estadoPorRisco).forEach((riscoId) => {
     const estado = estadoPorRisco[riscoId];
     const status = String(estado.classificacao || 'Identificado').trim();
-    if (STATUS_FORA.indexOf(status) !== -1) { foraPorStatus += 1; return; }
-
     const vinculo = (vinculosPorRiscoId && vinculosPorRiscoId[riscoId]) || null;
-    if (!vinculo) semVinculo += 1;
-    const area = String((vinculo && vinculo.area) || estado.area || '').trim() || AREA_CORPORATIVA;
+    const areaDoRisco = String((vinculo && vinculo.area) || estado.area || '').trim() || AREA_CORPORATIVA;
+    const base = {
+      id: riscoId,
+      titulo: String(estado.sujeitoRotulo || riscoId),
+      area: areaDoRisco,
+      status,
+      score: Number(estado.valor),
+      contado: false,
+      carga: 0,
+      valorFinanceiro: null,
+    };
+    if (STATUS_FORA.indexOf(status) !== -1) { foraPorStatus += 1; riscos.push(base); return; }
 
-    const score = Number(estado.valor);
+    if (!vinculo) semVinculo += 1;
+    const area = areaDoRisco;
+
+    const score = scoreDaMedicao(estado);
     if (!porArea[area]) porArea[area] = _novoAcumulado();
 
     if (!Number.isFinite(score) || score <= 0) {
       semAvaliacao += 1;
+      riscos.push(base);
       return;
     }
 
@@ -240,8 +273,10 @@ function reconstruirEmData(medicoesRisco, vinculosPorRiscoId, processosPorId, cr
     const valorFinanceiro = estado.valorFinanceiro === null || estado.valorFinanceiro === undefined
       ? null : Number(estado.valorFinanceiro);
     if (valorFinanceiro === null) semImpactoFinanceiro += 1;
-    _somar(porArea[area], score, carga, valorFinanceiro);
-    _somar(empresa, score, carga, valorFinanceiro);
+    const nivel = nivelDaMedicao(estado);
+    _somar(porArea[area], nivel, carga, valorFinanceiro);
+    _somar(empresa, nivel, carga, valorFinanceiro);
+    riscos.push(Object.assign(base, { contado: true, carga, valorFinanceiro }));
   });
 
   const areas = Object.keys(porArea)
@@ -256,7 +291,87 @@ function reconstruirEmData(medicoesRisco, vinculosPorRiscoId, processosPorId, cr
     semAvaliacao,
     semVinculo,
     semImpactoFinanceiro,
+    riscos,
   };
+}
+
+/**
+ * O que mudou de um estado para o outro, risco a risco -- a resposta para "por
+ * que a curva subiu (ou desceu) neste dia?". `antes` e `depois` sao as listas
+ * `riscos` de duas reconstrucoes (fim do dia anterior e fim do dia), feitas com
+ * os MESMOS insumos, entao pesos de Tier/criticidade iguais nos dois lados: so
+ * entra aqui o que mudou no proprio risco.
+ *
+ * Um risco so entra se sua carga OU seu valor financeiro mudou. `tipo`:
+ *   novo        -- nao contava e passou a contar (criado, ou avaliado pela 1a vez)
+ *   reavaliado  -- contava antes e depois, com valor diferente (inclui voltar a "sem avaliacao")
+ *   encerrado   -- contava e saiu por status Encerrado
+ *   excluido    -- contava e o risco foi apagado
+ * Ordenado pelo tamanho da variacao de carga (os que mais mexeram primeiro).
+ */
+function mudancasEntre(antes, depois) {
+  const porId = (lista) => {
+    const m = {};
+    (lista || []).forEach((r) => { m[r.id] = r; });
+    return m;
+  };
+  const a = porId(antes);
+  const d = porId(depois);
+  const ids = Object.keys(Object.assign({}, a, d));
+  const out = [];
+
+  ids.forEach((id) => {
+    const ra = a[id];
+    const rd = d[id];
+    const contavaAntes = !!(ra && ra.contado);
+    const contaDepois = !!(rd && rd.contado);
+    const cargaAntes = contavaAntes ? ra.carga : 0;
+    const cargaDepois = contaDepois ? rd.carga : 0;
+    const financeiroAntes = contavaAntes ? (ra.valorFinanceiro || 0) : 0;
+    const financeiroDepois = contaDepois ? (rd.valorFinanceiro || 0) : 0;
+    if (cargaAntes === cargaDepois && financeiroAntes === financeiroDepois) return;
+
+    let tipo;
+    if (!contavaAntes && contaDepois) tipo = 'novo';
+    else if (contavaAntes && !contaDepois && rd && rd.status === 'Excluído') tipo = 'excluido';
+    else if (contavaAntes && !contaDepois && rd && STATUS_FORA.indexOf(rd.status) !== -1) tipo = 'encerrado';
+    else tipo = 'reavaliado';
+
+    const ref = rd || ra;
+    // Titulo de verdade: a medicao cai no proprio id quando o risco nao tinha
+    // titulo; prefere um dos dois lados que tenha, senao rotulo neutro.
+    const tituloReal = [rd, ra].map((r) => r && r.titulo).find((t) => t && t !== id);
+    out.push({
+      riscoId: id,
+      titulo: tituloReal || '(risco sem título)',
+      area: ref.area,
+      tipo,
+      scoreAntes: contavaAntes ? ra.score : null,
+      scoreDepois: contaDepois ? rd.score : null,
+      cargaAntes,
+      cargaDepois,
+      financeiroAntes,
+      financeiroDepois,
+    });
+  });
+
+  return out.sort((x, y) => Math.abs(y.cargaDepois - y.cargaAntes) - Math.abs(x.cargaDepois - x.cargaAntes)
+    || x.titulo.localeCompare(y.titulo, 'pt-BR'));
+}
+
+/**
+ * Retrato de `dataAlvoISO` + `mudancas` (o que mudou desde `baselineISO`, em
+ * geral o fim do dia anterior). Duas reconstrucoes com os mesmos insumos --
+ * nenhuma leitura a mais no Firestore. A lista interna `riscos` NAO vai para o
+ * documento: so o resultado, `mudancas`.
+ */
+function reconstruirComMudancas(medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor, dataAlvoISO, baselineISO) {
+  const depois = reconstruirEmData(medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor, dataAlvoISO);
+  const antes = reconstruirEmData(medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor, baselineISO);
+  const retrato = Object.assign({}, depois);
+  delete retrato.riscos;
+  retrato.mudancas = mudancasEntre(antes.riscos, depois.riscos);
+  return retrato;
 }
 
 module.exports = {
@@ -270,7 +385,10 @@ module.exports = {
   resolverProcessosComBia,
   faixaCriticidadeFornecedor,
   pesoPorCriticidadeFornecedor,
-  faixaScore,
+  nivelDaMedicao,
+  scoreDaMedicao,
   pesoDoRisco,
   reconstruirEmData,
+  mudancasEntre,
+  reconstruirComMudancas,
 };

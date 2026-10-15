@@ -41,6 +41,7 @@
     SEGURANCA: 'seguranca',
     TI: 'ti',
     GESTOR: 'gestor',
+    OPERADOR: 'operador',
   };
 
   /** O perfil de quem nao esta cadastrado. O menor acesso possivel. */
@@ -69,7 +70,7 @@
   TELAS[PERFIL.SEGURANCA] = [
     'processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
-    'dependencias', 'areas', 'pessoas', 'relatorios', 'servicos', 'catalogo-backup',
+    'dependencias', 'areas', 'pessoas', 'relatorios', 'servicos', 'catalogo-backup', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'admin',
   ];
@@ -81,6 +82,14 @@
   // propria ("catalogo-backup"), mesma posse de 'servicos' (Admin + Seguranca).
   TELAS[PERFIL.TI] = [
     'drp', 'dependencias', 'relatorios',
+  ];
+  // DECISAO 14/10/2026: Operador Administrativo (assistente administrativo de TI e
+  // SI). Nao e tecnico: GERENCIA fornecedores (5 telas) e so CONSULTA Processos,
+  // Pessoas e Areas; gera Relatorios (leitura). Sem DRP, PCN, riscos, indicadores,
+  // perfis ou perguntas. Processos primeiro: e a pagina inicial dele.
+  TELAS[PERFIL.OPERADOR] = [
+    'processos', 'pessoas', 'areas', 'relatorios',
+    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
   ];
   TELAS[PERFIL.GESTOR] = [
     'processos', 'pcns', 'drp', 'riscos',
@@ -105,6 +114,12 @@
       valor: PERFIL.TI,
       rotulo: 'TI',
       descricao: 'Opera o DRP: parâmetros e conteúdo do plano de recuperação das dependências.',
+      exigeArea: false,
+    },
+    {
+      valor: PERFIL.OPERADOR,
+      rotulo: 'Operador Administrativo',
+      descricao: 'Perfil administrativo, não técnico: gerencia fornecedores e consulta processos, pessoas e áreas. Sem acesso a DRP, PCN, riscos ou perfis.',
       exigeArea: false,
     },
     {
@@ -182,6 +197,10 @@
     return _tem(valor, PERFIL.TI);
   }
 
+  function ehOperador(valor) {
+    return _tem(valor, PERFIL.OPERADOR);
+  }
+
   /** Uniao das telas de todos os perfis do usuario. Admin ve tudo. */
   function telasDoPerfil(valor) {
     var lista = _perfisDe(valor);
@@ -241,11 +260,25 @@
 
   /**
    * Modulo de fornecedores (cadastrar, editar, apagar, criterio, avaliar).
-   * Antes existia um perfil 'fornecedores' so pra isso; agora e Admin ou
-   * Seguranca da Informacao.
+   * Antes existia um perfil 'fornecedores' so pra isso; agora e Admin,
+   * Seguranca da Informacao ou Operador Administrativo (14/10/2026). No banco, o
+   * operador so escreve em /dependencias quando a categoria e Fornecedor.
    */
   function podeGerenciarFornecedores(valor) {
-    return ehAdmin(valor) || ehSeguranca(valor);
+    return ehAdmin(valor) || ehSeguranca(valor) || ehOperador(valor);
+  }
+
+  /**
+   * Mostrar os controles de edicao de Processos (novo, editar, excluir, enviar
+   * questionario): Admin, Seguranca ou Gestor (por area). Operador so consulta.
+   */
+  function podeEditarProcessos(valor) {
+    return ehAdmin(valor) || ehSeguranca(valor) || exigeArea(valor);
+  }
+
+  /** Cadastrar/editar/excluir Pessoas (vivem em /dependencias): Admin, Seguranca ou TI. */
+  function podeEditarPessoas(valor) {
+    return ehAdmin(valor) || ehSeguranca(valor) || ehTI(valor);
   }
 
   /** As categorias de /dependencias que sao "fornecedor". */
@@ -263,6 +296,11 @@
    */
   function podeMexerNaDependencia(valor, categoria) {
     return ehAdmin(valor) || ehSeguranca(valor) || ehTI(valor);
+  }
+
+  /** Cadastrar/editar/excluir Produtos de Software (Administracao): Admin ou Seguranca. */
+  function podeGerenciarProdutosSoftware(valor) {
+    return ehAdmin(valor) || ehSeguranca(valor);
   }
 
   /** Pode mexer no cadastro de Areas: Admin ou Seguranca. */
@@ -293,12 +331,16 @@
     ehAdmin: ehAdmin,
     ehSeguranca: ehSeguranca,
     ehTI: ehTI,
+    ehOperador: ehOperador,
     podeVerTela: podeVerTela,
     telasDoPerfil: telasDoPerfil,
     categoriaDeFornecedor: categoriaDeFornecedor,
     podeMexerNaDependencia: podeMexerNaDependencia,
     podeMexerNaArea: podeMexerNaArea,
+    podeGerenciarProdutosSoftware: podeGerenciarProdutosSoftware,
     podeGerenciarFornecedores: podeGerenciarFornecedores,
+    podeEditarProcessos: podeEditarProcessos,
+    podeEditarPessoas: podeEditarPessoas,
     podeGerenciarPerfis: podeGerenciarPerfis,
     podeGerarPCN: podeGerarPCN,
     podeGerarDRP: podeGerarDRP,

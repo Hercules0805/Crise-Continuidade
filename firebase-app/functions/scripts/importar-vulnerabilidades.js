@@ -23,7 +23,7 @@
  * NAO DEVE ABRIR RISCO NENHUM ao rodar: quase todas as linhas já estão
  * Corrigida/Aceita (decisão do usuário: histórico já resolvido não abre
  * risco -- ver vulnerabilidadeRisco.js, STATUS_FECHADOS_CORRECAO). A única
- * exceção é 2026-002 (Fortes AC), ainda "Aberto" -- essa sim deve abrir risco
+ * exceção é 2026-002 (Fortes AC), ainda "Pendente" -- essa sim deve abrir risco
  * automaticamente pelo gatilho `riscoDeVulnerabilidade`, se a severidade
  * (Alta, sem CVSS) cruzar o limiar.
  */
@@ -71,7 +71,7 @@ const LINHAS = [
     severidadeManual: 'Alta',
     descricao: 'A versão atual do sistema permite a visualização em claro da senha do banco de dados por meio da interface de configuração através do mecanismo Password Visibility Toggle (olho), possibilitando que usuários com acesso à funcionalidade revelem credenciais sensíveis. O comportamento caracteriza exposição de informação crítica, pois envolve credencial de infraestrutura que pode permitir acesso direto ao banco de dados, impactando confidencialidade e integridade das informações. Risco potencial: comprometimento total dos dados em caso de uso indevido da credencial.',
     dataDeteccao: data('10/02/26'), origemDeteccao: 'Cliente, SI', equipeResponsavel: 'Produto',
-    statusCorrecao: 'Aberto',
+    statusCorrecao: 'Pendente',
   },
   {
     codigo: '2026-003', ticketReport: '70586', produto: 'Área Restrita', nome: 'E-mail de recuperação de senha',
@@ -156,7 +156,7 @@ async function importar() {
     await col.add(Object.assign({
       ticketReport: '', versao: '', cwe: '', cve: '', cvss: null, severidadeManual: '',
       descricao: '', dataDeteccao: '', origemDeteccao: '', exploitDisponivel: '',
-      equipeResponsavel: '', responsavel: '', ticketCorrecao: '', statusCorrecao: 'Aberto',
+      equipeResponsavel: '', responsavel: '', ticketCorrecao: '', statusCorrecao: 'Pendente',
       dataPrevistaCorrecao: '', dataCorrecao: '', evidenciaCorrecao: '', observacoes: '',
     }, linha, {
       criadoEm: agora, atualizadoEm: agora, criadoPor: 'import-script',

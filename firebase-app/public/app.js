@@ -17,6 +17,7 @@ const pages = {
   'fornecedores-subcategorias': fornecedoresSubcategorias,
   'fornecedores-criticidade': fornecedoresCriticidadePerguntas,
   'catalogo-backup': catalogoBackup,
+  'produtos-software': produtosSoftware,
   perfis,
 };
 
@@ -74,9 +75,9 @@ function _nivelTierProcesso(tier) {
   return { 'Tier 1 (Crítico)': 'critical', 'Tier 2 (Essencial)': 'high', 'Tier 3 (Suporte)': 'medium' }[tier] || null;
 }
 
-/** risco-consolidado.js faixaScore(n).rotulo -- Crítico/Alto/Moderado/Baixo. */
+/** Nivel do risco (matriz NIST 5x5, risco-consolidado.js). "Crítico" antigo ainda aceito. */
 function _nivelFaixaRisco(rotulo) {
-  return { 'Crítico': 'critical', 'Alto': 'high', 'Moderado': 'medium', 'Baixo': 'low' }[rotulo] || null;
+  return { 'Muito alto': 'critical', 'Crítico': 'critical', 'Alto': 'high', 'Moderado': 'medium', 'Baixo': 'low', 'Muito baixo': 'low' }[rotulo] || null;
 }
 
 /** fornecedor-score.js faixaNota(n).rotulo -- escala invertida (nota alta = bom). */
@@ -102,9 +103,9 @@ function _nivelCriticidadeFornecedor(rotulo) {
   return { 'Alta': 'critical', 'Média': 'medium', 'Baixa': 'low' }[rotulo] || null;
 }
 
-/** Probabilidade/Impacto/Prioridade do Risco -- escalas próprias (3 ou 4 níveis, com "Crítica" feminino de Prioridade). */
+/** Probabilidade/Impacto (NIST 5x5) e Prioridade do Risco -- rotulos antigos (Média, Crítico) ainda aceitos. */
 function _nivelProbImpacto(valor) {
-  return { 'Baixa': 'low', 'Baixo': 'low', 'Média': 'medium', 'Moderado': 'medium', 'Alta': 'high', 'Alto': 'high', 'Crítico': 'critical', 'Crítica': 'critical' }[valor] || null;
+  return { 'Muito baixa': 'low', 'Muito baixo': 'low', 'Moderada': 'medium', 'Muito alta': 'critical', 'Muito alto': 'critical', 'Baixa': 'low', 'Baixo': 'low', 'Média': 'medium', 'Moderado': 'medium', 'Alta': 'high', 'Alto': 'high', 'Crítico': 'critical', 'Crítica': 'critical' }[valor] || null;
 }
 
 /** vulnerabilidade-severidade.js faixa(vuln).rotulo -- "Não informado" cai em cinza neutro, nunca numa das 4 cores. */
@@ -155,6 +156,26 @@ function route() {
       }
     }
     setTimeout(tryOpenProcess, 800);
+  }
+  // Deep links do vinculo Vulnerabilidade <-> Risco (15/10/2026). Parametros
+  // proprios (nao `editar`, que e o deep link de Processos).
+  if (page === 'riscos' && params.get('risco')) {
+    const rid = params.get('risco');
+    let tentativas = 0;
+    (function tentarAbrirRisco() {
+      const r = (riscosData || []).find((x) => String(x.id) === String(rid));
+      if (r && window.editarRisco) return window.editarRisco(r.id);
+      if (++tentativas < 25) setTimeout(tentarAbrirRisco, 400);
+    })();
+  }
+  if (page === 'vulnerabilidades' && params.get('vuln')) {
+    const vid = params.get('vuln');
+    let tentativas = 0;
+    (function tentarAbrirVuln() {
+      const v = (vulnerabilidadesData || []).find((x) => String(x.id) === String(vid));
+      if (v && window.abrirDrawerVulnerabilidade) return window.abrirDrawerVulnerabilidade(v.id);
+      if (++tentativas < 25) setTimeout(tentarAbrirVuln, 400);
+    })();
   }
   // Deep link: abrir o modal de uma Pessoa específica (vindo da seção Gestor
   // do Contrato do fornecedor, em nova aba).
@@ -374,6 +395,10 @@ window.filtrarPerguntas = () => {
   });
 };
 window.trocarAbaProcesso = (aba) => {
+  // BCP e Avaliacao so sao desenhadas ao abrir a aba, e so entram no payload
+  // depois de desenhadas (com os valores ja gravados). Se o formulario estava
+  // limpo, olhar a aba nao pode torna-lo "sujo".
+  const estavaLimpo = !_edProcesso.sujo();
   ['identificacao','avaliacao','bia','bcp','drp'].forEach(a => {
     document.getElementById('painel-' + a).style.display = a === aba ? 'block' : 'none';
     const btn = document.getElementById('tab-' + a);
@@ -386,6 +411,7 @@ window.trocarAbaProcesso = (aba) => {
   }
   // Renderizar avaliação ao abrir aba
   if (aba === 'avaliacao') renderAvaliacaoInline();
+  if (estavaLimpo) _edProcesso.marcar();
 };
 
 // ============================================================
@@ -533,10 +559,35 @@ window.calcularScoreInline = () => {
   window._avaliacaoScore = total;
 };
 
+// Fecha o modal de Perguntas (BIA) -- "fecharModal" por nome generico, mas o
+// #modal e especifico dessa tela (mesmo id compartilhado com Areas, ver
+// fecharModalArea/ui-referencias.md "Colisao de id=modal"). Achado ao
+// separar o fechar do drawer de Processo (que usava indevidamente este
+// mesmo nome, embora fechasse #drawerProcesso -- nunca o #modal de Perguntas
+// de verdade; mascarado ate agora porque a troca de tela sempre recria
+// app.innerHTML inteiro).
 window.fecharModal = () => {
+  document.getElementById('modal').classList.remove('open');
+};
+
+function _fecharDrawerProcessoSemSalvar() {
   document.getElementById('drawerProcesso').classList.remove('open');
   document.getElementById('drawerOverlayProcesso').classList.remove('open');
+}
+// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- mas so se algo mudou
+// desde que abriu/salvou (_edProcesso).
+window.fecharDrawerProcesso = async () => {
+  if (!_edProcesso.sujo()) return _fecharDrawerProcessoSemSalvar();
+  const ok = await salvarProcesso();
+  if (ok) _fecharDrawerProcessoSemSalvar();
 };
+
+// A "foto" do formulario inclui as respostas da aba Avaliacao (senao mudar so
+// uma resposta contaria como "sem mudanca" e o Fechar a descartaria).
+const _edProcesso = criarRastreadorEdicao(() => {
+  const c = _coletarFormularioProcesso();
+  return { p: c.p, aval: c.avalScores };
+});
 
 function renderizarConfigRespostas(config) {
   const cats = Object.keys(config);
@@ -714,7 +765,7 @@ async function areas() {
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Áreas</h2><p class="page-sub">Cadastre as áreas da empresa que participam do BIA</p></div>
-      <button class="btn btn-primary" onclick="abrirModalArea()">+ Nova Área</button>
+      ${Perfis.podeMexerNaArea(window.USER_PERFIS) ? '<button class="btn btn-primary" onclick="abrirModalArea()">+ Nova Área</button>' : ''}
     </div>
     <div style="margin-bottom:16px;">
       <input type="text" id="buscaArea" placeholder="🔍 Buscar área..." oninput="renderizarAreas()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:300px;">
@@ -782,13 +833,15 @@ function renderizarAreas() {
   data = areasOrdenacao.aplicar(data);
   areasOrdenacao.atualizarSetas('sort-', ['nome', 'responsavel', 'email', 'telefone']);
 
+  // Quem nao mexe em Areas (ex.: Operador Administrativo) so consulta.
+  const soLeituraAreas = !Perfis.podeMexerNaArea(window.USER_PERFIS);
   document.getElementById('rows').innerHTML = data.length
-    ? data.map(a => `<tr style="cursor:pointer;" onclick="editarArea('${a.id}')">
+    ? data.map(a => `<tr ${soLeituraAreas ? '' : `style="cursor:pointer;" onclick="editarArea('${a.id}')"`}>
         <td>${esc(a.nome)}</td>
         <td>${esc(a.responsavel || '')}</td>
         <td>${esc(a.email || '')}</td>
         <td>${esc(a.telefone || '')}</td>
-        <td style="text-align:center;" onclick="event.stopPropagation();">
+        ${soLeituraAreas ? '<td></td>' : `<td style="text-align:center;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarArea('${a.id}')" title="Editar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -801,7 +854,7 @@ function renderizarAreas() {
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
           </button>
-        </td>
+        </td>`}
       </tr>`).join('')
     : '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">Nenhuma área cadastrada.</td></tr>';
 }
@@ -972,6 +1025,20 @@ function _htmlDrawerPessoa() {
           <select id="pessoaLider" style="${inp}"><option value="">Selecione...</option></select>
         </div>
         <div style="margin-bottom:16px;">
+          <label style="${lbl}">Liderança em produtos</label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:0.9em;cursor:pointer;margin-bottom:6px;">
+            <input type="checkbox" id="pessoaTechLead" onchange="alternarLiderancaPessoa('techLead')"> <strong>Tech Lead</strong>
+          </label>
+          <div id="pessoaTechLeadProdutos"></div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:0.9em;cursor:pointer;margin:10px 0 6px;">
+            <input type="checkbox" id="pessoaTeamLead" onchange="alternarLiderancaPessoa('teamLead')"> <strong>Team Lead</strong>
+          </label>
+          <div id="pessoaTeamLeadProdutos"></div>
+          <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Marque a função e, se quiser, os produtos que a pessoa lidera (sem produto também é permitido).
+            <a href="#produtos-software" target="_blank" style="color:#d60014;font-weight:600;">🗂️ Gerenciar Produtos</a>
+            <button type="button" class="btn-icon" onclick="_recarregarProdutosPessoa()" title="Atualizar lista de produtos">🔄</button></span>
+        </div>
+        <div style="margin-bottom:16px;">
           <label style="${lbl}">Telefone</label>
           <input type="text" id="pessoaTelefone" placeholder="Telefone" style="${inp}">
         </div>
@@ -994,6 +1061,7 @@ function _htmlDrawerPessoa() {
         <div id="pessoaPerfilSemEmail" style="display:none;font-size:0.8em;color:#999;margin:6px 0 16px;">Informe um e-mail para atribuir um perfil de sistema.</div>
       </div>
       <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="_fecharModalPessoaSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharModalPessoa()">Fechar</button>
         <button class="btn btn-ghost" id="btnRelatorioPessoa" onclick="gerarRelatorioPessoa()" style="color:#1565c0;border-color:#1565c0;display:none;">📄 Relatório de Vínculos</button>
         <button class="btn btn-primary" id="btnSalvarPessoaCadastro" onclick="salvarPessoaCadastro()">Salvar</button>
@@ -1007,13 +1075,18 @@ async function pessoas() {
       <div><h2>Pessoas</h2><p class="page-sub">Usadas como Gestor do Contrato (Fornecedores) e Responsável (Áreas)</p></div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-ghost" onclick="abrirModalOrganograma()" style="color:#d60014;border-color:#d60014;">🗂️ Gerar organograma</button>
-        <button class="btn btn-primary" onclick="abrirModalPessoa()">+ Nova Pessoa</button>
+        ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button class="btn btn-primary" onclick="abrirModalPessoa()">+ Nova Pessoa</button>' : ''}
       </div>
     </div>
     <div style="margin-bottom:16px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
       <input type="text" id="buscaPessoa" placeholder="🔍 Buscar pessoa..." oninput="renderizarPessoas()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;flex:1;">
       <select id="filtroPessoaArea" onchange="renderizarPessoas()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:180px;"><option value="">Todas as áreas</option></select>
       <select id="filtroPessoaLider" onchange="renderizarPessoas()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:200px;"><option value="">Todos os líderes</option></select>
+      <select id="filtroPessoaFuncao" onchange="renderizarPessoas()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:180px;">
+        <option value="">Todas as funções</option>
+        <option value="techLead">Tech Lead</option>
+        <option value="teamLead">Team Lead</option>
+      </select>
     </div>
     <div class="loading" id="loadingPessoas">⏳ Carregando...</div>
     <div class="data-table" id="listaPessoas" style="display:none;">
@@ -1023,6 +1096,7 @@ async function pessoas() {
             <th onclick="ordenarPessoas('nome')" style="cursor:pointer;">Nome <span id="sort-pessoa-nome"></span></th>
             <th onclick="ordenarPessoas('detalhes')" style="cursor:pointer;">Cargo <span id="sort-pessoa-detalhes"></span></th>
             <th onclick="ordenarPessoas('setor')" style="cursor:pointer;">Área <span id="sort-pessoa-setor"></span></th>
+            <th>Liderança</th>
             <th onclick="ordenarPessoas('telefone')" style="cursor:pointer;">Telefone <span id="sort-pessoa-telefone"></span></th>
             <th onclick="ordenarPessoas('email')" style="cursor:pointer;">Email <span id="sort-pessoa-email"></span></th>
             <th style="width:100px;text-align:center;">Ações</th>
@@ -1054,8 +1128,14 @@ async function pessoas() {
       </div>
     </div>`;
 
-  const [deps, areas, perfis] = await Promise.all([API.getDependencias(), API.getAreas(), API.getPerfis()]);
+  const [deps, areas, perfis, produtos] = await Promise.all([
+    API.getDependencias(), API.getAreas(), API.getPerfis(),
+    // Produtos de Software (Tech Lead/Team Lead). Se falhar, a tela abre igual,
+    // só sem os nomes dos produtos.
+    API.getProdutosSoftware().catch((e) => { console.error('Pessoas: produtos não carregaram', e); return null; }),
+  ]);
   pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+  if (produtos) produtosSoftwareData = produtos;
   // Fonte do dropdown "Área" no modal de Pessoa -- mesmo catálogo de Áreas.
   window.areasData = areas;
   // Fonte do bloco "Perfil de Sistema" no modal de Pessoa -- mesmo catálogo
@@ -1118,17 +1198,26 @@ function renderizarPessoas() {
   const filtroLider = (document.getElementById('filtroPessoaLider') || {}).value || '';
   if (filtroLider) data = data.filter((p) => String(p.liderImediato || '') === String(filtroLider));
 
+  // Filtro por função de liderança em produtos (Tech Lead / Team Lead).
+  const filtroFuncao = (document.getElementById('filtroPessoaFuncao') || {}).value || '';
+  if (filtroFuncao) data = data.filter((p) => p[filtroFuncao] === true);
+
   data = pessoasOrdenacao.aplicar(data);
   pessoasOrdenacao.atualizarSetas('sort-pessoa-', ['nome', 'detalhes', 'setor', 'telefone', 'email']);
 
+  // Operador Administrativo (e quem nao edita pessoas) so consulta: sem clique de
+  // edicao e sem botoes. Espelha as regras do banco (/dependencias).
+  const soLeituraPessoas = !Perfis.podeEditarPessoas(window.USER_PERFIS);
   document.getElementById('rowsPessoas').innerHTML = data.length
-    ? data.map((p) => `<tr style="cursor:pointer;" onclick="abrirModalPessoa('${esc(p.id)}')">
+    ? data.map((p) => `<tr ${soLeituraPessoas ? '' : `style="cursor:pointer;" onclick="abrirModalPessoa('${esc(p.id)}')"`}>
         <td style="font-weight:600;">${esc(p.nome)}</td>
         <td>${esc(p.detalhes || '')}</td>
         <td>${esc(_areasDaPessoa(p).join(', '))}</td>
+        <td style="font-size:0.85em;">${_resumoLiderancaPessoa(p).map((l) =>
+          `<div><span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:0.82em;font-weight:700;background:#fce8ea;color:#d60014;">${esc(l.rotulo)}</span> ${l.nomes.length ? esc(l.nomes.join(', ')) : '<span style="color:#bbb;">sem produto</span>'}</div>`).join('')}</td>
         <td>${esc(p.telefone || '')}</td>
         <td>${esc(p.email || '')}</td>
-        <td style="text-align:center;" onclick="event.stopPropagation();">
+        ${soLeituraPessoas ? '<td></td>' : `<td style="text-align:center;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="abrirModalPessoa('${esc(p.id)}')" title="Editar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -1141,15 +1230,98 @@ function renderizarPessoas() {
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
           </button>
-        </td>
+        </td>`}
       </tr>`).join('')
-    : '<tr><td colspan="6" style="text-align:center;color:#999;padding:20px;">Nenhuma pessoa cadastrada.</td></tr>';
+    : '<tr><td colspan="7" style="text-align:center;color:#999;padding:20px;">Nenhuma pessoa cadastrada.</td></tr>';
 }
 
 window.ordenarPessoas = (coluna) => {
   pessoasOrdenacao.ordenar(coluna);
   renderizarPessoas();
 };
+
+// ------------------------------------------------------------
+// Liderança em produtos (Tech Lead / Team Lead). Cada função tem os seus
+// produtos (ids de produtos_software); marcar a função não obriga a ter
+// produto. Estado em window._pessoaLideranca.
+// ------------------------------------------------------------
+window._pessoaLideranca = { techLead: false, techLeadProdutos: [], teamLead: false, teamLeadProdutos: [] };
+const _FUNCOES_LIDERANCA = { techLead: 'Tech Lead', teamLead: 'Team Lead' };
+
+/** Produto (do catálogo) por id, ou null se foi removido. */
+function _produtoSoftwarePorId(id) {
+  return (produtosSoftwareData || []).find((p) => String(p.id) === String(id)) || null;
+}
+
+function renderLiderancaPessoa() {
+  Object.keys(_FUNCOES_LIDERANCA).forEach((funcao) => {
+    const cont = document.getElementById('pessoa' + funcao.charAt(0).toUpperCase() + funcao.slice(1) + 'Produtos');
+    const check = document.getElementById('pessoa' + funcao.charAt(0).toUpperCase() + funcao.slice(1));
+    if (!cont || !check) return;
+    const estado = window._pessoaLideranca;
+    check.checked = !!estado[funcao];
+    if (!estado[funcao]) { cont.innerHTML = ''; return; }
+
+    const marcados = new Set((estado[funcao + 'Produtos'] || []).map(String));
+    const ativos = (produtosSoftwareData || []).filter((p) => p.ativo);
+    // Produto já associado que foi desativado ou removido continua visível, marcado.
+    const extras = [...marcados]
+      .filter((id) => !ativos.some((p) => String(p.id) === id))
+      .map((id) => {
+        const p = _produtoSoftwarePorId(id);
+        return { id, nome: p ? p.nome : 'produto', sufixo: p ? ' (inativo)' : ' (removido)' };
+      });
+    const itens = [...ativos.map((p) => ({ id: String(p.id), nome: p.nome, sufixo: '' })), ...extras];
+    cont.innerHTML = itens.length
+      ? `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:4px;">${itens.map((it) => {
+        const sel = marcados.has(it.id);
+        return `<button type="button" onclick="alternarProdutoLiderancaPessoa('${funcao}','${esc(it.id)}')" style="padding:5px 12px;border-radius:14px;cursor:pointer;font-size:0.82em;font-weight:600;border:1.5px solid ${sel ? '#d60014' : '#c5cae9'};background:${sel ? '#fce8ea' : '#fff'};color:${sel ? '#d60014' : '#555'};">${esc(it.nome)}${esc(it.sufixo)}${sel ? ' ✓' : ''}</button>`;
+      }).join('')}</div>`
+      : '<div style="font-size:0.8em;color:#999;">Nenhum produto cadastrado ainda.</div>';
+  });
+}
+
+window.alternarLiderancaPessoa = (funcao) => {
+  const estado = window._pessoaLideranca;
+  const marcado = document.getElementById('pessoa' + funcao.charAt(0).toUpperCase() + funcao.slice(1)).checked;
+  estado[funcao] = marcado;
+  // Desmarcar a função limpa os produtos dela (não sobra associação sem função).
+  if (!marcado) estado[funcao + 'Produtos'] = [];
+  renderLiderancaPessoa();
+};
+
+window.alternarProdutoLiderancaPessoa = (funcao, produtoId) => {
+  const chave = funcao + 'Produtos';
+  const lista = window._pessoaLideranca[chave] || [];
+  window._pessoaLideranca[chave] = lista.map(String).includes(String(produtoId))
+    ? lista.filter((id) => String(id) !== String(produtoId))
+    : [...lista, String(produtoId)];
+  renderLiderancaPessoa();
+};
+
+window._recarregarProdutosPessoa = async () => {
+  try {
+    API.invalidate('getProdutosSoftware');
+    produtosSoftwareData = await API.getProdutosSoftware();
+  } catch (e) {
+    return showToast('❌ Não foi possível atualizar os produtos: ' + (e.message || 'erro desconhecido'), '#c62828');
+  }
+  renderLiderancaPessoa();
+  showToast('Lista de produtos atualizada.', '#2e7d32');
+};
+
+/** "Tech Lead · Fortes Ponto, Fortes RH" para a grade (um item por função marcada). */
+function _resumoLiderancaPessoa(p) {
+  return Object.entries(_FUNCOES_LIDERANCA)
+    .filter(([funcao]) => p[funcao])
+    .map(([funcao, rotulo]) => {
+      const nomes = (p[funcao + 'Produtos'] || []).map((id) => {
+        const prod = _produtoSoftwarePorId(id);
+        return prod ? prod.nome : null;
+      }).filter(Boolean);
+      return { rotulo, nomes };
+    });
+}
 
 // Áreas da Pessoa -- lista (multi). A 1ª é a "principal" (gravada também em
 // setor, por compat). Estado em window._pessoaAreas.
@@ -1253,6 +1425,11 @@ window.abrirModalPessoa = (id) => {
     : (p && p.setor ? [p.setor] : []);
   renderPessoaAreas();
   _popularSelectLiderPessoa(p ? (p.liderImediato || '') : '', p ? p.id : null);
+  window._pessoaLideranca = {
+    techLead: !!(p && p.techLead), techLeadProdutos: p && Array.isArray(p.techLeadProdutos) ? p.techLeadProdutos.map(String) : [],
+    teamLead: !!(p && p.teamLead), teamLeadProdutos: p && Array.isArray(p.teamLeadProdutos) ? p.teamLeadProdutos.map(String) : [],
+  };
+  renderLiderancaPessoa();
   document.getElementById('pessoaTelefone').value = p ? (p.telefone || '') : '';
   document.getElementById('pessoaEmail').value = p ? (p.email || '') : '';
   // Perfil de Sistema: atributo da propria Pessoa (p.perfis). Pessoa antiga,
@@ -1274,13 +1451,59 @@ window.abrirModalPessoa = (id) => {
   document.getElementById('drawerPessoa').classList.add('open');
   document.getElementById('drawerOverlayPessoa').classList.add('open');
   _ajustarPerfilPessoa();
+  _edPessoa.marcar();
 };
 
-window.fecharModalPessoa = () => {
+function _fecharModalPessoaSemSalvar() {
   document.getElementById('drawerPessoa').classList.remove('open');
   document.getElementById('drawerOverlayPessoa').classList.remove('open');
   _reabrirDrawerPaiSeEscondido();
+}
+// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- exceto no cadastro
+// rapido aninhado (empilhado sobre outro drawer), que continua com o
+// comportamento de sempre: o proprio salvarPessoaCadastro ja fecha e volta
+// pro pai ao salvar, entao aqui so fecha sem tentar salvar de novo.
+window.fecharModalPessoa = async () => {
+  if (_temDrawerPaiEmpilhado()) { _fecharModalPessoaSemSalvar(); return; }
+  if (!_edPessoa.sujo()) return _fecharModalPessoaSemSalvar();
+  const ok = await salvarPessoaCadastro();
+  if (ok) _fecharModalPessoaSemSalvar();
 };
+
+const _edPessoa = criarRastreadorEdicao(() => _coletarFormularioPessoa());
+
+// Estado do formulário (não o payload final): perfis = o que está marcado nos
+// checkboxes -- ou, pra quem não gerencia perfis (checkboxes ocultos), o valor
+// original, que não muda.
+function _coletarFormularioPessoa() {
+  const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIS);
+  return {
+    id: document.getElementById('pessoaId').value || null,
+    nome: document.getElementById('pessoaNome').value.trim(),
+    detalhes: document.getElementById('pessoaDetalhes').value.trim(),
+    areas: window._pessoaAreas || [],
+    liderImediato: document.getElementById('pessoaLider').value,
+    techLead: !!window._pessoaLideranca.techLead,
+    techLeadProdutos: window._pessoaLideranca.techLeadProdutos || [],
+    teamLead: !!window._pessoaLideranca.teamLead,
+    teamLeadProdutos: window._pessoaLideranca.teamLeadProdutos || [],
+    telefone: document.getElementById('pessoaTelefone').value.trim(),
+    email: document.getElementById('pessoaEmail').value.trim(),
+    perfis: podeGerenciar
+      ? Array.from(document.querySelectorAll('#pessoaPerfilBox .pessoa-perfil-check:checked')).map((el) => el.value)
+      : (window._pessoaPerfisOriginais || []),
+  };
+}
+
+// Espelho em config_perfis (+ recarga da lista de perfis): fora do caminho de
+// quem espera o "Salvo!" -- são mais duas idas ao servidor. A Pessoa já está
+// gravada; se o espelho falhar, o aviso aparece depois.
+function _espelharPerfilPessoaEmSegundoPlano(dados) {
+  API.salvarPerfilAcesso(dados)
+    .then(() => API.getPerfis())
+    .then((perfis) => { perfisData = perfis; })
+    .catch((e) => showToast('⚠️ Pessoa salva, mas não foi possível salvar o perfil de sistema: ' + (e.message || 'erro desconhecido'), '#e65100'));
+}
 
 // ============================================================
 // RELATÓRIO DE VÍNCULOS DA PESSOA -- a quais Processos, Riscos, Indicadores,
@@ -1295,9 +1518,12 @@ window.fecharModalPessoa = () => {
 // Gerando..." primeiro, preenchendo de verdade só depois que os dados voltam
 // (mesmo padrão de gerarDRPDependencia).
 //
+// Dono do Processo = responsável da Área do processo (por nome, igual à seção
+// "Áreas"; a mesma regra da coluna Responsável da tela de Processos).
 // Vínculos por ID (confiáveis): bcpContatos/dependenciaItens (Processo),
 // gestoresContrato (Fornecedor), stakeholderId (Backup), liderImediato
-// (hierarquia). Vínculos por NOME (Risco.responsavel e Área.responsavel são
+// (hierarquia), techLeadProdutos/teamLeadProdutos (Produtos de Software, ids
+// do catálogo produtos_software). Vínculos por NOME (Risco.responsavel e Área.responsavel são
 // <select> do catálogo de Pessoas -- comparação por nome é confiável;
 // Indicador.responsavel é texto livre -- sinalizado como tal no relatório).
 // Fora do relatório, de propósito: Fornecedor.pessoas[] (cópias soltas, sem
@@ -1324,11 +1550,14 @@ window.gerarRelatorioPessoa = async (pessoaDireta) => {
   win.document.write('<p style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#d60014;">⏳ Gerando relatório...</p>');
 
   try {
-    const [processos, deps, riscos, indicadores, backups, perfis, areas] = await Promise.all([
+    const [processos, deps, riscos, indicadores, backups, perfis, areas, produtos] = await Promise.all([
       API.getProcessos(), API.getDependencias(), API.getRiscos(),
       API.getIndicadoresSeguranca(), API.getBackups(), API.getPerfis(), API.getAreas(),
+      // Só dá nome aos produtos da liderança; se falhar, o relatório ainda sai
+      // (os ids aparecem como "produto removido").
+      API.getProdutosSoftware().catch((e) => { console.error('Relatório de vínculos: produtos não carregaram', e); return []; }),
     ]);
-    const html = _buildRelatorioPessoaPage(pessoa, { processos, deps, riscos, indicadores, backups, perfis, areas });
+    const html = _buildRelatorioPessoaPage(pessoa, { processos, deps, riscos, indicadores, backups, perfis, areas, produtos });
     win.document.open();
     win.document.write(html);
     win.document.close();
@@ -1339,6 +1568,7 @@ window.gerarRelatorioPessoa = async (pessoaDireta) => {
 
 function _buildRelatorioPessoaPage(pessoa, dados) {
   const { processos, deps, riscos, indicadores, backups, perfis, areas } = dados;
+  const produtosCatalogo = dados.produtos || [];
   const pessoasTodas = deps.filter((d) => d.categoria === 'Pessoas');
   const fornecedores = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
   const nome = (pessoa.nome || '').trim();
@@ -1350,23 +1580,32 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
   // Acesso ao sistema
   const acesso = _perfilDaPessoa(pessoa.email);
 
-  // Processos: Contato de Crise (bcpContatos) + Dependência Crítica (dependenciaItens), deduplicados.
+  // Áreas onde é responsável (por nome -- o campo é um <select> do catálogo de Pessoas).
+  const areasDaPessoa = areas.filter((a) => (a.responsavel || '').trim() === nome);
+
+  // Processos: Dono do Processo + Contato de Crise (bcpContatos) + Dependência
+  // Crítica (dependenciaItens), deduplicados (um processo com mais de um vínculo
+  // aparece uma vez, com os vínculos somados). "Dono" é o mesmo conceito da tela
+  // de Processos (campo Dono/coluna Responsável): o responsável da ÁREA do
+  // processo -- o processo em si não guarda responsável próprio.
   const porProcesso = new Map();
-  processos.filter((p) => Array.isArray(p.bcpContatos) && p.bcpContatos.includes(pessoa.id))
-    .forEach((p) => porProcesso.set(p.id, { p, vinculos: ['Contato de Crise'] }));
-  _processosVinculadosADependencia(pessoa, processos).forEach((p) => {
+  const adicionarVinculo = (p, vinculo) => {
     const atual = porProcesso.get(p.id);
-    if (atual) atual.vinculos.push('Dependência Crítica');
-    else porProcesso.set(p.id, { p, vinculos: ['Dependência Crítica'] });
-  });
-  const processosDaPessoa = [...porProcesso.values()];
+    if (atual) atual.vinculos.push(vinculo);
+    else porProcesso.set(p.id, { p, vinculos: [vinculo] });
+  };
+  const nomesAreasDona = new Set(areasDaPessoa.map((a) => a.nome));
+  processos.filter((p) => nomesAreasDona.has(p.area)).forEach((p) => adicionarVinculo(p, 'Dono do Processo'));
+  processos.filter((p) => Array.isArray(p.bcpContatos) && p.bcpContatos.includes(pessoa.id))
+    .forEach((p) => adicionarVinculo(p, 'Contato de Crise'));
+  _processosVinculadosADependencia(pessoa, processos).forEach((p) => adicionarVinculo(p, 'Dependência Crítica'));
+  // Por área e depois por processo: um dono de área grande não pode virar uma lista embaralhada.
+  const processosDaPessoa = [...porProcesso.values()].sort((a, b) =>
+    (a.p.area || '').localeCompare(b.p.area || '', 'pt-BR') || (a.p.processo || '').localeCompare(b.p.processo || '', 'pt-BR'));
 
   // Riscos e Indicadores: responsavel por nome.
   const riscosDaPessoa = riscos.filter((r) => (r.responsavel || '').trim() === nome);
   const indicadoresDaPessoa = indicadores.filter((i) => (i.responsavel || '').trim() === nome);
-
-  // Áreas onde é responsável.
-  const areasDaPessoa = areas.filter((a) => (a.responsavel || '').trim() === nome);
 
   // Fornecedores onde é Gestor do Contrato (só vínculo com id confiável).
   const fornecedoresDaPessoa = fornecedores.filter((f) => (f.gestoresContrato || []).some((g) => g.id && String(g.id) === String(pessoa.id)));
@@ -1374,8 +1613,34 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
   // Backups onde é Stakeholder.
   const backupsDaPessoa = backups.filter((b) => b.stakeholderId && String(b.stakeholderId) === String(pessoa.id));
 
+  // Produtos de Software onde é Tech Lead / Team Lead (vínculo por id). Uma
+  // linha por produto, com as funções juntas; função marcada sem produto
+  // também é vínculo (linha própria, "sem produto associado").
+  const produtosDaPessoa = [];
+  const semProduto = [];
+  const porProduto = new Map();
+  Object.entries(_FUNCOES_LIDERANCA).forEach(([funcao, rotulo]) => {
+    if (!pessoa[funcao]) return;
+    const ids = [...new Set((pessoa[funcao + 'Produtos'] || []).map(String))];
+    if (!ids.length) { semProduto.push(rotulo); return; }
+    ids.forEach((id) => {
+      if (!porProduto.has(id)) {
+        const prod = produtosCatalogo.find((p) => String(p.id) === id);
+        porProduto.set(id, {
+          nome: prod ? prod.nome + (prod.ativo === false ? ' (inativo)' : '') : '(produto removido)',
+          funcoes: [],
+        });
+      }
+      porProduto.get(id).funcoes.push(rotulo);
+    });
+  });
+  [...porProduto.values()]
+    .sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+    .forEach((p) => produtosDaPessoa.push({ nome: p.nome, funcoes: p.funcoes.join(' + ') }));
+  semProduto.forEach((rotulo) => produtosDaPessoa.push({ nome: '— (sem produto associado)', funcoes: rotulo }));
+
   const temVinculoOperacional = processosDaPessoa.length || riscosDaPessoa.length || indicadoresDaPessoa.length
-    || areasDaPessoa.length || fornecedoresDaPessoa.length || backupsDaPessoa.length;
+    || areasDaPessoa.length || fornecedoresDaPessoa.length || backupsDaPessoa.length || produtosDaPessoa.length;
 
   const linhaOuVazio = (lista, montarLinha) => lista.length ? lista.map(montarLinha).join('') : '';
 
@@ -1449,6 +1714,11 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
     if (backupsDaPessoa.length) {
       html += '<h2>Backups (Stakeholder)</h2><table><tr><th>Backup</th></tr>'
         + linhaOuVazio(backupsDaPessoa, (b) => '<tr><td><b>' + esc(b.nome) + '</b></td></tr>')
+        + '</table>';
+    }
+    if (produtosDaPessoa.length) {
+      html += '<h2>Produtos de Software (Tech Lead / Team Lead)</h2><table><tr><th>Produto</th><th>Função</th></tr>'
+        + linhaOuVazio(produtosDaPessoa, (p) => '<tr><td><b>' + esc(p.nome) + '</b></td><td>' + esc(p.funcoes) + '</td></tr>')
         + '</table>';
     }
   }
@@ -1637,8 +1907,11 @@ window.salvarPessoaCadastro = async () => {
   }
 
   const perfisParaEntidade = (podeGerenciar && !perfilCancelado) ? perfisMarcados : (window._pessoaPerfisOriginais || []);
+  // Foto do formulário no momento do clique -- é ela que vira "limpo" depois de
+  // gravar (não o que for digitado enquanto a gravação está em andamento).
+  const estadoDoFormulario = _coletarFormularioPessoa();
 
-  await comBotaoCarregando('btnSalvarPessoaCadastro', async () => {
+  return await comBotaoCarregando('btnSalvarPessoaCadastro', async () => {
     try {
       const r = await API.salvarDependencia({
         id,
@@ -1651,12 +1924,17 @@ window.salvarPessoaCadastro = async () => {
         setor: (window._pessoaAreas && window._pessoaAreas[0]) || '',
         // Líder imediato -- id de outra Pessoa (base do organograma).
         liderImediato: document.getElementById('pessoaLider').value,
+        techLead: estadoDoFormulario.techLead,
+        techLeadProdutos: estadoDoFormulario.techLeadProdutos,
+        teamLead: estadoDoFormulario.teamLead,
+        teamLeadProdutos: estadoDoFormulario.teamLeadProdutos,
         telefone: document.getElementById('pessoaTelefone').value.trim(),
         email,
         perfis: perfisParaEntidade,
       });
+      _edPessoa.marcar({ ...estadoDoFormulario, id: id || r.id });
       if (_temDrawerPaiEmpilhado()) {
-        fecharModalPessoa();
+        _fecharModalPessoaSemSalvar();
       } else if (!id) {
         // Sem fechar o drawer, o próximo "Salvar" precisa gravar no MESMO
         // registro em vez de criar uma segunda pessoa idêntica.
@@ -1674,22 +1952,22 @@ window.salvarPessoaCadastro = async () => {
       showToast(perfilCancelado ? '✅ Salvo. Perfil de sistema não foi alterado.' : '✅ Salvo!', perfilCancelado ? '#e65100' : '#2e7d32');
     } catch (e) {
       showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
-      return;
+      return false;
     }
 
     // Espelho em config_perfis (fonte real de RBAC) -- só quem gerencia
     // perfis, com e-mail, sem cancelamento de auto-proteção, e com ao menos
     // um perfil marcado (revogar acesso por completo continua exclusivo da
-    // tela Perfis de Acesso, com seu próprio confirm).
-    if (!podeGerenciar || !email || perfilCancelado || !perfisMarcados.length) return;
+    // tela Perfis de Acesso, com seu próprio confirm). A pessoa em si já
+    // salvou (true) mesmo quando este espelho secundário não roda ou falha.
+    if (!podeGerenciar || !email || perfilCancelado || !perfisMarcados.length) return true;
 
-    try {
-      const area = (window._pessoaAreas && window._pessoaAreas[0]) || '';
-      await API.salvarPerfilAcesso({ email, perfis: perfisMarcados, area });
-      perfisData = await API.getPerfis();
-    } catch (e) {
-      showToast('⚠️ Pessoa salva, mas não foi possível salvar o perfil de sistema: ' + (e.message || 'erro desconhecido'), '#e65100');
-    }
+    _espelharPerfilPessoaEmSegundoPlano({
+      email,
+      perfis: perfisMarcados,
+      area: (window._pessoaAreas && window._pessoaAreas[0]) || '',
+    });
+    return true;
   });
 };
 
@@ -1726,7 +2004,7 @@ async function processos() {
       <div><h2>Processos de Negócio</h2><p class="page-sub">Cadastre os processos críticos de cada área</p></div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-ghost" onclick="abrirDrawerProcessosLote()" id="btnEditarProcessosLote" style="color:#1565c0;border-color:#1565c0;display:none;">✏️ Editar selecionados</button>
-        <button class="btn btn-primary" onclick="abrirModalProcesso()">+ Novo Processo</button>
+        ${Perfis.podeEditarProcessos(window.USER_PERFIS) ? '<button class="btn btn-primary" onclick="abrirModalProcesso()">+ Novo Processo</button>' : ''}
       </div>
     </div>
     <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
@@ -1775,7 +2053,7 @@ async function processos() {
       <table>
         <thead>
           <tr>
-            <th style="width:3%;text-align:center;padding-left:6px;padding-right:6px;"><input type="checkbox" id="chkTodosProcessos" onchange="toggleTodosProcessos(this.checked)" title="Selecionar todos"></th>
+            <th style="width:3%;text-align:center;padding-left:6px;padding-right:6px;${Perfis.podeEditarProcessos(window.USER_PERFIS) ? '' : 'visibility:hidden;'}"><input type="checkbox" id="chkTodosProcessos" onchange="toggleTodosProcessos(this.checked)" title="Selecionar todos"></th>
             <th onclick="ordenarProcessos('area')" style="cursor:pointer;width:10%;">Área <span id="sort-area"></span></th>
             <th onclick="ordenarProcessos('processo')" style="cursor:pointer;width:15%;">Processo de Negócio <span id="sort-processo"></span></th>
             <th onclick="ordenarProcessos('responsavel')" style="cursor:pointer;width:10%;">Responsável <span id="sort-responsavel"></span></th>
@@ -1847,12 +2125,12 @@ async function processos() {
         <button class="btn btn-primary" onclick="salvarAvaliacaoProcesso()">Salvar Avaliação</button>
       </div>
     </div>
-    <div class="drawer-overlay" id="drawerOverlayProcesso" onclick="fecharModal()"></div>
+    <div class="drawer-overlay" id="drawerOverlayProcesso" onclick="fecharDrawerProcesso()"></div>
     <div class="drawer" id="drawerProcesso">
       <div class="drawer-resize" id="drawerResize"></div>
       <div class="drawer-header">
         <h3 id="modalTitulo">Novo Processo</h3>
-        <button onclick="fecharModal()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+        <button onclick="fecharDrawerProcesso()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
         <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
@@ -2017,7 +2295,8 @@ async function processos() {
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="fecharModal()">Fechar</button>
+        <button class="btn btn-ghost" onclick="_fecharDrawerProcessoSemSalvar()">Cancelar</button>
+        <button class="btn btn-ghost" onclick="fecharDrawerProcesso()">Fechar</button>
         <button class="btn btn-ghost" onclick="gerarDossieProcesso()" style="color:#1565c0;border-color:#1565c0;">📄 Dossiê</button>
         <button class="btn btn-ghost" onclick="abrirPCNSalvo()" id="btnPcnSalvo" style="color:#2e7d32;border-color:#2e7d32;display:none;">📂 Abrir PCN</button>
         <button class="btn btn-ghost" onclick="gerarPCNProcesso()" id="btnGerarPcn" style="color:#2e7d32;border-color:#2e7d32;">🤖 Gerar PCN</button>
@@ -2212,12 +2491,15 @@ function renderizarProcessos() {
     }
   }
   
+  // Operador Administrativo so consulta: o clique da linha abre o detalhe
+  // (somente leitura) e as acoes de editar/avaliar/enviar/excluir somem.
+  const soLeituraProcessos = !Perfis.podeEditarProcessos(window.USER_PERFIS);
   document.getElementById('rows').innerHTML = data.length
     ? data.map(p => {
         const status = Criticidade.tierDoProcesso(p);
         const statusColor = Criticidade.corDoTier(status);
-        return `<tr style="cursor:pointer;" onclick="editarProcesso('${p.id}')">
-        <td style="text-align:center;padding-left:6px;padding-right:6px;" onclick="event.stopPropagation();"><input type="checkbox" class="chk-processo" data-id="${esc(p.id)}" ${processosSelecionados.has(p.id) ? 'checked' : ''} onchange="toggleProcessoSelecionado('${p.id}', this.checked)"></td>
+        return `<tr style="cursor:pointer;" onclick="${soLeituraProcessos ? 'verDetalhesProcesso' : 'editarProcesso'}('${p.id}')">
+        ${soLeituraProcessos ? '<td></td>' : `<td style="text-align:center;padding-left:6px;padding-right:6px;" onclick="event.stopPropagation();"><input type="checkbox" class="chk-processo" data-id="${esc(p.id)}" ${processosSelecionados.has(p.id) ? 'checked' : ''} onchange="toggleProcessoSelecionado('${p.id}', this.checked)"></td>`}
         <td>${esc(p.area)}</td>
         <td><strong>${esc(p.processo)}</strong></td>
         <td>${p.responsavelArea || p.responsavel || ''}</td>
@@ -2226,7 +2508,7 @@ function renderizarProcessos() {
         <td style="font-size:0.8em;color:#555;">${p.biaHomologada || '-'}</td>
         <td style="font-size:0.8em;color:#555;">${p.bcpStatus || '-'}</td>
         <td style="font-size:0.8em;color:#555;">${p.drpStatus || '-'}</td>
-        <td class="col-c col-nw col-sticky" onclick="event.stopPropagation();">
+        ${soLeituraProcessos ? `<td class="col-c col-nw col-sticky" onclick="event.stopPropagation();"><button class="btn-icon" onclick="verDetalhesProcesso('${p.id}')" title="Ver detalhes">👁️</button></td>` : `<td class="col-c col-nw col-sticky" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarProcesso('${p.id}')" title="Editar">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
               <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
@@ -2259,7 +2541,7 @@ function renderizarProcessos() {
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
           </button>
-        </td>
+        </td>`}
       </tr>`;
       }).join('')
     : `<tr><td colspan="8" style="text-align:center;color:#999;padding:40px;">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
@@ -3105,18 +3387,27 @@ window.abrirModalProcesso = (p) => {
   const fRPO = document.getElementById('fRPO'); if (fRPO) fRPO.value = p ? (p.rpo || '') : '';
   const fMTD = document.getElementById('fMTD'); if (fMTD) fMTD.value = p ? (p.mtd || '') : '';
   iniciarDrawerResize();
+  _edProcesso.marcar();
 };
 
-window.editarProcesso = (id) => abrirModalProcesso(window.processosData.find(p => p.id === id));
+window.editarProcesso = (id) => {
+  // Sem permissao de editar (Operador Administrativo): abre so o detalhe.
+  if (!Perfis.podeEditarProcessos(window.USER_PERFIS)) return verDetalhesProcesso(id);
+  abrirModalProcesso(window.processosData.find(p => p.id === id));
+};
 
 window.avaliarProcessoFromBia = () => {
   const id = document.getElementById('fId').value || '';
   if (!id) return;
-  fecharModal();
+  // So navega pra tela de Avaliacao -- nao tenta salvar aqui (quem decide
+  // salvar o Processo e o botao Salvar/Fechar dele, nao esta navegacao).
+  _fecharDrawerProcessoSemSalvar();
   setTimeout(() => avaliarProcesso(id), 300);
 };
 
-window.salvarProcesso = async () => {
+// Le o formulario do drawer de Processo (puro: sem toast, sem efeito) --
+// usado por salvarProcesso e pelo rastreador de edicao (_edProcesso).
+function _coletarFormularioProcesso() {
   // Contingencia e SLA por fornecedor, lidos da tabela da aba BCP. Essa tabela
   // so existe no DOM quando a aba foi aberta nesta edicao: se nao foi, os dois
   // campos ficam FORA do payload, em vez de irem vazios e apagarem o que ja
@@ -3150,25 +3441,6 @@ window.salvarProcesso = async () => {
     ...camposFornecedoresBcp,
   };
 
-  if (!p.area) return showToast('Selecione a área.', '#e65100');
-  if (!p.processo) return showToast('Informe o processo.', '#e65100');
-  // Prevenir duplicatas
-  if (!p.id) {
-    const duplicado = (window.processosData || []).find(x => x.area.toLowerCase() === p.area.toLowerCase() && x.processo.toLowerCase() === p.processo.toLowerCase());
-    if (duplicado) return showToast('Já existe um processo com esse nome nesta área.', '#e65100');
-  }
-  
-  // Prevenir duplicatas: se não tem id, verificar se já existe processo com mesmo nome e área
-  if (!p.id) {
-    const duplicado = (window.processosData || []).find(x => 
-      x.area.toLowerCase() === p.area.toLowerCase() && 
-      x.processo.toLowerCase() === p.processo.toLowerCase()
-    );
-    if (duplicado) {
-      return showToast('Já existe um processo com esse nome nesta área.', '#e65100');
-    }
-  }
-  
   // Coletar respostas da avaliação inline (se houver)
   const pergs = window.processosPerguntas || [];
   const avalScores = {};
@@ -3191,6 +3463,19 @@ window.salvarProcesso = async () => {
       temResposta = true;
     }
   });
+  return { p, avalScores, avalTotal, temResposta };
+}
+
+window.salvarProcesso = async () => {
+  const { p, avalScores, avalTotal, temResposta } = _coletarFormularioProcesso();
+
+  if (!p.area) return showToast('Selecione a área.', '#e65100');
+  if (!p.processo) return showToast('Informe o processo.', '#e65100');
+  // Prevenir duplicatas: se não tem id, verificar se já existe processo com mesmo nome e área
+  if (!p.id) {
+    const duplicado = (window.processosData || []).find(x => x.area.toLowerCase() === p.area.toLowerCase() && x.processo.toLowerCase() === p.processo.toLowerCase());
+    if (duplicado) return showToast('Já existe um processo com esse nome nesta área.', '#e65100');
+  }
 
   // Desabilitar botão e mostrar loading
   const btnSalvar = document.querySelector('#drawerProcesso .drawer-footer .btn-primary');
@@ -3228,6 +3513,7 @@ window.salvarProcesso = async () => {
     if (temResposta) {
       await API.post('salvarRespostas', { area: p.area, processo: p.processo, scores: avalScores });
     }
+    _edProcesso.marcar({ p: { ...p, id: p.id || result.id }, aval: avalScores });
 
     // Atualizar ID real se era novo
     if (!p.id && result.id) {
@@ -3241,6 +3527,7 @@ window.salvarProcesso = async () => {
     }
     showToast('✅ Salvo!', '#2e7d32');
     API.invalidate('getProcessos');
+    return true;
   } catch (err) {
     console.error('Erro ao salvar processo:', err);
     showToast('❌ Erro ao salvar: ' + err.message, '#c62828');
@@ -3251,6 +3538,7 @@ window.salvarProcesso = async () => {
       window.processosData = window.processosData.filter(x => x.id !== pEnriquecido.id);
       renderizarProcessos();
     }
+    return false;
   } finally {
     // Resetar botão salvar para próximo uso -- só agora, com a gravação real
     // (sucesso ou erro) já terminada.
@@ -4218,6 +4506,7 @@ function _buildRoteiroTestePage(categoria, versoesDaCategoria, versaoAtual, dep,
       var ROTEIRO_DEP_ID = '${escScript(dep && dep.id || '')}';
       var ROTEIRO_CATEGORIA = '${escScript(categoria)}';
       var ROTEIRO_VERSOES = JSON.parse('${versoesJson}');
+      ${_SCRIPT_TOKEN_POPUP('ROTEIRO_TOKEN')}
       function trocarVersaoRoteiroTeste(idx){
         var v = ROTEIRO_VERSOES[Number(idx)];
         if (v && v.html) document.getElementById('roteiro-conteudo').innerHTML = v.html;
@@ -4228,8 +4517,13 @@ function _buildRoteiroTestePage(categoria, versoesDaCategoria, versaoAtual, dep,
         if(btn){btn.disabled=true;btn.textContent='⏳ Salvando...';}
         try{
           var payload = JSON.stringify({action:'salvarRoteiroTeste', id:ROTEIRO_DEP_ID, categoria:ROTEIRO_CATEGORIA, html:conteudo});
-          var res = await fetch(ROTEIRO_API_URL, {method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8','Authorization':'Bearer '+ROTEIRO_TOKEN},body:payload});
-          if(res.status===401){throw new Error('A sessão desta aba expirou. Feche esta aba, volte ao sistema e abra o roteiro de novo — o conteúdo editado não foi salvo.');}
+          var enviar = async function(forcar){
+            var tk = await tokenDoSistema(forcar);
+            return fetch(ROTEIRO_API_URL, {method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8','Authorization':'Bearer '+tk},body:payload});
+          };
+          var res = await enviar(false);
+          if(res.status===401) res = await enviar(true);
+          if(res.status===401){throw new Error(MSG_SESSAO_PERDIDA);}
           var data = JSON.parse(await res.text());
           if(data.error) throw new Error(data.error);
           alert('✅ Versão ' + (data.versao || '') + ' salva com sucesso! (' + (data.totalVersoes || '') + ' versões no total)');
@@ -4237,6 +4531,7 @@ function _buildRoteiroTestePage(categoria, versoesDaCategoria, versaoAtual, dep,
         finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
       }
     </script>
+    <script src="https://bia-forte-2025.web.app/tabela-editavel.js?v=1"></script>
   </body></html>`;
 }
 
@@ -4573,6 +4868,7 @@ function _htmlDrawerDependencia() {
         </div>
       </div>
       <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="_fecharDrawerDependenciaSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerDependencia()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarDep" onclick="salvarDep()">Salvar</button>
       </div>
@@ -4651,6 +4947,9 @@ window.abrirDrawerDependencia = (d) => {
   trocarAbaDependencia('geral');
   document.getElementById('drawerDependencia').classList.add('open');
   document.getElementById('drawerOverlayDependencia').classList.add('open');
+  // Rascunho (categoria/nome sugeridos, sem id) não existe no banco: o Fechar
+  // tem que gravar, nunca tratar como "sem mudança".
+  if (d && !d.id) _edDep.esquecer(); else _edDep.marcar();
 };
 
 /**
@@ -4713,13 +5012,58 @@ async function _renderProcessosDaDependencia(d) {
   </table>`;
 }
 
-window.fecharDrawerDependencia = () => {
+function _fecharDrawerDependenciaSemSalvar() {
   document.getElementById('drawerDependencia').classList.remove('open');
   document.getElementById('drawerOverlayDependencia').classList.remove('open');
   window._backupNovoServidor = null;
   window._servicoNovaDependenciaCategoria = null;
   _reabrirDrawerPaiSeEscondido();
+}
+// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- exceto no cadastro
+// rapido aninhado (mesmas flags que salvarDep ja usa pra detectar isso),
+// que mantem o comportamento de sempre: fecha otimista e volta pro pai,
+// sem esperar a gravacao real terminar.
+window.fecharDrawerDependencia = async () => {
+  if (window._backupNovoServidor || window._servicoNovaDependenciaCategoria) {
+    _fecharDrawerDependenciaSemSalvar();
+    return;
+  }
+  if (!_edDep.sujo()) return _fecharDrawerDependenciaSemSalvar();
+  const ok = await salvarDep();
+  if (ok) _fecharDrawerDependenciaSemSalvar();
 };
+
+const _edDep = criarRastreadorEdicao(() => _coletarFormularioDependencia());
+
+// Só o que a pessoa edita nesta tela. Os campos que o salvar apenas preserva
+// do registro (setor, empresa, drpSalvo, drpRoteirosTeste...) ficam de fora de
+// propósito: gerar um DRP muda drpSalvo em memória sem a pessoa ter editado
+// nada, e isso não pode contar como "mudou o formulário".
+function _coletarFormularioDependencia() {
+  return {
+    id: document.getElementById('depId').value || null,
+    categoria: document.getElementById('depCategoria').value.trim(),
+    nome: document.getElementById('depNome').value.trim(),
+    detalhes: document.getElementById('depDetalhes').value.trim(),
+    rto: document.getElementById('depRto').value.trim(),
+    rpo: document.getElementById('depRpo').value.trim(),
+    estrategia: document.getElementById('depEstrategia').value,
+    responsavel: document.getElementById('depResponsavel').value,
+    drpCriteriosAcionamento: window._depDrpListas.drpCriteriosAcionamento || [],
+    drpPreRequisitos: window._depDrpListas.drpPreRequisitos || [],
+    drpHealthCheck: window._depDrpListas.drpHealthCheck || [],
+    drpRunbook: window._depDrpListas.drpRunbook || [],
+    drpCriteriosRetorno: window._depDrpListas.drpCriteriosRetorno || [],
+    drpLimitacoes: window._depDrpListas.drpLimitacoes || [],
+    drpDependencias: (window._depDrpDependenciasSel || []).map((x) => ({ id: x.id != null ? x.id : null, nome: x.nome, categoria: x.categoria || 'Outros' })),
+    // Estratégias de Teste (Parâmetros DRP) e histórico de Registros (aba).
+    drpEstrategiasTeste: (window._depDrpEstrategias || []).map((e) => ({ cenario: e.cenario || '', frequencia: e.frequencia || '' })),
+    drpRegistrosTeste: (window._depDrpRegistros || []).map((r) => ({ data: r.data || '', resultado: r.resultado || '', evidencia: r.evidencia || '', pendencias: r.pendencias || '' })),
+    // Aba Plano de Recuperação: template importado.
+    drpTemplate: window._depDrpTemplate || '',
+    drpTemplateNome: window._depDrpTemplateNome || '',
+  };
+}
 
 window.editarDep = (id) => {
   const d = dependenciasData.find(x => x.id === id);
@@ -4745,30 +5089,15 @@ window.salvarDep = async () => {
   // silencio um dado antigo no proximo merge:true (_salvarDependencia grava
   // esses campos sempre, e e a mesma funcao compartilhada com Fornecedor).
   const existente = idAtual ? dependenciasData.find((x) => x.id === idAtual) : null;
+  // Foto do formulário no clique -- é ela que vira "limpo" depois de gravar.
+  const estadoDoFormulario = _coletarFormularioDependencia();
   const d = {
-    id: idAtual,
-    categoria: document.getElementById('depCategoria').value.trim(),
-    nome: document.getElementById('depNome').value.trim(),
-    detalhes: document.getElementById('depDetalhes').value.trim(),
+    ...estadoDoFormulario,
     setor: existente ? (existente.setor || '') : '',
     empresa: existente ? (existente.empresa || '') : '',
     telefone: existente ? (existente.telefone || '') : '',
     email: existente ? (existente.email || '') : '',
     endereco: existente ? (existente.endereco || '') : '',
-    rto: document.getElementById('depRto').value.trim(),
-    rpo: document.getElementById('depRpo').value.trim(),
-    estrategia: document.getElementById('depEstrategia').value,
-    responsavel: document.getElementById('depResponsavel').value,
-    drpCriteriosAcionamento: window._depDrpListas.drpCriteriosAcionamento || [],
-    drpPreRequisitos: window._depDrpListas.drpPreRequisitos || [],
-    drpHealthCheck: window._depDrpListas.drpHealthCheck || [],
-    drpRunbook: window._depDrpListas.drpRunbook || [],
-    drpCriteriosRetorno: window._depDrpListas.drpCriteriosRetorno || [],
-    drpLimitacoes: window._depDrpListas.drpLimitacoes || [],
-    drpDependencias: (window._depDrpDependenciasSel || []).map((x) => ({ id: x.id != null ? x.id : null, nome: x.nome, categoria: x.categoria || 'Outros' })),
-    // Estratégias de Teste (Parâmetros DRP) e histórico de Registros (aba).
-    drpEstrategiasTeste: (window._depDrpEstrategias || []).map((e) => ({ cenario: e.cenario || '', frequencia: e.frequencia || '' })),
-    drpRegistrosTeste: (window._depDrpRegistros || []).map((r) => ({ data: r.data || '', resultado: r.resultado || '', evidencia: r.evidencia || '', pendencias: r.pendencias || '' })),
     // Roteiros de Teste: gerado/apagado só pelo fluxo próprio (gerarRoteiroTeste/
     // excluirRoteiroTeste) -- aqui só preserva o que já existe, mesmo tratamento
     // de drpSalvo logo abaixo.
@@ -4776,11 +5105,9 @@ window.salvarDep = async () => {
     // drpTestes (registro único antigo) não é mais editado pela UI -- preserva
     // o que já estava gravado (fonte da migração e fallback do gerarDRP).
     drpTestes: existente && existente.drpTestes ? existente.drpTestes : undefined,
-    // Aba Plano de Recuperação: template importado. drpSalvo (versões do
-    // artefato) é gravado pelo fluxo próprio (salvarDRP) -- aqui só preserva o
-    // que já existe pra não sumir do objeto em memória no merge otimista.
-    drpTemplate: window._depDrpTemplate || '',
-    drpTemplateNome: window._depDrpTemplateNome || '',
+    // drpSalvo (versões do artefato) é gravado pelo fluxo próprio (salvarDRP)
+    // -- aqui só preserva o que já existe pra não sumir do objeto em memória
+    // no merge otimista.
     drpSalvo: existente ? (existente.drpSalvo || '') : '',
   };
   if (!d.categoria) return showToast('Informe a categoria.', '#e65100');
@@ -4802,7 +5129,7 @@ window.salvarDep = async () => {
   // aberto por cima de outro (cadastro rápido de Servidor/Serviço a partir do
   // Backup/Serviço) -- aí sim o sentido é "crie rapidinho e volte". Direto do
   // catálogo, fica aberto (padrão "Fechar + Salvar", igual o resto do sistema).
-  if (aninhado) fecharDrawerDependencia();
+  if (aninhado) _fecharDrawerDependenciaSemSalvar();
   // Sem fechar, o usuário pode clicar "Salvar" de novo antes da gravação real
   // terminar -- desabilita o botão até lá pra não criar duas dependências.
   const btnSalvarDep = document.getElementById('btnSalvarDep');
@@ -4826,6 +5153,7 @@ window.salvarDep = async () => {
     const payload = { ...d };
     if (isNew) payload.id = null;
     const result = await API.salvarDependencia(payload);
+    _edDep.marcar({ ...estadoDoFormulario, id: isNew ? result.id : estadoDoFormulario.id });
     // Atualizar ID real se era novo
     if (isNew && result.id) {
       const tempIdx = dependenciasData.findIndex(x => x.id === tempId);
@@ -4858,6 +5186,7 @@ window.salvarDep = async () => {
       _renderServicoProcessosImpactados();
     }
     showToast('✅ Salvo!', '#2e7d32');
+    return true;
   } catch(e) {
     showToast('❌ Erro: ' + e.message, '#c62828');
     if (!aninhado && btnSalvarDep) btnSalvarDep.disabled = false;
@@ -4866,6 +5195,7 @@ window.salvarDep = async () => {
       dependenciasData = dependenciasData.filter(x => x.id !== tempId);
       _refreshAposSalvarDependencia();
     }
+    return false;
   }
 };
 
@@ -4896,6 +5226,11 @@ async function relatorios() {
         <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Processos por Dependência</h3>
         <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para cada dependência do catálogo técnico, quais Processos de Negócio dependem dela.</p>
         <button class="btn btn-primary" onclick="abrirSelecaoDependenciasRelatorio()">📄 Gerar relatório</button>
+      </div>
+      <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
+        <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Processos por Área</h3>
+        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para cada área, os Processos de Negócio dela, com Tier, score, RTO/RPO, status de BIA/BCP/DRP e quem é o dono (responsável da área).</p>
+        <button class="btn btn-primary" onclick="abrirSelecaoAreasRelatorio()">📄 Gerar relatório</button>
       </div>
       <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
         <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Relatório de Vínculos da Pessoa</h3>
@@ -4930,6 +5265,25 @@ async function relatorios() {
       <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharSelecaoDependenciasRelatorio()">Cancelar</button>
         <button class="btn btn-primary" id="btnConfirmarRelatorioDeps" onclick="confirmarGerarRelatorioProcessosPorDependencia()">Gerar relatório</button>
+      </div>
+    </div>
+    <div class="drawer-overlay" id="drawerOverlaySelecaoAreasRelatorio" onclick="fecharSelecaoAreasRelatorio()"></div>
+    <div class="drawer" id="drawerSelecaoAreasRelatorio">
+      <div class="drawer-header">
+        <h3>Escolher áreas</h3>
+        <button onclick="fecharSelecaoAreasRelatorio()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <p style="font-size:0.82em;color:#888;margin-bottom:12px;">Selecione quais áreas entram no relatório "Processos por Área". O número ao lado é a quantidade de processos de cada uma.</p>
+        <div style="display:flex;gap:8px;margin-bottom:10px;">
+          <button type="button" class="btn btn-ghost" onclick="selecionarTodasAreasRelatorio(true)" style="font-size:0.82em;padding:6px 12px;">Selecionar todas</button>
+          <button type="button" class="btn btn-ghost" onclick="selecionarTodasAreasRelatorio(false)" style="font-size:0.82em;padding:6px 12px;">Limpar seleção</button>
+        </div>
+        <div id="relatorioAreasChecklist"></div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharSelecaoAreasRelatorio()">Cancelar</button>
+        <button class="btn btn-primary" id="btnConfirmarRelatorioAreas" onclick="confirmarGerarRelatorioProcessosPorArea()">Gerar relatório</button>
       </div>
     </div>
     <div class="modal-overlay" id="modalSelecaoPessoaRelatorio"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
@@ -5007,6 +5361,179 @@ window.selecionarTodasDependenciasRelatorio = (checked) => {
   window._relatorioDepsSelecionadas = checked ? new Set((window._relatorioDepsCatalogo || []).map((d) => d.id)) : new Set();
   document.querySelectorAll('#relatorioDepsChecklist .chk-relatorio-dep').forEach((el) => { el.checked = checked; });
 };
+
+// ============================================================
+// Relatório "Processos por Área" (DECISÃO 14/10/2026): para cada área, os
+// Processos de Negócio dela com Tier/Score/RTO/RPO/BIA/BCP/DRP -- as mesmas
+// fontes das colunas da grade de Processos -- e o Dono (responsável da Área,
+// que é como a tela de Processos define "dono"). Mesmo modelo 100% client-side
+// do "Processos por Dependência": checklist de seleção + página aberta em nova
+// aba. A chave da área é o NOME (o processo guarda `area` por nome).
+// ============================================================
+window._relatorioAreasGrupos = [];
+window._relatorioAreasSelecionadas = new Set();
+
+/**
+ * Um grupo por área: as do catálogo mais qualquer área que só apareça nos
+ * processos (não some do relatório por faltar no cadastro). Ordem alfabética.
+ */
+function _gruposRelatorioAreas(areas, processos) {
+  const porNome = new Map();
+  (areas || []).forEach((a) => {
+    if (a && a.nome) porNome.set(a.nome, { nome: a.nome, responsavel: (a.responsavel || '').trim(), foraDoCadastro: false, processos: [] });
+  });
+  (processos || []).forEach((p) => {
+    const nome = (p.area || '').trim();
+    if (!nome) return;
+    if (!porNome.has(nome)) porNome.set(nome, { nome, responsavel: '', foraDoCadastro: true, processos: [] });
+    porNome.get(nome).processos.push(p);
+  });
+  return [...porNome.values()].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+
+window.abrirSelecaoAreasRelatorio = async () => {
+  let areas, processos;
+  try {
+    [areas, processos] = await Promise.all([API.getAreas(), API.getProcessos()]);
+  } catch (e) {
+    showToast('❌ Não foi possível carregar áreas e processos: ' + (e.message || 'erro desconhecido'), '#c62828');
+    return;
+  }
+  window._relatorioAreasGrupos = _gruposRelatorioAreas(areas, processos);
+  window._relatorioAreasSelecionadas = new Set(window._relatorioAreasGrupos.map((g) => g.nome));
+  _renderRelatorioAreasChecklist();
+  document.getElementById('drawerSelecaoAreasRelatorio').classList.add('open');
+  document.getElementById('drawerOverlaySelecaoAreasRelatorio').classList.add('open');
+};
+
+window.fecharSelecaoAreasRelatorio = () => {
+  document.getElementById('drawerSelecaoAreasRelatorio').classList.remove('open');
+  document.getElementById('drawerOverlaySelecaoAreasRelatorio').classList.remove('open');
+};
+
+function _renderRelatorioAreasChecklist() {
+  const cont = document.getElementById('relatorioAreasChecklist');
+  if (!cont) return;
+  const grupos = window._relatorioAreasGrupos || [];
+  if (!grupos.length) {
+    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhuma área cadastrada.</p>';
+    return;
+  }
+  const selecionadas = window._relatorioAreasSelecionadas || new Set();
+  cont.innerHTML = grupos.map((g, i) => `
+    <label style="display:flex;align-items:center;gap:8px;font-size:0.88em;cursor:pointer;padding:3px 0;">
+      <input type="checkbox" class="chk-relatorio-area" data-i="${i}" ${selecionadas.has(g.nome) ? 'checked' : ''} onchange="toggleAreaRelatorioSelecionada(${i}, this.checked)">
+      <span>${esc(g.nome)}${g.foraDoCadastro ? ' <span style="color:#e65100;font-size:0.85em;">(área fora do cadastro)</span>' : ''}</span>
+      <span style="margin-left:auto;color:${g.processos.length ? '#555' : '#bbb'};font-size:0.85em;">${g.processos.length}</span>
+    </label>`).join('');
+}
+
+window.toggleAreaRelatorioSelecionada = (i, checked) => {
+  const g = (window._relatorioAreasGrupos || [])[i];
+  if (!g) return;
+  if (checked) window._relatorioAreasSelecionadas.add(g.nome); else window._relatorioAreasSelecionadas.delete(g.nome);
+};
+
+window.selecionarTodasAreasRelatorio = (checked) => {
+  window._relatorioAreasSelecionadas = checked ? new Set((window._relatorioAreasGrupos || []).map((g) => g.nome)) : new Set();
+  document.querySelectorAll('#relatorioAreasChecklist .chk-relatorio-area').forEach((el) => { el.checked = checked; });
+};
+
+window.confirmarGerarRelatorioProcessosPorArea = async () => {
+  const selecionadas = window._relatorioAreasSelecionadas || new Set();
+  if (!selecionadas.size) return showToast('Selecione ao menos uma área.', '#e65100');
+  const grupos = (window._relatorioAreasGrupos || []).filter((g) => selecionadas.has(g.nome));
+  const html = _htmlRelatorioProcessosPorArea(grupos);
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
+  fecharSelecaoAreasRelatorio();
+  win.document.open();
+  win.document.write(html);
+  win.document.close();
+};
+
+/** HTML do relatório para os grupos (áreas) já filtrados -- pura, para teste. */
+function _htmlRelatorioProcessosPorArea(grupos) {
+  const ORDEM_TIER = [Criticidade.TIER.T1, Criticidade.TIER.T2, Criticidade.TIER.T3, Criticidade.TIER.PENDENTE];
+  const rotuloTier = (t) => (t === Criticidade.TIER.PENDENTE ? 'Pendente' : Criticidade.tierCurto(t));
+  const vazio = (v) => (v === undefined || v === null || String(v).trim() === '' ? '–' : esc(String(v)));
+  const totalProcessos = (grupos || []).reduce((t, g) => t + g.processos.length, 0);
+
+  const corpo = (grupos || []).map((g) => {
+    const linhas = g.processos
+      .map((p) => ({ p, tier: Criticidade.tierDoProcesso(p) }))
+      .sort((a, b) => (ORDEM_TIER.indexOf(a.tier) - ORDEM_TIER.indexOf(b.tier)) || (a.p.processo || '').localeCompare(b.p.processo || '', 'pt-BR'));
+    const contagem = ORDEM_TIER
+      .map((t) => ({ t, n: linhas.filter((l) => l.tier === t).length }))
+      .filter((x) => x.n);
+    const resumo = [`${linhas.length} processo${linhas.length === 1 ? '' : 's'}`]
+      .concat(contagem.map((x) => `<span class="tier-badge" style="background:${Criticidade.corDoTier(x.t)};">${esc(rotuloTier(x.t))}: ${x.n}</span>`))
+      .join(' ');
+    return `
+    <div class="area-bloco">
+      <h2>${esc(g.nome)}${g.foraDoCadastro ? ' <span class="aviso-cadastro">(área fora do cadastro)</span>' : ''}</h2>
+      <div class="area-meta"><span>Dono: <strong>${g.responsavel ? esc(g.responsavel) : '—'}</strong></span>${linhas.length ? `<span class="resumo">${resumo}</span>` : ''}</div>
+      ${linhas.length ? `
+        <table>
+          <thead><tr><th>Processo</th><th>Tier</th><th class="c">Score</th><th>RTO</th><th>RPO</th><th>BIA</th><th>BCP</th><th>DRP</th></tr></thead>
+          <tbody>
+            ${linhas.map(({ p, tier }) => `<tr>
+              <td><strong>${esc(p.processo)}</strong></td>
+              <td><span class="tier-badge" style="background:${Criticidade.corDoTier(tier)};">${esc(tier)}</span></td>
+              <td class="c">${p.avaliado || p.score > 0 ? esc(String(p.score)) : '–'}</td>
+              <td>${vazio(p.rto)}</td><td>${vazio(p.rpo)}</td>
+              <td>${vazio(p.biaHomologada)}</td><td>${vazio(p.bcpStatus)}</td><td>${vazio(p.drpStatus)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>` : '<p class="vazio">Nenhum processo cadastrado nesta área.</p>'}
+    </div>`;
+  }).join('');
+
+  const nAreas = (grupos || []).length;
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Processos por Área</title>
+<style>
+:root{--risk-critical:#d60014;--risk-high:#b64a12;--risk-medium:#9a6700;--risk-low:#38bb0e}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#222;background:#f5f6fa;padding:24px}
+.header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:24px}
+.header h1{font-size:18pt;color:#d60014}
+.header .sub{font-size:9pt;color:#888;margin-top:4px}
+.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}
+.btn-print:hover{opacity:.9}
+.area-bloco{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:20px;margin-bottom:20px;page-break-inside:avoid}
+.area-bloco h2{font-size:13pt;color:#d60014;margin-bottom:6px}
+.aviso-cadastro{font-size:8.5pt;font-weight:400;color:#e65100}
+.area-meta{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;font-size:9.5pt;color:#555;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #fce8ea}
+.area-meta .resumo{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center}
+table{width:100%;border-collapse:collapse;font-size:9.5pt}
+th{text-align:left;padding:8px 10px;background:#f5f6fa;color:#555;font-size:8.5pt;text-transform:uppercase;letter-spacing:.3px}
+td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
+.c{text-align:center}
+.tier-badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:8.5pt;font-weight:600;color:#fff}
+.vazio{font-size:9.5pt;color:#999;font-style:italic;padding:4px 0}
+.footer{margin-top:30px;text-align:center;font-size:8pt;color:#aaa}
+@media print{body{background:#fff}.btn-print{display:none!important}.area-bloco,.tier-badge{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
+    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+    <h1>Processos por Área</h1>
+    <div class="sub">${nAreas} área${nAreas === 1 ? '' : 's'} • ${totalProcessos} processo${totalProcessos === 1 ? '' : 's'} • ${new Date().toLocaleDateString('pt-BR')} • Fortes Tecnologia</div>
+  </div>
+  <button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button>
+</div>
+${corpo || '<p style="text-align:center;color:#999;padding:60px 20px;">Nenhuma área selecionada.</p>'}
+<div class="footer">Relatório gerado a partir do cadastro de Áreas e de Processos. Dono = responsável da área.</div>
+</body>
+</html>`;
+}
 
 // ============================================================
 // Seleção de Pessoa antes de gerar "Relatório de Vínculos" -- mesmo relatório
@@ -5288,6 +5815,7 @@ function _htmlDrawerServico() {
         </div>
       </div>
       <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="_fecharDrawerServicoSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerServico()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarServico" onclick="salvarServico()">Salvar</button>
       </div>
@@ -5332,6 +5860,7 @@ window.abrirDrawerServico = (id) => {
   trocarAbaServico('dados');
   document.getElementById('drawerServico').classList.add('open');
   document.getElementById('drawerOverlayServico').classList.add('open');
+  _edServico.marcar();
 };
 
 /**
@@ -5375,11 +5904,31 @@ function _renderServicoBackupsTab(servicoId) {
   </table>`;
 }
 
-window.fecharDrawerServico = () => {
+function _fecharDrawerServicoSemSalvar() {
   document.getElementById('drawerServico').classList.remove('open');
   document.getElementById('drawerOverlayServico').classList.remove('open');
   _reabrirDrawerPaiSeEscondido();
+}
+// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- exceto no cadastro
+// rapido aninhado, que mantem o comportamento de sempre (salvarServico ja
+// fecha e volta pro pai ao salvar).
+window.fecharDrawerServico = async () => {
+  if (_temDrawerPaiEmpilhado()) { _fecharDrawerServicoSemSalvar(); return; }
+  if (!_edServico.sujo()) return _fecharDrawerServicoSemSalvar();
+  const ok = await salvarServico();
+  if (ok) _fecharDrawerServicoSemSalvar();
 };
+
+const _edServico = criarRastreadorEdicao(() => _coletarFormularioServico());
+
+function _coletarFormularioServico() {
+  return {
+    id: document.getElementById('servicoId').value || null,
+    nome: document.getElementById('servicoNome').value.trim(),
+    descricao: document.getElementById('servicoDescricao').value.trim(),
+    dependenciaItens: window._servicoDependencias || [],
+  };
+}
 
 /**
  * Uma seção por categoria técnica (mesmo padrão já usado 2x nesta sessão:
@@ -5533,14 +6082,14 @@ function _renderServicoProcessosImpactados() {
 }
 
 window.salvarServico = async () => {
-  const nome = document.getElementById('servicoNome').value.trim();
+  const dados = _coletarFormularioServico();
+  const { id, nome, descricao } = dados;
   if (!nome) return showToast('Informe o nome do serviço.', '#e65100');
-  const id = document.getElementById('servicoId').value || null;
-  const descricao = document.getElementById('servicoDescricao').value.trim();
 
-  await comBotaoCarregando('btnSalvarServico', async () => {
+  return await comBotaoCarregando('btnSalvarServico', async () => {
     try {
-      const r = await API.salvarServico({ id, nome, descricao, dependenciaItens: window._servicoDependencias || [] });
+      const r = await API.salvarServico(dados);
+      _edServico.marcar({ ...dados, id: id || r.id });
       const item = { id: r.id, nome, descricao, dependenciaItens: window._servicoDependencias || [] };
       const idx = servicosData.findIndex((x) => String(x.id) === String(r.id));
       if (idx >= 0) servicosData[idx] = item; else servicosData.push(item);
@@ -5548,7 +6097,7 @@ window.salvarServico = async () => {
       // se #backupServico existir (ou seja, se viemos de abrirDrawerServicoDeBackup).
       _popularSelectBackupServico(r.id);
       if (_temDrawerPaiEmpilhado()) {
-        fecharDrawerServico();
+        _fecharDrawerServicoSemSalvar();
       } else if (!id) {
         // Sem fechar o drawer, o próximo "Salvar" precisa gravar no MESMO
         // registro em vez de criar um segundo serviço idêntico.
@@ -5557,8 +6106,10 @@ window.salvarServico = async () => {
       }
       if (document.getElementById('servicoRows')) renderizarServicos();
       showToast('✅ Salvo!', '#2e7d32');
+      return true;
     } catch (e) {
       showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      return false;
     }
   });
 };
@@ -5826,6 +6377,7 @@ function _htmlDrawerBackup() {
         </div>
       </div>
       <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="_fecharDrawerBackupSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerBackup()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarBackup" onclick="salvarBackup()">Salvar</button>
       </div>
@@ -5872,13 +6424,41 @@ window.abrirDrawerBackup = (id) => {
   trocarAbaBackup('dados');
   document.getElementById('drawerBackup').classList.add('open');
   document.getElementById('drawerOverlayBackup').classList.add('open');
+  _edBackup.marcar();
 };
 
-window.fecharDrawerBackup = () => {
+function _fecharDrawerBackupSemSalvar() {
   document.getElementById('drawerBackup').classList.remove('open');
   document.getElementById('drawerOverlayBackup').classList.remove('open');
   _reabrirDrawerPaiSeEscondido();
+}
+// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- exceto no cadastro
+// rapido aninhado, que mantem o comportamento de sempre (salvarBackup ja
+// fecha e volta pro pai ao salvar).
+window.fecharDrawerBackup = async () => {
+  if (_temDrawerPaiEmpilhado()) { _fecharDrawerBackupSemSalvar(); return; }
+  if (!_edBackup.sujo()) return _fecharDrawerBackupSemSalvar();
+  const ok = await salvarBackup();
+  if (ok) _fecharDrawerBackupSemSalvar();
 };
+
+const _edBackup = criarRastreadorEdicao(() => _coletarFormularioBackup());
+
+function _coletarFormularioBackup() {
+  const servidorId = document.getElementById('backupServidor').value;
+  const servidorNome = servidorId ? ((window.dependenciasCatalogo || []).find((d) => String(d.id) === String(servidorId)) || {}).nome || '' : '';
+  const stakeholderId = document.getElementById('backupStakeholder').value;
+  const stakeholderNome = stakeholderId ? ((pessoasData || []).find((p) => String(p.id) === String(stakeholderId)) || {}).nome || '' : '';
+  return {
+    id: document.getElementById('backupId').value || null,
+    nome: document.getElementById('backupNome').value.trim(),
+    descricao: document.getElementById('backupDescricao').value.trim(),
+    servicoId: document.getElementById('backupServico').value,
+    servidorId, servidorNome,
+    stakeholderId, stakeholderNome,
+    jobs: window._backupJobs || [],
+  };
+}
 
 /** Popula o <select> de Serviço do Backup a partir de servicosData; usado na abertura e depois de cadastrar um serviço novo por cima. */
 function _popularSelectBackupServico(valorSelecionado) {
@@ -6160,25 +6740,14 @@ function _renderBackupJobsTabela() {
  * Devolve o id salvo, ou null se a validação falhar (toast já mostrado).
  */
 async function _gravarBackupAtual() {
-  const nome = document.getElementById('backupNome').value.trim();
-  if (!nome) { showToast('Informe o nome do backup.', '#e65100'); return null; }
-  const servicoId = document.getElementById('backupServico').value;
-  if (!servicoId) { showToast('Selecione o serviço vinculado.', '#e65100'); return null; }
-  const id = document.getElementById('backupId').value || null;
-  const descricao = document.getElementById('backupDescricao').value.trim();
-  const servidorId = document.getElementById('backupServidor').value;
-  const servidorNome = servidorId ? ((window.dependenciasCatalogo || []).find((d) => String(d.id) === String(servidorId)) || {}).nome || '' : '';
-  const stakeholderId = document.getElementById('backupStakeholder').value;
-  const stakeholderNome = stakeholderId ? ((pessoasData || []).find((p) => String(p.id) === String(stakeholderId)) || {}).nome || '' : '';
+  const payload = _coletarFormularioBackup();
+  if (!payload.nome) { showToast('Informe o nome do backup.', '#e65100'); return null; }
+  if (!payload.servicoId) { showToast('Selecione o serviço vinculado.', '#e65100'); return null; }
+  const id = payload.id;
 
   try {
-    const payload = {
-      id, nome, descricao, servicoId,
-      servidorId, servidorNome,
-      stakeholderId, stakeholderNome,
-      jobs: window._backupJobs || [],
-    };
     const r = await API.salvarBackup(payload);
+    _edBackup.marcar({ ...payload, id: r.id });
     const item = { ...payload, id: r.id };
     const idx = backupsData.findIndex((x) => String(x.id) === String(r.id));
     if (idx >= 0) backupsData[idx] = item; else backupsData.push(item);
@@ -6197,12 +6766,13 @@ async function _gravarBackupAtual() {
 }
 
 window.salvarBackup = async () => {
-  await comBotaoCarregando('btnSalvarBackup', async () => {
+  return await comBotaoCarregando('btnSalvarBackup', async () => {
     const id = await _gravarBackupAtual();
     if (id) {
-      if (_temDrawerPaiEmpilhado()) fecharDrawerBackup();
+      if (_temDrawerPaiEmpilhado()) _fecharDrawerBackupSemSalvar();
       showToast('✅ Salvo!', '#2e7d32');
     }
+    return !!id;
   });
 };
 
@@ -6236,8 +6806,184 @@ let vulnerabilidadesData = [];
 let vulnerabilidadesOrdenacao = criarOrdenacao('codigo', 'desc');
 let vulnerabilidadesPaginaAtual = 1;
 const VULNERABILIDADES_POR_PAGINA = 20;
+// Selecao para edicao em lote / clonar (mesmo padrao de processosSelecionados).
+// Sobrevive a filtro, ordenacao e troca de pagina.
+let vulnerabilidadesSelecionadas = new Set();
 
-const VULNERABILIDADE_STATUS_CORRECAO = ['Aberto', 'Em Correção', 'Corrigida', 'Aceita'];
+const VULNERABILIDADE_STATUS_CORRECAO = ['Pendente', 'Em Correção', 'Corrigida', 'Aceita'];
+
+/**
+ * Tipo de Vulnerabilidade (DECISAO 15/10/2026): taxonomia FIXA em dois niveis
+ * (Tipo -> Subtipo), alinhada a NIST/CIS/OWASP. O Tipo e obrigatorio no salvar;
+ * o Subtipo e opcional. `tratativa` e so a dica mostrada no drawer (nao troca o
+ * Responsavel). Mudar esta lista e decisao de produto: valor ja gravado que sair
+ * dela continua visivel, marcado "(fora da lista)". O servidor so olha um valor
+ * daqui: 'Não Conformidade' abre risco como "Regulatório/Legal"
+ * (functions/vulnerabilidadeRisco.js).
+ */
+const VULNERABILIDADE_TIPOS = [
+  { tipo: 'Não Conformidade', descricao: 'Violação de leis, regulações de mercado ou políticas internas de segurança e TI.',
+    tratativa: 'Costuma exigir tratativa orçamentária ou jurídica, não só técnica.',
+    subtipos: ['Licenciamento', 'LGPD/Privacidade', 'Política Interna', 'PCI-DSS', 'Outro'] },
+  { tipo: 'Falha de Software (CVE / Bug)', descricao: 'Falhas técnicas e bugs no código de sistemas operacionais, binários ou bibliotecas de terceiros.',
+    tratativa: 'Resolvida por Engenharia/Infra com patch ou atualização.',
+    subtipos: ['CVE Conhecido', 'Zero-Day', 'Bug Interno', 'Biblioteca de Terceiros'] },
+  { tipo: 'Má Configuração', descricao: 'Parâmetros de segurança configurados incorretamente ou mantidos no padrão inseguro.',
+    tratativa: 'Resolvida por Engenharia/Infra com ajuste de configuração ou script.',
+    subtipos: ['Exposição Pública (porta, bucket)', 'Senha/Credencial Padrão', 'Hardening Ausente', 'Outro'] },
+  { tipo: 'Software Obsoleto / EOL', descricao: 'Sistemas ou componentes descontinuados pelo fabricante, sem suporte a correções.',
+    tratativa: 'Costuma exigir orçamento ou projeto de migração — não há patch.',
+    subtipos: ['Sistema Operacional', 'Linguagem/Runtime', 'Aplicação/Banco de Dados', 'Biblioteca/Componente'] },
+  { tipo: 'Falha de Aplicação Web / API', descricao: 'Falhas na lógica ou implementação de sistemas desenvolvidos internamente (OWASP Top 10).',
+    tratativa: 'Corrigida pelo time do produto (OWASP Top 10).',
+    subtipos: ['Injeção (SQLi etc.)', 'XSS', 'Controle de Acesso Quebrado (BOLA/IDOR)', 'Exposição de Dados Sensíveis', 'Autenticação/Sessão', 'Lógica de Negócio', 'Outro'] },
+  { tipo: 'Controle de Acesso / IAM', descricao: 'Fraquezas na gestão de identidade, privilégios excessivos ou governança de credenciais.',
+    tratativa: 'Gestão de identidades: revisão de acessos e credenciais.',
+    subtipos: ['Privilégio Excessivo', 'Conta Órfã/Ex-colaborador', 'Credencial sem Expiração/Rotação', 'Ausência de MFA', 'Outro'] },
+  { tipo: 'Fraqueza de Arquitetura / Rede', descricao: 'Falhas estruturais no desenho do ambiente ou ausência de controles defensivos.',
+    tratativa: 'Mudança estrutural no ambiente; costuma virar projeto.',
+    subtipos: ['Segmentação Ausente', 'Criptografia Ausente (trânsito/repouso)', 'Controle Defensivo Ausente', 'Outro'] },
+];
+
+/**
+ * Avaliacao de severidade alinhada ao Tipo (DECISAO 15/10/2026).
+ *
+ * `metodo` = o que aparece primeiro na aba Severidade; `cvss` = 'principal',
+ * 'alternativa' (recolhido) ou 'nao-se-aplica' (nem aparece). `matriz` troca SO
+ * o texto da matriz Impacto x Facilidade: perguntas, rotulos e explicacoes dos 4
+ * niveis. Os CODIGOS gravados continuam os de Cvss31.IMPACTOS/FACILIDADES (por
+ * posicao), entao severidadeCriterios ja gravado continua valido, a regua 4x4
+ * (Cvss31.sugerirSeveridade) nao muda e trocar de tipo mantem o que foi marcado.
+ * Tipo sem `matriz` usa o texto padrao de cvss31.js. A regra de calculo
+ * (VulnerabilidadeSeveridade.faixa: CVSS manda) e o servidor nao mudam.
+ *
+ * `cwe`/`cve` (DECISAO 15/10/2026): se o campo aparece na Identificacao. CWE e
+ * catalogo de FRAQUEZAS -- cobre quase toda falha tecnica, so nao Nao
+ * Conformidade. CVE identifica falha PUBLICA de produto de TERCEIRO -- faz
+ * sentido em Falha de Software, EOL e Ma Configuracao; codigo interno (Web/API),
+ * IAM e Arquitetura nao recebem CVE. Campo que o tipo nao usa mas ja tem valor
+ * continua visivel, com aviso e "Limpar" (_aplicarCamposPorTipoVuln).
+ */
+const VULNERABILIDADE_CONFIG_POR_TIPO = {
+  'Falha de Software (CVE / Bug)': { metodo: 'cvss', cvss: 'principal', cwe: true, cve: true },
+  'Falha de Aplicação Web / API': { metodo: 'cvss', cvss: 'principal', cwe: true, cve: false },
+  'Má Configuração': { metodo: 'cvss', cvss: 'principal', cwe: true, cve: true },
+  'Software Obsoleto / EOL': {
+    metodo: 'matriz', cvss: 'alternativa', cwe: true, cve: true,
+    porque: 'Sem patch do fabricante, o que pesa é quão crítico e quão exposto é o ativo. Se houver CVE conhecida, o CVSS dela pode ser informado.',
+    matriz: {
+      impacto: { pergunta: 'Quão crítico é o ativo obsoleto?', niveis: [
+        { rotulo: 'Baixo', explicacao: 'Ativo de apoio ou isolado, sem dado sensível.' },
+        { rotulo: 'Moderado', explicacao: 'Usado por parte dos processos, com alternativa.' },
+        { rotulo: 'Alto', explicacao: 'Sustenta processo ou produto importante, ou guarda dado sensível.' },
+        { rotulo: 'Grave', explicacao: 'Núcleo do produto/negócio ou dado sensível em larga escala.' },
+      ] },
+      facilidade: { pergunta: 'Quão exposto ele está?', niveis: [
+        { rotulo: 'Isolado', explicacao: 'Rede restrita, sem CVE pública conhecida.' },
+        { rotulo: 'Rede interna', explicacao: 'Alcançável a partir da rede corporativa.' },
+        { rotulo: 'Internet ou CVE pública', explicacao: 'Exposto à internet ou com falha pública conhecida.' },
+        { rotulo: 'Exploit ativo', explicacao: 'Há exploit público em uso ou já foi explorado.' },
+      ] },
+    },
+  },
+  'Controle de Acesso / IAM': {
+    metodo: 'matriz', cvss: 'alternativa', cwe: true, cve: false,
+    porque: 'Falha de gestão de acesso: o que pesa é o que o acesso indevido permite e quão fácil é usá-lo.',
+    matriz: {
+      impacto: { pergunta: 'O que o acesso indevido permite?', niveis: [
+        { rotulo: 'Baixo', explicacao: 'Ler dado não sensível.' },
+        { rotulo: 'Moderado', explicacao: 'Alterar dado interno ou de parte dos usuários.' },
+        { rotulo: 'Alto', explicacao: 'Dado sensível ou funções administrativas de um sistema.' },
+        { rotulo: 'Grave', explicacao: 'Administração de produção/domínio, vários sistemas ou dados de clientes.' },
+      ] },
+      facilidade: { pergunta: 'Quão fácil é usar esse acesso indevidamente?', niveis: [
+        { rotulo: 'Difícil', explicacao: 'Exige credencial de outra pessoa e várias condições juntas.' },
+        { rotulo: 'Possível', explicacao: 'Exige estar logado na rede interna ou em outro sistema.' },
+        { rotulo: 'Fácil', explicacao: 'Credencial ativa sem MFA, ou conta de ex-colaborador ainda ativa.' },
+        { rotulo: 'Muito fácil', explicacao: 'Credencial exposta/compartilhada ou acesso já sendo usado.' },
+      ] },
+    },
+  },
+  'Fraqueza de Arquitetura / Rede': {
+    metodo: 'matriz', cvss: 'alternativa', cwe: true, cve: false,
+    porque: 'Falha estrutural do ambiente: o que pesa é o alcance que ela dá a um atacante e quão exposto está o ponto fraco.',
+    matriz: {
+      impacto: { pergunta: 'O que um atacante alcança por causa dessa fraqueza?', niveis: [
+        { rotulo: 'Baixo', explicacao: 'Ambiente de teste ou isolado.' },
+        { rotulo: 'Moderado', explicacao: 'Parte da rede interna.' },
+        { rotulo: 'Alto', explicacao: 'Ambiente de produção ou dados sensíveis.' },
+        { rotulo: 'Grave', explicacao: 'Todo o ambiente, ou produção de clientes.' },
+      ] },
+      facilidade: { pergunta: 'Quão exposto está o ponto fraco?', niveis: [
+        { rotulo: 'Só com acesso adm.', explicacao: 'Exige acesso administrativo ou físico.' },
+        { rotulo: 'Rede interna', explicacao: 'Alcançável a partir da rede interna.' },
+        { rotulo: 'Internet com esforço', explicacao: 'Alcançável pela internet, com algum esforço.' },
+        { rotulo: 'Internet sem barreira', explicacao: 'Exposto à internet sem nenhum controle.' },
+      ] },
+    },
+  },
+  'Não Conformidade': {
+    metodo: 'matriz', cvss: 'nao-se-aplica', cwe: false, cve: false,
+    porque: 'Não é falha técnica explorável — o CVSS não se aplica. O que pesa é a exposição legal/regulatória e a chance de ser apontada.',
+    matriz: {
+      impacto: { pergunta: 'Qual a exposição legal, regulatória ou contratual?', niveis: [
+        { rotulo: 'Baixo', explicacao: 'Desvio de política interna, sem efeito externo.' },
+        { rotulo: 'Moderado', explicacao: 'Descumprimento de política ou contrato com efeito limitado e corrigível.' },
+        { rotulo: 'Alto', explicacao: 'Pode gerar multa, sanção contratual ou expor dado pessoal (LGPD).' },
+        { rotulo: 'Grave', explicacao: 'Sanção relevante (ANPD, órgão fiscalizador), multa alta ou processo judicial.' },
+      ] },
+      facilidade: { pergunta: 'Qual a chance de ser apontada (auditoria, fiscalização, cliente)?', niveis: [
+        { rotulo: 'Improvável', explicacao: 'Só uma verificação muito específica encontraria.' },
+        { rotulo: 'Possível', explicacao: 'Uma auditoria de rotina pode encontrar.' },
+        { rotulo: 'Provável', explicacao: 'Visível para cliente, fornecedor ou fiscalização comum.' },
+        { rotulo: 'Já apontada', explicacao: 'Já foi identificada por auditoria, cliente ou órgão externo.' },
+      ] },
+    },
+  },
+};
+
+/** Quais identificadores tecnicos o tipo usa. Sem tipo (ou tipo fora da lista) = os dois, como antes. */
+function _camposDoTipoVuln(tipo) {
+  const cfg = VULNERABILIDADE_CONFIG_POR_TIPO[tipo];
+  return cfg ? { cwe: cfg.cwe !== false, cve: cfg.cve !== false } : { cwe: true, cve: true };
+}
+
+/** Config de severidade do tipo, com o texto padrao da matriz quando o tipo nao define um. Sem tipo = null. */
+function _configSeveridadeVuln(tipo) {
+  const cfg = VULNERABILIDADE_CONFIG_POR_TIPO[tipo];
+  if (!cfg) return null;
+  const padrao = (lista) => lista.map((o) => ({ rotulo: o.codigo, explicacao: o.explicacao }));
+  return {
+    metodo: cfg.metodo,
+    cvss: cfg.cvss,
+    porque: cfg.porque || 'Falha técnica explorável: o CVSS 3.1 é a régua de mercado. Se ele não se aplicar a este caso, use a matriz.',
+    matriz: cfg.matriz || {
+      impacto: { pergunta: 'Qual o impacto se acontecer?', niveis: padrao(Cvss31.IMPACTOS) },
+      facilidade: { pergunta: 'Quão fácil é acontecer?', niveis: padrao(Cvss31.FACILIDADES) },
+    },
+  };
+}
+
+/** Como a vulnerabilidade foi descoberta (o "quem reportou" continua em origemDeteccao, rotulo "Reportado por"). */
+const VULNERABILIDADE_METODOS_DETECCAO = ['Scan Automatizado', 'Pentest', 'Auditoria Interna', 'Auditoria Externa', 'Report Interno', 'Report de Cliente', 'Outro'];
+
+function _tipoVulnerabilidade(tipo) {
+  return VULNERABILIDADE_TIPOS.find((t) => t.tipo === tipo) || null;
+}
+
+/** Options de um select de lista fixa; valor gravado fora da lista fica visivel e marcado. */
+function _optionsListaFixaVuln(lista, valorAtual, rotuloVazio) {
+  const atual = valorAtual || '';
+  return `<option value="">${esc(rotuloVazio)}</option>` +
+    lista.map((x) => `<option value="${esc(x)}">${esc(x)}</option>`).join('') +
+    (atual && !lista.includes(atual) ? `<option value="${esc(atual)}">${esc(atual)} (fora da lista)</option>` : '');
+}
+
+/** Celula "Tipo" da grade: tipo + subtipo em cinza; sem tipo = pill neutra "Não classificada". */
+function _htmlCelulaTipoVuln(v) {
+  if (!v.tipo) return '<span style="display:inline-block;padding:3px 10px;border-radius:10px;font-size:0.78em;font-weight:600;color:#777;background:#f0f0f0;">Não classificada</span>';
+  return esc(v.tipo) + (v.subtipo ? `<div style="font-size:0.78em;color:#888;">${esc(v.subtipo)}</div>` : '');
+}
 
 /**
  * Próximo código "AAAA-NNN" (ano atual + sequencial de 3 dígitos), pra nunca
@@ -6260,7 +7006,7 @@ function _proximoCodigoVulnerabilidade() {
 /** Pill de workflow (status da correção), não é Badge de severidade -- mesma distinção já aplicada a _badgeStatusRisco. */
 function _pillStatusCorrecaoVulnerabilidade(status) {
   const cores = {
-    'Aberto': { cor: '#e65100', fundo: '#fff3e0' },
+    'Pendente': { cor: '#e65100', fundo: '#fff3e0' },
     'Em Correção': { cor: '#1565c0', fundo: '#e3f2fd' },
     'Corrigida': { cor: '#2e7d32', fundo: '#e8f5e9' },
     'Aceita': { cor: '#555', fundo: '#f0f0f0' },
@@ -6282,8 +7028,14 @@ async function vulnerabilidades() {
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Vulnerabilidades</h2><p class="page-sub">Catálogo de vulnerabilidades reportadas, com severidade e abertura automática de risco</p></div>
-      <button class="btn btn-primary" onclick="abrirDrawerVulnerabilidade()">+ Nova Vulnerabilidade</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="abrirDrawerVulnerabilidadeLote()" id="btnEditarVulnLote" style="color:#1565c0;border-color:#1565c0;display:none;">✏️ Editar selecionadas</button>
+        <button class="btn btn-ghost" onclick="clonarVulnerabilidadesSelecionadas()" id="btnClonarVulnSelecionadas" style="color:#d60014;border-color:#d60014;display:none;">📋 Clonar selecionadas</button>
+        <button class="btn btn-ghost" onclick="exportarVulnerabilidadesParaRiscos()" id="btnExportarVulnRiscos" style="color:#2e7d32;border-color:#2e7d32;display:none;">📤 Exportar para Riscos</button>
+        <button class="btn btn-primary" onclick="abrirDrawerVulnerabilidade()">+ Nova Vulnerabilidade</button>
+      </div>
     </div>
+    <div id="vulnPainelExposicao" style="margin-bottom:14px;"></div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end;">
       <input type="text" id="buscaVulnerabilidade" placeholder="🔍 Buscar vulnerabilidade..." oninput="renderizarVulnerabilidades()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;">
       <div>
@@ -6307,22 +7059,33 @@ async function vulnerabilidades() {
         <select id="filtroVulnStatus" onchange="renderizarVulnerabilidades()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:160px;">
           <option value="">Todos</option>
           ${VULNERABILIDADE_STATUS_CORRECAO.map((s) => `<option value="${s}">${s}</option>`).join('')}
+          <option value="__atrasadas__">Atrasadas</option>
+        </select>
+      </div>
+      <div>
+        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Tipo</label>
+        <select id="filtroVulnTipo" onchange="vulnerabilidadesPaginaAtual = 1; renderizarVulnerabilidades()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:180px;">
+          <option value="">Todos</option>
+          ${VULNERABILIDADE_TIPOS.map((t) => `<option value="${esc(t.tipo)}">${esc(t.tipo)}</option>`).join('')}
+          <option value="__sem_tipo__">Não classificada</option>
         </select>
       </div>
       <span id="contadorVulnerabilidades" style="font-size:0.82em;color:#888;padding:8px 0;"></span>
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table" id="listaVulnerabilidades" style="display:none;">
-      <table style="min-width:1240px;">
+      <table style="min-width:1470px;">
         <colgroup>
-          <col style="width:100px"><col style="width:170px"><col style="width:320px"><col style="width:130px">
-          <col style="width:160px"><col style="width:110px"><col style="width:150px"><col style="width:100px">
+          <col style="width:44px"><col style="width:100px"><col style="width:170px"><col style="width:300px"><col style="width:200px"><col style="width:130px">
+          <col style="width:160px"><col style="width:110px"><col style="width:150px"><col style="width:130px">
         </colgroup>
         <thead>
           <tr>
+            <th style="text-align:center;padding-left:6px;padding-right:6px;"><input type="checkbox" id="chkTodasVulnerabilidades" onchange="toggleTodasVulnerabilidades(this.checked)" title="Selecionar todas desta página"></th>
             <th onclick="ordenarVulnerabilidades('codigo')" style="cursor:pointer;">Código <span id="sort-vuln-codigo"></span></th>
             <th onclick="ordenarVulnerabilidades('produto')" style="cursor:pointer;">Produto <span id="sort-vuln-produto"></span></th>
             <th onclick="ordenarVulnerabilidades('nome')" style="cursor:pointer;">Vulnerabilidade <span id="sort-vuln-nome"></span></th>
+            <th onclick="ordenarVulnerabilidades('tipo')" style="cursor:pointer;">Tipo <span id="sort-vuln-tipo"></span></th>
             <th onclick="ordenarVulnerabilidades('severidade')" style="cursor:pointer;">Severidade <span id="sort-vuln-severidade"></span></th>
             <th onclick="ordenarVulnerabilidades('statusCorrecao')" style="cursor:pointer;">Status da Correção <span id="sort-vuln-statusCorrecao"></span></th>
             <th onclick="ordenarVulnerabilidades('dataDeteccao')" style="cursor:pointer;">Detecção <span id="sort-vuln-dataDeteccao"></span></th>
@@ -6334,15 +7097,31 @@ async function vulnerabilidades() {
       </table>
       <div id="vulnPaginacao" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:0 4px;font-size:0.85em;color:#666;"></div>
     </div>
-    ${_htmlDrawerVulnerabilidade()}`;
+    ${_htmlDrawerVulnerabilidade()}
+    ${_htmlDrawerVulnerabilidadeLote()}`;
 
   try {
-    const [vulnsList, riscosList] = await Promise.all([
+    const [vulnsList, riscosList, depsList, areasList, produtosList, cfgVuln] = await Promise.all([
       API.getVulnerabilidades(),
       API.getRiscos().catch((e) => { console.error('Vulnerabilidades: riscos não carregaram; link de "risco aberto" ficará indisponível', e); return riscosData || []; }),
+      // Responsável (Pessoas) e Equipe (Áreas) da aba Correção. Se falharem, a
+      // tela abre igual e os seletores mostram só o valor já gravado.
+      API.getDependencias().catch((e) => { console.error('Vulnerabilidades: pessoas não carregaram', e); return null; }),
+      API.getAreas().catch((e) => { console.error('Vulnerabilidades: áreas não carregaram', e); return null; }),
+      // Catálogo de Produtos de Software (nome do produto vinculado). Se falhar,
+      // a tela abre igual e mostra o texto do ativo afetado.
+      API.getProdutosSoftware().catch((e) => { console.error('Vulnerabilidades: produtos não carregaram', e); return null; }),
+      API.getConfigVulnerabilidade().catch(() => ({ limiarCvss: 7 })),
     ]);
     vulnerabilidadesData = vulnsList;
+    vulnLimiarCvss = cfgVuln && Number.isFinite(Number(cfgVuln.limiarCvss)) ? Number(cfgVuln.limiarCvss) : 7;
     riscosData = riscosList;
+    if (depsList) {
+      pessoasData = depsList.filter((d) => d.categoria === 'Pessoas');
+      _vulnDepsCatalogo = depsList.filter((d) => VULN_CATEGORIAS_DEPENDENCIA.includes(d.categoria));
+    }
+    if (areasList) window.areasData = areasList;
+    if (produtosList) produtosSoftwareData = produtosList;
   } catch (e) {
     console.error('Vulnerabilidades: falha ao carregar', e);
     vulnerabilidadesData = [];
@@ -6350,17 +7129,60 @@ async function vulnerabilidades() {
 
   const filtroProduto = document.getElementById('filtroVulnProduto');
   if (filtroProduto) {
-    const produtos = [...new Set(vulnerabilidadesData.map((v) => v.produto).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const produtos = [...new Set(vulnerabilidadesData.map(_nomeProdutoVuln).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
     filtroProduto.innerHTML = '<option value="">Todos</option>' + produtos.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
   }
 
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaVulnerabilidades').style.display = 'block';
   vulnerabilidadesPaginaAtual = 1;
+  vulnerabilidadesSelecionadas = new Set();
   renderizarVulnerabilidades();
 }
 
+/**
+ * Nome do produto para a grade/filtro/busca: o Produto de Software vinculado
+ * (nome do catálogo, que acompanha renomeações) ou, sem vínculo, o texto antigo.
+ */
+function _nomeProdutoVuln(v) {
+  const p = v && v.produtoSoftwareId ? _produtoSoftwarePorId(v.produtoSoftwareId) : null;
+  if (p) return p.nome;
+  if (v && v.produtoSoftwareId) return (v.produto || '').trim() || '(produto removido)';
+  return ((v && v.produto) || '').trim();
+}
+
+/** Célula "Produto" da grade: nome do produto vinculado + "Ativo: …" em cinza (quando há os dois). */
+/**
+ * Dependencias afetadas (DECISAO 15/10/2026): substitui o texto livre "Ativo
+ * afetado". Escolha em duas etapas (categoria -> item do catalogo de
+ * Dependencias), varias por vulnerabilidade, vinculo por id ({id, categoria,
+ * nome}, mesmo formato de dependenciaItens). So categorias tecnicas + Processos
+ * Internos: Fornecedor e Pessoa ja tem cadastro e risco proprios. O texto antigo
+ * (`produto`) fica como legado: visivel so leitura ate alguem limpar.
+ */
+const VULN_CATEGORIAS_DEPENDENCIA = ['Infraestrutura', 'Sistemas', 'Servidor', 'Banco de Dados', 'API', 'Segurança', 'Processos Internos'];
+let _vulnDepsCatalogo = [];
+window._vulnDependencias = [];
+
+/** Nomes das dependencias afetadas (para grade, busca e risco). */
+function _nomesDependenciasVuln(v) {
+  return (Array.isArray(v && v.dependenciasAfetadas) ? v.dependenciasAfetadas : []).map((d) => d.nome).filter(Boolean);
+}
+
+/** Celula "Produto" da grade: produto vinculado + "Dependências: ..." (ou o texto legado) em cinza. */
+function _htmlCelulaProdutoVuln(v) {
+  const nome = _nomeProdutoVuln(v);
+  const deps = _nomesDependenciasVuln(v);
+  const ativo = ((v && v.produto) || '').trim();
+  let linha = '';
+  if (deps.length) linha = `Dependências: ${deps.join(', ')}`;
+  else if (ativo && v.produtoSoftwareId && ativo.toLowerCase() !== nome.toLowerCase()) linha = `Ativo: ${ativo}`;
+  if (!nome && !linha) return '-';
+  return (nome ? esc(nome) : '<span style="color:#999;">—</span>') + (linha ? `<div style="font-size:0.78em;color:#888;">${esc(linha)}</div>` : '');
+}
+
 function renderizarVulnerabilidades() {
+  _renderPainelExposicaoVuln();
   const RANK_SEVERIDADE = { 'Crítica': 4, 'Alta': 3, 'Média': 2, 'Baixa': 1, 'Não informado': 0 };
   let data = [...vulnerabilidadesData];
 
@@ -6369,22 +7191,30 @@ function renderizarVulnerabilidades() {
     const termo = busca.toLowerCase();
     data = data.filter((v) =>
       (v.codigo || '').toLowerCase().includes(termo) ||
+      _nomeProdutoVuln(v).toLowerCase().includes(termo) ||
       (v.produto || '').toLowerCase().includes(termo) ||
+      _nomesDependenciasVuln(v).some((n) => n.toLowerCase().includes(termo)) ||
       (v.nome || '').toLowerCase().includes(termo) ||
       (v.cve || '').toLowerCase().includes(termo) ||
-      (v.cwe || '').toLowerCase().includes(termo));
+      (v.cwe || '').toLowerCase().includes(termo) ||
+      (v.tipo || '').toLowerCase().includes(termo) ||
+      (v.subtipo || '').toLowerCase().includes(termo));
   }
+  const filtroTipo = (document.getElementById('filtroVulnTipo') || {}).value || '';
+  if (filtroTipo) data = data.filter((v) => (filtroTipo === '__sem_tipo__' ? !v.tipo : v.tipo === filtroTipo));
   const filtroProduto = (document.getElementById('filtroVulnProduto') || {}).value || '';
-  if (filtroProduto) data = data.filter((v) => v.produto === filtroProduto);
+  if (filtroProduto) data = data.filter((v) => _nomeProdutoVuln(v) === filtroProduto);
   const filtroSeveridade = (document.getElementById('filtroVulnSeveridade') || {}).value || '';
   if (filtroSeveridade) data = data.filter((v) => VulnerabilidadeSeveridade.faixa(v).rotulo === filtroSeveridade);
   const filtroStatus = (document.getElementById('filtroVulnStatus') || {}).value || '';
-  if (filtroStatus) data = data.filter((v) => v.statusCorrecao === filtroStatus);
+  if (filtroStatus === '__atrasadas__') data = data.filter(_vulnAtrasada);
+  else if (filtroStatus) data = data.filter((v) => v.statusCorrecao === filtroStatus);
 
   data = vulnerabilidadesOrdenacao.aplicar(data, {
+    produto: (a, b, dir) => dir * _nomeProdutoVuln(a).toLowerCase().localeCompare(_nomeProdutoVuln(b).toLowerCase(), 'pt-BR'),
     severidade: (a, b, dir) => dir * ((RANK_SEVERIDADE[VulnerabilidadeSeveridade.faixa(a).rotulo] || 0) - (RANK_SEVERIDADE[VulnerabilidadeSeveridade.faixa(b).rotulo] || 0)),
   });
-  vulnerabilidadesOrdenacao.atualizarSetas('sort-vuln-', ['codigo', 'produto', 'nome', 'severidade', 'statusCorrecao', 'dataDeteccao']);
+  vulnerabilidadesOrdenacao.atualizarSetas('sort-vuln-', ['codigo', 'produto', 'nome', 'tipo', 'severidade', 'statusCorrecao', 'dataDeteccao']);
 
   const contador = document.getElementById('contadorVulnerabilidades');
   if (contador) {
@@ -6402,18 +7232,23 @@ function renderizarVulnerabilidades() {
   document.getElementById('vulnerabilidadeRows').innerHTML = pagina.length
     ? pagina.map((v) => {
         const faixa = VulnerabilidadeSeveridade.faixa(v);
-        const riscoAberto = (riscosData || []).find((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(v.id) && !['Aceito', 'Encerrado'].includes(r.status));
+        const riscoAberto = (riscosData || []).find((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(v.id) && r.status !== 'Encerrado');
         return `<tr style="cursor:pointer;" onclick="abrirDrawerVulnerabilidade('${esc(v.id)}')">
+        <td style="text-align:center;padding-left:6px;padding-right:6px;" onclick="event.stopPropagation();"><input type="checkbox" class="chk-vulnerabilidade" data-id="${esc(v.id)}" ${vulnerabilidadesSelecionadas.has(String(v.id)) ? 'checked' : ''} onchange="toggleVulnerabilidadeSelecionada('${esc(v.id)}', this.checked)"></td>
         <td style="font-weight:600;">${esc(v.codigo || '-')}</td>
-        <td>${esc(v.produto || '-')}</td>
-        <td>${esc(v.nome || '-')}${riscoAberto ? `<br><a href="#riscos" onclick="event.stopPropagation();" style="font-size:0.78em;color:#c62828;font-weight:600;">⚠️ Risco aberto</a>` : ''}</td>
+        <td>${_htmlCelulaProdutoVuln(v)}</td>
+        <td>${esc(v.nome || '-')}${riscoAberto ? `<br><a href="#riscos?risco=${esc(riscoAberto.id)}" onclick="event.stopPropagation();" style="font-size:0.78em;color:#c62828;font-weight:600;">⚠️ ${riscoAberto.status === 'Aceito' ? 'Risco aceito' : 'Risco aberto'}</a>` : ''}</td>
+        <td>${_htmlCelulaTipoVuln(v)}</td>
         <td>${_htmlBadge(_nivelSeveridadeVulnerabilidade(faixa.rotulo), faixa.rotulo)}</td>
-        <td>${_pillStatusCorrecaoVulnerabilidade(v.statusCorrecao)}</td>
+        <td>${_pillStatusCorrecaoVulnerabilidade(v.statusCorrecao)}${_vulnAtrasada(v) ? ' <span class="vuln-atrasada" title="Data prevista de correção já passou" style="display:inline-block;margin-top:3px;padding:2px 8px;border-radius:10px;font-size:0.72em;font-weight:700;color:#c62828;background:#fdecea;">Atrasada</span>' : ''}</td>
         <td style="font-size:0.85em;color:#555;">${esc(v.dataDeteccao ? new Date(v.dataDeteccao + 'T00:00:00').toLocaleDateString('pt-BR') : '-')}</td>
         <td style="font-size:0.85em;color:#555;">${esc(v.responsavel || '-')}</td>
         <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="abrirDrawerVulnerabilidade('${esc(v.id)}')" title="Editar">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="clonarVulnerabilidade('${esc(v.id)}')" title="Clonar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d60014" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
           <button class="btn-icon" onclick="excluirVulnerabilidade('${esc(v.id)}')" title="Excluir">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -6421,7 +7256,8 @@ function renderizarVulnerabilidades() {
         </td>
       </tr>`;
       }).join('')
-    : `<tr><td colspan="8" style="text-align:center;color:#999;padding:40px;">Nenhuma vulnerabilidade encontrada.</td></tr>`;
+    : `<tr><td colspan="10" style="text-align:center;color:#999;padding:40px;">Nenhuma vulnerabilidade encontrada.</td></tr>`;
+  _sincronizarSelecaoVulnerabilidades();
 
   const paginacao = document.getElementById('vulnPaginacao');
   if (paginacao) {
@@ -6435,8 +7271,430 @@ function renderizarVulnerabilidades() {
   }
 }
 
+// ------------------------------------------------------------
+// Exposicao e vinculo com o Registro de Riscos (DECISAO 15/10/2026, NIST):
+// atraso de correcao, inconsistencias "acima do limiar sem risco" e o limiar
+// configuravel (config_regua/vulnerabilidade, lido tambem pelo servidor).
+// ------------------------------------------------------------
+let vulnLimiarCvss = 7;
+const _NOTA_POR_SEVERIDADE_VULN = { 'Crítica': 9.5, 'Alta': 7.5, 'Média': 5, 'Baixa': 2 };
+
+/** Mesma "nota" do servidor (vulnerabilidadeRisco._nota): CVSS, ou valor representativo da severidade manual. */
+function _notaVuln(v) {
+  if (v && v.cvss !== null && v.cvss !== undefined && v.cvss !== '' && Number.isFinite(Number(v.cvss))) return Number(v.cvss);
+  return _NOTA_POR_SEVERIDADE_VULN[v && v.severidadeManual] || null;
+}
+
+function _vulnEmAberto(v) {
+  return !['Corrigida', 'Aceita'].includes(v && v.statusCorrecao);
+}
+
+/** Data prevista de correcao ja passou e a vulnerabilidade segue em aberto. */
+function _vulnAtrasada(v) {
+  const hoje = new Date().toISOString().slice(0, 10);
+  return !!(v && v.dataPrevistaCorrecao && v.dataPrevistaCorrecao < hoje && _vulnEmAberto(v));
+}
+
+/** Acima do limiar, em aberto e sem risco ativo: o que o gatilho deveria ter coberto. */
+function _vulnSemRiscoAcimaDoLimiar(v) {
+  const nota = _notaVuln(v);
+  return _vulnEmAberto(v) && nota !== null && nota >= vulnLimiarCvss && !_riscoAbertoDaVuln(v.id);
+}
+
+function _renderPainelExposicaoVuln() {
+  const cont = document.getElementById('vulnPainelExposicao');
+  if (!cont) return;
+  const abertas = (vulnerabilidadesData || []).filter(_vulnEmAberto);
+  const porFaixa = { 'Crítica': 0, 'Alta': 0, 'Média': 0, 'Baixa': 0, 'Não informado': 0 };
+  abertas.forEach((v) => { const r = VulnerabilidadeSeveridade.faixa(v).rotulo; porFaixa[r] = (porFaixa[r] || 0) + 1; });
+  const atrasadas = abertas.filter(_vulnAtrasada).length;
+  const semRisco = (vulnerabilidadesData || []).filter(_vulnSemRiscoAcimaDoLimiar);
+  const podeRegua = Perfis.podeEditarRegua(window.USER_PERFIS);
+  const chip = (txt, cor, fundo) => `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.8em;font-weight:600;color:${cor};background:${fundo};">${txt}</span>`;
+  cont.innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:#fafafa;border:1px solid #eee;border-radius:10px;padding:10px 14px;">
+      <strong style="font-size:0.85em;color:#444;">Em aberto: ${abertas.length}</strong>
+      ${['Crítica', 'Alta', 'Média', 'Baixa'].map((f) => chip(`${f}: ${porFaixa[f]}`, '#444', '#f0f0f0')).join('')}
+      ${atrasadas ? chip(`⏰ Atrasadas: ${atrasadas}`, '#c62828', '#fdecea') : ''}
+      ${semRisco.length ? `${chip(`⚠️ Acima do limiar sem risco: ${semRisco.length}`, '#e65100', '#fff3e0')}
+        <button class="btn btn-ghost" onclick="selecionarVulnSemRisco()" style="padding:4px 10px;font-size:0.8em;">Selecionar para exportar</button>` : ''}
+      <span style="margin-left:auto;font-size:0.8em;color:#666;display:inline-flex;align-items:center;gap:6px;">
+        Risco automático a partir de CVSS
+        ${podeRegua
+          ? `<input type="number" id="vulnLimiarCvss" min="0" max="10" step="0.1" value="${vulnLimiarCvss}" style="width:64px;padding:4px 6px;border:1px solid #ddd;border-radius:6px;">
+             <button class="btn btn-ghost" onclick="salvarLimiarVulnerabilidade()" style="padding:4px 10px;font-size:0.9em;">Salvar</button>`
+          : `<strong>${vulnLimiarCvss}</strong>`}
+      </span>
+    </div>`;
+}
+
+window.selecionarVulnSemRisco = () => {
+  (vulnerabilidadesData || []).filter(_vulnSemRiscoAcimaDoLimiar).forEach((v) => vulnerabilidadesSelecionadas.add(String(v.id)));
+  renderizarVulnerabilidades();
+};
+
+window.salvarLimiarVulnerabilidade = async () => {
+  const valor = Number(document.getElementById('vulnLimiarCvss').value);
+  try {
+    await API.salvarConfigVulnerabilidade({ limiarCvss: valor });
+    vulnLimiarCvss = valor;
+    renderizarVulnerabilidades();
+    showToast('✅ Limiar salvo. Vale para as próximas edições e para a varredura diária.', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+  }
+};
+
 window.ordenarVulnerabilidades = (coluna) => { vulnerabilidadesOrdenacao.ordenar(coluna); vulnerabilidadesPaginaAtual = 1; renderizarVulnerabilidades(); };
 window.irParaPaginaVulnerabilidades = (delta) => { vulnerabilidadesPaginaAtual += delta; renderizarVulnerabilidades(); };
+
+// ------------------------------------------------------------
+// Selecao, edicao em lote e clonar (DECISAO 15/10/2026) -- mesmo padrao de
+// Processos de Negocio. "Marcar todas" cobre as linhas da PAGINA visivel.
+// ------------------------------------------------------------
+function _sincronizarSelecaoVulnerabilidades() {
+  const chks = [...document.querySelectorAll('#vulnerabilidadeRows .chk-vulnerabilidade')];
+  const chkTodas = document.getElementById('chkTodasVulnerabilidades');
+  if (chkTodas) {
+    const todas = chks.length > 0 && chks.every((el) => vulnerabilidadesSelecionadas.has(el.dataset.id));
+    chkTodas.checked = todas;
+    chkTodas.indeterminate = !todas && chks.some((el) => vulnerabilidadesSelecionadas.has(el.dataset.id));
+  }
+  const n = vulnerabilidadesSelecionadas.size;
+  [['btnEditarVulnLote', '✏️ Editar selecionadas'], ['btnClonarVulnSelecionadas', '📋 Clonar selecionadas'], ['btnExportarVulnRiscos', '📤 Exportar para Riscos']].forEach(([id, rotulo]) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.style.display = n > 0 ? 'inline-block' : 'none';
+    btn.textContent = n > 0 ? `${rotulo} (${n})` : rotulo;
+  });
+}
+
+window.toggleVulnerabilidadeSelecionada = (id, checked) => {
+  if (checked) vulnerabilidadesSelecionadas.add(String(id)); else vulnerabilidadesSelecionadas.delete(String(id));
+  _sincronizarSelecaoVulnerabilidades();
+};
+
+window.toggleTodasVulnerabilidades = (checked) => {
+  document.querySelectorAll('#vulnerabilidadeRows .chk-vulnerabilidade').forEach((el) => {
+    const id = el.dataset.id;
+    if (!id) return;
+    if (checked) vulnerabilidadesSelecionadas.add(id); else vulnerabilidadesSelecionadas.delete(id);
+    el.checked = checked;
+  });
+  _sincronizarSelecaoVulnerabilidades();
+};
+
+/**
+ * Copia de uma vulnerabilidade para virar um registro novo. Copia o que descreve
+ * a falha (produto, nome, CVSS/CWE/CVE, severidade, origem, responsavel...) e
+ * ZERA o que e do ciclo de vida do registro original: codigo (novo), data de
+ * deteccao (hoje), status (Aberto) e tudo da correcao.
+ */
+function _copiaDeVulnerabilidade(v, codigo, hoje) {
+  return {
+    id: null,
+    codigo,
+    ticketReport: v.ticketReport || '',
+    produto: v.produto || '',
+    produtoSoftwareId: v.produtoSoftwareId || '',
+    dependenciasAfetadas: (Array.isArray(v.dependenciasAfetadas) ? v.dependenciasAfetadas : []).map((d) => ({ id: d.id || null, categoria: d.categoria || '', nome: d.nome || '' })),
+    versao: v.versao || '',
+    nome: `${v.nome || ''} (cópia)`,
+    cwe: v.cwe || '',
+    cve: v.cve || '',
+    cvss: v.cvss != null && v.cvss !== '' ? Number(v.cvss) : null,
+    severidadeManual: v.severidadeManual || '',
+    cvssVetor: v.cvssVetor || '',
+    severidadeCriterios: {
+      impacto: (v.severidadeCriterios && v.severidadeCriterios.impacto) || '',
+      facilidade: (v.severidadeCriterios && v.severidadeCriterios.facilidade) || '',
+    },
+    descricao: v.descricao || '',
+    dataDeteccao: hoje,
+    origemDeteccao: v.origemDeteccao || '',
+    tipo: v.tipo || '',
+    subtipo: v.subtipo || '',
+    metodoDeteccao: v.metodoDeteccao || '',
+    exploitDisponivel: v.exploitDisponivel || '',
+    equipeResponsavel: v.equipeResponsavel || '',
+    responsavel: v.responsavel || '',
+    ticketCorrecao: '',
+    statusCorrecao: 'Pendente',
+    dataPrevistaCorrecao: '',
+    dataCorrecao: '',
+    evidenciaCorrecao: '',
+    observacoes: v.observacoes || '',
+  };
+}
+
+/** Icone da linha: abre o drawer ja preenchido, sem id, para revisar antes de salvar. */
+window.clonarVulnerabilidade = (id) => {
+  const original = vulnerabilidadesData.find((x) => String(x.id) === String(id));
+  if (!original) return;
+  abrirDrawerVulnerabilidade(_copiaDeVulnerabilidade(original, _proximoCodigoVulnerabilidade(), new Date().toISOString().slice(0, 10)));
+};
+
+/** Botao do cabecalho: cria as copias direto, uma a uma (o codigo sequencial depende da anterior). */
+window.clonarVulnerabilidadesSelecionadas = async () => {
+  const ids = [...vulnerabilidadesSelecionadas];
+  if (!ids.length) return;
+  // Tipo e obrigatorio: copiar uma nao classificada criaria outra nao classificada.
+  const semTipo = ids.map((id) => vulnerabilidadesData.find((x) => String(x.id) === id)).filter((v) => v && !v.tipo);
+  if (semTipo.length) {
+    return showToast(`Classifique o Tipo antes de clonar: ${semTipo.map((v) => v.codigo || v.id).join(', ')}.`, '#e65100');
+  }
+  if (!confirm(`Criar ${ids.length} cópia(s)? Cada uma recebe código novo e status Pendente; se a severidade cruzar o limiar, um risco é aberto automaticamente, como em qualquer vulnerabilidade nova.`)) return;
+
+  await comBotaoCarregando('btnClonarVulnSelecionadas', async () => {
+    const hoje = new Date().toISOString().slice(0, 10);
+    const codigos = [];
+    const erros = [];
+    for (const id of ids) {
+      const original = vulnerabilidadesData.find((x) => String(x.id) === String(id));
+      if (!original) continue;
+      const copia = _copiaDeVulnerabilidade(original, _proximoCodigoVulnerabilidade(), hoje);
+      try {
+        const r = await API.salvarVulnerabilidade(copia);
+        vulnerabilidadesData.push({ ...copia, id: r.id });
+        codigos.push(copia.codigo);
+      } catch (e) {
+        erros.push(`${original.codigo || id}: ${e.message || 'erro desconhecido'}`);
+      }
+    }
+    vulnerabilidadesSelecionadas = new Set();
+    vulnerabilidadesPaginaAtual = 1;
+    renderizarVulnerabilidades();
+    if (!erros.length) {
+      showToast(`✅ ${codigos.length} cópia(s) criada(s): ${codigos[0]}${codigos.length > 1 ? ' a ' + codigos[codigos.length - 1] : ''}.`, '#2e7d32');
+    } else {
+      showToast(`⚠️ ${codigos.length} de ${ids.length} cópia(s) criada(s). Erro em: ${erros.join('; ')}`, '#e65100');
+    }
+  });
+};
+
+/** Risco automatico/manual ainda aberto desta vulnerabilidade (mesma regra do link "Risco aberto" da grade). */
+function _riscoAbertoDaVuln(id) {
+  return (riscosData || []).find((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(id) && r.status !== 'Encerrado');
+}
+
+/**
+ * "Exportar para Riscos" das selecionadas (DECISAO 15/10/2026): a mesma acao de
+ * servidor da exportacao individual do drawer (importarVulnerabilidadeParaRisco),
+ * uma por vez. Pula antes de chamar o servidor quem ja tem risco aberto; o
+ * servidor tambem nao duplica (jaExiste). Como na individual, ignora limiar e
+ * status da correcao -- o confirm avisa quantas estao Corrigida/Aceita.
+ */
+window.exportarVulnerabilidadesParaRiscos = async () => {
+  const selecionadas = [...vulnerabilidadesSelecionadas]
+    .map((id) => vulnerabilidadesData.find((x) => String(x.id) === id)).filter(Boolean);
+  if (!selecionadas.length) return;
+  const comRisco = selecionadas.filter((v) => _riscoAbertoDaVuln(v.id));
+  const aExportar = selecionadas.filter((v) => !_riscoAbertoDaVuln(v.id));
+  if (!aExportar.length) {
+    return showToast(`Todas as ${selecionadas.length} selecionada(s) já têm risco aberto no Registro de Riscos.`, '#e65100');
+  }
+  const fechadas = aExportar.filter((v) => ['Corrigida', 'Aceita'].includes(v.statusCorrecao)).length;
+  const msg = `Criar risco no Registro de Riscos para ${aExportar.length} vulnerabilidade(s)?`
+    + (comRisco.length ? `\n\n${comRisco.length} já têm risco aberto e serão puladas.` : '')
+    + (fechadas ? `\n\n${fechadas} estão Corrigida/Aceita — o risco será criado mesmo assim (como na exportação individual).` : '');
+  if (!confirm(msg)) return;
+
+  await comBotaoCarregando('btnExportarVulnRiscos', async () => {
+    let criados = 0;
+    let jaExistiam = comRisco.length;
+    const erros = [];
+    for (const v of aExportar) {
+      try {
+        const r = await API.post('importarVulnerabilidadeParaRisco', { id: v.id });
+        if (r && r.jaExiste) jaExistiam++; else criados++;
+      } catch (e) {
+        erros.push(`${v.codigo || v.id}: ${e.message || 'erro desconhecido'}`);
+      }
+    }
+    try {
+      API.invalidate('getRiscos');
+      riscosData = await API.getRiscos();
+    } catch (e) { /* a grade so perde o link "Risco aberto" ate recarregar */ }
+    vulnerabilidadesSelecionadas = new Set();
+    renderizarVulnerabilidades();
+    const resumo = `${criados} risco(s) criado(s)${jaExistiam ? `, ${jaExistiam} já existiam` : ''}`;
+    if (!erros.length) showToast(`✅ ${resumo}.`, '#2e7d32');
+    else showToast(`⚠️ ${resumo}. Erro em: ${erros.join('; ')}`, '#e65100');
+  });
+};
+
+function _htmlDrawerVulnerabilidadeLote() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  const manter = '<option value="__manter__" selected>— Não alterar —</option>';
+  return `
+    <div class="drawer-overlay" id="drawerOverlayVulnerabilidadeLote" onclick="fecharDrawerVulnerabilidadeLote()"></div>
+    <div class="drawer" id="drawerVulnerabilidadeLote">
+      <div class="drawer-header">
+        <h3 id="loteVulnTitulo">Editar vulnerabilidades selecionadas</h3>
+        <button onclick="fecharDrawerVulnerabilidadeLote()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <p style="font-size:0.82em;color:#888;margin-bottom:16px;">Só os campos alterados abaixo são aplicados às vulnerabilidades selecionadas — deixe em "Não alterar" (ou em branco) o que não deve mudar.</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+          <div>
+            <label style="${lbl}">Status da Correção</label>
+            <select id="loteVulnStatus" style="${inp}">${manter}${VULNERABILIDADE_STATUS_CORRECAO.map((st) => `<option value="${esc(st)}">${esc(st)}</option>`).join('')}</select>
+          </div>
+          <div>
+            <label style="${lbl}">Ticket de Correção</label>
+            <input type="text" id="loteVulnTicketCorrecao" style="${inp}" placeholder="Em branco = não alterar">
+          </div>
+          <div>
+            <label style="${lbl}">Data Prevista da Correção</label>
+            <input type="date" id="loteVulnDataPrevista" style="${inp}">
+          </div>
+          <div>
+            <label style="${lbl}">Data da Correção</label>
+            <input type="date" id="loteVulnDataCorrecao" style="${inp}">
+          </div>
+          <div>
+            <label style="${lbl}">Responsável</label>
+            <select id="loteVulnResponsavel" style="${inp}"></select>
+          </div>
+          <div>
+            <label style="${lbl}">Equipe Responsável</label>
+            <select id="loteVulnEquipe" style="${inp}"></select>
+          </div>
+        </div>
+        <div style="font-size:0.74em;color:#888;margin:-8px 0 16px;">Escolher o Responsável com a Equipe em "Não alterar" preenche a Equipe pela área da pessoa.</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+          <div>
+            <label style="${lbl}">Produto de Software</label>
+            <select id="loteVulnProdutoSoftware" style="${inp}"></select>
+          </div>
+          <div>
+            <label style="${lbl}">Reportado por</label>
+            <input type="text" id="loteVulnOrigem" style="${inp}" placeholder="Em branco = não alterar">
+          </div>
+          <div>
+            <label style="${lbl}">Tipo</label>
+            <select id="loteVulnTipo" style="${inp}" onchange="_popularSubtipoLoteVuln()">${manter}${VULNERABILIDADE_TIPOS.map((t) => `<option value="${esc(t.tipo)}">${esc(t.tipo)}</option>`).join('')}</select>
+          </div>
+          <div>
+            <label style="${lbl}">Subtipo</label>
+            <select id="loteVulnSubtipo" style="${inp}"></select>
+          </div>
+          <div>
+            <label style="${lbl}">Método de Detecção</label>
+            <select id="loteVulnMetodo" style="${inp}">${manter}${VULNERABILIDADE_METODOS_DETECCAO.map((m) => `<option value="${esc(m)}">${esc(m)}</option>`).join('')}</select>
+          </div>
+          <div>
+            <label style="${lbl}">Exploit Disponível?</label>
+            <select id="loteVulnExploit" style="${inp}">${manter}<option value="">Não informado</option><option value="Sim">Sim</option><option value="Não">Não</option></select>
+          </div>
+          <div>
+            <label style="${lbl}">Severidade Manual</label>
+            <select id="loteVulnSeveridade" style="${inp}">${manter}<option value="">Sem severidade manual</option><option value="Baixa">Baixa</option><option value="Média">Média</option><option value="Alta">Alta</option><option value="Crítica">Crítica</option></select>
+          </div>
+        </div>
+        <div id="loteVulnAvisoCvss" style="display:none;font-size:0.8em;color:#e65100;background:#fff3e0;border-radius:7px;padding:8px 12px;"></div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerVulnerabilidadeLote()">Cancelar</button>
+        <button class="btn btn-primary" id="btnAplicarLoteVulnerabilidades" onclick="aplicarEdicaoLoteVulnerabilidades()">Aplicar</button>
+      </div>
+    </div>`;
+}
+
+window.abrirDrawerVulnerabilidadeLote = () => {
+  if (!vulnerabilidadesSelecionadas.size) return;
+  document.getElementById('loteVulnTitulo').textContent = `Editar ${vulnerabilidadesSelecionadas.size} vulnerabilidade(s) selecionada(s)`;
+  ['loteVulnStatus', 'loteVulnExploit', 'loteVulnSeveridade', 'loteVulnTipo', 'loteVulnMetodo'].forEach((id) => { document.getElementById(id).value = '__manter__'; });
+  _popularSubtipoLoteVuln();
+  ['loteVulnTicketCorrecao', 'loteVulnDataPrevista', 'loteVulnDataCorrecao', 'loteVulnOrigem'].forEach((id) => { document.getElementById(id).value = ''; });
+  const manter = '<option value="__manter__" selected>— Não alterar —</option>';
+  const pessoas = [...(pessoasData || [])].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  document.getElementById('loteVulnResponsavel').innerHTML = manter + pessoas.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('');
+  const equipes = [...new Set((window.areasData || []).map((a) => a.nome).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  document.getElementById('loteVulnEquipe').innerHTML = manter + equipes.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  const produtos = (produtosSoftwareData || []).filter((p) => p.ativo).sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  document.getElementById('loteVulnProdutoSoftware').innerHTML = manter + produtos.map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('');
+  // Com CVSS valido a faixa vem do CVSS, nao da severidade manual: avisar quantas nao mudam.
+  const comCvss = [...vulnerabilidadesSelecionadas]
+    .map((id) => vulnerabilidadesData.find((x) => String(x.id) === id))
+    .filter((v) => v && v.cvss != null && v.cvss !== '').length;
+  const aviso = document.getElementById('loteVulnAvisoCvss');
+  aviso.style.display = comCvss ? 'block' : 'none';
+  aviso.textContent = comCvss ? `${comCvss} das selecionadas têm CVSS: a severidade delas vem do CVSS, então a Severidade Manual não muda a faixa.` : '';
+  document.getElementById('drawerVulnerabilidadeLote').classList.add('open');
+  document.getElementById('drawerOverlayVulnerabilidadeLote').classList.add('open');
+};
+
+/**
+ * Subtipo do lote depende do Tipo escolhido no lote. Tipo em "Nao alterar" ->
+ * so "Nao alterar" (subtipo sem tipo nao faz sentido para um lote misto).
+ */
+window._popularSubtipoLoteVuln = () => {
+  const tipo = _tipoVulnerabilidade(document.getElementById('loteVulnTipo').value);
+  const sel = document.getElementById('loteVulnSubtipo');
+  sel.innerHTML = '<option value="__manter__" selected>— Não alterar —</option>' +
+    (tipo ? '<option value="">Sem subtipo</option>' + tipo.subtipos.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('') : '');
+  sel.disabled = !tipo;
+};
+
+window.fecharDrawerVulnerabilidadeLote = () => {
+  document.getElementById('drawerVulnerabilidadeLote').classList.remove('open');
+  document.getElementById('drawerOverlayVulnerabilidadeLote').classList.remove('open');
+};
+
+window.aplicarEdicaoLoteVulnerabilidades = async () => {
+  const ids = [...vulnerabilidadesSelecionadas];
+  if (!ids.length) return;
+
+  // Selects: "__manter__" = nao altera. Texto/data: vazio = nao altera.
+  const tocados = {};
+  [['loteVulnStatus', 'statusCorrecao'], ['loteVulnResponsavel', 'responsavel'], ['loteVulnEquipe', 'equipeResponsavel'],
+    ['loteVulnProdutoSoftware', 'produtoSoftwareId'], ['loteVulnExploit', 'exploitDisponivel'], ['loteVulnSeveridade', 'severidadeManual'],
+    ['loteVulnTipo', 'tipo'], ['loteVulnSubtipo', 'subtipo'], ['loteVulnMetodo', 'metodoDeteccao']]
+    .forEach(([el, campo]) => { const v = document.getElementById(el).value; if (v !== '__manter__') tocados[campo] = v; });
+  // Trocar o Tipo sem escolher Subtipo zera o subtipo: senao ficaria o subtipo de outro tipo.
+  if (tocados.tipo && !('subtipo' in tocados)) tocados.subtipo = '';
+  [['loteVulnTicketCorrecao', 'ticketCorrecao'], ['loteVulnDataPrevista', 'dataPrevistaCorrecao'],
+    ['loteVulnDataCorrecao', 'dataCorrecao'], ['loteVulnOrigem', 'origemDeteccao']]
+    .forEach(([el, campo]) => { const v = document.getElementById(el).value.trim(); if (v) tocados[campo] = v; });
+
+  if (!Object.keys(tocados).length) return showToast('Escolha ao menos um campo para alterar.', '#e65100');
+
+  // A equipe acompanha a pessoa (mesma regra do drawer individual), a menos que
+  // a Equipe tenha sido escolhida de proposito.
+  if (tocados.responsavel && !('equipeResponsavel' in tocados)) {
+    const pessoa = (pessoasData || []).find((p) => p.nome === tocados.responsavel);
+    const area = pessoa ? _areasDaPessoa(pessoa)[0] : null;
+    if (area) tocados.equipeResponsavel = area;
+  }
+
+  if (!confirm(`Aplicar as alterações a ${ids.length} vulnerabilidade(s) selecionada(s)?`)) return;
+
+  await comBotaoCarregando('btnAplicarLoteVulnerabilidades', async () => {
+    let sucesso = 0;
+    const erros = [];
+    for (const id of ids) {
+      const v = vulnerabilidadesData.find((x) => String(x.id) === id);
+      if (!v) continue;
+      try {
+        await API.salvarVulnerabilidade({ id: v.id, ...tocados });
+        Object.assign(v, tocados);
+        sucesso++;
+      } catch (e) {
+        erros.push(`${v.codigo || id}: ${e.message || 'erro desconhecido'}`);
+      }
+    }
+    vulnerabilidadesSelecionadas = new Set();
+    fecharDrawerVulnerabilidadeLote();
+    renderizarVulnerabilidades();
+    if (!erros.length) {
+      showToast(`✅ ${sucesso} vulnerabilidade(s) atualizada(s)! Riscos automáticos podem abrir ou encerrar em instantes.`, '#2e7d32');
+    } else {
+      showToast(`⚠️ ${sucesso} de ${ids.length} atualizada(s). Erro em: ${erros.join('; ')}`, '#e65100');
+    }
+  });
+};
 
 function _htmlDrawerVulnerabilidade() {
   const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
@@ -6470,8 +7728,12 @@ function _htmlDrawerVulnerabilidade() {
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
               <div>
-                <label style="${lbl}">Produto</label>
-                <input type="text" id="vulnProduto" placeholder="Nome do servidor, estação ou aplicação" style="${inp}">
+                <label style="${lbl}">Produto de Software</label>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <select id="vulnProdutoSoftware" style="${inp}flex:1;" onchange="_sugerirResponsavelPeloProdutoVuln()"><option value="">Selecione...</option></select>
+                  <button type="button" class="btn-icon" onclick="_recarregarProdutosVulnerabilidade()" title="Atualizar lista de produtos">🔄</button>
+                </div>
+                <a href="#produtos-software" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">🗂️ Gerenciar Produtos</a>
               </div>
               <div>
                 <label style="${lbl}">Versão</label>
@@ -6479,17 +7741,56 @@ function _htmlDrawerVulnerabilidade() {
               </div>
             </div>
             <div style="margin-bottom:14px;">
+              <label style="${lbl}">Dependências afetadas</label>
+              <div style="display:grid;grid-template-columns:1fr 1.4fr auto auto;gap:8px;align-items:center;">
+                <select id="vulnDepCategoria" style="${inp}" onchange="_popularItensDependenciaVuln()">
+                  <option value="">Categoria...</option>
+                  ${VULN_CATEGORIAS_DEPENDENCIA.map((c) => `<option value="${esc(c)}">${DEPENDENCIA_CAT_ICONES[c] || '📦'} ${esc(c)}</option>`).join('')}
+                </select>
+                <select id="vulnDepItem" style="${inp}" disabled><option value="">Escolha a categoria primeiro</option></select>
+                <button type="button" class="btn btn-ghost" onclick="adicionarDependenciaVuln()" style="white-space:nowrap;">Adicionar</button>
+                <button type="button" class="btn-icon" onclick="_recarregarDependenciasVulnerabilidade()" title="Atualizar lista de dependências">🔄</button>
+              </div>
+              <div id="vulnDepChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
+              <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:4px;">
+                <span style="font-size:0.74em;color:#888;">Informe o produto de software, as dependências afetadas ou os dois.</span>
+                <a href="#dependencias" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;">🗂️ Gerenciar Dependências</a>
+              </div>
+              <input type="hidden" id="vulnProduto">
+              <div id="vulnProdutoLegado" style="display:none;font-size:0.8em;color:#555;background:#f7f7f7;border-radius:6px;padding:6px 10px;margin-top:8px;">
+                Ativo afetado (texto antigo): <strong id="vulnProdutoLegadoTexto"></strong>
+                <span style="color:#888;">— escolha a dependência acima e limpe o texto.</span>
+                <button type="button" onclick="limparProdutoLegadoVuln()" style="background:none;border:none;color:#d60014;font-weight:700;text-decoration:underline;cursor:pointer;font-size:1em;padding:0;margin-left:4px;">Limpar</button>
+              </div>
+            </div>
+            <div style="margin-bottom:14px;">
               <label style="${lbl}">Nome da Vulnerabilidade</label>
               <input type="text" id="vulnNome" style="${inp}">
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:4px;">
               <div>
-                <label style="${lbl}">CWE</label>
-                <input type="text" id="vulnCwe" placeholder="Ex: CWE-284 — Improper Access Control" style="${inp}">
+                <label style="${lbl}">Tipo de Vulnerabilidade <span style="color:#d60014;">*</span></label>
+                <select id="vulnTipo" style="${inp}" onchange="trocarTipoVulnerabilidade()"></select>
               </div>
               <div>
+                <label style="${lbl}">Subtipo</label>
+                <select id="vulnSubtipo" style="${inp}" onchange="_aplicarCamposPorTipoVuln()"></select>
+              </div>
+            </div>
+            <div id="vulnTipoDica" style="font-size:0.74em;color:#888;margin-bottom:4px;min-height:1em;"></div>
+            <div id="vulnTipoAlerta" style="display:none;font-size:0.74em;color:#e65100;margin-bottom:4px;">⚠️ Há CVSS preenchido: ele não se aplica a Não Conformidade (veja a aba Severidade).</div>
+            <div style="margin-bottom:10px;"></div>
+            <div id="vulnLinhaCweCve" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
+              <div id="vulnCampoCwe">
+                <label style="${lbl}">CWE</label>
+                <input type="text" id="vulnCwe" placeholder="Ex: CWE-284 — Improper Access Control" style="${inp}">
+                <div id="vulnCweAviso" style="display:none;font-size:0.74em;color:#e65100;margin-top:4px;"><span></span> <button type="button" onclick="limparCampoTecnicoVuln('cwe')" style="background:none;border:none;color:#e65100;font-weight:700;text-decoration:underline;cursor:pointer;font-size:1em;padding:0;">Limpar</button></div>
+              </div>
+              <div id="vulnCampoCve">
                 <label style="${lbl}">CVE</label>
                 <input type="text" id="vulnCve" style="${inp}">
+                <div id="vulnCveDica" style="display:none;font-size:0.74em;color:#888;margin-top:4px;">Informe o identificador (ex.: CVE-2025-55247).</div>
+                <div id="vulnCveAviso" style="display:none;font-size:0.74em;color:#e65100;margin-top:4px;"><span></span> <button type="button" onclick="limparCampoTecnicoVuln('cve')" style="background:none;border:none;color:#e65100;font-weight:700;text-decoration:underline;cursor:pointer;font-size:1em;padding:0;">Limpar</button></div>
               </div>
             </div>
             <div style="margin-bottom:14px;">
@@ -6502,40 +7803,79 @@ function _htmlDrawerVulnerabilidade() {
                 <input type="date" id="vulnDataDeteccao" style="${inp}" onchange="atualizarTempoCorrecaoVulnerabilidade()">
               </div>
               <div>
-                <label style="${lbl}">Origem da Detecção</label>
-                <input type="text" id="vulnOrigemDeteccao" style="${inp}">
+                <label style="${lbl}">Método de Detecção</label>
+                <select id="vulnMetodoDeteccao" style="${inp}"></select>
               </div>
             </div>
-            <div>
-              <label style="${lbl}">Exploit Disponível?</label>
-              <select id="vulnExploitDisponivel" style="${inp}">
-                <option value="">Não informado</option>
-                <option value="Sim">Sim</option>
-                <option value="Não">Não</option>
-              </select>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+              <div>
+                <label style="${lbl}">Reportado por</label>
+                <input type="text" id="vulnOrigemDeteccao" placeholder="Quem reportou — pessoa, time ou cliente" style="${inp}">
+              </div>
+              <div>
+                <label style="${lbl}">Exploit Disponível?</label>
+                <select id="vulnExploitDisponivel" style="${inp}">
+                  <option value="">Não informado</option>
+                  <option value="Sim">Sim</option>
+                  <option value="Não">Não</option>
+                </select>
+              </div>
             </div>
           </div>
 
           <div id="painel-vuln-severidade" style="display:none;">
-            <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:16px;margin-bottom:16px;">
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:12px;">
-                <div>
-                  <label style="${lbl}">CVSS (0 a 10)</label>
-                  <input type="number" id="vulnCvss" min="0" max="10" step="0.1" placeholder="Ex: 9.8" style="${inp}" oninput="atualizarBadgeSeveridadeVulnerabilidade()">
-                </div>
-                <div>
-                  <label style="${lbl}">Severidade manual (quando CVSS não se aplica)</label>
-                  <select id="vulnSeveridadeManual" style="${inp}" onchange="atualizarBadgeSeveridadeVulnerabilidade()">
-                    <option value="">Selecione...</option>
-                    <option value="Baixa">Baixa</option>
-                    <option value="Média">Média</option>
-                    <option value="Alta">Alta</option>
-                    <option value="Crítica">Crítica</option>
-                  </select>
-                </div>
+            <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <span>Severidade final:</span> <span id="vulnBadgeSeveridade"></span>
+              <span style="font-size:0.75em;color:#888;">CVSS preenchido manda; a severidade manual só vale quando o CVSS não se aplica.</span>
+            </div>
+
+            <div id="vulnSevMetodo" style="display:none;font-size:0.82em;color:#444;background:#f7f7fb;border-left:3px solid #d60014;border-radius:6px;padding:8px 12px;margin-bottom:12px;"></div>
+            <div id="vulnSevDivergencia" style="display:none;font-size:0.82em;color:#e65100;background:#fff3e0;border-radius:7px;padding:8px 12px;margin-bottom:12px;align-items:center;gap:10px;flex-wrap:wrap;">
+              <span style="flex:1;min-width:220px;">⚠️ O CVSS não se aplica a Não Conformidade. Enquanto houver CVSS preenchido, é ele que define a severidade (e o risco automático).</span>
+              <button type="button" class="btn btn-ghost" id="btnLimparCvssVuln" onclick="limparCvssVulnerabilidade()" style="white-space:nowrap;color:#e65100;border-color:#e65100;">Limpar CVSS</button>
+            </div>
+            <div id="vulnSevPrincipal"></div>
+            <details id="vulnSevAlternativa" style="margin-top:14px;border:1px solid #eee;border-radius:8px;padding:8px 14px;background:#fff;">
+              <summary id="vulnSevAlternativaTitulo" style="cursor:pointer;font-size:0.85em;font-weight:600;color:#555;padding:4px 0;"></summary>
+              <div id="vulnSevAlternativaCorpo" style="margin-top:12px;"></div>
+            </details>
+            <div id="vulnSevOculto" style="display:none;"></div>
+            <div id="vulnSecaoCvss">
+            <label style="${lbl}margin-bottom:4px;">Avaliação técnica (CVSS 3.1)</label>
+            <span style="font-size:0.75em;color:#888;display:block;margin-bottom:12px;">Responda as 8 perguntas: a nota oficial é calculada sozinha. Se o relatório (pentest, fornecedor) já trouxer o vetor, cole abaixo.</span>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+              <input type="text" id="vulnCvssVetorColar" placeholder="Colar vetor, ex.: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H" style="${inp}flex:1;">
+              <button type="button" class="btn btn-ghost" onclick="colarVetorCvssVulnerabilidade()" style="white-space:nowrap;">Aplicar vetor</button>
+            </div>
+            <div id="vulnCvssVetorAviso" style="display:none;font-size:0.78em;color:#e65100;margin-bottom:8px;"></div>
+            <div id="vulnCvssCriterios"></div>
+            <div style="display:grid;grid-template-columns:1fr auto;gap:12px;align-items:end;margin:4px 0 8px;padding:12px 16px;border:1px solid #eee;border-radius:8px;background:#fff;">
+              <div>
+                <label style="${lbl}">CVSS (0 a 10)</label>
+                <input type="number" id="vulnCvss" min="0" max="10" step="0.1" placeholder="Ex: 9.8" style="${inp}" oninput="atualizarBadgeSeveridadeVulnerabilidade()">
+                <div id="vulnCvssResultado" style="font-size:0.8em;color:#666;margin-top:6px;"></div>
               </div>
-              <span style="font-size:0.75em;color:#888;display:block;margin-bottom:10px;">Enquanto houver CVSS preenchido, ele manda na severidade final -- o campo manual só é usado quando o CVSS não se aplica (ex.: falha de processo, não de um componente técnico avaliável por CVSS).</span>
-              <div>Severidade final: <span id="vulnBadgeSeveridade"></span></div>
+              <button type="button" class="btn btn-ghost" id="btnLimparCriteriosCvss" onclick="limparCriteriosCvssVulnerabilidade()" style="white-space:nowrap;">Limpar critérios</button>
+            </div>
+
+            </div>
+            <div id="vulnSecaoMatriz">
+            <label style="${lbl}margin-bottom:4px;">Matriz de impacto</label>
+            <span id="vulnMatrizSub" style="font-size:0.75em;color:#888;display:block;margin-bottom:12px;">Quando o CVSS não se aplica. Os dois critérios sugerem a severidade; você pode trocar a sugestão.</span>
+            <div id="vulnSemCvssCriterios"></div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:end;padding:12px 16px;border:1px solid #eee;border-radius:8px;background:#fff;">
+              <div>
+                <label style="${lbl}">Severidade manual</label>
+                <select id="vulnSeveridadeManual" style="${inp}" onchange="atualizarBadgeSeveridadeVulnerabilidade()">
+                  <option value="">Selecione...</option>
+                  <option value="Baixa">Baixa</option>
+                  <option value="Média">Média</option>
+                  <option value="Alta">Alta</option>
+                  <option value="Crítica">Crítica</option>
+                </select>
+              </div>
+              <div id="vulnSemCvssSugestao" style="font-size:0.85em;color:#666;padding-bottom:10px;"></div>
+            </div>
             </div>
           </div>
 
@@ -6543,11 +7883,17 @@ function _htmlDrawerVulnerabilidade() {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
               <div>
                 <label style="${lbl}">Equipe Responsável pela Correção</label>
-                <input type="text" id="vulnEquipeResponsavel" style="${inp}">
+                <select id="vulnEquipeResponsavel" style="${inp}"><option value="">Selecione...</option></select>
+                <div id="vulnEquipeDica" style="font-size:0.74em;color:#888;margin-top:4px;">Vem da área da pessoa responsável; pode ser trocada.</div>
               </div>
               <div>
                 <label style="${lbl}">Responsável</label>
-                <input type="text" id="vulnResponsavel" style="${inp}">
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <select id="vulnResponsavel" style="${inp}flex:1;" onchange="_equipePelaPessoaVuln()"><option value="">Selecione...</option></select>
+                  <button type="button" class="btn-icon" onclick="_recarregarPessoasVulnerabilidade()" title="Atualizar lista de pessoas e áreas">🔄</button>
+                </div>
+                <a href="#pessoas" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">👤 Gerenciar Pessoas</a>
+                <div id="vulnResponsavelDica" style="font-size:0.74em;color:#888;margin-top:4px;"></div>
               </div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
@@ -6585,12 +7931,158 @@ function _htmlDrawerVulnerabilidade() {
         </div>
       </div>
       <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="_fecharDrawerVulnerabilidadeSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerVulnerabilidade()">Fechar</button>
         <button class="btn btn-ghost" id="btnImportarVulnParaRisco" onclick="importarVulnerabilidadeParaRisco()" style="display:none;color:#c62828;border-color:#c62828;"></button>
         <button class="btn btn-primary" id="btnSalvarVulnerabilidade" onclick="salvarVulnerabilidade()">Salvar</button>
       </div>
     </div>`;
 }
+
+/** Popula Tipo/Subtipo/dica a partir dos valores gravados (nada e recalculado ao abrir). */
+function _popularTipoVuln(tipoAtual, subtipoAtual) {
+  document.getElementById('vulnTipo').innerHTML = _optionsListaFixaVuln(VULNERABILIDADE_TIPOS.map((t) => t.tipo), tipoAtual, 'Selecione...');
+  document.getElementById('vulnTipo').value = tipoAtual || '';
+  _popularSubtipoVuln(subtipoAtual);
+}
+
+function _popularSubtipoVuln(subtipoAtual) {
+  const tipo = _tipoVulnerabilidade(document.getElementById('vulnTipo').value);
+  const sel = document.getElementById('vulnSubtipo');
+  sel.innerHTML = _optionsListaFixaVuln(tipo ? tipo.subtipos : [], subtipoAtual, tipo ? 'Selecione...' : 'Escolha o tipo primeiro');
+  sel.value = subtipoAtual || '';
+  sel.disabled = !tipo && !subtipoAtual;
+  document.getElementById('vulnTipoDica').textContent = tipo ? `${tipo.descricao} ${tipo.tratativa}` : '';
+}
+
+/** Trocar o Tipo limpa o Subtipo (o de antes e de outro tipo) e atualiza a dica. */
+/** Trocar o Tipo tambem realinha a aba Severidade (nada e apagado, so muda o que aparece primeiro). */
+window.trocarTipoVulnerabilidade = () => {
+  _popularSubtipoVuln('');
+  _aplicarMetodoSeveridadeVuln(false);
+  _aplicarCamposPorTipoVuln();
+};
+
+/**
+ * CWE/CVE conforme o tipo (VULNERABILIDADE_CONFIG_POR_TIPO). Campo que o tipo
+ * nao usa SOME -- a menos que ja tenha valor: ai fica, com aviso e "Limpar"
+ * (nunca apaga sozinho). Sem nenhum dos dois, a linha inteira sai do layout; com
+ * um so, ele ocupa a linha. Reavaliado ao abrir, trocar tipo/subtipo e limpar --
+ * nao a cada tecla, para o campo nao sumir enquanto a pessoa apaga o texto.
+ */
+window._aplicarCamposPorTipoVuln = () => {
+  const linha = document.getElementById('vulnLinhaCweCve');
+  if (!linha) return;
+  const tipo = (document.getElementById('vulnTipo') || {}).value || '';
+  const usa = _camposDoTipoVuln(tipo);
+  const mostrados = ['cwe', 'cve'].filter((campo) => {
+    const sufixo = campo === 'cwe' ? 'Cwe' : 'Cve';
+    const valor = document.getElementById('vuln' + sufixo).value.trim();
+    const mostrar = usa[campo] || !!valor;
+    document.getElementById('vulnCampo' + sufixo).style.display = mostrar ? '' : 'none';
+    const aviso = document.getElementById('vuln' + sufixo + 'Aviso');
+    const diverge = !usa[campo] && !!valor;
+    aviso.style.display = diverge ? 'block' : 'none';
+    if (diverge) aviso.querySelector('span').textContent = `⚠️ ${campo.toUpperCase()} não se aplica a ${tipo} — limpe se foi engano.`;
+    return mostrar;
+  });
+  linha.style.display = mostrados.length ? 'grid' : 'none';
+  linha.style.gridTemplateColumns = mostrados.length === 2 ? '1fr 1fr' : '1fr';
+  const subtipo = (document.getElementById('vulnSubtipo') || {}).value || '';
+  document.getElementById('vulnCveDica').style.display = subtipo === 'CVE Conhecido' && mostrados.includes('cve') ? 'block' : 'none';
+};
+
+/** "Limpar" do aviso de CWE/CVE que nao se aplica ao tipo. Grava so no Salvar/Fechar. */
+window.limparCampoTecnicoVuln = (campo) => {
+  document.getElementById(campo === 'cwe' ? 'vulnCwe' : 'vulnCve').value = '';
+  _aplicarCamposPorTipoVuln();
+};
+
+function _temCvssVuln() {
+  const campo = document.getElementById('vulnCvss');
+  return !!((campo && campo.value !== '') || Object.keys(window._vulnCvssRespostas || {}).length);
+}
+
+function _temMatrizVuln() {
+  const s = window._vulnSemCvss || {};
+  return !!(s.impacto || s.facilidade || (document.getElementById('vulnSeveridadeManual') || {}).value);
+}
+
+/**
+ * Posiciona as secoes CVSS e Matriz conforme o tipo: a principal primeiro, a
+ * alternativa num <details> recolhido (que ABRE sozinho se ja tiver dado, para
+ * nada ficar escondido), e o CVSS fora da tela para Nao Conformidade. Os
+ * elementos so mudam de lugar -- valores e respostas ficam intactos.
+ * `abrindo` = drawer acabou de abrir (recalcula se a alternativa abre).
+ */
+function _aplicarMetodoSeveridadeVuln(abrindo) {
+  const secCvss = document.getElementById('vulnSecaoCvss');
+  const secMatriz = document.getElementById('vulnSecaoMatriz');
+  if (!secCvss || !secMatriz) return;
+  const principal = document.getElementById('vulnSevPrincipal');
+  const det = document.getElementById('vulnSevAlternativa');
+  const corpoAlt = document.getElementById('vulnSevAlternativaCorpo');
+  const oculto = document.getElementById('vulnSevOculto');
+  const faixaMetodo = document.getElementById('vulnSevMetodo');
+  const tipo = (document.getElementById('vulnTipo') || {}).value || '';
+  const cfg = _configSeveridadeVuln(tipo);
+
+  if (!cfg) {
+    // Sem tipo: os dois abertos, como antes.
+    principal.appendChild(secCvss);
+    principal.appendChild(secMatriz);
+    det.style.display = 'none';
+    faixaMetodo.style.display = 'block';
+    faixaMetodo.textContent = 'Escolha o Tipo na Identificação para ver o método recomendado.';
+  } else {
+    const cvssPrincipal = cfg.metodo === 'cvss';
+    const primeira = cvssPrincipal ? secCvss : secMatriz;
+    principal.appendChild(primeira);
+    if (cfg.cvss === 'nao-se-aplica') {
+      oculto.appendChild(secCvss);
+      det.style.display = 'none';
+    } else {
+      const segunda = cvssPrincipal ? secMatriz : secCvss;
+      corpoAlt.appendChild(segunda);
+      det.style.display = '';
+      document.getElementById('vulnSevAlternativaTitulo').textContent = cvssPrincipal
+        ? 'O CVSS não se aplica a este caso? Use a matriz de impacto'
+        : 'Tem um CVSS (ex.: CVE do relatório)? Informe aqui';
+      const temDado = cvssPrincipal ? _temMatrizVuln() : _temCvssVuln();
+      det.open = abrindo ? temDado : (det.open || temDado);
+    }
+    faixaMetodo.style.display = 'block';
+    faixaMetodo.innerHTML = `Método para <strong>${esc(tipo)}</strong>: <strong>${cvssPrincipal ? 'CVSS 3.1' : 'Matriz de impacto'}</strong>. <span style="color:#777;">${esc(cfg.porque)}</span>`;
+  }
+  const sub = document.getElementById('vulnMatrizSub');
+  if (sub) {
+    sub.textContent = cfg && cfg.metodo === 'matriz'
+      ? 'Os dois critérios sugerem a severidade; você pode trocar a sugestão.'
+      : 'Quando o CVSS não se aplica. Os dois critérios sugerem a severidade; você pode trocar a sugestão.';
+  }
+  _renderCriteriosSemCvssVuln();
+  _atualizarDivergenciaVuln();
+}
+
+/** Nao Conformidade com CVSS preenchido: avisa (aba Severidade + Identificacao) e oferece limpar. Nunca limpa sozinho. */
+function _atualizarDivergenciaVuln() {
+  const tipo = (document.getElementById('vulnTipo') || {}).value || '';
+  const cfg = _configSeveridadeVuln(tipo);
+  const diverge = !!(cfg && cfg.cvss === 'nao-se-aplica' && _temCvssVuln());
+  const aviso = document.getElementById('vulnSevDivergencia');
+  if (aviso) aviso.style.display = diverge ? 'flex' : 'none';
+  const alerta = document.getElementById('vulnTipoAlerta');
+  if (alerta) alerta.style.display = diverge ? 'block' : 'none';
+}
+
+/** Botao "Limpar CVSS": zera nota, vetor e respostas. Grava so no Salvar/Fechar, como qualquer edicao. */
+window.limparCvssVulnerabilidade = () => {
+  window._vulnCvssRespostas = {};
+  window._vulnCvssDosCriterios = false;
+  document.getElementById('vulnCvss').value = '';
+  _renderCriteriosCvssVuln();
+  atualizarBadgeSeveridadeVulnerabilidade();
+};
 
 window.trocarAbaVulnerabilidade = (aba) => {
   ['identificacao', 'severidade', 'correcao'].forEach((a) => {
@@ -6609,7 +8101,375 @@ window.atualizarBadgeSeveridadeVulnerabilidade = () => {
   const faixa = VulnerabilidadeSeveridade.faixa(vuln);
   const el = document.getElementById('vulnBadgeSeveridade');
   if (el) el.innerHTML = _htmlBadge(_nivelSeveridadeVulnerabilidade(faixa.rotulo), faixa.rotulo);
+  _atualizarResumoCriteriosVuln();
+  _atualizarDivergenciaVuln();
 };
+
+// ------------------------------------------------------------
+// Aba Severidade: avaliação guiada (DECISÃO 13/10/2026). Critérios e cálculo
+// em cvss31.js; o resultado vai pros MESMOS campos de sempre (vulnCvss e
+// vulnSeveridadeManual) -- faixas, risco automático e grade não mudam.
+// ------------------------------------------------------------
+window._vulnCvssRespostas = {};
+// true quando o número no campo CVSS veio dos critérios (e não digitado):
+// desmarcar um critério depois disso limpa o número, em vez de deixar uma nota
+// que não corresponde mais às respostas.
+window._vulnCvssDosCriterios = false;
+window._vulnSemCvss = { impacto: '', facilidade: '' };
+
+// Mesmo visual de cartão selecionável com descrição de renderEstrategiaChips.
+function _cartaoCriterioVuln(onclick, rotulo, explicacao, marcado) {
+  return `<button type="button" onclick="${onclick}" style="text-align:left;padding:8px 12px;border-radius:10px;cursor:pointer;flex:1 1 150px;min-width:150px;max-width:260px;border:1.5px solid ${marcado ? '#d60014' : '#c5cae9'};background:${marcado ? '#fce8ea' : '#fff'};">
+    <div style="font-weight:700;color:#d60014;font-size:0.86em;">${esc(rotulo)}${marcado ? ' ✓' : ''}</div>
+    <div style="font-size:0.76em;color:#666;margin-top:3px;">${esc(explicacao)}</div>
+  </button>`;
+}
+
+function _renderCriteriosCvssVuln() {
+  const cont = document.getElementById('vulnCvssCriterios');
+  if (!cont) return;
+  const r = window._vulnCvssRespostas || {};
+  let grupoAtual = '';
+  cont.innerHTML = Cvss31.METRICAS.map((m, mi) => {
+    const titulo = m.grupo !== grupoAtual
+      ? `<div style="font-size:0.72em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;margin:12px 0 6px;">${esc(m.grupo)}</div>`
+      : '';
+    grupoAtual = m.grupo;
+    return `${titulo}<div style="margin-bottom:12px;">
+      <div style="font-weight:600;font-size:0.88em;color:#222;margin-bottom:6px;">${esc(m.pergunta)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${m.opcoes.map((o, oi) => _cartaoCriterioVuln(`selecionarCriterioCvssVulnerabilidade(${mi},${oi})`, o.rotulo, o.explicacao, r[m.codigo] === o.codigo)).join('')}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _renderCriteriosSemCvssVuln() {
+  const cont = document.getElementById('vulnSemCvssCriterios');
+  if (!cont) return;
+  const s = window._vulnSemCvss || {};
+  // Texto do tipo escolhido (ou o padrao); o codigo gravado e o canonico de
+  // cvss31.js, pela posicao -- so o que se le muda.
+  const cfg = _configSeveridadeVuln((document.getElementById('vulnTipo') || {}).value || '') || _configSeveridadeVuln('Má Configuração');
+  const bloco = (texto, chave, lista) => `<div style="margin-bottom:12px;">
+      <div style="font-weight:600;font-size:0.88em;color:#222;margin-bottom:6px;">${esc(texto.pergunta)}</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;">
+        ${lista.map((o, i) => _cartaoCriterioVuln(`selecionarCriterioSemCvssVulnerabilidade('${chave}',${i})`, texto.niveis[i].rotulo, texto.niveis[i].explicacao, s[chave] === o.codigo)).join('')}
+      </div>
+    </div>`;
+  cont.innerHTML = bloco(cfg.matriz.impacto, 'impacto', Cvss31.IMPACTOS)
+    + bloco(cfg.matriz.facilidade, 'facilidade', Cvss31.FACILIDADES);
+}
+
+function _atualizarResumoCriteriosVuln() {
+  const r = window._vulnCvssRespostas || {};
+  const nota = Cvss31.calcular(r);
+  const faltam = Cvss31.faltam(r);
+  const campo = document.getElementById('vulnCvss');
+  if (campo) campo.readOnly = nota !== null;
+  const res = document.getElementById('vulnCvssResultado');
+  if (res) {
+    if (nota !== null) {
+      const f = VulnerabilidadeSeveridade.faixa({ cvss: nota });
+      res.innerHTML = `Calculado pelos critérios: <strong>${String(nota).replace('.', ',')}</strong> ${_htmlBadge(_nivelSeveridadeVulnerabilidade(f.rotulo), f.rotulo)} <code style="font-size:0.95em;color:#555;">${esc(Cvss31.paraVetor(r))}</code>`;
+    } else if (faltam < Cvss31.METRICAS.length) {
+      res.textContent = `Faltam ${faltam} critério${faltam > 1 ? 's' : ''} — a nota só é calculada com os ${Cvss31.METRICAS.length} respondidos.`;
+    } else {
+      res.textContent = 'Sem critérios respondidos: o CVSS também pode ser digitado à mão (ex.: número que veio no relatório).';
+    }
+  }
+  const btnLimpar = document.getElementById('btnLimparCriteriosCvss');
+  if (btnLimpar) btnLimpar.style.display = faltam < Cvss31.METRICAS.length ? '' : 'none';
+
+  const s = window._vulnSemCvss || {};
+  const sugestao = Cvss31.sugerirSeveridade(s.impacto, s.facilidade);
+  const elSug = document.getElementById('vulnSemCvssSugestao');
+  if (elSug) {
+    elSug.innerHTML = sugestao
+      ? `Sugestão pelos critérios: ${_htmlBadge(_nivelSeveridadeVulnerabilidade(sugestao), sugestao)}`
+      : 'Responda impacto e facilidade para ver a sugestão.';
+  }
+}
+
+// Nota completa preenche o campo CVSS; voltar a ficar incompleta limpa o número
+// que tinha vindo dos critérios (nunca um número digitado à mão).
+function _aplicarCriteriosCvssVuln() {
+  const nota = Cvss31.calcular(window._vulnCvssRespostas);
+  const campo = document.getElementById('vulnCvss');
+  if (nota !== null) {
+    campo.value = String(nota);
+    window._vulnCvssDosCriterios = true;
+  } else if (window._vulnCvssDosCriterios) {
+    campo.value = '';
+    window._vulnCvssDosCriterios = false;
+  }
+  _renderCriteriosCvssVuln();
+  atualizarBadgeSeveridadeVulnerabilidade();
+}
+
+window.selecionarCriterioCvssVulnerabilidade = (mi, oi) => {
+  const m = Cvss31.METRICAS[mi];
+  const o = m && m.opcoes[oi];
+  if (!o) return;
+  const r = window._vulnCvssRespostas;
+  if (r[m.codigo] === o.codigo) delete r[m.codigo]; else r[m.codigo] = o.codigo;
+  _aplicarCriteriosCvssVuln();
+};
+
+window.colarVetorCvssVulnerabilidade = () => {
+  const inp = document.getElementById('vulnCvssVetorColar');
+  const aviso = document.getElementById('vulnCvssVetorAviso');
+  const r = Cvss31.lerVetor(inp.value);
+  if (!r) {
+    aviso.textContent = 'Vetor não reconhecido. Use o vetor CVSS 3.1 (ou 3.0) completo, ex.: CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H';
+    aviso.style.display = 'block';
+    return;
+  }
+  aviso.style.display = 'none';
+  inp.value = '';
+  window._vulnCvssRespostas = r;
+  _aplicarCriteriosCvssVuln();
+};
+
+window.limparCriteriosCvssVulnerabilidade = () => {
+  window._vulnCvssRespostas = {};
+  _aplicarCriteriosCvssVuln();
+};
+
+window.selecionarCriterioSemCvssVulnerabilidade = (chave, i) => {
+  const lista = chave === 'impacto' ? Cvss31.IMPACTOS : Cvss31.FACILIDADES;
+  const item = lista[i];
+  if (!item) return;
+  const s = window._vulnSemCvss;
+  s[chave] = s[chave] === item.codigo ? '' : item.codigo;
+  // A sugestão preenche o seletor; ele continua editável pra quem discordar.
+  const sugestao = Cvss31.sugerirSeveridade(s.impacto, s.facilidade);
+  if (sugestao) document.getElementById('vulnSeveridadeManual').value = sugestao;
+  _renderCriteriosSemCvssVuln();
+  atualizarBadgeSeveridadeVulnerabilidade();
+};
+
+// ------------------------------------------------------------
+// Aba Correção: Responsável vem do cadastro de Pessoas e a Equipe acompanha a
+// área da pessoa (DECISÃO 13/10/2026). Mesmo padrão do Risco (rResponsavel):
+// valor antigo que não está no cadastro vira opção extra, nunca some.
+// ------------------------------------------------------------
+function _popularSelectResponsavelVuln(valorAtual) {
+  const sel = document.getElementById('vulnResponsavel');
+  if (!sel) return;
+  const lista = [...(pessoasData || [])].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  const temNaLista = lista.some((p) => p.nome === valorAtual);
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    lista.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
+    (valorAtual && !temNaLista ? `<option value="${esc(valorAtual)}">${esc(valorAtual)} (não cadastrado como pessoa)</option>` : '');
+  sel.value = valorAtual || '';
+}
+
+function _popularSelectEquipeVuln(valorAtual) {
+  const sel = document.getElementById('vulnEquipeResponsavel');
+  if (!sel) return;
+  const lista = [...new Set((window.areasData || []).map((a) => a.nome).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const temNaLista = lista.includes(valorAtual);
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    lista.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('') +
+    (valorAtual && !temNaLista ? `<option value="${esc(valorAtual)}">${esc(valorAtual)} (fora do cadastro de áreas)</option>` : '');
+  sel.value = valorAtual || '';
+}
+
+// A equipe acompanha a pessoa: escolher o Responsável preenche a área principal
+// dela (a 1ª; _areasDaPessoa já cai de areas[] pro setor). Pessoa sem área não
+// apaga a equipe atual, só avisa. Mudar só a equipe depois não mexe na pessoa.
+window._equipePelaPessoaVuln = () => {
+  const dica = document.getElementById('vulnEquipeDica');
+  const padrao = 'Vem da área da pessoa responsável; pode ser trocada.';
+  const nome = document.getElementById('vulnResponsavel').value;
+  const pessoa = nome ? (pessoasData || []).find((p) => p.nome === nome) : null;
+  if (!pessoa) { if (dica) dica.textContent = padrao; return; }
+  const areas = _areasDaPessoa(pessoa);
+  if (!areas.length) {
+    if (dica) dica.textContent = 'Esta pessoa não tem área cadastrada — escolha a equipe.';
+    return;
+  }
+  const sel = document.getElementById('vulnEquipeResponsavel');
+  if (![...sel.options].some((o) => o.value === areas[0])) sel.add(new Option(`${areas[0]} (fora do cadastro de áreas)`, areas[0]));
+  sel.value = areas[0];
+  if (dica) dica.textContent = areas.length > 1 ? `Área principal de ${nome}. Também em: ${areas.slice(1).join(', ')}.` : padrao;
+};
+
+// ------------------------------------------------------------
+// Produto de Software da vulnerabilidade (DECISÃO 14/10/2026): vínculo por id com
+// o catálogo Produtos de Software; o texto antigo virou "Ativo afetado".
+// ------------------------------------------------------------
+function _popularSelectProdutoSoftwareVuln(valorAtual) {
+  const sel = document.getElementById('vulnProdutoSoftware');
+  if (!sel) return;
+  const atual = valorAtual ? String(valorAtual) : '';
+  const ativos = (produtosSoftwareData || []).filter((p) => p.ativo)
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  // Produto já vinculado que foi desativado ou removido continua visível, marcado.
+  let extra = '';
+  if (atual && !ativos.some((p) => String(p.id) === atual)) {
+    const p = _produtoSoftwarePorId(atual);
+    extra = `<option value="${esc(atual)}">${esc(p ? p.nome : 'produto')} ${p ? '(inativo)' : '(removido)'}</option>`;
+  }
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    ativos.map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('') + extra;
+  sel.value = atual;
+}
+
+// Escolher o produto sugere o Responsável pelo Tech Lead dele (e a Equipe vem da
+// área da pessoa, via _equipePelaPessoaVuln). Só sugere: exatamente 1 Tech Lead e
+// Responsável ainda vazio. Vários Tech Leads só são listados; nada sobrescreve
+// uma escolha já feita. Ao abrir um registro nada é recalculado.
+window._sugerirResponsavelPeloProdutoVuln = () => {
+  const dica = document.getElementById('vulnResponsavelDica');
+  const id = document.getElementById('vulnProdutoSoftware').value;
+  if (!id) { dica.textContent = ''; return; }
+  const prod = _produtoSoftwarePorId(id);
+  const nomeProduto = prod ? prod.nome : 'este produto';
+  const lideres = (pessoasData || []).filter((p) => p.techLead && (p.techLeadProdutos || []).map(String).includes(String(id)));
+  if (!lideres.length) { dica.textContent = `Nenhum Tech Lead cadastrado para ${nomeProduto}.`; return; }
+  if (lideres.length > 1) {
+    dica.textContent = `Tech Leads de ${nomeProduto}: ${lideres.map((p) => p.nome).join(', ')} — escolha o responsável.`;
+    return;
+  }
+  const resp = document.getElementById('vulnResponsavel');
+  if (resp.value) { dica.textContent = `Tech Lead de ${nomeProduto}: ${lideres[0].nome}.`; return; }
+  if (![...resp.options].some((o) => o.value === lideres[0].nome)) resp.add(new Option(lideres[0].nome, lideres[0].nome));
+  resp.value = lideres[0].nome;
+  _equipePelaPessoaVuln();
+  dica.textContent = `Sugerido: Tech Lead de ${nomeProduto}.`;
+};
+
+// ------------------------------------------------------------
+// Dependencias afetadas: seletor em duas etapas (categoria -> item) + chips.
+// ------------------------------------------------------------
+function _popularDependenciasVuln(v) {
+  window._vulnDependencias = (Array.isArray(v && v.dependenciasAfetadas) ? v.dependenciasAfetadas : [])
+    .map((d) => ({ id: d.id || null, categoria: d.categoria || '', nome: d.nome || '' }));
+  document.getElementById('vulnDepCategoria').value = '';
+  _popularItensDependenciaVuln();
+  _renderChipsDependenciaVuln();
+  _atualizarProdutoLegadoVuln();
+}
+
+/** Itens da categoria escolhida, em ordem alfabetica, sem os ja escolhidos. */
+window._popularItensDependenciaVuln = () => {
+  const cat = document.getElementById('vulnDepCategoria').value;
+  const sel = document.getElementById('vulnDepItem');
+  if (!cat) {
+    sel.innerHTML = '<option value="">Escolha a categoria primeiro</option>';
+    sel.disabled = true;
+    return;
+  }
+  const ja = new Set((window._vulnDependencias || []).map((d) => String(d.id || '')));
+  const itens = _vulnDepsCatalogo.filter((d) => d.categoria === cat && !ja.has(String(d.id)))
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  sel.innerHTML = itens.length
+    ? '<option value="">Selecione...</option>' + itens.map((d) => `<option value="${esc(d.id)}">${esc(d.nome)}</option>`).join('')
+    : '<option value="">Nenhum item disponível nesta categoria</option>';
+  sel.disabled = !itens.length;
+};
+
+window.adicionarDependenciaVuln = () => {
+  const id = document.getElementById('vulnDepItem').value;
+  if (!id) return showToast('Escolha a categoria e a dependência.', '#e65100');
+  const d = _vulnDepsCatalogo.find((x) => String(x.id) === String(id));
+  if (!d) return;
+  window._vulnDependencias.push({ id: d.id, categoria: d.categoria, nome: d.nome });
+  _popularItensDependenciaVuln();
+  _renderChipsDependenciaVuln();
+};
+
+window.removerDependenciaVuln = (idx) => {
+  window._vulnDependencias.splice(idx, 1);
+  _popularItensDependenciaVuln();
+  _renderChipsDependenciaVuln();
+};
+
+/** Chips "icone Categoria: Nome x"; vinculo que sumiu do catalogo fica, marcado "(removida)". */
+function _renderChipsDependenciaVuln() {
+  const cont = document.getElementById('vulnDepChips');
+  if (!cont) return;
+  cont.innerHTML = (window._vulnDependencias || []).map((item, i) => {
+    const existe = !item.id || _vulnDepsCatalogo.some((d) => String(d.id) === String(item.id));
+    const rotulo = `${DEPENDENCIA_CAT_ICONES[item.categoria] || '📦'} ${item.categoria}: ${item.nome}${existe ? '' : ' (removida)'}`;
+    return `<span class="vuln-dep-chip" style="display:inline-flex;align-items:center;gap:6px;background:${existe ? '#d60014' : '#999'};color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(rotulo)}<button type="button" onclick="removerDependenciaVuln(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
+  }).join('');
+}
+
+function _atualizarProdutoLegadoVuln() {
+  const texto = document.getElementById('vulnProduto').value.trim();
+  document.getElementById('vulnProdutoLegado').style.display = texto ? 'block' : 'none';
+  document.getElementById('vulnProdutoLegadoTexto').textContent = texto;
+}
+
+/** "Limpar" do texto antigo de Ativo afetado. Grava so no Salvar/Fechar. */
+window.limparProdutoLegadoVuln = () => {
+  document.getElementById('vulnProduto').value = '';
+  _atualizarProdutoLegadoVuln();
+};
+
+window._recarregarDependenciasVulnerabilidade = async () => {
+  try {
+    API.invalidate('getDependencias');
+    const deps = await API.getDependencias();
+    pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+    _vulnDepsCatalogo = deps.filter((d) => VULN_CATEGORIAS_DEPENDENCIA.includes(d.categoria));
+  } catch (e) {
+    return showToast('❌ Não foi possível atualizar a lista: ' + (e.message || 'erro desconhecido'), '#c62828');
+  }
+  _popularItensDependenciaVuln();
+  _renderChipsDependenciaVuln();
+  showToast('Lista de dependências atualizada.', '#2e7d32');
+};
+
+window._recarregarProdutosVulnerabilidade = async () => {
+  const produto = document.getElementById('vulnProdutoSoftware').value;
+  const resp = document.getElementById('vulnResponsavel').value;
+  try {
+    API.invalidate('getProdutosSoftware', 'getDependencias');
+    const [produtos, deps] = await Promise.all([API.getProdutosSoftware(), API.getDependencias()]);
+    produtosSoftwareData = produtos;
+    pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+  } catch (e) {
+    return showToast('❌ Não foi possível atualizar a lista: ' + (e.message || 'erro desconhecido'), '#c62828');
+  }
+  _popularSelectProdutoSoftwareVuln(produto);
+  _popularSelectResponsavelVuln(resp);
+  showToast('Lista de produtos atualizada.', '#2e7d32');
+};
+
+window._recarregarPessoasVulnerabilidade = async () => {
+  const resp = document.getElementById('vulnResponsavel').value;
+  const equipe = document.getElementById('vulnEquipeResponsavel').value;
+  try {
+    API.invalidate('getDependencias', 'getAreas');
+    const [deps, areas] = await Promise.all([API.getDependencias(), API.getAreas()]);
+    pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+    window.areasData = areas;
+  } catch (e) {
+    return showToast('❌ Não foi possível atualizar a lista: ' + (e.message || 'erro desconhecido'), '#c62828');
+  }
+  _popularSelectResponsavelVuln(resp);
+  _popularSelectEquipeVuln(equipe);
+  showToast('Lista de pessoas e áreas atualizada.', '#2e7d32');
+};
+
+/** Hidrata os critérios ao abrir o drawer (vetor parcial também volta marcado). */
+function _carregarCriteriosSeveridadeVuln(v) {
+  window._vulnCvssRespostas = (v && Cvss31.lerVetor(v.cvssVetor || '', { parcial: true })) || {};
+  const nota = Cvss31.calcular(window._vulnCvssRespostas);
+  window._vulnCvssDosCriterios = nota !== null;
+  // Com o vetor completo, ele é a fonte da verdade do número.
+  if (nota !== null) document.getElementById('vulnCvss').value = String(nota);
+  const sc = (v && v.severidadeCriterios) || {};
+  window._vulnSemCvss = { impacto: sc.impacto || '', facilidade: sc.facilidade || '' };
+  document.getElementById('vulnCvssVetorColar').value = '';
+  document.getElementById('vulnCvssVetorAviso').style.display = 'none';
+  _renderCriteriosCvssVuln();
+  _renderCriteriosSemCvssVuln();
+}
 
 window.atualizarTempoCorrecaoVulnerabilidade = () => {
   const el = document.getElementById('vulnTempoCorrecao');
@@ -6621,15 +8481,21 @@ window.atualizarTempoCorrecaoVulnerabilidade = () => {
   el.textContent = dias !== null ? `Tempo de correção: ${dias} dia${dias !== 1 ? 's' : ''}` : '';
 };
 
-window.abrirDrawerVulnerabilidade = (id) => {
-  const v = id ? vulnerabilidadesData.find((x) => String(x.id) === String(id)) : null;
-  document.getElementById('vulnId').value = v ? v.id : '';
-  document.getElementById('vulnDrawerTitulo').textContent = v ? 'Editar Vulnerabilidade' : 'Nova Vulnerabilidade';
+window.abrirDrawerVulnerabilidade = (idOuRegistro) => {
+  // Id (editar) ou registro sem id (copia de clonarVulnerabilidade): o rascunho
+  // abre preenchido mas ainda nao existe no banco.
+  const rascunho = idOuRegistro && typeof idOuRegistro === 'object' && !idOuRegistro.id ? idOuRegistro : null;
+  const v = rascunho || (idOuRegistro ? vulnerabilidadesData.find((x) => String(x.id) === String(idOuRegistro)) : null);
+  document.getElementById('vulnId').value = v && v.id ? v.id : '';
+  document.getElementById('vulnDrawerTitulo').textContent = v && v.id ? 'Editar Vulnerabilidade' : 'Nova Vulnerabilidade';
   // Novo registro: só uma prévia (o código real é recalculado no Salvar, com
   // os dados mais atuais) -- evita a tela em branco antes de gerar nada.
   document.getElementById('vulnCodigo').value = v ? v.codigo : _proximoCodigoVulnerabilidade();
   document.getElementById('vulnTicketReport').value = v ? v.ticketReport : '';
-  document.getElementById('vulnProduto').value = v ? v.produto : '';
+  document.getElementById('vulnProduto').value = v ? (v.produto || '') : '';
+  _popularDependenciasVuln(v);
+  _popularSelectProdutoSoftwareVuln(v ? v.produtoSoftwareId : '');
+  document.getElementById('vulnResponsavelDica').textContent = '';
   document.getElementById('vulnVersao').value = v ? v.versao : '';
   document.getElementById('vulnNome').value = v ? v.nome : '';
   document.getElementById('vulnCwe').value = v ? v.cwe : '';
@@ -6637,23 +8503,33 @@ window.abrirDrawerVulnerabilidade = (id) => {
   document.getElementById('vulnDescricao').value = v ? v.descricao : '';
   document.getElementById('vulnDataDeteccao').value = v ? v.dataDeteccao : '';
   document.getElementById('vulnOrigemDeteccao').value = v ? v.origemDeteccao : '';
+  _popularTipoVuln(v ? v.tipo : '', v ? v.subtipo : '');
+  document.getElementById('vulnMetodoDeteccao').innerHTML = _optionsListaFixaVuln(VULNERABILIDADE_METODOS_DETECCAO, v ? v.metodoDeteccao : '', 'Selecione...');
+  document.getElementById('vulnMetodoDeteccao').value = v ? (v.metodoDeteccao || '') : '';
   document.getElementById('vulnExploitDisponivel').value = v ? v.exploitDisponivel : '';
   document.getElementById('vulnCvss').value = v && v.cvss != null ? v.cvss : '';
   document.getElementById('vulnSeveridadeManual').value = v ? v.severidadeManual : '';
-  document.getElementById('vulnEquipeResponsavel').value = v ? v.equipeResponsavel : '';
-  document.getElementById('vulnResponsavel').value = v ? v.responsavel : '';
+  // Ao abrir, mostra o que está gravado -- nada é recalculado pela pessoa.
+  _popularSelectEquipeVuln(v ? v.equipeResponsavel : '');
+  _popularSelectResponsavelVuln(v ? v.responsavel : '');
+  document.getElementById('vulnEquipeDica').textContent = 'Vem da área da pessoa responsável; pode ser trocada.';
   document.getElementById('vulnTicketCorrecao').value = v ? v.ticketCorrecao : '';
-  document.getElementById('vulnStatusCorrecao').value = v ? v.statusCorrecao : 'Aberto';
+  document.getElementById('vulnStatusCorrecao').value = v ? v.statusCorrecao : 'Pendente';
   document.getElementById('vulnDataPrevistaCorrecao').value = v ? v.dataPrevistaCorrecao : '';
   document.getElementById('vulnDataCorrecao').value = v ? v.dataCorrecao : '';
   document.getElementById('vulnEvidenciaCorrecao').value = v ? v.evidenciaCorrecao : '';
   document.getElementById('vulnObservacoes').value = v ? v.observacoes : '';
+  _carregarCriteriosSeveridadeVuln(v);
+  _aplicarMetodoSeveridadeVuln(true);
+  _aplicarCamposPorTipoVuln();
   atualizarBadgeSeveridadeVulnerabilidade();
   atualizarTempoCorrecaoVulnerabilidade();
-  _atualizarBotaoImportarVulnParaRisco(v ? v.id : '');
+  _atualizarBotaoImportarVulnParaRisco(v && v.id ? v.id : '');
   trocarAbaVulnerabilidade('identificacao');
   document.getElementById('drawerVulnerabilidade').classList.add('open');
   document.getElementById('drawerOverlayVulnerabilidade').classList.add('open');
+  // Rascunho sem id: nada existe no banco, entao Fechar tem que gravar.
+  if (rascunho) _edVulnerabilidade.esquecer(); else _edVulnerabilidade.marcar();
 };
 
 /**
@@ -6667,11 +8543,11 @@ function _atualizarBotaoImportarVulnParaRisco(vulnId) {
   const btn = document.getElementById('btnImportarVulnParaRisco');
   if (!btn) return;
   if (!vulnId) { btn.style.display = 'none'; return; }
-  const aberto = (riscosData || []).find((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(vulnId) && !['Aceito', 'Encerrado'].includes(r.status));
+  const aberto = (riscosData || []).find((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(vulnId) && r.status !== 'Encerrado');
   btn.style.display = 'inline-block';
   if (aberto) {
     btn.textContent = '⚠️ Ver Risco aberto';
-    btn.onclick = () => { window.location.hash = 'riscos'; };
+    btn.onclick = () => { window.location.hash = 'riscos?risco=' + aberto.id; };
   } else {
     btn.textContent = '📤 Importar para Riscos';
     btn.onclick = () => importarVulnerabilidadeParaRisco();
@@ -6699,20 +8575,31 @@ window.importarVulnerabilidadeParaRisco = async () => {
   }
 };
 
-window.fecharDrawerVulnerabilidade = () => {
+function _fecharDrawerVulnerabilidadeSemSalvar() {
   document.getElementById('drawerVulnerabilidade').classList.remove('open');
   document.getElementById('drawerOverlayVulnerabilidade').classList.remove('open');
+}
+// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- mas so se algo mudou
+// desde que abriu/salvou (_edVulnerabilidade): sem mudanca nao ha o que gravar.
+window.fecharDrawerVulnerabilidade = async () => {
+  if (!_edVulnerabilidade.sujo()) return _fecharDrawerVulnerabilidadeSemSalvar();
+  const ok = await salvarVulnerabilidade();
+  if (ok) _fecharDrawerVulnerabilidadeSemSalvar();
 };
 
-window.salvarVulnerabilidade = async () => {
+const _edVulnerabilidade = criarRastreadorEdicao(() => _coletarFormularioVulnerabilidade());
+
+function _coletarFormularioVulnerabilidade() {
   const id = document.getElementById('vulnId').value || null;
-  const v = {
+  return {
     id,
     // Novo registro -> gera o código agora (ano + sequencial); edição ->
     // mantém o que já está gravado (o campo é só-leitura na tela).
     codigo: id ? document.getElementById('vulnCodigo').value.trim() : _proximoCodigoVulnerabilidade(),
     ticketReport: document.getElementById('vulnTicketReport').value.trim(),
     produto: document.getElementById('vulnProduto').value.trim(),
+    dependenciasAfetadas: (window._vulnDependencias || []).map((d) => ({ id: d.id || null, categoria: d.categoria, nome: d.nome })),
+    produtoSoftwareId: document.getElementById('vulnProdutoSoftware').value || '',
     versao: document.getElementById('vulnVersao').value.trim(),
     nome: document.getElementById('vulnNome').value.trim(),
     cwe: document.getElementById('vulnCwe').value.trim(),
@@ -6720,9 +8607,19 @@ window.salvarVulnerabilidade = async () => {
     descricao: document.getElementById('vulnDescricao').value.trim(),
     dataDeteccao: document.getElementById('vulnDataDeteccao').value,
     origemDeteccao: document.getElementById('vulnOrigemDeteccao').value.trim(),
+    tipo: document.getElementById('vulnTipo').value,
+    subtipo: document.getElementById('vulnSubtipo').value,
+    metodoDeteccao: document.getElementById('vulnMetodoDeteccao').value,
     exploitDisponivel: document.getElementById('vulnExploitDisponivel').value,
     cvss: document.getElementById('vulnCvss').value !== '' ? Number(document.getElementById('vulnCvss').value) : null,
     severidadeManual: document.getElementById('vulnSeveridadeManual').value,
+    // Critérios da aba Severidade (vetor parcial também, pra não perder uma
+    // avaliação pela metade ao fechar).
+    cvssVetor: Cvss31.paraVetor(window._vulnCvssRespostas || {}, { parcial: true }),
+    severidadeCriterios: {
+      impacto: (window._vulnSemCvss || {}).impacto || '',
+      facilidade: (window._vulnSemCvss || {}).facilidade || '',
+    },
     equipeResponsavel: document.getElementById('vulnEquipeResponsavel').value.trim(),
     responsavel: document.getElementById('vulnResponsavel').value.trim(),
     ticketCorrecao: document.getElementById('vulnTicketCorrecao').value.trim(),
@@ -6732,12 +8629,24 @@ window.salvarVulnerabilidade = async () => {
     evidenciaCorrecao: document.getElementById('vulnEvidenciaCorrecao').value.trim(),
     observacoes: document.getElementById('vulnObservacoes').value.trim(),
   };
-  if (!v.nome) return showToast('Informe o nome da vulnerabilidade.', '#e65100');
-  if (!v.produto) return showToast('Informe o produto.', '#e65100');
+}
 
-  await comBotaoCarregando('btnSalvarVulnerabilidade', async () => {
+window.salvarVulnerabilidade = async () => {
+  const v = _coletarFormularioVulnerabilidade();
+  const id = v.id;
+  if (!v.nome) return showToast('Informe o nome da vulnerabilidade.', '#e65100');
+  if (!v.tipo) {
+    trocarAbaVulnerabilidade('identificacao');
+    return showToast('Informe o tipo da vulnerabilidade.', '#e65100');
+  }
+  // Basta um dos dois: o produto da empresa (catálogo) ou o ativo afetado (texto).
+  // Basta um: produto de software, uma dependencia afetada ou (registro antigo) o texto legado.
+  if (!v.produto && !v.produtoSoftwareId && !v.dependenciasAfetadas.length) return showToast('Informe o produto de software ou ao menos uma dependência afetada.', '#e65100');
+
+  return await comBotaoCarregando('btnSalvarVulnerabilidade', async () => {
     try {
       const result = await API.salvarVulnerabilidade(v);
+      _edVulnerabilidade.marcar({ ...v, id: id || result.id });
       if (id) {
         const idx = vulnerabilidadesData.findIndex((x) => String(x.id) === String(id));
         if (idx !== -1) vulnerabilidadesData[idx] = { ...v, id };
@@ -6751,8 +8660,10 @@ window.salvarVulnerabilidade = async () => {
       }
       renderizarVulnerabilidades();
       showToast('✅ Salvo! Se a severidade cruzar o limiar, um risco é aberto automaticamente em instantes.', '#2e7d32');
+      return true;
     } catch (e) {
       showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      return false;
     }
   });
 };
@@ -6760,10 +8671,11 @@ window.salvarVulnerabilidade = async () => {
 window.excluirVulnerabilidade = async (id) => {
   const v = vulnerabilidadesData.find((x) => String(x.id) === String(id));
   if (!v) return;
-  if (!confirm(`Excluir a vulnerabilidade "${v.nome}"? Esta ação não pode ser desfeita. Um eventual risco já aberto para ela precisa ser fechado manualmente no Registro de Riscos.`)) return;
+  if (!confirm(`Excluir a vulnerabilidade "${v.nome}"? Esta ação não pode ser desfeita. Um risco ativo dela no Registro de Riscos será encerrado automaticamente.`)) return;
   try {
     await API.excluirVulnerabilidade(id);
     vulnerabilidadesData = vulnerabilidadesData.filter((x) => String(x.id) !== String(id));
+    vulnerabilidadesSelecionadas.delete(String(id));
     renderizarVulnerabilidades();
     showToast('🗑️ Excluído.', '#555');
   } catch (e) {
@@ -7326,18 +9238,39 @@ window.salvarAvaliacaoProcesso = async () => {
 // PÁGINA: GESTÃO DE RISCOS
 // ============================================================
 let riscosData = [];
+// Apetite de risco (config_regua/riscos) e cache das vulnerabilidades para o
+// cartao de origem no drawer (15/10/2026).
+let riscosApetite = RiscoConsolidado.APETITE_PADRAO;
+let riscosVulnsCache = null;
 // Abre pelo maior risco: e a pergunta que a tela responde.
 let riscosOrdenacao = criarOrdenacao('dataIdentificacao', 'desc');
 let riscosAreasCache = [];
 let riscosProcessosCache = [];
 let riscosFornecedoresCache = [];
 let riscosCriticidadePorFornecedorCache = {};
-const RISCO_STATUS = ['Identificado', 'Em Análise', 'Em Avaliação', 'Em Tratamento', 'Em Monitoramento', 'Aceito', 'Encerrado'];
+// "Em Análise" foi fundido em "Em Avaliação" (15/10/2026, etapas do NIST SP 800-39).
+const RISCO_STATUS = ['Identificado', 'Em Avaliação', 'Em Tratamento', 'Em Monitoramento', 'Aceito', 'Encerrado'];
 
 // Rótulo de exibição do campo origem -- o valor gravado no Firestore não
 // muda (usado em checagens de dedup: _atualizarBotaoImportarVulnParaRisco
 // aqui, decidir() em fornecedorRisco.js/vulnerabilidadeRisco.js), só o
 // texto mostrado no dropdown do drawer e na coluna da grade.
+// Fontes de ameaca -- taxonomia do NIST SP 800-30 (Tabela D-2).
+const RISCO_FONTES_AMEACA = [
+  { valor: 'Adversária', descricao: 'Pessoas, grupos ou organizações que buscam explorar a organização (ataque, fraude, sabotagem).' },
+  { valor: 'Acidental', descricao: 'Ações erradas de pessoas no exercício das suas funções (erro operacional, configuração errada).' },
+  { valor: 'Estrutural / falha técnica', descricao: 'Falhas de equipamento, software, ambiente ou recursos (hardware, sistema, energia, climatização).' },
+  { valor: 'Ambiental', descricao: 'Desastres naturais ou causados pelo homem e falhas de infraestrutura fora do controle da organização.' },
+];
+
+// Respostas ao risco -- NIST SP 800-39 (o valor gravado continua o mesmo de antes).
+const RISCO_RESPOSTAS = [
+  { valor: 'Mitigar', rotulo: 'Mitigar — reduzir probabilidade ou impacto', rotuloDescricao: 'Medidas de mitigação', descricao: 'Reduzir a probabilidade ou o impacto com controles. Exige ao menos uma ação no Plano de Ação.' },
+  { valor: 'Transferir', rotulo: 'Compartilhar / Transferir — seguro, contrato, fornecedor', rotuloDescricao: 'Para quem e como (seguro, contrato, fornecedor)', descricao: 'Compartilhar o risco com outra parte (seguro, cláusula contratual, terceirização).' },
+  { valor: 'Evitar', rotulo: 'Evitar — eliminar a atividade ou condição', rotuloDescricao: 'Como a atividade ou condição será eliminada', descricao: 'Eliminar a atividade ou a condição que gera o risco.' },
+  { valor: 'Aceitar', rotulo: 'Aceitar — conviver com o risco, com aprovação', rotuloDescricao: '', descricao: 'Conviver com o risco, de forma consciente: justificativa, aprovador (se acima do apetite) e data de reavaliação.' },
+];
+
 const RISCO_ORIGENS = [
   { valor: 'Manual', rotulo: 'Manual' },
   { valor: 'Importado de PCN', rotulo: 'PCN' },
@@ -7387,7 +9320,13 @@ function _corStatusRisco(status) {
 // e da empresa. Estas duas linhas existem para o resto do app.js nao precisar
 // mudar — e para nao voltar a haver duas copias da mesma escala.
 const _scoreDoRisco = (r) => RiscoConsolidado.scoreDoRisco(r);
-const _faixaScoreRisco = (n) => RiscoConsolidado.faixaScore(n);
+/** Score residual (depois do tratamento); vazio = ainda nao informado, sem o aviso de "fora da escala". */
+function _badgeResidualRisco(r) {
+  const n = RiscoConsolidado.scoreResidual(r);
+  if (n === null) return '<span class="muted" title="Risco residual ainda não informado (aba Resposta)">–</span>';
+  const nivel = RiscoConsolidado.nivelResidual(r);
+  return `<span class="chip-score" title="Residual: ${esc(nivel)} (${n} de 25)">${n}</span>`;
+}
 
 function _badgeScoreRisco(r) {
   const n = _scoreDoRisco(r);
@@ -7396,8 +9335,8 @@ function _badgeScoreRisco(r) {
     // Cinza e "-" em vez de zero: ausencia nao e risco baixo.
     return `<span class="muted" title="Probabilidade ou impacto fora da escala — reavalie este risco">–</span>`;
   }
-  const f = _faixaScoreRisco(n);
-  return `<span class="chip-score" title="${f.rotulo} (${n} de 12)">${n}</span>`;
+  const nivel = RiscoConsolidado.nivelDoRisco(r);
+  return `<span class="chip-score" title="${esc(nivel)} (${n} de 25 — nível pela matriz NIST)">${n}</span>`;
 }
 
 function _badgeStatusRisco(status) {
@@ -7419,7 +9358,7 @@ function _badgeCargaRisco(r, processosPorId) {
   if (carga === null) {
     return '<span class="muted" title="Probabilidade ou impacto fora da escala — reavalie este risco">–</span>';
   }
-  const critico = (_scoreDoRisco(r) || 0) >= 9;
+  const critico = ['Alto', 'Muito alto'].includes(RiscoConsolidado.nivelDoRisco(r));
   return `<span class="load${critico ? ' hi' : ''}">${carga}</span>`;
 }
 
@@ -7437,6 +9376,7 @@ async function riscos() {
         <button class="btn btn-primary" onclick="abrirDrawerRisco()" id="btnNovoRisco" style="display:none;">+ Novo Risco</button>
       </div>
     </div>
+    <div id="riscoApetiteBox" style="margin-bottom:12px;"></div>
     <div id="painelRiscoConsolidado" style="margin-bottom:20px;"></div>
     <div class="filters">
       <div class="field">
@@ -7460,6 +9400,16 @@ async function riscos() {
         </select>
       </div>
       <div class="field">
+        <label class="field-label">Situação</label>
+        <select id="filtroRiscoSituacao" onchange="filtrarRiscos()" class="field-control">
+          <option value="">Todas</option>
+          <option value="apetite">Acima do apetite</option>
+          <option value="reavaliacao">Reavaliação vencida</option>
+          <option value="alerta">Com alerta da automação</option>
+          <option value="kri">KRI fora da meta</option>
+        </select>
+      </div>
+      <div class="field">
         <label class="field-label">&nbsp;</label>
         <input type="search" id="buscaRisco" placeholder="Buscar risco…" aria-label="Buscar risco" oninput="filtrarRiscos()" class="field-control field-control--busca">
       </div>
@@ -7468,12 +9418,12 @@ async function riscos() {
     <div class="data-table data-table--compact" id="listaRiscos" style="display:none;">
       <!-- Larguras em px (soma 2214) em vez de %: 16 colunas não cabem espremidas;
            abaixo disso a grade rola na horizontal e Ações fica fixa à direita. -->
-      <table style="min-width:2214px;">
+      <table style="min-width:2346px;">
         <colgroup>
           <col style="width:104px"><col style="width:210px"><col style="width:200px"><col style="width:150px">
           <col style="width:300px"><col style="width:130px"><col style="width:140px"><col style="width:140px">
-          <col style="width:104px"><col style="width:104px"><col style="width:72px"><col style="width:72px">
-          <col style="width:140px"><col style="width:132px"><col style="width:112px"><col style="width:104px">
+          <col style="width:104px"><col style="width:104px"><col style="width:72px"><col style="width:84px"><col style="width:72px">
+          <col style="width:140px"><col style="width:180px"><col style="width:112px"><col style="width:104px">
         </colgroup>
         <thead>
           <tr>
@@ -7487,7 +9437,8 @@ async function riscos() {
             <th>Reportado por</th>
             <th title="Probabilidade">Prob.</th>
             <th>Impacto</th>
-            <th class="col-c" onclick="ordenarRiscos('score')" style="cursor:pointer;" title="Probabilidade x Impacto, de 1 a 12">Score <span id="sort-risco-score"></span></th>
+            <th class="col-c" onclick="ordenarRiscos('score')" style="cursor:pointer;" title="Probabilidade x Impacto, de 1 a 25 (escala NIST 5x5)">Score <span id="sort-risco-score"></span></th>
+            <th class="col-c" title="Score depois do tratamento (Probabilidade x Impacto residuais)">Residual</th>
             <th class="col-c" title="Score x peso do Tier do processo (ou criticidade do fornecedor) -- quanto este risco soma na Carga de Risco da Empresa">Carga</th>
             <th class="col-r" title="Impacto financeiro">Impacto R$</th>
             <th>Status</th>
@@ -7515,7 +9466,7 @@ async function riscos() {
     // Processos entram aqui porque o numero consolidado pondera cada risco pela
     // criticidade do processo ligado a ele — sem os processos, todo risco viraria
     // peso padrao e o numero perderia justamente o que liga o BIA ao risco.
-    const [riscos_, areas_, deps_, inds_, procs_, avalsForn_] = await Promise.all([
+    const [riscos_, areas_, deps_, inds_, procs_, avalsForn_, cfgRiscos_] = await Promise.all([
       API.getRiscos(), API.getAreas(), API.getDependencias(), API.getIndicadoresSeguranca(),
       // Nao pode derrubar a pagina: se os processos nao vierem, o registro de
       // riscos continua utilizavel e o painel avisa que esta sem os pesos.
@@ -7528,7 +9479,9 @@ async function riscos() {
         console.error('Riscos: avaliacoes de fornecedor nao carregaram; criticidade usara peso padrao', e);
         return [];
       }),
+      API.getConfigRiscos().catch(() => ({ apetite: RiscoConsolidado.APETITE_PADRAO })),
     ]);
+    riscosApetite = (cfgRiscos_ && cfgRiscos_.apetite) || RiscoConsolidado.APETITE_PADRAO;
     riscosData = riscos_; riscosAreasCache = areas_; indicadoresData = inds_; riscosProcessosCache = procs_;
     riscosFornecedoresCache = deps_.filter(d => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
     // Responsavel do risco escolhe uma Pessoa -- mesmo catalogo que Areas e
@@ -7544,7 +9497,7 @@ async function riscos() {
     riscosData = []; riscosAreasCache = []; riscosFornecedoresCache = []; riscosCriticidadePorFornecedorCache = {};
     const corpo = document.getElementById('riscoRows');
     if (corpo) {
-      corpo.innerHTML = `<tr><td colspan="16" style="padding:24px;text-align:center;color:#c62828;">
+      corpo.innerHTML = `<tr><td colspan="17" style="padding:24px;text-align:center;color:#c62828;">
         Não foi possível carregar os riscos.<br>
         <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
         <button class="btn btn-ghost" onclick="riscos()" style="margin-top:12px;">Tentar de novo</button>
@@ -7609,7 +9562,7 @@ function _renderPainelRiscoConsolidado() {
       </div>
       <div>${badgesComposicao(emp.composicao, false) || '<span style="font-size:0.8em;color:#999;">Nenhum risco na conta</span>'}</div>
       <div style="font-size:0.76em;color:#777;margin-top:10px;">
-        ${emp.contados} risco${emp.contados === 1 ? '' : 's'} somado${emp.contados === 1 ? '' : 's'}${emp.piorScore !== null ? ` · pior caso ${emp.piorScore} de 12 (${esc(emp.piorFaixa.rotulo)})` : ''}
+        ${emp.contados} risco${emp.contados === 1 ? '' : 's'} somado${emp.contados === 1 ? '' : 's'}${emp.piorScore !== null ? ` · pior caso ${emp.piorScore} de 25 (${esc(emp.piorFaixa.rotulo)})` : ''}
       </div>
       ${avisoSemAvaliacao(emp.semAvaliacao)}
       ${!riscosProcessosCache.length && (riscosData || []).some((x) => x.processoId)
@@ -7645,10 +9598,10 @@ function _renderPainelRiscoConsolidado() {
       ${cartaoAreas}
     </div>
     <div style="font-size:0.74em;color:#999;margin-top:8px;line-height:1.5;">
-      Como a conta é feita: cada risco soma a sua nota (1 a 12) multiplicada pela criticidade do processo ligado a ele
+      Como a conta é feita: cada risco soma a sua nota (1 a 25, escala NIST 5×5) multiplicada pela criticidade do processo ligado a ele
       (Tier 1 pesa 3, Tier 2 pesa 2, Tier 3 pesa 1; risco corporativo ou em processo ainda Pendente pesa 2). Risco de
       fornecedor sem processo pesa pela criticidade avaliada do fornecedor (Alta 3, Média 2, Baixa 1; sem avaliação pesa 2).
-      Um risco soma no máximo 36 pontos. A carga da empresa é a soma das áreas — dá para conferir somando a coluna.
+      Um risco soma no máximo 75 pontos. A carga da empresa é a soma das áreas — dá para conferir somando a coluna.
       Riscos aceitos entram na conta: aceitar um risco não o faz desaparecer. Encerrados ficam fora${r.foraPorStatus ? ` (${r.foraPorStatus} hoje)` : ''}.
       A carga não tem teto, então não existe número "bom" ou "ruim" por si: o que se lê é a composição, o pior caso e a variação ao longo do tempo.
     </div>`;
@@ -7685,6 +9638,124 @@ function _dataCurta(diaISO) {
   const [, m, d] = diaISO.split('-');
   return `${d}/${m}`;
 }
+
+// ------------------------------------------------------------
+// Dica dos pontos do gráfico do Monitor (DECISÃO 14/10/2026): ao passar o
+// mouse, além do valor mostra QUAIS RISCOS moveram a curva naquele dia
+// (retrato.mudancas, gravado pelo servidor -- ver historicoRisco.js).
+// ------------------------------------------------------------
+const _DICA_MONITOR_MAX_LINHAS = 6;
+
+function _variacaoMonitor(v, formatarValor) {
+  return v > 0
+    ? `<span style="color:#c62828;font-weight:700;">▲ +${esc(formatarValor(v))}</span>`
+    : `<span style="color:#2e7d32;font-weight:700;">▼ −${esc(formatarValor(Math.abs(v)))}</span>`;
+}
+
+function _rotuloTipoMudancaMonitor(m) {
+  if (m.tipo === 'novo') return m.scoreDepois != null ? `novo · score ${m.scoreDepois}` : 'novo';
+  if (m.tipo === 'encerrado') return 'encerrado';
+  if (m.tipo === 'excluido') return 'excluído';
+  if (m.scoreDepois == null) return 'sem avaliação';
+  if (m.scoreAntes === m.scoreDepois) return 'estimativa financeira alterada';
+  return `reavaliado · score ${m.scoreAntes == null ? '–' : m.scoreAntes} → ${m.scoreDepois}`;
+}
+
+/**
+ * HTML da dica do ponto (série `sIdx`, dia `i`) de um gráfico do Monitor. Pura
+ * (só lê `ctx`), para poder ser testada. `ctx` = { historico, series, campo,
+ * formatarValor, valorDoDia, rotuloValor } -- guardado por _svgLinhaTempoRisco.
+ */
+function _conteudoDicaMonitor(ctx, sIdx, i) {
+  const { historico, series, campo, formatarValor, valorDoDia, rotuloValor } = ctx;
+  const serie = series[sIdx];
+  const dia = historico[i];
+  if (!serie || !dia) return '';
+  const valor = valorDoDia(dia, serie.nome);
+  const anterior = i > 0 ? historico[i - 1] : null;
+  const delta = anterior ? valor - valorDoDia(anterior, serie.nome) : null;
+
+  let situacao;
+  if (delta === null) situacao = '<span style="color:#888;">primeiro dia registrado</span>';
+  else if (delta === 0) situacao = `<span style="color:#888;">sem variação desde ${_dataCurta(anterior.dia)}</span>`;
+  else situacao = `${_variacaoMonitor(delta, formatarValor)} <span style="color:#888;">desde ${_dataCurta(anterior.dia)}</span>`;
+
+  let corpo = '';
+  const mudancas = dia.mudancas;
+  if (!Array.isArray(mudancas)) {
+    if (delta !== 0) corpo = '<div style="color:#999;font-size:0.92em;">Detalhe por risco indisponível para este dia.</div>';
+  } else {
+    const variacaoDe = (m) => (campo === 'impactoFinanceiro'
+      ? (m.financeiroDepois || 0) - (m.financeiroAntes || 0)
+      : (m.cargaDepois || 0) - (m.cargaAntes || 0));
+    const doEscopo = mudancas
+      .filter((m) => serie.nome === 'Empresa' || m.area === serie.nome)
+      .map((m) => ({ m, v: variacaoDe(m) }))
+      .filter((x) => x.v !== 0)
+      .sort((a, b) => Math.abs(b.v) - Math.abs(a.v));
+
+    if (!doEscopo.length) {
+      corpo = delta === 0 ? '<div style="color:#999;font-size:0.92em;">Sem mudança neste dia.</div>' : '';
+    } else {
+      const visiveis = doEscopo.slice(0, _DICA_MONITOR_MAX_LINHAS);
+      corpo = visiveis.map(({ m, v }) => `
+        <div style="display:flex;gap:8px;align-items:baseline;margin-top:5px;">
+          <span style="white-space:nowrap;">${_variacaoMonitor(v, formatarValor)}</span>
+          <span><span style="font-weight:600;color:#222;">${esc(m.titulo)}</span>
+          <span style="color:#888;font-size:0.9em;"> ${esc(_rotuloTipoMudancaMonitor(m))}</span>
+          ${serie.nome === 'Empresa' && m.area ? `<span style="color:#aaa;font-size:0.88em;"> · ${esc(m.area)}</span>` : ''}</span>
+        </div>`).join('');
+      if (doEscopo.length > visiveis.length) {
+        corpo += `<div style="margin-top:5px;color:#888;font-size:0.9em;">+${doEscopo.length - visiveis.length} outro${doEscopo.length - visiveis.length > 1 ? 's' : ''}</div>`;
+      }
+    }
+    // A soma do detalhe deveria fechar com a variação do ponto; nos poucos dias
+    // gravados com pesos antigos (bug de Tier de 22/09) não fecha -- avisa.
+    const soma = doEscopo.reduce((t, x) => t + x.v, 0);
+    if (delta !== null && soma !== delta) {
+      corpo += '<div style="margin-top:8px;color:#999;font-size:0.82em;">Detalhe calculado com os pesos de hoje; o ponto gravado usou pesos anteriores.</div>';
+    }
+  }
+
+  return `<div style="font-weight:700;color:${serie.cor};">${esc(serie.nome)} · ${_dataCurta(dia.dia)}</div>
+    <div style="margin-top:2px;"><strong>${esc(rotuloValor)} ${esc(formatarValor(valor))}</strong> &nbsp;${situacao}</div>
+    ${corpo ? `<div style="border-top:1px solid #eee;margin-top:7px;padding-top:2px;">${corpo}</div>` : ''}`;
+}
+
+function _dicaMonitorEl() {
+  let el = document.getElementById('dicaMonitor');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'dicaMonitor';
+    el.style.cssText = 'position:fixed;z-index:1000;display:none;pointer-events:none;background:#fff;border:1px solid #e0e0e0;border-radius:8px;box-shadow:0 4px 18px rgba(0,0,0,0.16);padding:10px 12px;font-size:0.82em;line-height:1.35;max-width:380px;min-width:200px;color:#444;';
+    document.body.appendChild(el);
+    // Toque (celular): a dica abre no clique e some ao tocar fora de um ponto.
+    document.addEventListener('click', (ev) => {
+      if (!ev.target.closest || !ev.target.closest('.ponto-monitor-hit')) el.style.display = 'none';
+    });
+  }
+  return el;
+}
+
+window._mostrarDicaMonitor = (ev, campo, sIdx, i) => {
+  const ctx = (window._monitorGraficos || {})[campo];
+  if (!ctx) return;
+  const el = _dicaMonitorEl();
+  el.innerHTML = _conteudoDicaMonitor(ctx, sIdx, i);
+  el.style.display = 'block';
+  // Acima do ponto; se não couber, abaixo. Sempre dentro da janela.
+  const alvo = ev.currentTarget.getBoundingClientRect();
+  const w = el.offsetWidth, h = el.offsetHeight;
+  const esq = Math.min(Math.max(8, alvo.left + alvo.width / 2 - w / 2), window.innerWidth - w - 8);
+  const topo = alvo.top - h - 10 >= 8 ? alvo.top - h - 10 : alvo.bottom + 10;
+  el.style.left = esq + 'px';
+  el.style.top = topo + 'px';
+};
+
+window._esconderDicaMonitor = () => {
+  const el = document.getElementById('dicaMonitor');
+  if (el) el.style.display = 'none';
+};
 
 /**
  * Monta o SVG da curva. `historico` vem em ordem cronologica (mais antigo
@@ -7726,6 +9797,13 @@ function _svgLinhaTempoRisco(historico, opcoes) {
     return a ? (a[campo] || 0) : 0;
   };
 
+  // Contexto da dica ao passar o mouse (ver _conteudoDicaMonitor).
+  window._monitorGraficos = window._monitorGraficos || {};
+  window._monitorGraficos[campo] = {
+    historico, series, campo, formatarValor, valorDoDia,
+    rotuloValor: (opcoes && opcoes.rotuloValor) || (campo === 'impactoFinanceiro' ? 'Impacto financeiro' : 'Carga'),
+  };
+
   const todosValores = series.flatMap((s) => historico.map((dia) => valorDoDia(dia, s.nome)));
   const maxValor = Math.max(1, ...todosValores) * 1.15;
 
@@ -7753,11 +9831,15 @@ function _svgLinhaTempoRisco(historico, opcoes) {
     rotulosX += `<text x="${x(n - 1)}" y="${ALTURA - MARGEM.baixo + 16}" text-anchor="middle" font-size="10" fill="#999">${_dataCurta(historico[n - 1].dia)}</text>`;
   }
 
-  const linhas = series.map((s) => {
+  const linhas = series.map((s, sIdx) => {
     const pontos = historico.map((dia, i) => `${x(i)},${y(valorDoDia(dia, s.nome))}`).join(' ');
+    // Ponto visível (r=3) + alvo de hover maior e transparente (r=9) que abre a
+    // dica com os riscos do dia (substitui o <title> nativo, que só mostrava o valor).
     const circulos = historico.map((dia, i) => {
       const v = valorDoDia(dia, s.nome);
-      return `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${s.cor}"><title>${esc(s.nome)} — ${_dataCurta(dia.dia)}: ${esc(formatarValor(v))}</title></circle>`;
+      return `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${s.cor}"/>`
+        + `<circle class="ponto-monitor-hit" cx="${x(i)}" cy="${y(v)}" r="9" fill="transparent" style="cursor:pointer;" `
+        + `onmouseenter="_mostrarDicaMonitor(event,'${campo}',${sIdx},${i})" onmouseleave="_esconderDicaMonitor()" onclick="_mostrarDicaMonitor(event,'${campo}',${sIdx},${i})"/>`;
     }).join('');
     const linha = n > 1
       ? `<polyline points="${pontos}" fill="none" stroke="${s.cor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`
@@ -7894,6 +9976,7 @@ async function monitor() {
 
 function renderizarRiscos() {
   _renderPainelRiscoConsolidado();
+  _renderApetiteRiscos();
   let data = [...riscosData];
   const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
 
@@ -7906,6 +9989,13 @@ function renderizarRiscos() {
   const filtroFornecedor = document.getElementById('filtroRiscoFornecedor');
   if (filtroFornecedor && filtroFornecedor.value === '_qualquer_') data = data.filter(r => r.fornecedor);
   else if (filtroFornecedor && filtroFornecedor.value) data = data.filter(r => r.fornecedor === filtroFornecedor.value);
+
+  const situacao = (document.getElementById('filtroRiscoSituacao') || {}).value || '';
+  const hojeSit = new Date().toISOString().slice(0, 10);
+  if (situacao === 'apetite') data = data.filter((r) => RiscoConsolidado.acimaDoApetite(r, riscosApetite));
+  else if (situacao === 'reavaliacao') data = data.filter((r) => RiscoConsolidado.reavaliacaoVencida(r, hojeSit));
+  else if (situacao === 'alerta') data = data.filter((r) => r.alertaAutomacao);
+  else if (situacao === 'kri') data = data.filter((r) => r.status !== 'Encerrado' && _riscoComKriForaDaMeta(r));
 
   const busca = (document.getElementById('buscaRisco') || {}).value || '';
   if (busca.trim()) {
@@ -7951,9 +10041,10 @@ function renderizarRiscos() {
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
         <td class="col-c">${_badgeScoreRisco(r)}</td>
+        <td class="col-c">${_badgeResidualRisco(r)}</td>
         <td class="col-c">${_badgeCargaRisco(r, processosPorId)}</td>
         <td class="num col-r col-nw">${r.impactoFinanceiro === null || r.impactoFinanceiro === undefined ? '<span class="muted">–</span>' : _formatarReais(r.impactoFinanceiro)}</td>
-        <td>${_badgeStatusRisco(r.status)}</td>
+        <td>${_badgeStatusRisco(r.status)}${_selosGovernancaRisco(r)}</td>
         <td>${_badgeProbImpactoRisco(r.prioridade)}</td>
         <td class="col-c col-nw col-sticky" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarRisco('${r.id}')" title="${isAdmin ? 'Editar' : 'Visualizar'}">
@@ -7967,8 +10058,51 @@ function renderizarRiscos() {
           </button>` : ''}
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="16" class="muted" style="text-align:center;padding:40px;">Nenhum risco cadastrado.</td></tr>';
+    : '<tr><td colspan="17" class="muted" style="text-align:center;padding:40px;">Nenhum risco cadastrado.</td></tr>';
 }
+
+// ------------------------------------------------------------
+// Governanca NIST no Registro de Riscos (DECISAO 15/10/2026): apetite
+// (CSF GV.RM-02), reavaliacao periodica (RMF Monitor), avisos da automacao.
+// Regras puras em risco-consolidado.js.
+// ------------------------------------------------------------
+function _selosGovernancaRisco(r) {
+  const hoje = new Date().toISOString().slice(0, 10);
+  const selo = (txt, cor, fundo, title) => `<div><span title="${esc(title)}" style="display:inline-block;margin-top:3px;padding:2px 8px;border-radius:10px;font-size:0.72em;font-weight:700;color:${cor};background:${fundo};">${txt}</span></div>`;
+  let h = '';
+  if (RiscoConsolidado.acimaDoApetite(r, riscosApetite)) h += selo('Acima do apetite', '#c62828', '#fdecea', `Nível acima do apetite (${riscosApetite}): precisa de tratamento ou de aceite aprovado.`);
+  if (RiscoConsolidado.reavaliacaoVencida(r, hoje)) h += selo('Reavaliação vencida', '#e65100', '#fff3e0', `Próxima reavaliação era ${r.proximaReavaliacao}.`);
+  if (r.alertaAutomacao) h += selo('⚠️ Revisar', '#6a1b9a', '#f3e5f5', r.alertaAutomacao);
+  if (r.status !== 'Encerrado' && _riscoComKriForaDaMeta(r)) h += selo('KRI fora da meta', '#c62828', '#fdecea', 'Um indicador-chave deste risco está fora da meta no último lançamento.');
+  return h;
+}
+
+function _renderApetiteRiscos() {
+  const box = document.getElementById('riscoApetiteBox');
+  if (!box) return;
+  const pode = Perfis.podeEditarRegua(window.USER_PERFIS);
+  const acima = (riscosData || []).filter((r) => RiscoConsolidado.acimaDoApetite(r, riscosApetite)).length;
+  box.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:0.82em;color:#555;">
+    <span><strong>Apetite de risco:</strong> até</span>
+    ${pode
+      ? `<select id="riscoApetiteSelect" onchange="salvarApetiteRiscos()" style="padding:4px 8px;border:1px solid #ddd;border-radius:6px;">${RiscoConsolidado.ORDEM_NIVEL.map((n) => `<option value="${n}" ${n === riscosApetite ? 'selected' : ''}>${n}</option>`).join('')}</select>`
+      : `<strong>${esc(riscosApetite)}</strong>`}
+    <span style="color:#888;">— acima disso o risco precisa de tratamento, ou de aceite com justificativa, aprovador e data de reavaliação.</span>
+    ${acima ? `<span style="color:#c62828;font-weight:700;">${acima} risco(s) acima do apetite</span>` : ''}
+  </div>`;
+}
+
+window.salvarApetiteRiscos = async () => {
+  const valor = document.getElementById('riscoApetiteSelect').value;
+  try {
+    await API.salvarConfigRiscos({ apetite: valor });
+    riscosApetite = valor;
+    renderizarRiscos();
+    showToast('✅ Apetite de risco salvo.', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+  }
+};
 
 window.clonarRisco = (id) => {
   const original = riscosData.find((r) => r.id === id);
@@ -8000,6 +10134,8 @@ window.ordenarRiscos = (coluna) => {
 function _htmlDrawerRisco() {
   const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
   const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  const dica = 'font-size:0.72em;color:#888;margin-top:3px;display:block;';
+  const aba = (id, rotulo, etapa) => `<button id="tab-risco-${id}" onclick="trocarAbaRisco('${id}')" style="flex:1;min-width:120px;padding:10px 14px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;line-height:1.2;">${rotulo}<div style="font-size:0.72em;font-weight:600;opacity:0.8;">${etapa}</div></button>`;
   return `
     <div class="drawer-overlay" id="drawerOverlayRisco" onclick="fecharDrawerRisco()"></div>
     <div class="drawer" id="drawerRisco">
@@ -8008,21 +10144,51 @@ function _htmlDrawerRisco() {
         <button onclick="fecharDrawerRisco()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
+        <div id="rEtapasNist" style="display:flex;gap:6px;flex-wrap:wrap;padding:8px 24px;background:#fafafa;border-bottom:1px solid #eee;font-size:0.78em;"></div>
         <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;flex-wrap:wrap;">
-          <button id="tab-risco-identificacao" onclick="trocarAbaRisco('identificacao')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Identificação</button>
-          <button id="tab-risco-analise" onclick="trocarAbaRisco('analise')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Análise &amp; Avaliação</button>
-          <button id="tab-risco-tratamento" onclick="trocarAbaRisco('tratamento')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Tratamento</button>
-          <button id="tab-risco-monitoramento" onclick="trocarAbaRisco('monitoramento')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Monitoramento</button>
-          <button id="tab-risco-encerramento" onclick="trocarAbaRisco('encerramento')" style="flex:1;min-width:120px;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Reavaliação &amp; Encerramento</button>
+          ${aba('identificacao', 'Identificação', '① Enquadrar')}
+          ${aba('avaliacao', 'Avaliação', '② Avaliar')}
+          ${aba('resposta', 'Resposta', '③ Responder')}
+          ${aba('monitoramento', 'Monitoramento', '④ Monitorar')}
         </div>
         <div style="flex:1;overflow-y:auto;padding:20px 24px;">
           <input type="hidden" id="rId">
 
-          <!-- ABA: IDENTIFICAÇÃO / REGISTRO -->
+          <!-- ① IDENTIFICAÇÃO — Enquadrar (NIST SP 800-39 Frame / CSF ID.RA) -->
           <div id="painel-risco-identificacao">
-            <div style="margin-bottom:20px;">
+            <div id="rAlertaAutomacao" style="display:none;font-size:0.82em;color:#6a1b9a;background:#f3e5f5;border-radius:8px;padding:8px 12px;margin-bottom:14px;"></div>
+            <div id="rOrigemVulnCard" style="display:none;margin-bottom:16px;"></div>
+
+            <div style="border:1px solid #eee;border-radius:9px;padding:12px 14px;margin-bottom:18px;background:#fcfcfc;">
+              <label style="${lbl}margin-bottom:2px;">Declaração do risco (NIST SP 800-30)</label>
+              <span style="${dica}margin-bottom:10px;">Quem ou o que causa (fonte), o que acontece (evento), por qual fraqueza (vulnerabilidade/condição) e com que efeito (consequência).</span>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:10px;">
+                <div>
+                  <label style="${lbl}">Fonte da ameaça</label>
+                  <select id="rFonteAmeaca" style="${inp}" onchange="_atualizarDeclaracaoRisco()">
+                    <option value="">Selecione...</option>
+                    ${RISCO_FONTES_AMEACA.map((f) => `<option value="${esc(f.valor)}" title="${esc(f.descricao)}">${esc(f.valor)}</option>`).join('')}
+                  </select>
+                </div>
+                <div>
+                  <label style="${lbl}">Evento de ameaça</label>
+                  <input type="text" id="rEventoAmeaca" placeholder="Ex.: indisponibilidade do data center" style="${inp}" oninput="_atualizarDeclaracaoRisco()">
+                </div>
+                <div>
+                  <label style="${lbl}">Vulnerabilidade / condição predisponente</label>
+                  <input type="text" id="rCondicaoPredisponente" placeholder="Ex.: sem redundância de energia" style="${inp}" oninput="_atualizarDeclaracaoRisco()">
+                </div>
+                <div>
+                  <label style="${lbl}">Consequência</label>
+                  <input type="text" id="rConsequencia" placeholder="Ex.: parada do faturamento" style="${inp}" oninput="_atualizarDeclaracaoRisco()">
+                </div>
+              </div>
+              <div id="rDeclaracaoSugerida" style="display:none;font-size:0.85em;color:#333;background:#fff;border:1px dashed #d6d6d6;border-radius:7px;padding:8px 10px;"></div>
+            </div>
+
+            <div style="margin-bottom:16px;">
               <label style="${lbl}">Título / Evento</label>
-              <input type="text" id="rTitulo" placeholder="Ex: Falha de energia no data center" style="${inp}border:2px solid #d60014;font-weight:600;">
+              <input type="text" id="rTitulo" placeholder="Ex: Falha de energia no data center" style="${inp}border:2px solid #d60014;font-weight:600;" oninput="_atualizarEtapasNist()">
             </div>
             <div style="margin-bottom:16px;">
               <label style="${lbl}">Descrição</label>
@@ -8038,18 +10204,12 @@ function _htmlDrawerRisco() {
                 <select id="rProcesso" style="${inp}"><option value="">-- Nenhum (risco corporativo) --</option></select>
               </div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
-              <div>
-                <label style="${lbl}">Fornecedor Relacionado (opcional)</label>
-                <select id="rFornecedor" style="${inp}"><option value="">-- Nenhum --</option></select>
-                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Use quando o risco foi reportado por (ou envolve) um fornecedor do catálogo de Dependências.</span>
-              </div>
-              <div>
-                <label style="${lbl}">Indicador Relacionado (opcional)</label>
-                <select id="rIndicador" style="${inp}"><option value="">-- Nenhum --</option></select>
-                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Use quando o risco tem relação com um indicador de segurança. Risco gerado por desvio de meta já vem preenchido.</span>
-              </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Fornecedor Relacionado (opcional)</label>
+              <select id="rFornecedor" style="${inp}"><option value="">-- Nenhum --</option></select>
+              <span style="${dica}">Use quando o risco foi reportado por (ou envolve) um fornecedor do catálogo de Dependências. Indicadores agora ficam na aba Monitoramento, como KRIs.</span>
             </div>
+            <input type="hidden" id="rIndicador">
             <div style="margin-bottom:16px;">
               <label style="${lbl}">Categorias do Risco</label>
               <div id="rCategoriasLista" style="display:flex;flex-direction:column;gap:8px;">
@@ -8060,9 +10220,15 @@ function _htmlDrawerRisco() {
                   </label>`).join('')}
               </div>
             </div>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Responsável (Owner)</label>
-              <select id="rResponsavel" style="${inp}"><option value="">Selecione...</option></select>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="${lbl}">Responsável (Owner)</label>
+                <select id="rResponsavel" style="${inp}" onchange="_atualizarEtapasNist()"><option value="">Selecione...</option></select>
+              </div>
+              <div>
+                <label style="${lbl}">Reportado por</label>
+                <select id="rReportadoPor" style="${inp}"><option value="">Selecione...</option></select>
+              </div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
@@ -8072,107 +10238,103 @@ function _htmlDrawerRisco() {
               <div>
                 <label style="${lbl}">Status</label>
                 <select id="rStatus" style="${inp}">${RISCO_STATUS.map(s => `<option value="${s}">${s}</option>`).join('')}</select>
+                <span style="${dica}">Avança sozinho ao salvar (Avaliação → Tratamento → Monitoramento) quando a etapa é concluída; Aceito e Encerrado são decisão sua.</span>
               </div>
             </div>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Origem do Risco</label>
-              <select id="rOrigem" style="${inp}">${RISCO_ORIGENS.map(o => `<option value="${esc(o.valor)}">${esc(o.rotulo)}</option>`).join('')}</select>
-              <span id="rOrigemTravadaInfo" style="font-size:0.72em;color:#888;margin-top:3px;display:block;"></span>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Reportado por</label>
-              <select id="rReportadoPor" style="${inp}"><option value="">Selecione...</option></select>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
+              <div>
+                <label style="${lbl}">Origem do Risco</label>
+                <select id="rOrigem" style="${inp}">${RISCO_ORIGENS.map(o => `<option value="${esc(o.valor)}">${esc(o.rotulo)}</option>`).join('')}</select>
+                <span id="rOrigemTravadaInfo" style="${dica}"></span>
+              </div>
+              <div>
+                <label style="${lbl}">Função do NIST CSF 2.0</label>
+                <select id="rFuncaoCsf" style="${inp}"><option value="">Selecione...</option>${RiscoConsolidado.FUNCOES_CSF.map((f) => `<option value="${f}">${f}</option>`).join('')}</select>
+                <span style="${dica}">Vem preenchida pela origem do risco.</span>
+              </div>
             </div>
           </div>
 
-          <!-- ABA: ANÁLISE (IMPACTO FINANCEIRO) & AVALIAÇÃO -->
-          <div id="painel-risco-analise" style="display:none;">
+          <!-- ② AVALIAÇÃO — Avaliar (NIST SP 800-30 / CSF ID.RA-04/05) -->
+          <div id="painel-risco-avaliacao" style="display:none;">
+            <label style="${lbl}margin-bottom:2px;">Probabilidade × Impacto (matriz NIST SP 800-30)</label>
+            <span style="${dica}margin-bottom:10px;">Clique na célula. O nível vem da Tabela I-2 do SP 800-30; passe o mouse nos rótulos para ver a definição de cada nível.</span>
+            <div id="rMatrizInerente"></div>
+            <select id="rProbabilidade" style="display:none;" onchange="_calcularScoreRisco()"><option value=""></option>${RiscoConsolidado.PROBABILIDADES.map((v) => `<option value="${v}">${v}</option>`).join('')}</select>
+            <select id="rImpacto" style="display:none;" onchange="_calcularScoreRisco()"><option value=""></option>${RiscoConsolidado.IMPACTOS.map((v) => `<option value="${v}">${v}</option>`).join('')}</select>
+            <div id="rResumoAvaliacao" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin:12px 0 16px;font-size:0.88em;"></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
-                <label style="${lbl}">Probabilidade</label>
-                <select id="rProbabilidade" style="${inp}" onchange="_calcularScoreRisco()">
-                  <option value="">Selecione...</option>
-                  <option value="Baixa">Baixa — Pouco provável que aconteça</option>
-                  <option value="Média">Média — Pode acontecer eventualmente</option>
-                  <option value="Alta">Alta — Muito provável que aconteça</option>
-                </select>
-              </div>
-              <div>
-                <label style="${lbl}">Impacto</label>
-                <select id="rImpacto" style="${inp}" onchange="_calcularScoreRisco()">
-                  <option value="">Selecione...</option>
-                  <option value="Baixo">Baixo — Pouco impacto na operação</option>
-                  <option value="Moderado">Moderado — Impacto perceptível, mas gerenciável</option>
-                  <option value="Alto">Alto — Impacto significativo na operação</option>
-                  <option value="Crítico">Crítico — Risco à continuidade do negócio</option>
-                </select>
-              </div>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}margin-bottom:8px;">Componentes do Impacto Financeiro, por seção</label>
-              ${RISCO_IMPACTO_FINANCEIRO_SECOES.map((s, i) => `
-                <div style="border:1px solid #eee;border-radius:9px;padding:12px 14px;margin-bottom:10px;">
-                  <div style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">${esc(s.secao)}</div>
-                  <div id="impactoFinanceiroTabela_${i}"></div>
-                  <div style="display:grid;grid-template-columns:${s.categorias.length > 1 ? '1.3fr ' : ''}1.5fr 1fr auto;gap:8px;margin-top:8px;align-items:end;">
-                    ${s.categorias.length > 1 ? `
-                    <div>
-                      <select id="ifCategoria_${i}" style="${inp}">
-                        <option value="">Selecione...</option>
-                        ${s.categorias.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
-                      </select>
-                    </div>` : ''}
-                    <div><input type="text" id="ifDescricao_${i}" placeholder="Descrição (opcional)" style="${inp}"></div>
-                    <div><input type="number" id="ifValor_${i}" placeholder="Valor R$" style="${inp}"></div>
-                    <button class="btn btn-ghost" onclick="adicionarImpactoFinanceiroItem(${i})" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
-                  </div>
-                </div>`).join('')}
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Impacto Financeiro Estimado (R$)</label>
-              <input type="number" id="rImpactoFinanceiro" readonly style="${inp}background:#f5f6fa;color:#d60014;font-weight:700;">
-              <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Calculado automaticamente pela soma dos componentes acima.</span>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Observações Gerais do Impacto Financeiro</label>
-              <textarea id="rImpactoFinanceiroDescricao" rows="3" placeholder="Premissas, ressalvas ou contexto da estimativa" style="${inp}resize:vertical;"></textarea>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
-              <div>
-                <label style="${lbl}">Score (Priorização)</label>
+                <label style="${lbl}">Score (1 a 25)</label>
                 <input type="number" id="rScore" readonly style="${inp}background:#f5f6fa;color:#d60014;font-weight:700;">
-                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Calculado automaticamente: Probabilidade × Impacto.</span>
+                <span style="${dica}">Probabilidade × Impacto. Ordena a lista e entra na carga de risco.</span>
               </div>
               <div>
-                <label style="${lbl}">Prioridade</label>
-                <select id="rPrioridade" style="${inp}">
-                  <option value="">Selecione...</option>
-                  <option value="Baixa">Baixa</option>
-                  <option value="Média">Média</option>
-                  <option value="Alta">Alta</option>
-                  <option value="Crítica">Crítica</option>
-                </select>
+                <label style="${lbl}">Prioridade (calculada)</label>
+                <input type="text" id="rPrioridade" readonly style="${inp}background:#f5f6fa;font-weight:700;">
+                <span style="${dica}">Pelo nível do risco; sobe um degrau quando passa do apetite.</span>
               </div>
             </div>
+            <details id="rBlocoFinanceiro" style="border:1px solid #eee;border-radius:9px;padding:10px 14px;margin-bottom:16px;">
+              <summary style="cursor:pointer;font-size:0.85em;font-weight:700;color:#555;">Estimativa financeira (opcional)</summary>
+              <div style="margin-top:12px;">
+                ${RISCO_IMPACTO_FINANCEIRO_SECOES.map((s, i) => `
+                  <div style="border:1px solid #eee;border-radius:9px;padding:12px 14px;margin-bottom:10px;">
+                    <div style="font-size:0.78em;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">${esc(s.secao)}</div>
+                    <div id="impactoFinanceiroTabela_${i}"></div>
+                    <div style="display:grid;grid-template-columns:${s.categorias.length > 1 ? '1.3fr ' : ''}1.5fr 1fr auto;gap:8px;margin-top:8px;align-items:end;">
+                      ${s.categorias.length > 1 ? `
+                      <div>
+                        <select id="ifCategoria_${i}" style="${inp}">
+                          <option value="">Selecione...</option>
+                          ${s.categorias.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}
+                        </select>
+                      </div>` : ''}
+                      <div><input type="text" id="ifDescricao_${i}" placeholder="Descrição (opcional)" style="${inp}"></div>
+                      <div><input type="number" id="ifValor_${i}" placeholder="Valor R$" style="${inp}"></div>
+                      <button class="btn btn-ghost" onclick="adicionarImpactoFinanceiroItem(${i})" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+                    </div>
+                  </div>`).join('')}
+                <div style="margin-bottom:12px;">
+                  <label style="${lbl}">Impacto Financeiro Estimado (R$)</label>
+                  <input type="number" id="rImpactoFinanceiro" readonly style="${inp}background:#f5f6fa;color:#d60014;font-weight:700;">
+                  <span style="${dica}">Soma dos componentes acima.</span>
+                </div>
+                <div>
+                  <label style="${lbl}">Premissas da estimativa</label>
+                  <textarea id="rImpactoFinanceiroDescricao" rows="2" placeholder="Premissas, ressalvas ou contexto da estimativa" style="${inp}resize:vertical;"></textarea>
+                </div>
+              </div>
+            </details>
           </div>
 
-          <!-- ABA: TRATAMENTO & PLANO DE AÇÃO -->
-          <div id="painel-risco-tratamento" style="display:none;">
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Estratégia de Tratamento</label>
-              <select id="rEstrategiaTratamento" style="${inp}">
+          <!-- ③ RESPOSTA — Responder (NIST SP 800-39 Respond / CSF ID.RA-06) -->
+          <div id="painel-risco-resposta" style="display:none;">
+            <div style="margin-bottom:12px;">
+              <label style="${lbl}">Resposta ao risco</label>
+              <select id="rEstrategiaTratamento" style="${inp}" onchange="_atualizarBlocosResposta()">
                 <option value="">Selecione...</option>
-                <option value="Mitigar">Mitigar</option>
-                <option value="Transferir">Transferir</option>
-                <option value="Aceitar">Aceitar</option>
-                <option value="Evitar">Evitar</option>
+                ${RISCO_RESPOSTAS.map((x) => `<option value="${x.valor}">${esc(x.rotulo)}</option>`).join('')}
               </select>
+              <span id="rRespostaDica" style="${dica}"></span>
             </div>
-            <div style="margin-bottom:20px;">
-              <label style="${lbl}">Estratégia / Medidas de Mitigação</label>
-              <textarea id="rEstrategiaDescricao" rows="3" placeholder="Descreva a estratégia de tratamento" style="${inp}resize:vertical;"></textarea>
+            <div id="rBlocoDescricaoResposta" style="margin-bottom:18px;">
+              <label id="rRotuloDescricaoResposta" style="${lbl}">Medidas de mitigação</label>
+              <textarea id="rEstrategiaDescricao" rows="3" style="${inp}resize:vertical;" oninput="_atualizarEtapasNist()"></textarea>
             </div>
-            <div>
+            <div id="rBlocoAceite" style="display:none;border:1px solid #eee;border-radius:8px;padding:12px 14px;margin-bottom:18px;background:#fafafa;">
+              <label style="${lbl}margin-bottom:2px;">Aceite do risco</label>
+              <span style="${dica}margin-bottom:10px;">Acima do apetite de risco, o aceite precisa de um aprovador. A próxima reavaliação fica na aba Monitoramento (sugerida automaticamente pelo nível).</span>
+              <div style="margin-bottom:12px;">
+                <label style="${lbl}">Justificativa do aceite</label>
+                <textarea id="rJustificativaAceite" rows="2" placeholder="Por que o risco é aceito e em que condições" style="${inp}resize:vertical;" oninput="_atualizarEtapasNist()"></textarea>
+              </div>
+              <div>
+                <label style="${lbl}">Aprovador do aceite</label>
+                <select id="rAprovadorAceite" style="${inp}"><option value="">Selecione...</option></select>
+              </div>
+            </div>
+            <div id="rBlocoPlano" style="margin-bottom:18px;">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
                 <label style="${lbl}margin-bottom:0;">Plano de Ação (5W2H)</label>
                 <button class="btn btn-ghost" onclick="exportarPlanoAcaoRisco()" style="padding:6px 14px;font-size:0.82em;">🖨️ Exportar Plano de Ação</button>
@@ -8205,78 +10367,107 @@ function _htmlDrawerRisco() {
                       <option value="Pendente">Pendente</option>
                       <option value="Em andamento">Em andamento</option>
                       <option value="Concluído">Concluído</option>
-                      <option value="Atrasado">Atrasado</option>
                     </select>
+                    <span style="${dica}">"Atrasado" é automático quando o prazo passa.</span>
                   </div>
                   <button class="btn btn-ghost" id="btnAdicionarPlanoAcao" onclick="adicionarPlanoAcaoItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
                 </div>
               </div>
             </div>
+            <details id="rBlocoResidual" style="border:1px solid #eee;border-radius:8px;padding:10px 14px;background:#fafafa;">
+              <summary style="cursor:pointer;font-size:0.85em;font-weight:700;color:#555;">Risco residual (depois da resposta) — opcional</summary>
+              <span style="${dica}margin:8px 0 10px;">O risco como fica com a resposta aplicada. A carga do Risco no Tempo continua pelo risco inerente.</span>
+              <div id="rMatrizResidual"></div>
+              <select id="rProbabilidadeResidual" style="display:none;" onchange="_calcularScoreResidualRisco()"><option value=""></option>${RiscoConsolidado.PROBABILIDADES.map((v) => `<option value="${v}">${v}</option>`).join('')}</select>
+              <select id="rImpactoResidual" style="display:none;" onchange="_calcularScoreResidualRisco()"><option value=""></option>${RiscoConsolidado.IMPACTOS.map((v) => `<option value="${v}">${v}</option>`).join('')}</select>
+              <div style="display:flex;gap:12px;align-items:center;margin-top:8px;font-size:0.88em;">
+                <span>Residual: <strong id="rScoreResidual">–</strong></span>
+                <a href="#" onclick="limparResidualRisco();return false;" style="color:#d60014;font-size:0.9em;">Limpar</a>
+              </div>
+            </details>
           </div>
 
-          <!-- ABA: MONITORAMENTO (KRIs) -->
+          <!-- ④ MONITORAMENTO — Monitorar (RMF Monitor / CSF DE.CM, ID.IM) -->
           <div id="painel-risco-monitoramento" style="display:none;">
-            <label style="${lbl}margin-bottom:8px;">Indicadores-Chave de Risco (KRIs)</label>
+            <label style="${lbl}margin-bottom:2px;">Indicadores-Chave de Risco (KRIs)</label>
+            <span style="${dica}margin-bottom:8px;">Escolha um indicador do cadastro de Indicadores de Segurança: meta, último resultado e status vêm do lançamento mensal. KRI livre só para métricas fora do cadastro.</span>
             <div id="krisTabela"></div>
-            <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:14px;margin-top:10px;">
+            <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:14px;margin:10px 0 20px;">
               <div id="kriEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:10px;">
-                ✎ Editando lançamento — <a href="#" onclick="cancelarEdicaoKri();return false;" style="color:#1565c0;">cancelar edição</a>
+                ✎ Editando KRI — <a href="#" onclick="cancelarEdicaoKri();return false;" style="color:#1565c0;">cancelar edição</a>
               </div>
-              <div style="margin-bottom:10px;"><input type="text" id="kriIndicador" placeholder="Indicador" style="${inp}"></div>
-              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
-                <div><input type="text" id="kriMeta" placeholder="Meta" style="${inp}"></div>
-                <div><input type="text" id="kriValorAtual" placeholder="Valor atual" style="${inp}"></div>
-                <div><input type="date" id="kriDataLancamento" style="${inp}"></div>
-              </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end;">
+              <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:end;margin-bottom:10px;">
                 <div>
+                  <label style="${lbl}">Indicador</label>
+                  <select id="kriIndicadorId" style="${inp}" onchange="_alternarKriLivre()"></select>
+                </div>
+                <button class="btn btn-ghost" id="btnAdicionarKri" onclick="adicionarKriItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+              </div>
+              <div id="kriCamposLivres" style="display:none;">
+                <div style="margin-bottom:10px;"><input type="text" id="kriIndicador" placeholder="Nome do KRI" style="${inp}"></div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
+                  <div><input type="text" id="kriMeta" placeholder="Meta" style="${inp}"></div>
+                  <div><input type="text" id="kriValorAtual" placeholder="Valor atual" style="${inp}"></div>
+                  <div><input type="date" id="kriDataLancamento" style="${inp}"></div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                   <select id="kriFrequencia" style="${inp}">
                     <option value="Diária">Diária</option>
                     <option value="Semanal">Semanal</option>
                     <option value="Mensal">Mensal</option>
                     <option value="Trimestral">Trimestral</option>
                   </select>
-                </div>
-                <div>
                   <select id="kriStatus" style="${inp}">
                     <option value="Dentro da meta">Dentro da meta</option>
                     <option value="Atenção">Atenção</option>
                     <option value="Fora da meta">Fora da meta</option>
                   </select>
                 </div>
-                <button class="btn btn-ghost" id="btnAdicionarKri" onclick="adicionarKriItem()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
               </div>
             </div>
-          </div>
 
-          <!-- ABA: REAVALIAÇÃO & ENCERRAMENTO -->
-          <div id="painel-risco-encerramento" style="display:none;">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
-                <label style="${lbl}">Data da Última Reavaliação</label>
+                <label style="${lbl}">Última Reavaliação</label>
                 <input type="date" id="rDataUltimaReavaliacao" style="${inp}">
+                <span style="${dica}">Preenchida sozinha quando status ou score mudam.</span>
               </div>
               <div>
                 <label style="${lbl}">Próxima Reavaliação</label>
-                <input type="date" id="rProximaReavaliacao" style="${inp}">
+                <input type="date" id="rProximaReavaliacao" style="${inp}" onchange="_atualizarEtapasNist()">
+                <span style="${dica}">Sugerida pelo nível (Muito alto 30, Alto 90, Moderado 180, Baixo 365 dias).</span>
               </div>
             </div>
+
             <div style="margin-bottom:20px;">
-              <label style="${lbl}">Histórico de Reavaliação</label>
-              <textarea id="rHistoricoReavaliacao" rows="3" placeholder="Registre observações de cada reavaliação" style="${inp}resize:vertical;"></textarea>
+              <label style="${lbl}">Histórico (trilha de auditoria)</label>
+              <div id="rHistoricoLog" style="border:1px solid #eee;border-radius:8px;max-height:200px;overflow-y:auto;font-size:0.82em;background:#fcfcfc;"></div>
+              <textarea id="rHistoricoReavaliacao" style="display:none;"></textarea>
+              <div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:8px;">
+                <input type="text" id="rNovaNotaHistorico" placeholder="Adicionar nota de reavaliação…" style="${inp}">
+                <button class="btn btn-ghost" id="btnAdicionarNotaHistorico" onclick="adicionarNotaHistoricoRisco()" style="padding:9px 14px;white-space:nowrap;">+ Nota</button>
+              </div>
+              <span style="${dica}">Só acréscimo: nenhuma linha anterior é editada ou apagada.</span>
             </div>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Data de Encerramento</label>
-              <input type="date" id="rDataEncerramento" style="${inp}">
-            </div>
-            <div>
-              <label style="${lbl}">Justificativa de Aceitação/Encerramento</label>
-              <textarea id="rJustificativaEncerramento" rows="3" placeholder="Motivo da aceitação do risco ou encerramento" style="${inp}resize:vertical;"></textarea>
+
+            <div style="border-top:1px solid #eee;padding-top:16px;">
+              <label style="${lbl}margin-bottom:8px;">Encerramento</label>
+              <div style="display:grid;grid-template-columns:180px 1fr;gap:12px;">
+                <div>
+                  <label style="${lbl}">Data</label>
+                  <input type="date" id="rDataEncerramento" style="${inp}">
+                </div>
+                <div>
+                  <label style="${lbl}">Justificativa de Encerramento</label>
+                  <textarea id="rJustificativaEncerramento" rows="2" placeholder="Motivo do encerramento (obrigatório para encerrar)" style="${inp}resize:vertical;"></textarea>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
       <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="_fecharDrawerRiscoSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerRisco()">Fechar</button>
         <button class="btn btn-primary" onclick="salvarRisco()" id="btnSalvarRisco">Salvar</button>
       </div>
@@ -8284,7 +10475,7 @@ function _htmlDrawerRisco() {
 }
 
 window.trocarAbaRisco = (aba) => {
-  ['identificacao', 'analise', 'tratamento', 'monitoramento', 'encerramento'].forEach(a => {
+  ['identificacao', 'avaliacao', 'resposta', 'monitoramento'].forEach(a => {
     document.getElementById('painel-risco-' + a).style.display = a === aba ? 'block' : 'none';
     const btn = document.getElementById('tab-risco-' + a);
     btn.style.color = a === aba ? '#d60014' : '#999';
@@ -8310,7 +10501,11 @@ window.abrirDrawerRisco = async (r) => {
   if (!riscosProcessosCache.length) {
     try { riscosProcessosCache = await API.getProcessos(); } catch (e) { riscosProcessosCache = []; }
   }
-  document.getElementById('rArea').innerHTML = riscosAreasCache.map(a => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
+  // Risco corporativo (sem area) e legitimo -- vulnerabilidade sem processo
+  // afetado, desvio de indicador, fornecedor. Antes nao havia a opcao e esses
+  // riscos nao podiam ser salvos sem inventar uma area.
+  document.getElementById('rArea').innerHTML = '<option value="">Corporativo (sem área)</option>' +
+    riscosAreasCache.map(a => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
   document.getElementById('rProcesso').innerHTML = '<option value="">-- Nenhum (risco corporativo) --</option>' +
     riscosProcessosCache.map(p => `<option value="${p.id}" data-area="${esc(p.area)}" data-tier="${esc(Criticidade.tierDoProcesso(p))}">${esc(p.area)} — ${esc(p.processo)}</option>`).join('');
   document.getElementById('rProcesso').onchange = () => {
@@ -8333,21 +10528,12 @@ window.abrirDrawerRisco = async (r) => {
   document.getElementById('rFornecedor').innerHTML = '<option value="">-- Nenhum --</option>' +
     riscosFornecedoresCache.map(f => `<option value="${f.id}" data-nome="${esc(f.nome)}">${esc(f.nome)}</option>`).join('');
 
-  // Vinculo risco -> indicador. Um risco aponta para no maximo um indicador; um
-  // indicador pode ter varios riscos. O risco gerado por desvio de meta ja nasce
-  // com o vinculo; este campo permite que um risco criado a mao aponte para o
-  // mesmo indicador, que e o que faz o indicador virar insumo do hub.
+  // Indicadores: os KRIs da aba Monitoramento sao escolhidos deste cadastro (o
+  // antigo campo "Indicador relacionado" virou o primeiro KRI; rIndicador e
+  // um campo oculto mantido pelos KRIs).
   if (!(indicadoresData || []).length) {
     try { indicadoresData = await API.getIndicadoresSeguranca(); } catch (e) { indicadoresData = []; }
   }
-  document.getElementById('rIndicador').innerHTML = '<option value="">-- Nenhum --</option>' +
-    (indicadoresData || []).map(i => `<option value="${esc(i.id)}">${esc(i.nome)}${i.pilar ? ' — ' + esc(i.pilar) : ''}${i.foraDaMeta ? ' (fora da meta)' : ''}</option>`).join('');
-  document.getElementById('rIndicador').onchange = () => {
-    const sel = document.getElementById('rIndicador');
-    const aviso = document.getElementById('rProbabilidade-sugestao');
-    if (aviso) aviso.remove();
-    if (sel.value) _sugerirProbabilidadePeloIndicador(sel.value);
-  };
 
   _limparSugestoes();
   document.getElementById('rArea').value = r ? r.area : '';
@@ -8397,8 +10583,9 @@ window.abrirDrawerRisco = async (r) => {
     ? `🔒 Preenchido automaticamente (${_rotuloOrigemRisco(origemAtual)}) — não pode ser alterado aqui.`
     : '';
 
-  document.getElementById('rProbabilidade').value = r ? (r.probabilidade || '') : '';
-  document.getElementById('rImpacto').value = r ? (r.impacto || '') : '';
+  // Escala NIST 5x5: rotulo antigo (Média, Crítico) e normalizado ao abrir.
+  document.getElementById('rProbabilidade').value = r ? RiscoConsolidado.normalizarProbabilidade(r.probabilidade) : '';
+  document.getElementById('rImpacto').value = r ? RiscoConsolidado.normalizarImpacto(r.impacto) : '';
   window._riscoImpactoFinanceiro = r && r.impactoFinanceiroComponentes ? [...r.impactoFinanceiroComponentes] : [];
   renderImpactoFinanceiroRisco();
   document.getElementById('rImpactoFinanceiroDescricao').value = r ? (r.impactoFinanceiroDescricao || '') : '';
@@ -8420,6 +10607,24 @@ window.abrirDrawerRisco = async (r) => {
   document.getElementById('rHistoricoReavaliacao').value = r ? (r.historicoReavaliacao || '') : '';
   document.getElementById('rDataEncerramento').value = r ? (r.dataEncerramento || '') : '';
   document.getElementById('rJustificativaEncerramento').value = r ? (r.justificativaEncerramento || '') : '';
+  document.getElementById('rJustificativaAceite').value = r ? (r.justificativaAceite || '') : '';
+  const aprovadorAtual = r ? (r.aprovadorAceite || '') : '';
+  const temAprovador = pessoasData.some((p) => p.nome === aprovadorAtual);
+  document.getElementById('rAprovadorAceite').innerHTML = '<option value="">Selecione...</option>' +
+    pessoasData.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
+    (aprovadorAtual && !temAprovador ? `<option value="${esc(aprovadorAtual)}">${esc(aprovadorAtual)} (não cadastrado como pessoa)</option>` : '');
+  document.getElementById('rAprovadorAceite').value = aprovadorAtual;
+  document.getElementById('rProbabilidadeResidual').value = r ? RiscoConsolidado.normalizarProbabilidade(r.probabilidadeResidual) : '';
+  document.getElementById('rImpactoResidual').value = r ? RiscoConsolidado.normalizarImpacto(r.impactoResidual) : '';
+  _calcularScoreResidualRisco();
+  // Funcao CSF: a gravada; sem nenhuma, a padrao da origem (vale tambem para
+  // riscos antigos -- e so preenchimento de campo vazio, como as sugestoes).
+  document.getElementById('rFuncaoCsf').value = (r && r.funcaoCsf) || RiscoConsolidado.funcaoCsfPadrao(r ? r.origem : 'Manual');
+  // Estado de partida: exigencias por status e linha de historico so valem
+  // quando o status/score MUDA em relacao a este ponto.
+  window._riscoOriginal = { status: r ? (r.status || '') : '', score: r ? RiscoConsolidado.scoreDoRisco(r) : null };
+  _renderAvisosOrigemRisco(r);
+  _aposAbrirRiscoNist(r);
 
   _atualizarTituloDrawerRisco(r);
 
@@ -8438,11 +10643,24 @@ window.abrirDrawerRisco = async (r) => {
   trocarAbaRisco('identificacao');
   document.getElementById('drawerRisco').classList.add('open');
   document.getElementById('drawerOverlayRisco').classList.add('open');
+  // Cópia (clonarRisco) chega com id vazio e conteúdo preenchido: nada disso
+  // existe no banco ainda, então o Fechar tem que gravar -- nunca "sem mudança".
+  if (r && !r.id) _edRisco.esquecer(); else _edRisco.marcar();
 };
 
-window.fecharDrawerRisco = () => {
+function _fecharDrawerRiscoSemSalvar() {
   document.getElementById('drawerRisco').classList.remove('open');
   document.getElementById('drawerOverlayRisco').classList.remove('open');
+}
+// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- so fecha se salvarRisco
+// devolver true (gravacao principal confirmada); validacao/erro mostram o
+// mesmo aviso de sempre e o drawer continua aberto.
+window.fecharDrawerRisco = async () => {
+  // Sem mudança desde que abriu/salvou não há o que gravar (e quem só pode ver
+  // o risco, sem permissão de escrita, também fecha sem tentar).
+  if (!_edRisco.sujo()) return _fecharDrawerRiscoSemSalvar();
+  const ok = await salvarRisco();
+  if (ok) _fecharDrawerRiscoSemSalvar();
 };
 
 window.editarRisco = (id) => abrirDrawerRisco(riscosData.find(r => r.id === id));
@@ -8461,6 +10679,8 @@ window.excluirRisco = async (id) => {
 // Le o formulario do drawer de Risco pro estado atual da tela -- usado por
 // salvarRisco (grava) e exportarPlanoAcaoRisco (so le, pro PDF refletir
 // inclusive uma acao do Plano de Acao recem-adicionada e ainda nao salva).
+const _edRisco = criarRastreadorEdicao(() => _coletarFormularioRisco());
+
 function _coletarFormularioRisco() {
   const procSel = document.getElementById('rProcesso');
   const procOpt = procSel.options[procSel.selectedIndex];
@@ -8473,7 +10693,8 @@ function _coletarFormularioRisco() {
     processo: procSel.value && procOpt ? procOpt.textContent.split(' — ').slice(1).join(' — ') : null,
     fornecedor: fornSel.value || null,
     fornecedorNome: fornSel.value && fornOpt ? fornOpt.dataset.nome : null,
-    indicadorId: document.getElementById('rIndicador').value || null,
+    // Indicador do risco = o primeiro KRI ligado ao cadastro de Indicadores.
+    indicadorId: ((window._riscoKris || []).find((k) => k.indicadorId) || {}).indicadorId || null,
     titulo: document.getElementById('rTitulo').value.trim(),
     descricao: document.getElementById('rDescricao').value.trim(),
     categorias: Array.from(document.querySelectorAll('.risco-categoria-check:checked')).map((c) => c.value),
@@ -8488,27 +10709,85 @@ function _coletarFormularioRisco() {
     impactoFinanceiroComponentes: window._riscoImpactoFinanceiro || [],
     impactoFinanceiroDescricao: document.getElementById('rImpactoFinanceiroDescricao').value.trim(),
     score: document.getElementById('rScore').value ? Number(document.getElementById('rScore').value) : null,
-    prioridade: document.getElementById('rPrioridade').value,
+    // Prioridade CALCULADA (nivel + apetite), nunca escolhida a mao.
+    prioridade: RiscoConsolidado.prioridadeCalculada({
+      probabilidade: document.getElementById('rProbabilidade').value,
+      impacto: document.getElementById('rImpacto').value,
+      status: document.getElementById('rStatus').value,
+    }, riscosApetite),
     estrategiaTratamento: document.getElementById('rEstrategiaTratamento').value,
     estrategiaDescricao: document.getElementById('rEstrategiaDescricao').value.trim(),
-    planoAcao: window._riscoPlanoAcao || [],
+    // "Atrasado" e automatico (prazo passou e nao foi concluida).
+    planoAcao: (window._riscoPlanoAcao || []).map((it) => Object.assign({}, it, { status: RiscoConsolidado.statusDaAcao(it, new Date().toISOString().slice(0, 10)) })),
     kris: window._riscoKris || [],
     dataUltimaReavaliacao: document.getElementById('rDataUltimaReavaliacao').value || null,
     proximaReavaliacao: document.getElementById('rProximaReavaliacao').value || null,
     historicoReavaliacao: document.getElementById('rHistoricoReavaliacao').value.trim(),
     dataEncerramento: document.getElementById('rDataEncerramento').value || null,
     justificativaEncerramento: document.getElementById('rJustificativaEncerramento').value.trim(),
+    justificativaAceite: document.getElementById('rJustificativaAceite').value.trim(),
+    aprovadorAceite: document.getElementById('rAprovadorAceite').value,
+    probabilidadeResidual: document.getElementById('rProbabilidadeResidual').value,
+    impactoResidual: document.getElementById('rImpactoResidual').value,
+    funcaoCsf: document.getElementById('rFuncaoCsf').value,
+    fonteAmeaca: document.getElementById('rFonteAmeaca').value,
+    eventoAmeaca: document.getElementById('rEventoAmeaca').value.trim(),
+    condicaoPredisponente: document.getElementById('rCondicaoPredisponente').value.trim(),
+    consequencia: document.getElementById('rConsequencia').value.trim(),
   };
 }
 
 window.salvarRisco = async () => {
   const r = _coletarFormularioRisco();
-  if (!r.area) return showToast('Selecione a área.', '#e65100');
   if (!r.titulo) return showToast('Informe o título do risco.', '#e65100');
+
+  // Exigencias da etapa (NIST SP 800-37): so na MUDANCA de status.
+  const original = window._riscoOriginal || { status: '', score: null };
+  const pend = RiscoConsolidado.pendenciasDoStatus(r, original.status, riscosApetite);
+  if (pend.length) return showToast(`Para o status "${r.status}" falta: ${pend.join('; ')}.`, '#e65100');
+
+  const hoje = new Date().toISOString().slice(0, 10);
+  // Avanco automatico (RMF): so para frente, so se a pessoa nao mexeu no status.
+  const avancado = RiscoConsolidado.statusAvancado(r, original.status || r.status);
+  if (avancado) {
+    r.status = avancado;
+    document.getElementById('rStatus').value = avancado;
+  }
+  const scoreNovo = RiscoConsolidado.scoreDoRisco(r);
+  const mudouStatus = !!original.status && r.status !== original.status;
+  const mudouScore = r.id && scoreNovo !== original.score;
+  if (r.status === 'Encerrado' && !r.dataEncerramento) {
+    r.dataEncerramento = hoje;
+    document.getElementById('rDataEncerramento').value = hoje;
+  }
+  // Encerrar a mao o risco de uma vulnerabilidade que nao foi corrigida: avisar.
+  if (mudouStatus && r.status === 'Encerrado' && _vulnDoRiscoAberto(r)) {
+    const v = _vulnDoRiscoAberto(r);
+    if (!confirm(`A vulnerabilidade ${v.codigo} continua "${v.statusCorrecao || 'Pendente'}". Encerrar o risco não a marca como corrigida; se ela seguir acima do limiar, um novo risco será aberto na próxima atualização dela.\n\nEncerrar mesmo assim?`)) return false;
+  }
+  // Reavaliacao (RMF Monitor): mudou status ou score -> registra a data e a
+  // linha no historico; proxima reavaliacao sugerida pelo nivel se vazia/vencida.
+  if (mudouStatus || mudouScore) {
+    r.dataUltimaReavaliacao = hoje;
+    document.getElementById('rDataUltimaReavaliacao').value = hoje;
+    const partes = [];
+    if (mudouStatus) partes.push(`status ${original.status} → ${r.status}${avancado ? ' (automático)' : ''}`);
+    if (mudouScore) partes.push(`score ${original.score === null ? '–' : original.score} → ${scoreNovo === null ? '–' : scoreNovo}`);
+    const linha = `${hoje} — ${(window.USER_EMAIL || 'usuário').toLowerCase()}: ${partes.join('; ')}`;
+    r.historicoReavaliacao = r.historicoReavaliacao ? `${r.historicoReavaliacao}\n${linha}` : linha;
+    document.getElementById('rHistoricoReavaliacao').value = r.historicoReavaliacao;
+  }
+  if (r.status !== 'Encerrado' && (!r.proximaReavaliacao || ((mudouStatus || mudouScore) && r.proximaReavaliacao <= hoje))) {
+    const sugerida = RiscoConsolidado.proximaReavaliacaoSugerida(r, hoje);
+    if (sugerida) {
+      r.proximaReavaliacao = sugerida;
+      document.getElementById('rProximaReavaliacao').value = sugerida;
+    }
+  }
 
   const isNew = !r.id;
 
-  await comBotaoCarregando('btnSalvarRisco', async () => {
+  return await comBotaoCarregando('btnSalvarRisco', async () => {
     try {
       const result = await API.salvarRisco(r);
       if (isNew) {
@@ -8517,14 +10796,19 @@ window.salvarRisco = async () => {
         // registro em vez de criar um segundo risco identico.
         document.getElementById('rId').value = r.id;
       }
+      _edRisco.marcar({ ...r });
+      window._riscoOriginal = { status: r.status, score: RiscoConsolidado.scoreDoRisco(r) };
       const idx = riscosData.findIndex(x => x.id === r.id);
       if (idx !== -1) riscosData[idx] = { ...riscosData[idx], ...r };
       else riscosData.push({ origem: 'Manual', ...r });
       renderizarRiscos();
       _atualizarTituloDrawerRisco(r);
-      showToast('✅ Salvo!', '#2e7d32');
+      _renderHistoricoRisco();
+      _atualizarEtapasNist();
+      showToast(avancado ? `✅ Salvo! Status avançado para "${avancado}".` : '✅ Salvo!', '#2e7d32');
       API.invalidate('getRiscos');
-    } catch (e) { showToast('❌ Erro: ' + e.message, '#c62828'); }
+      return true;
+    } catch (e) { showToast('❌ Erro: ' + e.message, '#c62828'); return false; }
   });
 };
 
@@ -8535,8 +10819,310 @@ window.salvarRisco = async () => {
  * Nunca sobrescrevem uma escolha do analista. E a mesma regra do RTO: o numero
  * que uma pessoa decidiu nao e apagado por um calculo.
  */
+window._calcularScoreResidualRisco = () => {
+  const el = document.getElementById('rScoreResidual');
+  if (!el) return;
+  const rr = {
+    probabilidade: document.getElementById('rProbabilidadeResidual').value,
+    impacto: document.getElementById('rImpactoResidual').value,
+  };
+  const cont = document.getElementById('rMatrizResidual');
+  if (cont) cont.innerHTML = _htmlMatrizRisco('residual', rr.probabilidade, rr.impacto);
+  const n = RiscoConsolidado.scoreDoRisco(rr);
+  el.textContent = n === null ? '–' : `${n} — ${RiscoConsolidado.nivelDoRisco(rr)}`;
+};
+
+/** Vulnerabilidade de origem do risco, se ela ainda nao foi corrigida (para o aviso de encerrar). */
+function _vulnDoRiscoAberto(r) {
+  const rOrig = (riscosData || []).find((x) => x.id === r.id);
+  const vid = rOrig && rOrig.vulnerabilidadeId;
+  if (!vid || !riscosVulnsCache) return null;
+  const v = riscosVulnsCache.find((x) => String(x.id) === String(vid));
+  return v && v.statusCorrecao !== 'Corrigida' ? v : null;
+}
+
+/** Alerta da automacao + cartao da vulnerabilidade de origem (rastreabilidade, NIST SP 800-37). */
+async function _renderAvisosOrigemRisco(r) {
+  const alerta = document.getElementById('rAlertaAutomacao');
+  if (alerta) {
+    alerta.style.display = r && r.alertaAutomacao ? 'block' : 'none';
+    alerta.textContent = r && r.alertaAutomacao ? `⚠️ Revisar: ${r.alertaAutomacao}` : '';
+  }
+  const card = document.getElementById('rOrigemVulnCard');
+  if (!card) return;
+  card.style.display = 'none';
+  card.innerHTML = '';
+  if (!r || !r.vulnerabilidadeId) return;
+  if (!riscosVulnsCache) {
+    try { riscosVulnsCache = await API.getVulnerabilidades(); } catch (e) { riscosVulnsCache = []; }
+  }
+  if (String(document.getElementById('rId').value) !== String(r.id)) return; // outro risco foi aberto nesse meio-tempo
+  const v = riscosVulnsCache.find((x) => String(x.id) === String(r.vulnerabilidadeId));
+  const faixa = v ? VulnerabilidadeSeveridade.faixa(v).rotulo : '';
+  const deps = v && Array.isArray(v.dependenciasAfetadas) ? v.dependenciasAfetadas.map((d) => d.nome).filter(Boolean) : [];
+  card.style.display = 'block';
+  card.innerHTML = v
+    ? `<div style="border:1px solid #fce8ea;border-left:4px solid #d60014;border-radius:8px;padding:10px 14px;background:#fffafa;font-size:0.85em;">
+        <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;">
+          <strong>🛡️ Vulnerabilidade ${esc(v.codigo || '')} — ${esc(v.nome || '')}</strong>
+          <a href="#vulnerabilidades?vuln=${esc(v.id)}" style="color:#d60014;font-weight:700;">Abrir vulnerabilidade →</a>
+        </div>
+        <div style="margin-top:6px;color:#555;display:flex;flex-wrap:wrap;gap:6px 16px;">
+          <span>Severidade: <strong>${esc(faixa)}</strong></span>
+          <span>Correção: <strong>${esc(v.statusCorrecao || 'Pendente')}</strong></span>
+          <span>Prevista: <strong>${v.dataPrevistaCorrecao ? new Date(v.dataPrevistaCorrecao + 'T00:00:00').toLocaleDateString('pt-BR') : '—'}</strong></span>
+          <span>Responsável: <strong>${esc(v.responsavel || '—')}</strong></span>
+          ${deps.length ? `<span>Dependências: <strong>${esc(deps.join(', '))}</strong></span>` : ''}
+        </div>
+        <div style="margin-top:6px;font-size:0.9em;color:#888;">Este risco acompanha a vulnerabilidade automaticamente (responsável, prazo, status, probabilidade e impacto). O que você mudar aqui à mão deixa de ser sincronizado.</div>
+      </div>`
+    : `<div style="font-size:0.85em;color:#888;">Vulnerabilidade de origem ${esc(r.vulnerabilidadeCodigo || '')} não encontrada (pode ter sido excluída).</div>`;
+}
+
+// ------------------------------------------------------------
+// Drawer de Risco alinhado ao NIST (DECISAO 15/10/2026): 4 abas nas etapas do
+// SP 800-39 (Enquadrar, Avaliar, Responder, Monitorar), matriz 5x5 do SP 800-30,
+// declaracao de risco estruturada, prioridade calculada, KRI ligado aos
+// Indicadores e historico como trilha so de acrescimo. Regras puras em
+// risco-consolidado.js.
+// ------------------------------------------------------------
+
+/** Matriz 5x5 clicavel (Probabilidade nas linhas, de Muito alta para Muito baixa; Impacto nas colunas). */
+function _htmlMatrizRisco(tipo, pSel, iSel) {
+  const P = RiscoConsolidado.PROBABILIDADES.slice().reverse();
+  const I = RiscoConsolidado.IMPACTOS;
+  const pode = Perfis.podeEditarRiscos(window.USER_PERFIS);
+  const pN = RiscoConsolidado.normalizarProbabilidade(pSel);
+  const iN = RiscoConsolidado.normalizarImpacto(iSel);
+  const th = 'font-size:0.72em;font-weight:600;color:#555;padding:4px;';
+  const cab = I.map((i) => `<th title="${esc(RiscoConsolidado.DEFINICAO_IMPACTO[i])}" style="${th}text-align:center;cursor:help;">${esc(i)}</th>`).join('');
+  const linhas = P.map((p) => `<tr><th title="${esc(RiscoConsolidado.DEFINICAO_PROBABILIDADE[p])}" style="${th}text-align:right;white-space:nowrap;cursor:help;">${esc(p)}</th>${I.map((i) => {
+    const nivel = RiscoConsolidado.nivelPorMatriz(p, i);
+    const f = RiscoConsolidado.faixaNivel(nivel);
+    const sc = RiscoConsolidado.scoreDoRisco({ probabilidade: p, impacto: i });
+    const sel = p === pN && i === iN;
+    return `<td style="padding:2px;"><button type="button" class="risco-celula${sel ? ' sel' : ''}" data-tipo="${tipo}" data-p="${esc(p)}" data-i="${esc(i)}"
+      ${pode ? `onclick="selecionarCelulaRisco('${tipo}','${p}','${i}')"` : 'disabled'}
+      title="${esc(p)} × ${esc(i)} = ${esc(nivel)} (score ${sc})"
+      style="width:100%;min-width:56px;height:36px;border-radius:6px;border:${sel ? '3px solid #222' : '1px solid rgba(0,0,0,0.06)'};background:${f.fundo};color:${f.cor};font-weight:${sel ? 800 : 600};font-size:0.74em;cursor:${pode ? 'pointer' : 'default'};">${sel ? '● ' : ''}${sc}</button></td>`;
+  }).join('')}</tr>`).join('');
+  return `<div style="overflow-x:auto;"><table style="border-collapse:separate;border-spacing:0;width:100%;">
+    <tr><th style="${th}text-align:right;color:#999;">Prob. ↓ · Impacto →</th>${cab}</tr>${linhas}</table></div>`;
+}
+
+window.selecionarCelulaRisco = (tipo, p, i) => {
+  if (!Perfis.podeEditarRiscos(window.USER_PERFIS)) return;
+  if (tipo === 'residual') {
+    document.getElementById('rProbabilidadeResidual').value = p;
+    document.getElementById('rImpactoResidual').value = i;
+    _calcularScoreResidualRisco();
+    return;
+  }
+  document.getElementById('rProbabilidade').value = p;
+  document.getElementById('rImpacto').value = i;
+  _calcularScoreRisco();
+};
+
+/** Matriz, nivel, apetite, prioridade calculada e trilha -- tudo a partir de P e I. */
+window._atualizarAvaliacaoRisco = () => {
+  const cont = document.getElementById('rMatrizInerente');
+  if (!cont) return;
+  const r = {
+    probabilidade: document.getElementById('rProbabilidade').value,
+    impacto: document.getElementById('rImpacto').value,
+    status: document.getElementById('rStatus').value,
+  };
+  cont.innerHTML = _htmlMatrizRisco('inerente', r.probabilidade, r.impacto);
+  const nivel = RiscoConsolidado.nivelDoRisco(r);
+  const score = RiscoConsolidado.scoreDoRisco(r);
+  const resumo = document.getElementById('rResumoAvaliacao');
+  if (resumo) {
+    if (!nivel) {
+      resumo.innerHTML = '<span class="muted">Sem avaliação: escolha uma célula da matriz.</span>';
+    } else {
+      const acima = RiscoConsolidado.acimaDoApetite(r, riscosApetite);
+      resumo.innerHTML = `<span>Nível: ${_htmlBadge(_nivelFaixaRisco(nivel), nivel)}</span>
+        <span>Score <strong>${score}</strong> de 25</span>
+        <span style="font-weight:700;color:${acima ? '#c62828' : '#2e7d32'};">${acima ? `Acima do apetite (até ${esc(riscosApetite)})` : `Dentro do apetite (até ${esc(riscosApetite)})`}</span>`;
+    }
+  }
+  const pri = document.getElementById('rPrioridade');
+  if (pri) pri.value = RiscoConsolidado.prioridadeCalculada(r, riscosApetite) || '';
+  _atualizarEtapasNist();
+};
+
+/** Trilha das 4 etapas do SP 800-39 no topo do drawer. */
+window._atualizarEtapasNist = () => {
+  const el = document.getElementById('rEtapasNist');
+  if (!el || !document.getElementById('rTitulo')) return;
+  const e = RiscoConsolidado.etapasNist(_coletarFormularioRisco());
+  const etapas = [['enquadrar', '① Enquadrar'], ['avaliar', '② Avaliar'], ['responder', '③ Responder'], ['monitorar', '④ Monitorar']];
+  el.innerHTML = '<span style="color:#888;font-weight:600;margin-right:4px;align-self:center;">Etapas NIST SP 800-39:</span>' + etapas.map(([k, rot]) => `<span class="risco-etapa${e[k] ? ' ok' : ''}" title="${e[k] ? 'Concluída' : 'Pendente'}" style="padding:2px 10px;border-radius:12px;font-weight:700;${e[k] ? 'background:#e8f5e9;color:#2e7d32;' : 'background:#f0f0f0;color:#999;'}">${e[k] ? '✓' : '•'} ${rot}</span>`).join('');
+};
+
+// --- Declaracao de risco estruturada (SP 800-30) ---
+function _fraseDeclaracaoRisco() {
+  const fonte = document.getElementById('rFonteAmeaca').value;
+  const evento = document.getElementById('rEventoAmeaca').value.trim();
+  const cond = document.getElementById('rCondicaoPredisponente').value.trim();
+  const cons = document.getElementById('rConsequencia').value.trim();
+  if (!evento && !cons) return '';
+  return `Se ${evento || '[evento]'}${fonte ? ` (fonte ${fonte.toLowerCase()})` : ''}${cond ? `, explorando ${cond}` : ''}, então ${cons || '[consequência]'}.`;
+}
+
+window._atualizarDeclaracaoRisco = () => {
+  const box = document.getElementById('rDeclaracaoSugerida');
+  if (!box) return;
+  const frase = _fraseDeclaracaoRisco();
+  if (!frase) { box.style.display = 'none'; box.innerHTML = ''; return; }
+  const pode = Perfis.podeEditarRiscos(window.USER_PERFIS);
+  box.style.display = 'block';
+  box.innerHTML = `<div><span style="color:#888;">Declaração:</span> ${esc(frase)}</div>
+    ${pode ? `<div style="margin-top:6px;display:flex;gap:14px;">
+      <a href="#" onclick="usarDeclaracaoRisco('titulo');return false;" style="color:#d60014;font-weight:700;">Usar como título</a>
+      <a href="#" onclick="usarDeclaracaoRisco('descricao');return false;" style="color:#d60014;font-weight:700;">Usar como descrição</a></div>` : ''}`;
+};
+
+/** Sugestao: so substitui texto ja escrito com confirmacao. */
+window.usarDeclaracaoRisco = (alvo) => {
+  const frase = _fraseDeclaracaoRisco();
+  if (!frase) return;
+  const el = document.getElementById(alvo === 'titulo' ? 'rTitulo' : 'rDescricao');
+  if (el.value.trim() && el.value.trim() !== frase && !confirm(`Substituir ${alvo === 'titulo' ? 'o título' : 'a descrição'} atual pela declaração?`)) return;
+  el.value = frase;
+  _atualizarEtapasNist();
+};
+
+// --- Resposta ao risco (SP 800-39) ---
+window._atualizarBlocosResposta = () => {
+  const sel = document.getElementById('rEstrategiaTratamento');
+  if (!sel) return;
+  const est = sel.value;
+  const def = RISCO_RESPOSTAS.find((x) => x.valor === est);
+  document.getElementById('rRespostaDica').textContent = def ? def.descricao : 'Como a organização vai responder ao risco (NIST SP 800-39): mitigar, compartilhar/transferir, evitar ou aceitar.';
+  document.getElementById('rBlocoAceite').style.display = est === 'Aceitar' ? 'block' : 'none';
+  document.getElementById('rBlocoDescricaoResposta').style.display = est === 'Aceitar' ? 'none' : 'block';
+  document.getElementById('rRotuloDescricaoResposta').textContent = def && def.rotuloDescricao ? def.rotuloDescricao : 'Descrição da resposta';
+  const temPlano = (window._riscoPlanoAcao || []).length > 0;
+  document.getElementById('rBlocoPlano').style.display = (est === 'Mitigar' || temPlano) ? 'block' : 'none';
+  _atualizarEtapasNist();
+};
+
+// --- Historico como trilha so de acrescimo ---
+function _renderHistoricoRisco() {
+  const el = document.getElementById('rHistoricoLog');
+  if (!el) return;
+  const linhas = String(document.getElementById('rHistoricoReavaliacao').value || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  el.innerHTML = linhas.length
+    ? linhas.slice().reverse().map((l) => `<div class="risco-historico-linha" style="padding:6px 10px;border-bottom:1px solid #f0f0f0;">${esc(l)}</div>`).join('')
+    : '<div style="padding:10px;color:#999;">Sem registros ainda.</div>';
+}
+
+window.adicionarNotaHistoricoRisco = () => {
+  const inp = document.getElementById('rNovaNotaHistorico');
+  const nota = inp.value.trim();
+  if (!nota) return showToast('Escreva a nota.', '#e65100');
+  const linha = `${new Date().toISOString().slice(0, 10)} — ${(window.USER_EMAIL || 'usuário').toLowerCase()}: ${nota}`;
+  const ta = document.getElementById('rHistoricoReavaliacao');
+  ta.value = ta.value ? `${ta.value}\n${linha}` : linha;
+  inp.value = '';
+  _renderHistoricoRisco();
+};
+
+// --- KRIs ligados aos Indicadores de Seguranca ---
+function _indicadorDoKri(it) {
+  return it && it.indicadorId ? (indicadoresData || []).find((i) => String(i.id) === String(it.indicadorId)) || null : null;
+}
+
+/** Valores exibidos do KRI: do cadastro de Indicadores quando ligado (nunca digitados), ou os do KRI livre. */
+function _valoresKri(it) {
+  if (it && it.indicadorId) {
+    const ind = _indicadorDoKri(it);
+    if (!ind) return { nome: it.indicador || '(indicador removido)', meta: '–', valor: '–', data: '–', freq: 'Mensal', status: 'Indicador não encontrado', vinculado: true };
+    const temMeta = ind.metaMinima !== null && ind.metaMinima !== undefined && ind.metaMinima !== '';
+    const temDado = ind.ultimoDesempenho !== null && ind.ultimoDesempenho !== undefined && ind.ultimoDesempenho !== '';
+    return {
+      nome: ind.nome,
+      meta: temMeta ? `${ind.sentidoMeta === 'menorMelhor' ? '≤' : '≥'} ${ind.metaMinima}%` : '–',
+      valor: temDado ? `${ind.ultimoDesempenho}%` : '–',
+      data: ind.ultimoMes || '–',
+      freq: 'Mensal',
+      status: !temDado ? 'Sem lançamento' : (ind.foraDaMeta ? 'Fora da meta' : 'Dentro da meta'),
+      vinculado: true,
+    };
+  }
+  return { nome: it.indicador, meta: it.meta || '–', valor: it.valorAtual || '–', data: it.dataLancamento || it.ultimaAtualizacao || '–', freq: it.frequencia || '–', status: it.status || '–', vinculado: false };
+}
+
+/** Algum KRI do risco fora da meta (para o selo da grade). */
+function _riscoComKriForaDaMeta(r) {
+  return (Array.isArray(r && r.kris) ? r.kris : []).some((k) => _valoresKri(k).status === 'Fora da meta');
+}
+
+function _popularSelectKri() {
+  const sel = document.getElementById('kriIndicadorId');
+  if (!sel) return;
+  const usados = new Set((window._riscoKris || []).map((k) => String(k.indicadorId || '')));
+  sel.innerHTML = '<option value="">Selecione o indicador...</option>' +
+    (indicadoresData || []).filter((i) => i.ativo !== false).map((i) => `<option value="${esc(i.id)}" ${usados.has(String(i.id)) ? 'disabled' : ''}>${esc(i.nome)}${i.pilar ? ' — ' + esc(i.pilar) : ''}${i.foraDaMeta ? ' (fora da meta)' : ''}</option>`).join('') +
+    '<option value="__livre__">KRI livre (fora do cadastro)</option>';
+}
+
+window._alternarKriLivre = () => {
+  document.getElementById('kriCamposLivres').style.display = document.getElementById('kriIndicadorId').value === '__livre__' ? 'block' : 'none';
+};
+
+/** risk.indicadorId = o primeiro KRI ligado (mantem a sugestao de probabilidade e a automacao de indicador). */
+function _sincronizarIndicadorDoRisco() {
+  const lig = (window._riscoKris || []).find((k) => k.indicadorId);
+  const novo = lig ? String(lig.indicadorId) : '';
+  const campo = document.getElementById('rIndicador');
+  if (campo.value !== novo) {
+    campo.value = novo;
+    if (novo) _sugerirProbabilidadePeloIndicador(novo);
+  }
+}
+
+/** Ao abrir: declaracao, KRIs (indicador antigo vira KRI), blocos e trilha. */
+function _aposAbrirRiscoNist(r) {
+  document.getElementById('rFonteAmeaca').value = r ? (r.fonteAmeaca || '') : '';
+  document.getElementById('rEventoAmeaca').value = r ? (r.eventoAmeaca || '') : '';
+  document.getElementById('rCondicaoPredisponente').value = r ? (r.condicaoPredisponente || '') : '';
+  document.getElementById('rConsequencia').value = r ? (r.consequencia || '') : '';
+  _atualizarDeclaracaoRisco();
+  // O antigo campo "Indicador relacionado" vira o primeiro KRI (migra na leitura).
+  if (r && r.indicadorId && !(window._riscoKris || []).some((k) => String(k.indicadorId) === String(r.indicadorId))) {
+    const ind = _indicadorDoKri({ indicadorId: r.indicadorId });
+    window._riscoKris = [{ indicadorId: r.indicadorId, indicador: ind ? ind.nome : '', frequencia: 'Mensal' }, ...(window._riscoKris || [])];
+  }
+  document.getElementById('rIndicador').value = r && r.indicadorId ? String(r.indicadorId) : '';
+  _popularSelectKri();
+  window._alternarKriLivre();
+  renderKrisRisco();
+  // Risco novo: quem reporta e quem esta logado (se for uma Pessoa cadastrada).
+  if (!r || !r.id) {
+    const eu = (window.USER_EMAIL || '').toLowerCase();
+    const pessoa = eu ? (pessoasData || []).find((p) => (p.email || '').toLowerCase() === eu) : null;
+    if (pessoa && !document.getElementById('rReportadoPor').value) document.getElementById('rReportadoPor').value = pessoa.nome;
+    if (!document.getElementById('rDataIdentificacao').value) document.getElementById('rDataIdentificacao').value = new Date().toISOString().slice(0, 10);
+  }
+  document.getElementById('rBlocoFinanceiro').open = !!(r && ((r.impactoFinanceiroComponentes || []).length || r.impactoFinanceiroDescricao));
+  document.getElementById('rBlocoResidual').open = !!(r && (r.probabilidadeResidual || r.impactoResidual));
+  _atualizarBlocosResposta();
+  _calcularScoreResidualRisco();
+  _renderHistoricoRisco();
+  _atualizarAvaliacaoRisco();
+}
+
+window.limparResidualRisco = () => {
+  if (!Perfis.podeEditarRiscos(window.USER_PERFIS)) return;
+  document.getElementById('rProbabilidadeResidual').value = '';
+  document.getElementById('rImpactoResidual').value = '';
+  _calcularScoreResidualRisco();
+};
+
 const _IMPACTO_POR_TIER = {
-  [Criticidade.TIER.T1]: 'Crítico',
+  [Criticidade.TIER.T1]: 'Muito alto',
   [Criticidade.TIER.T2]: 'Alto',
   [Criticidade.TIER.T3]: 'Moderado',
 };
@@ -8563,7 +11149,7 @@ function _sugerirProbabilidadePeloIndicador(indicadorId) {
   const ind = (indicadoresData || []).find(i => i.id === indicadorId);
   if (!ind || ind.ultimoDesempenho == null) return;
   const fora = _indicadorForaDaMeta(ind, ind.ultimoDesempenho);
-  campo.value = fora ? 'Alta' : 'Média';
+  campo.value = fora ? 'Alta' : 'Moderada';
   _calcularScoreRisco();
   _marcarSugestao('rProbabilidade', fora
     ? `Sugerido: o indicador "${ind.nome}" está fora da meta.`
@@ -8592,15 +11178,16 @@ function _limparSugestoes() {
 }
 
 // Plano de Ação (sub-lista embutida no risco)
-// Score automático de risco: Probabilidade x Impacto (1-12).
-const RISCO_PESO_PROBABILIDADE = { 'Baixa': 1, 'Média': 2, 'Alta': 3 };
-const RISCO_PESO_IMPACTO = { 'Baixo': 1, 'Moderado': 2, 'Alto': 3, 'Crítico': 4 };
+// Score automático de risco: Probabilidade x Impacto (1-25, escala NIST 5x5).
+// Uma regra só: risco-consolidado.js.
 window._calcularScoreRisco = () => {
-  const probabilidade = document.getElementById('rProbabilidade').value;
-  const impacto = document.getElementById('rImpacto').value;
-  const pesoP = RISCO_PESO_PROBABILIDADE[probabilidade];
-  const pesoI = RISCO_PESO_IMPACTO[impacto];
-  document.getElementById('rScore').value = (pesoP && pesoI) ? pesoP * pesoI : '';
+  const r = {
+    probabilidade: document.getElementById('rProbabilidade').value,
+    impacto: document.getElementById('rImpacto').value,
+  };
+  const n = RiscoConsolidado.scoreDoRisco(r);
+  document.getElementById('rScore').value = n === null ? '' : n;
+  if (window._atualizarAvaliacaoRisco) window._atualizarAvaliacaoRisco();
 };
 
 // Componentes do Impacto Financeiro (sub-lista embutida no risco), agora
@@ -8686,7 +11273,7 @@ function renderPlanoAcaoRisco() {
         <td style="font-size:0.85em;color:#555;">${esc(it.onde || '-')}</td>
         <td style="font-size:0.85em;color:#555;">${it.quando || it.prazo || '-'}</td>
         <td style="font-size:0.85em;color:#555;">${it.quantoCusta != null && it.quantoCusta !== '' ? 'R$ ' + Number(it.quantoCusta).toLocaleString('pt-BR') : '-'}</td>
-        <td>${it.status || '-'}</td>
+        <td>${(() => { const st = RiscoConsolidado.statusDaAcao(it, new Date().toISOString().slice(0, 10)); return st === 'Atrasado' ? '<span class="pa-atrasado" style="color:#c62828;font-weight:700;">Atrasado</span>' : esc(st); })()}</td>
         <td style="text-align:center;white-space:nowrap;">${isAdmin ? `
           <button class="btn-icon" onclick="editarPlanoAcaoItem(${i})" title="Editar">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -8725,6 +11312,7 @@ window.adicionarPlanoAcaoItem = () => {
   }
   _limparFormularioPlanoAcao();
   renderPlanoAcaoRisco();
+  _atualizarBlocosResposta();
 };
 window.editarPlanoAcaoItem = (idx) => {
   const it = window._riscoPlanoAcao[idx];
@@ -8737,10 +11325,10 @@ window.editarPlanoAcaoItem = (idx) => {
   document.getElementById('paQuando').value = it.quando || it.prazo || '';
   document.getElementById('paComo').value = it.como || '';
   document.getElementById('paQuantoCusta').value = it.quantoCusta != null ? it.quantoCusta : '';
-  document.getElementById('paStatus').value = it.status || 'Pendente';
+  document.getElementById('paStatus').value = it.status && it.status !== 'Atrasado' ? it.status : 'Pendente';
   document.getElementById('paEdicaoAviso').style.display = 'block';
   document.getElementById('btnAdicionarPlanoAcao').textContent = 'Salvar alteração';
-  trocarAbaRisco('tratamento');
+  trocarAbaRisco('resposta');
 };
 window.cancelarEdicaoPlanoAcao = () => {
   window._planoAcaoEditandoIndex = null;
@@ -8752,6 +11340,7 @@ window.removerPlanoAcaoItem = (idx) => {
   window._riscoPlanoAcao.splice(idx, 1);
   if (window._planoAcaoEditandoIndex === idx) window.cancelarEdicaoPlanoAcao();
   renderPlanoAcaoRisco();
+  _atualizarBlocosResposta();
 };
 
 // KRIs (sub-lista embutida no risco)
@@ -8763,40 +11352,54 @@ function renderKrisRisco() {
   const itens = window._riscoKris || [];
   const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
   if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum KRI cadastrado.</p>'; return; }
-  // dataLancamento e o nome novo do campo; ultimaAtualizacao e o antigo, mantido
-  // como fallback para KRIs ja lancados antes desta tela ganhar o campo visivel.
+  const corStatus = { 'Fora da meta': '#c62828', 'Atenção': '#e65100', 'Dentro da meta': '#2e7d32' };
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
-    itens.map((it, i) => `<tr>
-        <td style="font-weight:600;color:#222;">${esc(it.indicador)}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(it.meta || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(it.valorAtual || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${it.dataLancamento || it.ultimaAtualizacao || '-'}</td>
-        <td style="font-size:0.85em;color:#555;">${it.frequencia || '-'}</td>
-        <td>${it.status || '-'}</td>
+    itens.map((it, i) => {
+      const v = _valoresKri(it);
+      return `<tr class="kri-linha" data-vinculado="${v.vinculado ? '1' : '0'}">
+        <td style="font-weight:600;color:#222;">${v.vinculado ? '<span title="Ligado ao cadastro de Indicadores de Segurança">🔗</span> ' : ''}${esc(v.nome)}</td>
+        <td style="font-size:0.85em;color:#555;" title="Meta">${esc(v.meta)}</td>
+        <td style="font-size:0.85em;color:#555;" title="Último resultado">${esc(v.valor)}</td>
+        <td style="font-size:0.85em;color:#555;" title="Referência">${esc(v.data)}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(v.freq)}</td>
+        <td class="kri-status" style="font-weight:700;color:${corStatus[v.status] || '#888'};">${esc(v.status)}</td>
         <td style="text-align:center;white-space:nowrap;">${isAdmin ? `
-          <button class="btn-icon" onclick="editarKriItem(${i})" title="Editar">
+          ${v.vinculado ? '' : `<button class="btn-icon" onclick="editarKriItem(${i})" title="Editar">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
+          </button>`}
           <button class="btn-icon" onclick="removerKriItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
-      </tr>`).join('') + `</tbody></table>`;
+      </tr>`;
+    }).join('') + `</tbody></table>`;
 }
 function _limparFormularioKri() {
   ['kriIndicador', 'kriMeta', 'kriValorAtual'].forEach(id => { document.getElementById(id).value = ''; });
   document.getElementById('kriDataLancamento').value = new Date().toISOString().slice(0, 10);
   document.getElementById('kriFrequencia').value = 'Mensal';
   document.getElementById('kriStatus').value = 'Dentro da meta';
+  _popularSelectKri();
+  window._alternarKriLivre();
 }
 window.adicionarKriItem = () => {
-  const indicador = document.getElementById('kriIndicador').value.trim();
-  if (!indicador) return showToast('Informe o indicador.', '#e65100');
-  const item = {
-    indicador,
-    meta: document.getElementById('kriMeta').value.trim(),
-    valorAtual: document.getElementById('kriValorAtual').value.trim(),
-    dataLancamento: document.getElementById('kriDataLancamento').value || new Date().toISOString().slice(0, 10),
-    frequencia: document.getElementById('kriFrequencia').value,
-    status: document.getElementById('kriStatus').value,
-  };
+  const escolha = document.getElementById('kriIndicadorId').value;
+  if (!escolha) return showToast('Escolha o indicador (ou "KRI livre").', '#e65100');
+  let item;
+  if (escolha === '__livre__') {
+    const indicador = document.getElementById('kriIndicador').value.trim();
+    if (!indicador) return showToast('Informe o nome do KRI.', '#e65100');
+    item = {
+      indicador,
+      meta: document.getElementById('kriMeta').value.trim(),
+      valorAtual: document.getElementById('kriValorAtual').value.trim(),
+      dataLancamento: document.getElementById('kriDataLancamento').value || new Date().toISOString().slice(0, 10),
+      frequencia: document.getElementById('kriFrequencia').value,
+      status: document.getElementById('kriStatus').value,
+    };
+  } else {
+    const ind = _indicadorDoKri({ indicadorId: escolha });
+    if ((window._riscoKris || []).some((k) => String(k.indicadorId) === String(escolha))) return showToast('Este indicador já é um KRI deste risco.', '#e65100');
+    // So o vinculo e gravado: meta, resultado e status vem sempre do cadastro.
+    item = { indicadorId: escolha, indicador: ind ? ind.nome : '', frequencia: 'Mensal' };
+  }
   window._riscoKris = window._riscoKris || [];
   if (window._kriEditandoIndex != null) {
     window._riscoKris[window._kriEditandoIndex] = item;
@@ -8808,11 +11411,15 @@ window.adicionarKriItem = () => {
   }
   _limparFormularioKri();
   renderKrisRisco();
+  _sincronizarIndicadorDoRisco();
+  _atualizarEtapasNist();
 };
 window.editarKriItem = (idx) => {
   const it = window._riscoKris[idx];
-  if (!it) return;
+  if (!it || it.indicadorId) return;
   window._kriEditandoIndex = idx;
+  document.getElementById('kriIndicadorId').value = '__livre__';
+  window._alternarKriLivre();
   document.getElementById('kriIndicador').value = it.indicador || '';
   document.getElementById('kriMeta').value = it.meta || '';
   document.getElementById('kriValorAtual').value = it.valorAtual || '';
@@ -8833,6 +11440,9 @@ window.removerKriItem = (idx) => {
   window._riscoKris.splice(idx, 1);
   if (window._kriEditandoIndex === idx) window.cancelarEdicaoKri();
   renderKrisRisco();
+  _popularSelectKri();
+  _sincronizarIndicadorDoRisco();
+  _atualizarEtapasNist();
 };
 
 // ------------------------------------------------------------
@@ -9015,8 +11625,9 @@ window.confirmarImportarRiscosPCN = async () => {
         dataIdentificacao: new Date().toISOString().slice(0, 10),
         status: 'Identificado',
         origem: 'Importado de PCN',
-        probabilidade: row.probabilidade || '',
-        impacto: row.impacto || '',
+        // PCN pode ter a escala antiga (Média, Crítico): normaliza para a NIST 5x5.
+        probabilidade: RiscoConsolidado.normalizarProbabilidade(row.probabilidade) || '',
+        impacto: RiscoConsolidado.normalizarImpacto(row.impacto) || '',
         estrategiaTratamento: '',
         estrategiaDescricao: row.mitigacao || '',
         planoAcao: [],
@@ -9177,7 +11788,10 @@ window.abrirImportarRiscosVulnerabilidade = async () => {
   window._riscoImportVulnsCache = vulns;
   const select = document.getElementById('importVulnSelect');
   select.innerHTML = '<option value="">Selecione...</option>' +
-    vulns.map((v) => `<option value="${esc(v.id)}">${esc(v.codigo || '-')} — ${esc(v.nome)} (${esc(v.produto)})</option>`).join('');
+    vulns.map((v) => {
+      const onde = [v.produto, ..._nomesDependenciasVuln(v)].filter(Boolean).join(', ');
+      return `<option value="${esc(v.id)}">${esc(v.codigo || '-')} — ${esc(v.nome)}${onde ? ` (${esc(onde)})` : ''}</option>`;
+    }).join('');
   document.getElementById('modalImportarRiscoVulnerabilidade').classList.add('open');
 };
 
@@ -9191,7 +11805,7 @@ window.onVulnerabilidadeImportRiscoChange = () => {
   if (!v) { resultado.innerHTML = ''; btnConfirmar.style.display = 'none'; return; }
 
   const faixa = VulnerabilidadeSeveridade.faixa(v);
-  const aberto = (riscosData || []).find((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(v.id) && !['Aceito', 'Encerrado'].includes(r.status));
+  const aberto = (riscosData || []).find((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(v.id) && r.status !== 'Encerrado');
 
   resultado.innerHTML = `
     <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px 14px;">
@@ -9341,17 +11955,12 @@ window.carregarRiscosDRPImport = async () => {
   const selectProb = (i) => `
     <select onchange="window._riscoImportExtraidosDRP[${i}].probabilidade = this.value" style="font-size:0.82em;padding:4px 6px;border:1px solid #ddd;border-radius:5px;width:100%;">
       <option value="">Selecione...</option>
-      <option value="Baixa">Baixa</option>
-      <option value="Média">Média</option>
-      <option value="Alta">Alta</option>
+      ${RiscoConsolidado.PROBABILIDADES.map((v) => `<option value="${v}">${v}</option>`).join('')}
     </select>`;
   const selectImpacto = (i) => `
     <select onchange="window._riscoImportExtraidosDRP[${i}].impacto = this.value" style="font-size:0.82em;padding:4px 6px;border:1px solid #ddd;border-radius:5px;width:100%;">
       <option value="">Selecione...</option>
-      <option value="Baixo">Baixo</option>
-      <option value="Moderado">Moderado</option>
-      <option value="Alto">Alto</option>
-      <option value="Crítico">Crítico</option>
+      ${RiscoConsolidado.IMPACTOS.map((v) => `<option value="${v}">${v}</option>`).join('')}
     </select>`;
 
   resultado.innerHTML = `
@@ -9632,14 +12241,16 @@ async function _lancarResultadosIndicador(indicador, novasEntradas, arquivoOrige
         // Desvio de indicador e falha de controle: cai sempre em Operacional,
         // dentro da lista fechada de categorias de risco (o Pilar do indicador
         // e outra taxonomia e nunca bateu com essa lista).
-        categoria: 'Operacional',
+        categorias: ['Operacional'],
         responsavel: indicador.responsavel || '',
         dataIdentificacao: new Date().toISOString().slice(0, 10),
         status: 'Identificado',
         origem: 'Indicador de Segurança',
         indicadorId: indicador.id,
         planoAcao: [],
-        kris: [],
+        // KRI ligado ao proprio indicador: o Monitoramento do risco mostra o
+        // resultado de cada lancamento sem ninguem redigitar.
+        kris: [{ indicadorId: indicador.id, indicador: indicador.nome, frequencia: 'Mensal' }],
       });
       riscoGerado = true;
       API.invalidate('getRiscos');
@@ -10898,7 +13509,7 @@ function _badgePlanoAcaoPopup(nivel, rotulo) {
 
 function _buildPlanoAcaoRiscoPage(r) {
   const score = _scoreDoRisco(r);
-  const faixaScore = score !== null ? _faixaScoreRisco(score) : null;
+  const faixaScore = score !== null ? RiscoConsolidado.faixaDoRisco(r) : null;
   const itens = Array.isArray(r.planoAcao) ? r.planoAcao : [];
   const tabelaPlanoAcao = itens.length
     ? `<table><thead><tr><th>Ação</th><th>Responsável</th><th>Onde</th><th>Quando</th><th>Quanto Custa</th><th>Status</th></tr></thead><tbody>${itens.map((it) => `
@@ -11088,7 +13699,8 @@ function _parsePCNVersoes(pcnSalvo) {
 // concatenacao apaga essa informacao), entao o <select> sem elas cai na
 // primeira opcao por padrao do proprio navegador, em vez de continuar
 // mostrando o texto ilegivel.
-const _VALORES_RISCO_VALIDOS = ['Alta', 'Média', 'Baixa', 'Crítico', 'Alto', 'Moderado', 'Baixo'];
+// Escala NIST 5x5 + rotulos antigos (PCN salvo antes de 15/10/2026).
+const _VALORES_RISCO_VALIDOS = ['Muito alta', 'Alta', 'Moderada', 'Baixa', 'Muito baixa', 'Muito alto', 'Alto', 'Moderado', 'Baixo', 'Muito baixo', 'Média', 'Crítico'];
 function _limparOpcoesRiscoInvalidas(html) {
   if (!html || html.indexOf('updateRiskColor') === -1) return html;
   const doc = document.implementation.createHTMLDocument('pcn-risco');
@@ -11239,7 +13851,32 @@ window.salvarEdicaoPcnBcp = async () => {
 async function _tokenParaPCN() {
   const user = firebase.auth().currentUser;
   if (!user) throw new Error('Sessão expirada. Entre novamente.');
-  return user.getIdToken();
+  // Forçado: sem isto vinha o token em cache, que podia já ter ~55 min de
+  // uso, e o popup expirava minutos depois de aberto.
+  return user.getIdToken(true);
+}
+// Os popups de DRP/PCN/Roteiro (abertos por esta janela, mesma origem) pedem
+// um token novo aqui na hora de salvar, em vez de depender do que receberam
+// ao abrir (vale 1h). O SDK renova sozinho quando o token está perto de vencer.
+window._tokenParaPopup = async (forcar) => {
+  const user = firebase.auth().currentUser;
+  if (!user) throw new Error('Sessão expirada. Entre novamente.');
+  return user.getIdToken(!!forcar);
+};
+// Trecho de script embutido nos popups: busca token novo na janela que abriu
+// o popup e guarda na variável de token daquele popup (os scripts *-live.js
+// leem a mesma variável). Sem a janela do sistema, fica o token da abertura.
+function _SCRIPT_TOKEN_POPUP(nomeVarToken) {
+  return `
+var MSG_SESSAO_PERDIDA = 'Não foi possível renovar a sessão (a aba do sistema foi fechada ou você saiu dela). Para não perder a edição: clique no documento, copie tudo (Ctrl+A, Ctrl+C), abra o documento de novo pelo sistema e cole por cima.';
+async function tokenDoSistema(forcar){
+  try{
+    if(window.opener && !window.opener.closed && typeof window.opener._tokenParaPopup === 'function'){
+      ${nomeVarToken} = await window.opener._tokenParaPopup(forcar);
+    }
+  }catch(e){}
+  return ${nomeVarToken};
+}`;
 }
 
 function _buildPCNPage(pcnContent, info, processId, versoes, idToken) {
@@ -11338,6 +13975,7 @@ var PCN_TOKEN = '` + (idToken || '') + `';
 var PCN_AREA = '${escScript(info.area || '')}';
 var PCN_PROCESSO = '${escScript(info.processo || '')}';
 var PCN_VERSOES = JSON.parse('${versoesJson}');
+${_SCRIPT_TOKEN_POPUP('PCN_TOKEN')}
 function buildNav(){
   var el = document.getElementById('pcn-editavel');
   var nav = document.getElementById('pcn-nav-list');
@@ -11388,12 +14026,13 @@ async function salvarVersaoPCN(){
   if(btn){btn.disabled=true;btn.textContent='⏳ Salvando...';}
   try{
     var payload = JSON.stringify({action:'salvarPCN',area:PCN_AREA,processo:PCN_PROCESSO,html:conteudo});
-    var res = await fetch(PCN_API_URL, {
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=UTF-8','Authorization':'Bearer '+PCN_TOKEN},
-      body: payload
-    });
-    if(res.status===401){throw new Error('A sessão desta aba expirou. Feche esta aba, volte ao sistema e abra o PCN de novo — o conteúdo editado não foi salvo.');}
+    var enviar = async function(forcar){
+      var tk = await tokenDoSistema(forcar);
+      return fetch(PCN_API_URL, {method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8','Authorization':'Bearer '+tk},body:payload});
+    };
+    var res = await enviar(false);
+    if(res.status===401) res = await enviar(true);
+    if(res.status===401){throw new Error(MSG_SESSAO_PERDIDA);}
     var text = await res.text();
     var data = JSON.parse(text);
     if(data.error) throw new Error(data.error);
@@ -11402,7 +14041,8 @@ async function salvarVersaoPCN(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
-<script src="https://bia-forte-2025.web.app/pcn-live.js?v=9"></script>
+<script src="https://bia-forte-2025.web.app/pcn-live.js?v=10"></script>
+<script src="https://bia-forte-2025.web.app/tabela-editavel.js?v=1"></script>
 </body>
 </html>`;
 }
@@ -11458,16 +14098,22 @@ window.gerarDRPDependencia = async () => {
     const htmlStart = drpContent.indexOf('<');
     if (htmlStart > 0) drpContent = drpContent.substring(htmlStart);
     drpContent = drpContent.replace(/^```html\s*/i, '').replace(/```\s*$/i, '').trim();
+    // Seções com cadeado na versão anterior já voltam preservadas pelo
+    // servidor (drpSecoes.js); repassar mantém o cadeado na versão nova.
+    const bloqueadas = Array.isArray(result.bloqueadas) ? result.bloqueadas : [];
 
     // Auto-salvar como primeira versão. drpSalvo local vira só metadado (sem
     // html) -- o conteúdo de verdade mora em drp_conteudo, do lado do
     // servidor, e só volta pelo obterDRP logo abaixo.
     const autor = window.USER_EMAIL || 'sistema';
     try {
-      await API.post('salvarDRP', { id: String(id), html: drpContent });
+      await API.post('salvarDRP', { id: String(id), html: drpContent, bloqueadas });
       API.invalidate('getDependencias');
+      // Espelha salvarDRP: numeração continua da última versão, histórico de 5.
       const metaAnterior = d && d.drpSalvo ? _parsePCNVersoes(d.drpSalvo) : [];
-      if (d) d.drpSalvo = JSON.stringify([...metaAnterior, { versao: metaAnterior.length + 1, data: new Date().toISOString(), autor }]);
+      const ultimaMeta = metaAnterior[metaAnterior.length - 1];
+      const proxima = (ultimaMeta && Number(ultimaMeta.versao)) ? Number(ultimaMeta.versao) + 1 : metaAnterior.length + 1;
+      if (d) d.drpSalvo = JSON.stringify([...metaAnterior, { versao: proxima, data: new Date().toISOString(), autor }].slice(-5));
       renderDrpResumo();
     } catch (saveErr) { console.warn('Auto-save DRP falhou:', saveErr); }
 
@@ -11479,14 +14125,16 @@ window.gerarDRPDependencia = async () => {
       versoes = (await API.get('obterDRP', { id })).versoes || [];
       if (!versoes.length) throw new Error('vazio');
     } catch (e) {
-      versoes = [{ versao: 1, data: new Date().toISOString(), autor, html: drpContent }];
+      versoes = [{ versao: 1, data: new Date().toISOString(), autor, html: drpContent, bloqueadas }];
     }
 
     const drpHtml = _buildDRPPage(drpContent, { nome: result.nome, categoria: result.categoria }, id, versoes, await _tokenParaPCN());
     win.document.open();
     win.document.write(drpHtml);
     win.document.close();
-    showToast('✅ DRP gerado e salvo!', '#2e7d32');
+    showToast(bloqueadas.length
+      ? `✅ DRP gerado e salvo! ${bloqueadas.length} ${bloqueadas.length === 1 ? 'seção ajustada manualmente foi preservada' : 'seções ajustadas manualmente foram preservadas'}.`
+      : '✅ DRP gerado e salvo!', '#2e7d32');
   } catch (err) {
     console.error('Erro DRP:', err);
     showToast('❌ ' + err.message, '#c62828');
@@ -11533,14 +14181,16 @@ function _buildDRPPage(drpContent, info, depId, versoes, idToken) {
   }
   drpContent = _limpo.html;
   const versoesJson = versoes ? JSON.stringify(versoes).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t').replace(/</g, '\\x3c') : '[]';
-  const versaoAtual = versoes ? versoes.length : 1;
+  // Numero da versao exibida (a ultima), nao o tamanho da lista: o historico
+  // guarda so as 5 ultimas (salvarDRP), entao a lista pode ser v16..v20.
+  const versaoAtual = versoes && versoes.length ? (Number(versoes[versoes.length - 1].versao) || versoes.length) : 1;
   const seletorVersoes = versoes && versoes.length > 1 ? `
     <div style="position:fixed;bottom:16px;right:20px;z-index:60;background:white;border:1.5px solid #e0e0e0;border-radius:8px;padding:8px 14px;box-shadow:0 2px 12px rgba(0,0,0,0.15);font-size:9pt;display:flex;align-items:center;gap:8px;">
       <span style="color:#666;">Versão:</span>
       <select id="drp-versao-select" onchange="trocarVersaoDRP(this.value)" style="padding:4px 8px;border:1px solid #ddd;border-radius:4px;font-size:9pt;">
-        ${versoes.map(function(v) { return '<option value="' + (v.versao-1) + '"' + (v.versao === versaoAtual ? ' selected' : '') + '>v' + v.versao + ' — ' + new Date(v.data).toLocaleDateString('pt-BR') + ' ' + new Date(v.data).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) + '</option>'; }).join('')}
+        ${versoes.map(function(v, i) { return '<option value="' + i + '"' + (i === versoes.length - 1 ? ' selected' : '') + '>v' + v.versao + ' — ' + new Date(v.data).toLocaleDateString('pt-BR') + ' ' + new Date(v.data).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}) + '</option>'; }).join('')}
       </select>
-      <span style="color:#999;font-size:8pt;">${versoes.length} versões</span>
+      <span style="color:#999;font-size:8pt;">últimas ${versoes.length} versões</span>
     </div>` : '';
 
   return `<!DOCTYPE html>
@@ -11582,7 +14232,9 @@ tr:nth-child(even){background:#fafbfc}
 .btn-action{position:fixed;top:12px;padding:10px 20px;background:#d60014;color:white;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600;z-index:60;box-shadow:0 2px 8px rgba(0,0,0,0.2)}
 .btn-action:hover{opacity:0.9}
 .footer{margin-top:40px;padding-top:16px;border-top:2px solid #fce8ea;font-size:8pt;color:#999;text-align:center}
-@media print{.sidebar,.toggle-btn,.btn-action,#drp-versao-select,.version-panel{display:none!important}.main{margin-left:0!important;padding:20px 30px}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.cover{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;margin:-20px -30px 20px;padding:30px}th{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}h2{page-break-after:avoid}table{page-break-inside:avoid}}
+.drp-lock-btn{margin-left:10px;padding:2px 10px;font-size:8pt;font-weight:600;border:1px solid #ccc;border-radius:12px;background:white;color:#999;cursor:pointer;vertical-align:middle}
+.drp-lock-btn.travada{border-color:#d60014;color:#d60014;background:#fce8ea}
+@media print{.sidebar,.toggle-btn,.btn-action,#drp-versao-select,.version-panel,.drp-lock-btn{display:none!important}.main{margin-left:0!important;padding:20px 30px}body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}.cover{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;margin:-20px -30px 20px;padding:30px}th{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}h2{page-break-after:avoid}table{page-break-inside:avoid}}
 </style>
 </head>
 <body>
@@ -11615,6 +14267,74 @@ var DRP_DEP_CATEGORIA = '${escScript(info.categoria || '')}';
 var DRP_API_URL = '` + APP_API_URL + `';
 var DRP_TOKEN = '` + (idToken || '') + `';
 var DRP_VERSOES = JSON.parse('${versoesJson}');
+${_SCRIPT_TOKEN_POPUP('DRP_TOKEN')}
+// Cadeado por secao (DECISAO 09/10/2026): chave da secao -> travada. Secao
+// travada volta identica quando o DRP e gerado de novo (drpSecoes.js).
+var DRP_BLOQUEADAS = {};
+function carregarBloqueadas(versao){
+  DRP_BLOQUEADAS = {};
+  ((versao && versao.bloqueadas) || []).forEach(function(k){ DRP_BLOQUEADAS[String(k)] = true; });
+}
+carregarBloqueadas(DRP_VERSOES[DRP_VERSOES.length-1]);
+function textoDoHeading(h){
+  var c=h.cloneNode(true);
+  c.querySelectorAll('button').forEach(function(b){b.remove();});
+  return (c.textContent||'').trim();
+}
+// Mesmo criterio de chaveDaSecao (functions/drpSecoes.js): numero do titulo,
+// ou o titulo normalizado quando nao ha numero.
+function chaveDoH2(h){
+  var t=textoDoHeading(h);
+  var m=t.match(/^\\s*(\\d+)/);
+  if(m) return m[1];
+  return t.normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/\\s+/g,' ').trim();
+}
+function pintarCadeados(){
+  var el=document.getElementById('drp-editavel');
+  if(!el) return;
+  el.querySelectorAll('h2').forEach(function(h){
+    var b=h.querySelector('.drp-lock-btn');
+    if(!b){
+      b=document.createElement('button');
+      b.type='button';
+      b.setAttribute('contenteditable','false');
+      b.onclick=function(e){
+        e.preventDefault();e.stopPropagation();
+        var k=chaveDoH2(h);
+        if(DRP_BLOQUEADAS[k]) delete DRP_BLOQUEADAS[k]; else DRP_BLOQUEADAS[k]=true;
+        pintarCadeados();
+      };
+      h.appendChild(b);
+    }
+    var travada=!!DRP_BLOQUEADAS[chaveDoH2(h)];
+    b.className='drp-lock-btn'+(travada?' travada':'');
+    b.textContent=travada?'🔒 Ajustada manualmente':'🔓';
+    b.title=travada
+      ?'A IA não reescreve esta seção ao gerar o DRP de novo. Clique para liberar.'
+      :'A IA pode reescrever esta seção ao gerar o DRP de novo. Clique para manter como está.';
+  });
+}
+// Secao a que um no pertence: o ultimo h2 que vem antes dele no documento
+// (funciona mesmo se a IA embrulhar tudo num <div>).
+function secaoDoNo(n){
+  var hs=document.getElementById('drp-editavel').querySelectorAll('h2');
+  var achado=null;
+  for(var i=0;i<hs.length;i++){
+    if(hs[i]===n||(hs[i].compareDocumentPosition(n)&Node.DOCUMENT_POSITION_FOLLOWING)) achado=hs[i];
+    else break;
+  }
+  return achado;
+}
+// Editar uma secao ja trava a secao -- ninguem precisa lembrar do cadeado.
+document.getElementById('drp-editavel').addEventListener('input',function(){
+  var sel=window.getSelection();
+  if(!sel||!sel.rangeCount) return;
+  var h=secaoDoNo(sel.getRangeAt(0).startContainer);
+  if(!h) return;
+  var k=chaveDoH2(h);
+  if(!DRP_BLOQUEADAS[k]){DRP_BLOQUEADAS[k]=true;pintarCadeados();}
+});
+pintarCadeados();
 function buildDRPNav(){
   var el = document.getElementById('drp-editavel');
   var nav = document.getElementById('drp-nav-list');
@@ -11622,7 +14342,7 @@ function buildDRPNav(){
   var hs = el.querySelectorAll('h1,h2,h3');
   if(!hs.length){document.getElementById('drp-sidebar').style.display='none';document.getElementById('drp-toggle').style.display='none';return;}
   var html='';
-  for(var i=0;i<hs.length;i++){var h=hs[i];var sid='s'+i;h.id=sid;var cls=h.tagName==='H1'?'h1-link':h.tagName==='H2'?'h2-link':'h3-link';html+='<li style="'+(h.tagName==='H3'?'padding-left:12px;':'')+'"><a href="#'+sid+'" class="'+cls+'">'+h.textContent.trim()+'</a></li>';}
+  for(var i=0;i<hs.length;i++){var h=hs[i];var sid='s'+i;h.id=sid;var cls=h.tagName==='H1'?'h1-link':h.tagName==='H2'?'h2-link':'h3-link';html+='<li style="'+(h.tagName==='H3'?'padding-left:12px;':'')+'"><a href="#'+sid+'" class="'+cls+'">'+textoDoHeading(h)+'</a></li>';}
   nav.innerHTML=html;
 }
 setTimeout(buildDRPNav, 300);
@@ -11634,16 +14354,26 @@ function toggleDRPSidebar(){
 }
 function trocarVersaoDRP(idx){
   var versao = DRP_VERSOES[Number(idx)];
-  if(versao && versao.html){document.getElementById('drp-editavel').innerHTML = versao.html;setTimeout(buildDRPNav,100);}
+  if(versao && versao.html){document.getElementById('drp-editavel').innerHTML = versao.html;carregarBloqueadas(versao);pintarCadeados();setTimeout(buildDRPNav,100);}
 }
 async function salvarVersaoDRP(){
-  var conteudo=document.getElementById('drp-editavel').innerHTML;
+  var editavel=document.getElementById('drp-editavel');
+  var clone=editavel.cloneNode(true);
+  clone.querySelectorAll('.drp-lock-btn').forEach(function(b){b.remove();});
+  var conteudo=clone.innerHTML;
+  var bloqueadas=[];
+  editavel.querySelectorAll('h2').forEach(function(h){var k=chaveDoH2(h);if(DRP_BLOQUEADAS[k]&&bloqueadas.indexOf(k)===-1)bloqueadas.push(k);});
   var btn=document.querySelector('button[onclick="salvarVersaoDRP()"]');
   if(btn){btn.disabled=true;btn.textContent='⏳ Salvando...';}
   try{
-    var payload = JSON.stringify({action:'salvarDRP',id:DRP_DEP_ID,html:conteudo});
-    var res = await fetch(DRP_API_URL, {method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8','Authorization':'Bearer '+DRP_TOKEN},body:payload});
-    if(res.status===401){throw new Error('A sessão desta aba expirou. Feche esta aba, volte ao sistema e abra o DRP de novo — o conteúdo editado não foi salvo.');}
+    var payload = JSON.stringify({action:'salvarDRP',id:DRP_DEP_ID,html:conteudo,bloqueadas:bloqueadas});
+    var enviar = async function(forcar){
+      var tk = await tokenDoSistema(forcar);
+      return fetch(DRP_API_URL, {method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8','Authorization':'Bearer '+tk},body:payload});
+    };
+    var res = await enviar(false);
+    if(res.status===401) res = await enviar(true);
+    if(res.status===401){throw new Error(MSG_SESSAO_PERDIDA);}
     var data = JSON.parse(await res.text());
     if(data.error) throw new Error(data.error);
     alert('✅ Versão ' + (data.versao || '') + ' salva com sucesso! (' + (data.totalVersoes || '') + ' versões no total)');
@@ -11651,7 +14381,8 @@ async function salvarVersaoDRP(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
-<script src="https://bia-forte-2025.web.app/drp-live.js?v=1"></script>
+<script src="https://bia-forte-2025.web.app/drp-live.js?v=2"></script>
+<script src="https://bia-forte-2025.web.app/tabela-editavel.js?v=1"></script>
 </body>
 </html>`;
 }
@@ -12056,8 +14787,8 @@ function renderDRPLista(lista, tipo) {
           <div style="font-size:0.78em;color:#999;margin-top:2px;">${sub}</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
+          ${temDRP ? `<button onclick="event.stopPropagation();abrirDRPDireto('${d.id}')" class="btn btn-ghost" style="padding:5px 10px;font-size:0.82em;" title="Abrir a última versão do DRP">📄 Abrir DRP</button>` : ''}
           <button onclick="event.stopPropagation();gerenciarDrpDependencia('${d.id}')" class="btn btn-ghost" style="padding:5px 10px;font-size:0.82em;" title="Gerenciar Parâmetros DRP">⚙️ Gerenciar</button>
-          ${temDRP ? `<button onclick="event.stopPropagation();abrirDRPDireto('${d.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Abrir DRP">📄</button>` : ''}
           ${temDRP ? `<button onclick="event.stopPropagation();copiarLinkDrpDireto('${d.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Copiar link direto">🔗</button>` : ''}
           ${(temDRP && podeExcluir) ? `<button onclick="event.stopPropagation();excluirDRPDaLista('${d.id}','${escJs(d.nome)}')" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#bbb'" title="Excluir DRP">🗑️</button>` : ''}
         </div>
@@ -12199,7 +14930,9 @@ async function fornecedoresCriterios() {
 }
 
 function renderLimiarFornecedor() {
-  const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
+  // O limiar mora em config_regua, que so o Admin grava (regua = atividade propria
+  // do Admin). Quem so gerencia fornecedores (SI, Operador) ve o valor, sem editar.
+  const isAdmin = Perfis.podeEditarRegua(window.USER_PERFIS);
   const box = document.getElementById('fornLimiarBox');
   if (!box) return;
   box.innerHTML = `
@@ -12782,6 +15515,7 @@ function _htmlDrawerCriticidadePergunta() {
         </div>
       </div>
       <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="_fecharDrawerCriticidadePerguntaSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerCriticidadePergunta()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarCriticidadePergunta" onclick="salvarCriticidadePergunta()">Salvar</button>
       </div>
@@ -12865,36 +15599,69 @@ window.abrirDrawerCriticidadePergunta = (id) => {
   renderCriticidadePerguntaOpcoes();
   document.getElementById('drawerCriticidadePergunta').classList.add('open');
   document.getElementById('drawerOverlayCriticidadePergunta').classList.add('open');
+  _edCriticidadePergunta.marcar();
 };
 
-window.fecharDrawerCriticidadePergunta = () => {
+function _fecharDrawerCriticidadePerguntaSemSalvar() {
   document.getElementById('drawerCriticidadePergunta').classList.remove('open');
   document.getElementById('drawerOverlayCriticidadePergunta').classList.remove('open');
+}
+// "Fechar" salva antes de fechar (DECISAO 08/10/2026).
+window.fecharDrawerCriticidadePergunta = async () => {
+  if (!_edCriticidadePergunta.sujo()) return _fecharDrawerCriticidadePerguntaSemSalvar();
+  const ok = await salvarCriticidadePergunta();
+  if (ok) _fecharDrawerCriticidadePerguntaSemSalvar();
 };
 
-window.salvarCriticidadePergunta = async () => {
-  const texto = document.getElementById('critPergTexto').value.trim();
-  if (!texto) return showToast('Informe o texto da pergunta.', '#e65100');
-  const opcoes = window._criticidadePerguntaOpcoes || [];
-  if (!opcoes.length) return showToast('Cadastre ao menos uma opção de resposta.', '#e65100');
+const _edCriticidadePergunta = criarRastreadorEdicao(() => _coletarFormularioCriticidadePergunta());
 
-  await comBotaoCarregando('btnSalvarCriticidadePergunta', async () => {
+function _coletarFormularioCriticidadePergunta() {
+  return {
+    id: document.getElementById('critPergId').value || null,
+    texto: document.getElementById('critPergTexto').value.trim(),
+    ativa: document.getElementById('critPergAtiva').checked,
+    opcoes: window._criticidadePerguntaOpcoes || [],
+  };
+}
+
+window.salvarCriticidadePergunta = async () => {
+  const dados = _coletarFormularioCriticidadePergunta();
+  if (!dados.texto) return showToast('Informe o texto da pergunta.', '#e65100');
+  if (!dados.opcoes.length) return showToast('Cadastre ao menos uma opção de resposta.', '#e65100');
+
+  return await comBotaoCarregando('btnSalvarCriticidadePergunta', async () => {
     try {
-      const result = await API.salvarCriticidadeFornecedorPergunta({
-        id: document.getElementById('critPergId').value || null,
-        texto,
-        ativa: document.getElementById('critPergAtiva').checked,
-        opcoes,
-      });
-      if (!document.getElementById('critPergId').value) {
+      const result = await API.salvarCriticidadeFornecedorPergunta(dados);
+      _edCriticidadePergunta.marcar({ ...dados, id: dados.id || result.id });
+      if (!dados.id) {
         document.getElementById('critPergId').value = result.id;
         document.getElementById('criticidadePerguntaDrawerTitulo').textContent = 'Editar Pergunta';
       }
-      criticidadeFornecedorPerguntasData = await API.getCriticidadeFornecedorPerguntas();
+      // Redesenha na hora com o que acabou de ser gravado; a releitura do
+      // catálogo (que normaliza ordem/opções) roda em segundo plano, em vez de
+      // o Fechar esperar mais uma ida ao servidor.
+      const existente = criticidadeFornecedorPerguntasData.find((x) => x.id === result.id);
+      const item = {
+        ...(existente || {}),
+        id: result.id,
+        texto: dados.texto,
+        ativa: dados.ativa,
+        ordem: existente ? existente.ordem : Date.now(),
+        opcoes: dados.opcoes.map((o) => ({ rotulo: String(o.rotulo).trim(), score: Number(o.score) })),
+        atualizadoEm: new Date().toISOString(),
+      };
+      if (existente) criticidadeFornecedorPerguntasData = criticidadeFornecedorPerguntasData.map((x) => (x.id === result.id ? item : x));
+      else criticidadeFornecedorPerguntasData = [...criticidadeFornecedorPerguntasData, item];
       renderizarCriticidadeFornecedorPerguntas();
+      API.getCriticidadeFornecedorPerguntas().then((lista) => {
+        criticidadeFornecedorPerguntasData = lista;
+        renderizarCriticidadeFornecedorPerguntas();
+      }).catch(() => { /* mantém o que já está na tela */ });
       showToast('✅ Salvo!', '#2e7d32');
+      return true;
     } catch (e) {
       showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      return false;
     }
   });
 };
@@ -13449,6 +16216,184 @@ window.salvarAvaliacaoFornecedor = async () => {
  */
 
 // ============================================================
+// PÁGINA: PRODUTOS DE SOFTWARE (Administração)
+//
+// Catálogo-base dos produtos da empresa (Fortes Ponto, Fortes RH...). A Pessoa
+// aponta para ele por ID (Tech Lead / Team Lead) -- renomear não orfaniza
+// ninguém. Mesmo molde de Categorias de Fornecedor: desativar em vez de
+// excluir; excluir avisa quantas pessoas apontam para o produto.
+// ============================================================
+let produtosSoftwareData = [];
+let produtosSoftwareOrdenacao = criarOrdenacao('nome', 'asc');
+
+async function produtosSoftware() {
+  const isAdmin = Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS);
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Produtos de Software</h2><p class="page-sub">Os produtos da empresa — usados para indicar quem é Tech Lead e Team Lead de cada um</p></div>
+      <button class="btn btn-primary" onclick="abrirModalProdutoSoftware()" id="btnNovoProdutoSoftware" style="display:none;">+ Novo Produto</button>
+    </div>
+    <div style="margin-bottom:16px;">
+      <input type="text" id="buscaProdutoSoftware" placeholder="🔍 Buscar produto..." oninput="renderizarProdutosSoftware()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;">
+    </div>
+    <div class="loading" id="loadingProdutosSoftware">⏳ Carregando...</div>
+    <div id="listaProdutosSoftware"></div>
+    <div class="modal-overlay" id="modalProdutoSoftware"><div class="modal" onclick="event.stopPropagation()">
+      <h3 id="modalProdutoSoftwareTitulo">Novo Produto</h3>
+      <input type="hidden" id="prodSoftId">
+      <label>Produto</label>
+      <input type="text" id="prodSoftNome" placeholder="Ex: Fortes Ponto">
+      <label class="check-label"><input type="checkbox" id="prodSoftAtivo" checked> Produto ativo</label>
+      <span style="font-size:0.75em;color:#888;display:block;">Desativar tira o produto das listas para novas associações. Quem já está associado continua vendo o produto marcado como inativo.</span>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalProdutoSoftware()">Cancelar</button>
+        <button class="btn btn-primary" id="btnSalvarProdutoSoftware" onclick="salvarProdutoSoftware()">Salvar</button>
+      </div>
+    </div></div>`;
+
+  document.getElementById('btnNovoProdutoSoftware').style.display = isAdmin ? 'inline-block' : 'none';
+
+  try {
+    const [produtos, deps] = await Promise.all([
+      API.getProdutosSoftware(),
+      // Só para contar quantas pessoas usam cada produto; sem isso a tela abre igual.
+      API.getDependencias().catch(() => null),
+    ]);
+    produtosSoftwareData = produtos;
+    if (deps) pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+  } catch (e) {
+    console.error('Produtos de software: falha ao carregar', e);
+    document.getElementById('loadingProdutosSoftware').style.display = 'none';
+    document.getElementById('listaProdutosSoftware').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
+      Não foi possível carregar os produtos.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="produtosSoftware()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+  document.getElementById('loadingProdutosSoftware').style.display = 'none';
+  renderizarProdutosSoftware();
+}
+
+window.ordenarProdutosSoftware = (coluna) => { produtosSoftwareOrdenacao.ordenar(coluna); renderizarProdutosSoftware(); };
+
+/** Pessoas que lideram o produto, por função: { techLead: [Pessoa], teamLead: [Pessoa] }. */
+function _lideresDoProduto(produtoId) {
+  const id = String(produtoId);
+  const tem = (lista) => Array.isArray(lista) && lista.map(String).includes(id);
+  return {
+    techLead: (pessoasData || []).filter((p) => p.techLead && tem(p.techLeadProdutos)),
+    teamLead: (pessoasData || []).filter((p) => p.teamLead && tem(p.teamLeadProdutos)),
+  };
+}
+
+function renderizarProdutosSoftware() {
+  const isAdmin = Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS);
+  const lista = document.getElementById('listaProdutosSoftware');
+  if (!lista) return;
+
+  if (!produtosSoftwareData.length) {
+    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
+      Nenhum produto cadastrado ainda.<br>
+      <span style="font-size:0.9em;">Sem produtos, a Pessoa não tem o que associar como Tech Lead ou Team Lead.</span></div>`;
+    return;
+  }
+
+  const busca = ((document.getElementById('buscaProdutoSoftware') || {}).value || '').trim().toLowerCase();
+  let data = produtosSoftwareData.filter((p) => !busca || (p.nome || '').toLowerCase().includes(busca));
+  data = produtosSoftwareOrdenacao.aplicar(data, {
+    status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
+  });
+  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarProdutosSoftware('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-prodsoft-${coluna}"></span></th>`;
+  const nomes = (pessoas) => pessoas.length ? pessoas.map((p) => esc(p.nome)).join(', ') : '<span style="color:#bbb;">–</span>';
+
+  lista.innerHTML = `
+    <div class="data-table">
+      <table>
+        <thead>
+          <tr>
+            ${th('nome', 'Produto', 'width:28%;')}
+            <th style="width:26%;">Tech Lead</th>
+            <th style="width:26%;">Team Lead</th>
+            ${th('status', 'Status', 'width:10%;text-align:center;')}
+            <th style="width:10%;text-align:center;">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${data.length ? data.map((p) => {
+            const l = _lideresDoProduto(p.id);
+            return `
+            <tr style="cursor:pointer;${p.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalProdutoSoftware('${esc(p.id)}')">
+              <td style="font-weight:600;">${esc(p.nome)}</td>
+              <td style="font-size:0.88em;color:#444;">${nomes(l.techLead)}</td>
+              <td style="font-size:0.88em;color:#444;">${nomes(l.teamLead)}</td>
+              <td style="text-align:center;">${p.ativo
+                ? '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#e8f5e9;color:#2e7d32;">Ativo</span>'
+                : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativo</span>'}</td>
+              <td style="text-align:center;" onclick="event.stopPropagation();">
+                ${isAdmin ? `
+                  <button class="btn-icon" onclick="abrirModalProdutoSoftware('${esc(p.id)}')" title="Editar">✏️</button>
+                  <button class="btn-icon" onclick="excluirProdutoSoftware('${esc(p.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
+              </td>
+            </tr>`;
+          }).join('') : '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">Nenhum produto encontrado.</td></tr>'}
+        </tbody>
+      </table>
+    </div>`;
+
+  produtosSoftwareOrdenacao.atualizarSetas('sort-prodsoft-', ['nome', 'status']);
+}
+
+window.abrirModalProdutoSoftware = (id) => {
+  const p = id ? produtosSoftwareData.find((x) => String(x.id) === String(id)) : null;
+  document.getElementById('modalProdutoSoftwareTitulo').textContent = p ? 'Editar Produto' : 'Novo Produto';
+  document.getElementById('prodSoftId').value = p ? p.id : '';
+  document.getElementById('prodSoftNome').value = p ? p.nome : '';
+  document.getElementById('prodSoftAtivo').checked = p ? p.ativo : true;
+  document.getElementById('modalProdutoSoftware').classList.add('open');
+};
+
+window.fecharModalProdutoSoftware = () => document.getElementById('modalProdutoSoftware').classList.remove('open');
+
+window.salvarProdutoSoftware = async () => {
+  const nome = document.getElementById('prodSoftNome').value.trim();
+  if (!nome) return showToast('Informe o nome do produto.', '#e65100');
+
+  await comBotaoCarregando('btnSalvarProdutoSoftware', async () => {
+    try {
+      await API.salvarProdutoSoftware({
+        id: document.getElementById('prodSoftId').value || null,
+        nome,
+        ativo: document.getElementById('prodSoftAtivo').checked,
+      });
+      fecharModalProdutoSoftware();
+      produtosSoftwareData = await API.getProdutosSoftware();
+      renderizarProdutosSoftware();
+      showToast('✅ Salvo!', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
+};
+
+window.excluirProdutoSoftware = async (id) => {
+  const p = produtosSoftwareData.find((x) => String(x.id) === String(id));
+  const l = _lideresDoProduto(id);
+  const nPessoas = new Set([...l.techLead, ...l.teamLead].map((x) => x.id)).size;
+  const uso = nPessoas
+    ? `\n\n⚠️ ${nPessoas} pessoa${nPessoas > 1 ? 's estão associadas' : ' está associada'} a este produto como Tech Lead/Team Lead; a associação continua guardada, mas aparece como "(removido)" até alguém reescolher.`
+    : '';
+  if (!confirm(`Excluir o produto "${p ? p.nome : id}"?${uso}\n\nSe a ideia é só parar de oferecê-lo em novas associações, é melhor desativar em vez de excluir.`)) return;
+  try {
+    await API.excluirProdutoSoftware(id);
+    produtosSoftwareData = await API.getProdutosSoftware();
+    renderizarProdutosSoftware();
+    showToast('✅ Excluído.', '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ============================================================
 // PÁGINA: PERFIS DE ACESSO
 //
 // Antes desta tela, cada pessoa nova era um documento digitado a mao no console
@@ -13805,6 +16750,9 @@ window.excluirPerfilAcesso = async (email) => {
 // ============================================================
 
 const CATEGORIA_FORNECEDOR_PADRAO = 'Fornecedores';
+// Canais de suporte do fornecedor (aba Dados) -- listas fechadas.
+const TIPOS_CANAL_SUPORTE = ['Telefone/0800', 'E-mail', 'Portal de chamados', 'WhatsApp', 'Chat', 'Gerente de contas', 'Outro'];
+const NIVEIS_CANAL_SUPORTE = ['N1', 'N2', 'N3', 'Emergência'];
 
 /**
  * Drawer unificado de fornecedor: clique na linha ou "✏️" abrem este mesmo
@@ -13865,12 +16813,12 @@ function _htmlDrawerFornecedorCadastro() {
         <input type="text" id="fornCadEndereco" placeholder="Cidade ou endereço" style="${inp}">
       </div>
 
-      <label style="${lbl}">Pessoas associadas</label>
+      <label style="${lbl}">Contatos associados</label>
       <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Uma empresa pode ter mais de um contato.</span>
       <div id="pessoasFornecedorTabela"></div>
       <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;margin-bottom:16px;">
         <div id="pessoaFornEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
-          ✎ Editando pessoa — <a href="#" onclick="cancelarEdicaoPessoaFornecedor();return false;" style="color:#1565c0;">cancelar edição</a>
+          ✎ Editando contato — <a href="#" onclick="cancelarEdicaoPessoaFornecedor();return false;" style="color:#1565c0;">cancelar edição</a>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:8px;">
           <input type="text" id="pessoaFornNome" placeholder="Nome da pessoa" style="${inp}">
@@ -13880,6 +16828,34 @@ function _htmlDrawerFornecedorCadastro() {
           <input type="email" id="pessoaFornEmail" placeholder="E-mail" style="${inp}">
           <input type="text" id="pessoaFornTelefone" placeholder="Telefone" maxlength="15" oninput="this.value=formatarTelefoneBR(this.value)" style="${inp}">
           <button class="btn btn-ghost" id="btnAdicionarPessoaForn" onclick="adicionarPessoaFornecedor()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+        </div>
+      </div>
+
+      <label style="${lbl}">Canais de suporte</label>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">0800, portal de chamados, e-mail de suporte, plantão... Entram nos contatos de contingência do DRP.</span>
+      <div id="canaisSuporteFornecedorTabela"></div>
+      <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;margin-bottom:16px;">
+        <div id="canalFornEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
+          ✎ Editando canal — <a href="#" onclick="cancelarEdicaoCanalFornecedor();return false;" style="color:#1565c0;">cancelar edição</a>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-bottom:8px;">
+          <select id="canalFornTipo" style="${inp}">
+            <option value="">Tipo do canal...</option>
+            ${TIPOS_CANAL_SUPORTE.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+          </select>
+          <input type="text" id="canalFornContato" placeholder="Número, e-mail ou link do portal" style="${inp}">
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr 1fr;gap:10px;margin-bottom:8px;">
+          <input type="text" id="canalFornHorario" placeholder="Horário (ex: 24x7, comercial 8h–18h)" style="${inp}">
+          <select id="canalFornNivel" style="${inp}">
+            <option value="">Nível...</option>
+            ${NIVEIS_CANAL_SUPORTE.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}
+          </select>
+          <input type="text" id="canalFornSla" placeholder="SLA (ex: 4h)" style="${inp}">
+        </div>
+        <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;">
+          <input type="text" id="canalFornObservacao" placeholder="Observação (nº do contrato... credenciais ficam no cofre de senhas)" style="${inp}">
+          <button class="btn btn-ghost" id="btnAdicionarCanalForn" onclick="adicionarCanalFornecedor()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
         </div>
       </div>
 
@@ -13932,6 +16908,7 @@ function _htmlDrawerFornecedorCadastro() {
 
       </div>
       <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="_fecharDrawerFornecedorCadastroSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerFornecedorCadastro()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarFornecedorCadastro" onclick="salvarFornecedorCadastro()">Salvar</button>
         <button class="btn btn-primary" id="btnSalvarAvaliacaoForn" onclick="salvarAvaliacaoFornecedor()" style="display:none;">Salvar avaliação</button>
@@ -13973,7 +16950,7 @@ function renderPessoasFornecedor() {
   const container = document.getElementById('pessoasFornecedorTabela');
   if (!container) return;
   const itens = window._fornecedorPessoas || [];
-  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhuma pessoa cadastrada.</p>'; return; }
+  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum contato cadastrado.</p>'; return; }
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((p, i) => `<tr>
         <td style="font-weight:600;color:#222;">${esc(p.nome)}</td>
@@ -14040,6 +17017,93 @@ window.removerPessoaFornecedor = (idx) => {
   window._fornecedorPessoas.splice(idx, 1);
   if (window._pessoaFornEditandoIndex === idx) window.cancelarEdicaoPessoaFornecedor();
   renderPessoasFornecedor();
+};
+
+// ============================================================
+// Canais de suporte -- mesmo padrão de "Contatos associados" logo acima.
+// Item: {tipo, contato, horario, nivel, sla, observacao}.
+// ============================================================
+window._fornecedorCanais = [];
+window._canalFornEditandoIndex = null;
+const _CAMPOS_CANAL_FORN = { tipo: 'canalFornTipo', contato: 'canalFornContato', horario: 'canalFornHorario', nivel: 'canalFornNivel', sla: 'canalFornSla', observacao: 'canalFornObservacao' };
+
+function renderCanaisSuporteFornecedor() {
+  const container = document.getElementById('canaisSuporteFornecedorTabela');
+  if (!container) return;
+  const itens = window._fornecedorCanais || [];
+  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum canal de suporte cadastrado.</p>'; return; }
+  const podeMexer = window._fornPodeMexer !== false;
+  container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
+    itens.map((c, i) => {
+      // Só http(s) vira link -- qualquer outro texto (telefone, e-mail) fica como texto.
+      const contato = /^https?:\/\//i.test(c.contato || '')
+        ? `<a href="${esc(c.contato)}" target="_blank" rel="noopener" style="color:#1565c0;">${esc(c.contato)}</a>`
+        : esc(c.contato || '');
+      const detalhes = [c.horario, c.sla ? 'SLA ' + c.sla : '', c.observacao].filter(Boolean).map(esc).join(' · ');
+      return `<tr>
+        <td>
+          <div><span style="font-weight:600;color:#222;">${esc(c.tipo)}${c.nivel ? ' · ' + esc(c.nivel) : ''}</span> <span style="font-size:0.88em;color:#333;margin-left:6px;">${contato}</span></div>
+          ${detalhes ? `<div style="font-size:0.8em;color:#888;margin-top:2px;">${detalhes}</div>` : ''}
+        </td>
+        <td style="text-align:center;white-space:nowrap;width:1%;">${podeMexer ? `
+          <button class="btn-icon" onclick="editarCanalFornecedor(${i})" title="Editar">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="removerCanalFornecedor(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('') + `</tbody></table>`;
+}
+
+function _limparFormularioCanalFornecedor() {
+  Object.values(_CAMPOS_CANAL_FORN).forEach((id) => { document.getElementById(id).value = ''; });
+}
+
+window.adicionarCanalFornecedor = () => {
+  const item = {};
+  Object.entries(_CAMPOS_CANAL_FORN).forEach(([campo, id]) => { item[campo] = document.getElementById(id).value.trim(); });
+  if (!item.tipo) return showToast('Escolha o tipo do canal.', '#e65100');
+  if (!item.contato) return showToast('Informe o contato do canal (número, e-mail ou link).', '#e65100');
+  window._fornecedorCanais = window._fornecedorCanais || [];
+  if (window._canalFornEditandoIndex != null) {
+    window._fornecedorCanais[window._canalFornEditandoIndex] = item;
+    window._canalFornEditandoIndex = null;
+    document.getElementById('canalFornEdicaoAviso').style.display = 'none';
+    document.getElementById('btnAdicionarCanalForn').textContent = '+ Adicionar';
+  } else {
+    window._fornecedorCanais.push(item);
+  }
+  _limparFormularioCanalFornecedor();
+  renderCanaisSuporteFornecedor();
+};
+
+window.editarCanalFornecedor = (idx) => {
+  const c = window._fornecedorCanais[idx];
+  if (!c) return;
+  window._canalFornEditandoIndex = idx;
+  // Tipo/nível fora da lista fechada (dado antigo) vira opção extra, em vez
+  // de o select abrir vazio e o próximo "Salvar alteração" apagar o valor.
+  [['canalFornTipo', c.tipo], ['canalFornNivel', c.nivel]].forEach(([id, valor]) => {
+    const sel = document.getElementById(id);
+    if (valor && !Array.from(sel.options).some((o) => o.value === valor)) sel.add(new Option(valor, valor));
+  });
+  Object.entries(_CAMPOS_CANAL_FORN).forEach(([campo, id]) => { document.getElementById(id).value = c[campo] || ''; });
+  document.getElementById('canalFornEdicaoAviso').style.display = 'block';
+  document.getElementById('btnAdicionarCanalForn').textContent = 'Salvar alteração';
+};
+
+window.cancelarEdicaoCanalFornecedor = () => {
+  window._canalFornEditandoIndex = null;
+  document.getElementById('canalFornEdicaoAviso').style.display = 'none';
+  document.getElementById('btnAdicionarCanalForn').textContent = '+ Adicionar';
+  _limparFormularioCanalFornecedor();
+};
+
+window.removerCanalFornecedor = (idx) => {
+  window._fornecedorCanais.splice(idx, 1);
+  if (window._canalFornEditandoIndex === idx) window.cancelarEdicaoCanalFornecedor();
+  else if (window._canalFornEditandoIndex != null && window._canalFornEditandoIndex > idx) window._canalFornEditandoIndex--;
+  renderCanaisSuporteFornecedor();
 };
 
 // ============================================================
@@ -14215,6 +17279,8 @@ window.abrirDrawerFornecedorCadastro = (id, abaInicial) => {
   window._fornecedorPessoas = f && Array.isArray(f.pessoas) ? [...f.pessoas] : [];
   window.cancelarEdicaoPessoaFornecedor();
   renderPessoasFornecedor();
+  window._fornecedorCanais = f && Array.isArray(f.canaisSuporte) ? f.canaisSuporte.map((c) => ({ ...c })) : [];
+  window.cancelarEdicaoCanalFornecedor();
   // Sem gate de perfil aqui, clicar numa linha da grade (qualquer usuario,
   // ver renderizarFornecedores) abriria um drawer totalmente editavel pra
   // quem so pode ver -- mesmo tratamento que o drawer de Risco ja da
@@ -14225,11 +17291,15 @@ window.abrirDrawerFornecedorCadastro = (id, abaInicial) => {
   // Gating de perfil: desabilita campos de Dados E das abas de avaliação.
   document.querySelectorAll('#drawerFornecedorCadastro input, #drawerFornecedorCadastro select, #drawerFornecedorCadastro textarea').forEach((el) => { el.disabled = !podeMexer; });
   document.getElementById('btnAdicionarPessoaForn').style.display = podeMexer ? 'inline-block' : 'none';
+  document.getElementById('btnAdicionarCanalForn').style.display = podeMexer ? 'inline-block' : 'none';
+  // Depois de _fornPodeMexer: a lista só mostra editar/remover pra quem pode mexer.
+  renderCanaisSuporteFornecedor();
   // A visibilidade dos dois botões de salvar é resolvida por trocarAbaFornecedor
   // (depende da aba e de _fornPodeMexer/_fornTemCriterios).
   trocarAbaFornecedor(abaInicial || 'dados');
   document.getElementById('drawerFornecedorCadastro').classList.add('open');
   document.getElementById('drawerOverlayFornecedorCadastro').classList.add('open');
+  _edFornecedor.marcar();
 };
 
 /**
@@ -14322,44 +17392,64 @@ function _popularAvaliacaoFornecedor(f) {
   atualizarPreviewCriticidadeFornecedor();
 }
 
-window.fecharDrawerFornecedorCadastro = () => {
+function _fecharDrawerFornecedorCadastroSemSalvar() {
   document.getElementById('drawerFornecedorCadastro').classList.remove('open');
   document.getElementById('drawerOverlayFornecedorCadastro').classList.remove('open');
+}
+// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- salva o cadastro
+// (aba Dados), nao a avaliacao de Criticidade/Conformidade, que tem seu
+// proprio botao "Salvar avaliação" e continua uma acao a parte.
+window.fecharDrawerFornecedorCadastro = async () => {
+  if (!_edFornecedor.sujo()) return _fecharDrawerFornecedorCadastroSemSalvar();
+  const ok = await salvarFornecedorCadastro();
+  if (ok) _fecharDrawerFornecedorCadastroSemSalvar();
 };
 
-window.salvarFornecedorCadastro = async () => {
-  const nome = document.getElementById('fornCadNome').value.trim();
-  if (!nome) return showToast('Informe a razão social do fornecedor.', '#e65100');
-  const id = document.getElementById('fornCadId').value || null;
+const _edFornecedor = criarRastreadorEdicao(() => _coletarFormularioFornecedor());
 
-  await comBotaoCarregando('btnSalvarFornecedorCadastro', async () => {
+// Só a aba Dados -- a avaliação (Criticidade/Conformidade) tem o próprio Salvar.
+function _coletarFormularioFornecedor() {
+  return {
+    id: document.getElementById('fornCadId').value || null,
+    nome: document.getElementById('fornCadNome').value.trim(),
+    nomeFantasia: document.getElementById('fornCadNomeFantasia').value.trim(),
+    cnpj: document.getElementById('fornCadCnpj').value.trim(),
+    categoriaFornecedor: document.getElementById('fornCadCategoria').value,
+    subcategoriaFornecedor: document.getElementById('fornCadSubcategoria').value,
+    // Lista de gestores (snapshots de Pessoa).
+    gestoresContrato: window._fornecedorGestores || [],
+    tic: document.getElementById('fornCadTic').checked,
+    detalhes: document.getElementById('fornCadDetalhes').value.trim(),
+    setor: document.getElementById('fornCadSetor').value.trim(),
+    endereco: document.getElementById('fornCadEndereco').value.trim(),
+    pessoas: window._fornecedorPessoas || [],
+    canaisSuporte: window._fornecedorCanais || [],
+  };
+}
+
+window.salvarFornecedorCadastro = async () => {
+  const dados = _coletarFormularioFornecedor();
+  const { id, nome } = dados;
+  if (!nome) return showToast('Informe a razão social do fornecedor.', '#e65100');
+
+  return await comBotaoCarregando('btnSalvarFornecedorCadastro', async () => {
   try {
     const r = await API.salvarDependencia({
-      id,
+      ...dados,
       // A categoria e sempre Fornecedores nesta tela. E o que mantem o
       // fornecedor no mesmo catalogo de que os processos dependem, e o que a
       // regra do banco exige para este perfil poder gravar.
       categoria: CATEGORIA_FORNECEDOR_PADRAO,
-      nome,
-      nomeFantasia: document.getElementById('fornCadNomeFantasia').value.trim(),
-      cnpj: document.getElementById('fornCadCnpj').value.trim(),
-      categoriaFornecedor: document.getElementById('fornCadCategoria').value,
-      subcategoriaFornecedor: document.getElementById('fornCadSubcategoria').value,
-      // Lista de gestores (snapshots de Pessoa). gestorContrato (string) segue
-      // gravado espelhando o 1º, por compat com quem ainda lê o campo antigo.
-      gestoresContrato: window._fornecedorGestores || [],
-      gestorContrato: (window._fornecedorGestores && window._fornecedorGestores[0] ? window._fornecedorGestores[0].nome : ''),
-      tic: document.getElementById('fornCadTic').checked,
-      detalhes: document.getElementById('fornCadDetalhes').value.trim(),
-      // Setor e endereco existem no catalogo e sao gravados por esta tela. Sem
-      // eles no formulario, salvar aqui apagaria o que estava preenchido: a
-      // gravacao regrava a linha inteira, e campo ausente vira vazio.
-      setor: document.getElementById('fornCadSetor').value.trim(),
-      endereco: document.getElementById('fornCadEndereco').value.trim(),
-      // empresa/email/telefone soltos saem daqui: uma empresa agora pode ter
-      // N pessoas, cada uma com seu proprio contato.
-      pessoas: window._fornecedorPessoas || [],
+      // gestorContrato (string) segue gravado espelhando o 1º gestor, por
+      // compat com quem ainda lê o campo antigo.
+      gestorContrato: (dados.gestoresContrato[0] ? dados.gestoresContrato[0].nome : ''),
+      // Setor, endereco e canais existem no catalogo e sao gravados por esta
+      // tela. Sem eles no formulario, salvar aqui apagaria o que estava
+      // preenchido: a gravacao regrava a linha inteira, e campo ausente vira
+      // vazio. empresa/email/telefone soltos ficam de fora: uma empresa agora
+      // pode ter N pessoas, cada uma com seu proprio contato.
     });
+    _edFornecedor.marcar({ ...dados, id: id || r.id });
     if (!id) {
       // Sem fechar o drawer, o próximo "Salvar" (e o "Salvar avaliação" das
       // abas Criticidade/Conformidade) precisa gravar no MESMO fornecedor em
@@ -14379,8 +17469,10 @@ window.salvarFornecedorCadastro = async () => {
     if (idx >= 0) fornecedoresData[idx] = item; else fornecedoresData.push(item);
     renderizarFornecedores();
     showToast('✅ Salvo!', '#2e7d32');
+    return true;
   } catch (e) {
     showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    return false;
   }
   });
 };

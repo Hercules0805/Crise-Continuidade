@@ -41,6 +41,7 @@ const COLLECTION = {
   avaliacoesFornecedor: 'avaliacoes_fornecedor',
   categoriasFornecedor: 'categorias_fornecedor',
   subcategoriasFornecedor: 'subcategorias_fornecedor',
+  produtosSoftware: 'produtos_software',
   criticidadeFornecedorPerguntas: 'criticidade_fornecedor_perguntas',
   historicoRisco: 'historico_risco',
   servicos: 'servicos',
@@ -321,6 +322,12 @@ async function _lerDependencias() {
     areas: Array.isArray(d.areas) ? d.areas.filter(Boolean) : [],
     // So usado por Pessoas: id da Pessoa que é o líder imediato (organograma).
     liderImediato: d.liderImediato || '',
+    // So usado por Pessoas: Tech Lead / Team Lead, cada funcao com os seus
+    // produtos (ids de produtos_software). Marcar a funcao nao obriga a ter produto.
+    techLead: d.techLead === true,
+    techLeadProdutos: Array.isArray(d.techLeadProdutos) ? d.techLeadProdutos.filter(Boolean) : [],
+    teamLead: d.teamLead === true,
+    teamLeadProdutos: Array.isArray(d.teamLeadProdutos) ? d.teamLeadProdutos.filter(Boolean) : [],
     empresa: d.empresa || '',
     telefone: d.telefone || '',
     email: d.email || '',
@@ -328,6 +335,9 @@ async function _lerDependencias() {
     // So usado por Fornecedores: uma empresa pode ter N pessoas associadas.
     // Nas outras 4 categorias este campo nunca e escrito e chega vazio.
     pessoas: Array.isArray(d.pessoas) ? d.pessoas : [],
+    // So usado por Fornecedores: canais de suporte (0800, portal, plantao...),
+    // {tipo, contato, horario, nivel, sla, observacao}. Entram no DRP.
+    canaisSuporte: Array.isArray(d.canaisSuporte) ? d.canaisSuporte : [],
     // Idem: segmento de negocio (catalogo categorias_fornecedor) e o
     // responsavel interno pelo contrato.
     categoriaFornecedor: d.categoriaFornecedor || '',
@@ -486,21 +496,42 @@ async function _lerVulnerabilidades() {
     id: v.id,
     codigo: v.codigo || '',
     ticketReport: v.ticketReport || '',
+    // Ativo afetado (texto livre; o campo no banco continua se chamando `produto`).
     produto: v.produto || '',
+    // Produto de Software do catalogo (id de produtos_software), '' quando nao ha.
+    produtoSoftwareId: v.produtoSoftwareId || '',
+    // Dependencias afetadas (15/10/2026): [{id, categoria, nome}] do catalogo de
+    // Dependencias; substitui o texto livre `produto` (que fica como legado).
+    dependenciasAfetadas: Array.isArray(v.dependenciasAfetadas)
+      ? v.dependenciasAfetadas.map((d) => ({ id: d.id || null, categoria: d.categoria || '', nome: d.nome || '' }))
+      : [],
     versao: v.versao || '',
     nome: v.nome || '',
     cwe: v.cwe || '',
     cve: v.cve || '',
     cvss: v.cvss != null && v.cvss !== '' ? Number(v.cvss) : null,
     severidadeManual: v.severidadeManual || '',
+    // Avaliacao guiada da aba Severidade (cvss31.js): vetor CVSS 3.1 (pode
+    // ser parcial) e os 2 criterios da matriz "sem CVSS".
+    cvssVetor: v.cvssVetor || '',
+    severidadeCriterios: {
+      impacto: (v.severidadeCriterios && v.severidadeCriterios.impacto) || '',
+      facilidade: (v.severidadeCriterios && v.severidadeCriterios.facilidade) || '',
+    },
     descricao: v.descricao || '',
     dataDeteccao: v.dataDeteccao || '',
     origemDeteccao: v.origemDeteccao || '',
+    // Tipo/Subtipo (lista fixa em app.js, VULNERABILIDADE_TIPOS) e Metodo de
+    // Deteccao (15/10/2026). origemDeteccao continua sendo "quem reportou".
+    tipo: v.tipo || '',
+    subtipo: v.subtipo || '',
+    metodoDeteccao: v.metodoDeteccao || '',
     exploitDisponivel: v.exploitDisponivel || '',
     equipeResponsavel: v.equipeResponsavel || '',
     responsavel: v.responsavel || '',
     ticketCorrecao: v.ticketCorrecao || '',
-    statusCorrecao: v.statusCorrecao || '',
+    // "Aberto" foi renomeado para "Pendente" (15/10/2026): documento antigo ainda nao migrado aparece certo.
+    statusCorrecao: v.statusCorrecao === 'Aberto' ? 'Pendente' : (v.statusCorrecao || ''),
     dataPrevistaCorrecao: v.dataPrevistaCorrecao || '',
     dataCorrecao: v.dataCorrecao || '',
     evidenciaCorrecao: v.evidenciaCorrecao || '',
@@ -509,8 +540,9 @@ async function _lerVulnerabilidades() {
 }
 
 const _CAMPOS_VULNERABILIDADE = [
-  'codigo', 'ticketReport', 'produto', 'versao', 'nome', 'cwe', 'cve', 'cvss', 'severidadeManual',
-  'descricao', 'dataDeteccao', 'origemDeteccao', 'exploitDisponivel',
+  'codigo', 'ticketReport', 'produto', 'produtoSoftwareId', 'dependenciasAfetadas', 'versao', 'nome', 'cwe', 'cve', 'cvss', 'severidadeManual',
+  'cvssVetor', 'severidadeCriterios',
+  'descricao', 'dataDeteccao', 'origemDeteccao', 'tipo', 'subtipo', 'metodoDeteccao', 'exploitDisponivel',
   'equipeResponsavel', 'responsavel', 'ticketCorrecao', 'statusCorrecao',
   'dataPrevistaCorrecao', 'dataCorrecao', 'evidenciaCorrecao', 'observacoes',
 ];
@@ -557,7 +589,10 @@ async function _salvarVulnerabilidade(v) {
  * configurado.
  */
 async function _lerRiscos() {
-  const ehAdmin = Perfis.ehAdmin(window.USER_PERFIL);
+  // Admin e Seguranca da Informacao leem tudo (DECISAO 15/10/2026: a regra do
+  // banco so deixava Admin, e SI -- que opera o modulo -- recebia "sem acesso").
+  const perfis = window.USER_PERFIS || window.USER_PERFIL;
+  const ehAdmin = Perfis.ehAdmin(perfis) || Perfis.ehSeguranca(perfis);
   const area = window.USER_AREA;
   if (!ehAdmin && !area) {
     // Mensagem diferente por perfil: o gestor precisa de area, o perfil de
@@ -579,17 +614,28 @@ async function _lerRiscos() {
     fornecedor: d.fornecedor || null,
     fornecedorNome: d.fornecedorNome || '',
     indicadorId: d.indicadorId || null,
+    // Vinculo com a vulnerabilidade de origem (gravado pelo servidor). Sem
+    // estes dois, a tela de Vulnerabilidades nunca achava o risco aberto.
+    vulnerabilidadeId: d.vulnerabilidadeId || null,
+    vulnerabilidadeCodigo: d.vulnerabilidadeCodigo || '',
+    // Aviso que a automacao deixa para revisao humana (ex.: severidade caiu
+    // abaixo do limiar com o risco aberto). So o servidor grava.
+    alertaAutomacao: d.alertaAutomacao || '',
     titulo: d.titulo || '',
     descricao: d.descricao || '',
     // Risco antigo tem so `categoria` (string, um valor so) -- cai num array
     // de 1 item, sem precisar de migracao de dado.
     categorias: Array.isArray(d.categorias) ? d.categorias : (d.categoria ? [d.categoria] : []),
     responsavel: d.responsavel || '',
+    reportadoPor: d.reportadoPor || '',
     dataIdentificacao: d.dataIdentificacao || '',
-    status: d.status || 'Identificado',
+    // "Em Análise" foi fundido em "Em Avaliação" (15/10/2026).
+    status: d.status === 'Em Análise' ? 'Em Avaliação' : (d.status || 'Identificado'),
     origem: d.origem || 'Manual',
-    probabilidade: d.probabilidade || '',
-    impacto: d.impacto || '',
+    // Escala NIST 5x5 (15/10/2026): rotulo antigo (Média, Crítico) vira o atual
+    // na leitura -- risco nao migrado aparece e calcula certo.
+    probabilidade: RiscoConsolidado.normalizarProbabilidade(d.probabilidade) || (d.probabilidade || ''),
+    impacto: RiscoConsolidado.normalizarImpacto(d.impacto) || (d.impacto || ''),
     impactoFinanceiro: d.impactoFinanceiro ?? null,
     impactoFinanceiroDescricao: d.impactoFinanceiroDescricao || '',
     score: d.score ?? null,
@@ -604,6 +650,15 @@ async function _lerRiscos() {
     historicoReavaliacao: d.historicoReavaliacao || '',
     dataEncerramento: d.dataEncerramento || null,
     justificativaEncerramento: d.justificativaEncerramento || '',
+    justificativaAceite: d.justificativaAceite || '',
+    aprovadorAceite: d.aprovadorAceite || '',
+    probabilidadeResidual: RiscoConsolidado.normalizarProbabilidade(d.probabilidadeResidual) || '',
+    impactoResidual: RiscoConsolidado.normalizarImpacto(d.impactoResidual) || '',
+    funcaoCsf: d.funcaoCsf || '',
+    fonteAmeaca: d.fonteAmeaca || '',
+    eventoAmeaca: d.eventoAmeaca || '',
+    condicaoPredisponente: d.condicaoPredisponente || '',
+    consequencia: d.consequencia || '',
     criadoEm: d.criadoEm || '',
     atualizadoEm: d.atualizadoEm || '',
     criadoPor: d.criadoPor || '',
@@ -745,6 +800,57 @@ async function _salvarCategoriaFornecedor(c) {
 }
 
 /**
+ * Produtos de Software da empresa (Fortes Ponto, Fortes RH...). Catalogo-base:
+ * a Pessoa aponta para ele, por ID (Tech Lead / Team Lead de um produto) --
+ * renomear um produto nao orfaniza ninguem. Mesmo molde de Categorias de
+ * Fornecedor: desativar em vez de excluir, sem versao.
+ */
+async function _lerProdutosSoftware() {
+  const docs = await _getAll(COLLECTION.produtosSoftware);
+  return docs.map((d) => ({
+    id: d.id,
+    nome: d.nome || '',
+    ativo: d.ativo !== false,
+    ordem: Number(d.ordem) || 0,
+    criadoEm: d.criadoEm || '',
+    atualizadoEm: d.atualizadoEm || '',
+  })).sort((a, b) => (a.ordem - b.ordem) || a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+
+const _CAMPOS_PRODUTO_SOFTWARE = ['nome', 'ativo', 'ordem'];
+
+/** Nome comparavel: sem acento, sem maiuscula, sem espaco sobrando. */
+function _nomeComparavel(nome) {
+  return String(nome || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+async function _salvarProdutoSoftware(p) {
+  const nome = String(p.nome || '').trim().replace(/\s+/g, ' ');
+  if (!nome) throw new Error('Informe o nome do produto.');
+  // Duplicado (mesmo nome sem diferenciar maiuscula/acento) em OUTRO produto.
+  const existentes = await _lerProdutosSoftware();
+  const igual = existentes.find((x) => _nomeComparavel(x.nome) === _nomeComparavel(nome) && String(x.id) !== String(p.id || ''));
+  if (igual) throw new Error(`Já existe um produto chamado "${igual.nome}".`);
+
+  const data = {};
+  _CAMPOS_PRODUTO_SOFTWARE.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(p, campo) && p[campo] !== undefined) data[campo] = p[campo];
+  });
+  data.nome = nome;
+  data.atualizadoEm = new Date().toISOString();
+
+  if (p.id) {
+    await _db.collection(COLLECTION.produtosSoftware).doc(String(p.id)).set(data, { merge: true });
+    return { success: true, id: p.id };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = (window.USER_EMAIL || '').toLowerCase();
+  if (data.ordem === undefined) data.ordem = Date.now();
+  const ref = await _db.collection(COLLECTION.produtosSoftware).add(data);
+  return { success: true, id: ref.id };
+}
+
+/**
  * Subcategorias do fornecedor -- filhas de uma Categoria (categoriaId),
  * mesmo molde de _lerCategoriasFornecedor/_salvarCategoriaFornecedor acima,
  * só que com o vinculo hierarquico. Ao contrario de Fornecedor->Categoria
@@ -826,15 +932,22 @@ async function _salvarCriticidadeFornecedorPergunta(p) {
   data.opcoes = opcoes.map((o) => ({ rotulo: String(o.rotulo).trim(), score: Number(o.score) }));
   data.atualizadoEm = new Date().toISOString();
 
+  // A versao e so de auditoria (nenhuma tela le o numero devolvido) e custa
+  // uma leitura + uma gravacao -- fora do caminho de quem espera o "Salvo!".
+  // Falha aqui nao desfaz a pergunta ja gravada; fica registrada no console.
+  const subirVersaoEmSegundoPlano = () => _subirVersaoCriticidadeFornecedor()
+    .catch((e) => console.warn('Versao da criticidade de fornecedor nao foi atualizada:', e));
   if (p.id) {
     await _db.collection(COLLECTION.criticidadeFornecedorPerguntas).doc(String(p.id)).set(data, { merge: true });
-    return { success: true, id: p.id, criticidadeVersao: await _subirVersaoCriticidadeFornecedor() };
+    subirVersaoEmSegundoPlano();
+    return { success: true, id: p.id };
   }
   data.criadoEm = data.atualizadoEm;
   data.criadoPor = (window.USER_EMAIL || '').toLowerCase();
   if (data.ordem === undefined) data.ordem = Date.now();
   const ref = await _db.collection(COLLECTION.criticidadeFornecedorPerguntas).add(data);
-  return { success: true, id: ref.id, criticidadeVersao: await _subirVersaoCriticidadeFornecedor() };
+  subirVersaoEmSegundoPlano();
+  return { success: true, id: ref.id };
 }
 
 // Versao de auditoria -- mesmo papel/nivel de simplicidade de
@@ -899,6 +1012,51 @@ async function _salvarConfigFornecedor(d) {
     atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
   }, { merge: true });
   return { success: true, limiarRisco: lim };
+}
+
+// Limiar de CVSS que abre risco de Vulnerabilidade (15/10/2026). Lido tambem
+// pelo servidor (functions/vulnerabilidadeContexto.js) -- mesmo documento.
+const LIMIAR_CVSS_PADRAO = 7.0;
+async function _lerConfigVulnerabilidade() {
+  try {
+    const snap = await _db.collection(COLLECTION.regua).doc('vulnerabilidade').get();
+    const n = Number(snap.exists ? (snap.data() || {}).limiarCvss : NaN);
+    return { limiarCvss: Number.isFinite(n) && n >= 0 && n <= 10 ? n : LIMIAR_CVSS_PADRAO };
+  } catch {
+    return { limiarCvss: LIMIAR_CVSS_PADRAO };
+  }
+}
+
+async function _salvarConfigVulnerabilidade(d) {
+  const n = Number(d.limiarCvss);
+  if (!Number.isFinite(n) || n < 0 || n > 10) throw new Error('O limiar tem que ser um CVSS de 0 a 10.');
+  await _db.collection(COLLECTION.regua).doc('vulnerabilidade').set({
+    limiarCvss: n,
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  }, { merge: true });
+  return { success: true, limiarCvss: n };
+}
+
+// Apetite de risco (CSF 2.0 GV.RM-02): maior nivel aceito sem tratamento.
+async function _lerConfigRiscos() {
+  try {
+    const snap = await _db.collection(COLLECTION.regua).doc('riscos').get();
+    const a = RiscoConsolidado.normalizarNivel(snap.exists ? (snap.data() || {}).apetite : '');
+    return { apetite: a || RiscoConsolidado.APETITE_PADRAO };
+  } catch {
+    return { apetite: RiscoConsolidado.APETITE_PADRAO };
+  }
+}
+
+async function _salvarConfigRiscos(d) {
+  if (!RiscoConsolidado.ORDEM_NIVEL.includes(d.apetite)) throw new Error('Apetite inválido.');
+  await _db.collection(COLLECTION.regua).doc('riscos').set({
+    apetite: d.apetite,
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  }, { merge: true });
+  return { success: true, apetite: d.apetite };
 }
 
 async function _subirVersaoCriterios() {
@@ -1279,6 +1437,28 @@ async function _salvarDependencia(d) {
     drpTemplateNome: d.drpTemplateNome || '',
     drpSalvo: d.drpSalvo || '',
   };
+  // Canais de suporte so entram quando vierem no payload: os campos acima sao
+  // regravados sempre (ausente vira vazio), e so o drawer de Fornecedor manda
+  // este -- qualquer outra tela que grave a dependencia apagaria os canais.
+  // Lideranca da Pessoa (Tech Lead/Team Lead): mesma regra -- so o drawer de
+  // Pessoa manda estes campos; Fornecedor/Dependencia regravam o documento e
+  // nao podem zerar a lideranca de ninguem.
+  if (typeof d.techLead === 'boolean' || typeof d.teamLead === 'boolean') {
+    data.techLead = d.techLead === true;
+    data.techLeadProdutos = data.techLead && Array.isArray(d.techLeadProdutos) ? [...new Set(d.techLeadProdutos.map(String).filter(Boolean))] : [];
+    data.teamLead = d.teamLead === true;
+    data.teamLeadProdutos = data.teamLead && Array.isArray(d.teamLeadProdutos) ? [...new Set(d.teamLeadProdutos.map(String).filter(Boolean))] : [];
+  }
+  if (Array.isArray(d.canaisSuporte)) {
+    data.canaisSuporte = d.canaisSuporte.map((c) => ({
+      tipo: String(c.tipo || ''),
+      contato: String(c.contato || ''),
+      horario: String(c.horario || ''),
+      nivel: String(c.nivel || ''),
+      sla: String(c.sla || ''),
+      observacao: String(c.observacao || ''),
+    }));
+  }
   if (d.id) {
     await _db.collection(COLLECTION.dependencias).doc(String(d.id)).set(data, { merge: true });
     return { success: true, id: d.id, dado: data };
@@ -1364,6 +1544,10 @@ const _CAMPOS_RISCO = [
   'estrategiaTratamento', 'estrategiaDescricao', 'planoAcao', 'kris', 'impactoFinanceiroComponentes',
   'dataUltimaReavaliacao', 'proximaReavaliacao', 'historicoReavaliacao',
   'dataEncerramento', 'justificativaEncerramento',
+  // Governanca NIST (15/10/2026): aceite, risco residual e funcao do CSF 2.0.
+  'justificativaAceite', 'aprovadorAceite', 'probabilidadeResidual', 'impactoResidual', 'funcaoCsf',
+  // Declaracao de risco estruturada (NIST SP 800-30).
+  'fonteAmeaca', 'eventoAmeaca', 'condicaoPredisponente', 'consequencia',
 ];
 
 // Merge: só grava os campos presentes no payload (mesma semântica de salvarProcesso).
@@ -1533,11 +1717,14 @@ const _GET_FIRESTORE = {
   getIndicadoresSeguranca: () => _lerIndicadoresSeguranca(),
   getCriteriosFornecedor: () => _lerCriteriosFornecedor(),
   getCategoriasFornecedor: () => _lerCategoriasFornecedor(),
+  getProdutosSoftware: () => _lerProdutosSoftware(),
   getSubcategoriasFornecedor: () => _lerSubcategoriasFornecedor(),
   getCriticidadeFornecedorPerguntas: () => _lerCriticidadeFornecedorPerguntas(),
   getAvaliacoesFornecedor: () => _lerAvaliacoesFornecedor(),
   getHistoricoRisco: () => _lerHistoricoRisco(),
   getConfigFornecedor: () => _lerConfigFornecedor(),
+  getConfigVulnerabilidade: () => _lerConfigVulnerabilidade(),
+  getConfigRiscos: () => _lerConfigRiscos(),
   getPerfis: () => _lerPerfis(),
   getServicos: () => _lerServicos(),
   getBackups: () => _lerBackups(),
@@ -1564,6 +1751,8 @@ const _POST_FIRESTORE = {
   salvarCriterioFornecedor: (b) => _salvarCriterioFornecedor(b),
   excluirCriterioFornecedor: (b) => _db.collection(COLLECTION.criteriosFornecedor).doc(String(b.id)).delete()
     .then(() => _subirVersaoCriterios()).then((versao) => ({ success: true, criteriosVersao: versao })),
+  salvarProdutoSoftware: (b) => _salvarProdutoSoftware(b),
+  excluirProdutoSoftware: (b) => _db.collection(COLLECTION.produtosSoftware).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarCategoriaFornecedor: (b) => _salvarCategoriaFornecedor(b),
   excluirCategoriaFornecedor: (b) => _db.collection(COLLECTION.categoriasFornecedor).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarSubcategoriaFornecedor: (b) => _salvarSubcategoriaFornecedor(b),
@@ -1579,6 +1768,8 @@ const _POST_FIRESTORE = {
   excluirVulnerabilidade: (b) => _db.collection(COLLECTION.vulnerabilidades).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarAvaliacaoFornecedor: (b) => _salvarAvaliacaoFornecedor(b),
   salvarConfigFornecedor: (b) => _salvarConfigFornecedor(b),
+  salvarConfigVulnerabilidade: (b) => _salvarConfigVulnerabilidade(b),
+  salvarConfigRiscos: (b) => _salvarConfigRiscos(b),
   salvarPerfilAcesso: (b) => _salvarPerfilAcesso(b),
   excluirPerfilAcesso: (b) => _db.collection(COLLECTION.configPerfis).doc(String(b.email || '').toLowerCase()).delete()
     .then(() => ({ success: true })),
@@ -1614,7 +1805,14 @@ async function _appApi(metodo, acao, dados) {
     opcoes.body = JSON.stringify({ action: acao, ...(dados || {}) });
   }
 
-  const res = await fetch(url, opcoes);
+  let res;
+  try {
+    res = await fetch(url, opcoes);
+  } catch (e) {
+    // fetch so rejeita sem resposta nenhuma (rede caiu, ou a plataforma cortou
+    // a conexao por tempo) -- "Failed to fetch" nao diz nada a quem le.
+    throw new Error('Não foi possível falar com o servidor (a conexão caiu ou a operação demorou demais). Tente de novo.');
+  }
   const texto = await res.text();
   if (res.status === 401) throw new Error(_extrairErro(texto) || 'Sessão inválida. Entre novamente.');
   if (!texto || texto.startsWith('<!') || texto.startsWith('<html')) {
@@ -1709,7 +1907,7 @@ const API = {
       return _appApi('POST', 'gerarDRP', { id: body.id, template: body.template });
     }
     if (action === 'salvarDRP') {
-      return _appApi('POST', 'salvarDRP', { id: body.id, html: body.html });
+      return _appApi('POST', 'salvarDRP', { id: body.id, html: body.html, bloqueadas: body.bloqueadas || [] });
     }
     if (action === 'excluirDRP') {
       return _appApi('POST', 'excluirDRP', { id: body.id });
@@ -1759,11 +1957,18 @@ const API = {
   getIndicadoresSeguranca: () => API.get('getIndicadoresSeguranca'),
   getCriteriosFornecedor: () => API.get('getCriteriosFornecedor'),
   getCategoriasFornecedor: () => API.get('getCategoriasFornecedor'),
+  getProdutosSoftware: () => API.get('getProdutosSoftware'),
+  salvarProdutoSoftware: (p) => API.post('salvarProdutoSoftware', p)
+    .then((r) => { API.invalidate('getProdutosSoftware'); return r; }),
+  excluirProdutoSoftware: (id) => API.post('excluirProdutoSoftware', { id })
+    .then((r) => { API.invalidate('getProdutosSoftware'); return r; }),
   getSubcategoriasFornecedor: () => API.get('getSubcategoriasFornecedor'),
   getCriticidadeFornecedorPerguntas: () => API.get('getCriticidadeFornecedorPerguntas'),
   getAvaliacoesFornecedor: () => API.get('getAvaliacoesFornecedor'),
   getHistoricoRisco: () => API.get('getHistoricoRisco'),
   getConfigFornecedor: () => API.get('getConfigFornecedor'),
+  getConfigVulnerabilidade: () => API.get('getConfigVulnerabilidade'),
+  getConfigRiscos: () => API.get('getConfigRiscos'),
   getPerfis: () => API.get('getPerfis'),
   salvarPerfilAcesso: (p) => API.post('salvarPerfilAcesso', p)
     .then((r) => { API.invalidate('getPerfis'); return r; }),
@@ -1771,6 +1976,10 @@ const API = {
     .then((r) => { API.invalidate('getPerfis'); return r; }),
   salvarConfigFornecedor: (c) => API.post('salvarConfigFornecedor', c)
     .then((r) => { API.invalidate('getConfigFornecedor'); return r; }),
+  salvarConfigVulnerabilidade: (c) => API.post('salvarConfigVulnerabilidade', c)
+    .then((r) => { API.invalidate('getConfigVulnerabilidade'); return r; }),
+  salvarConfigRiscos: (c) => API.post('salvarConfigRiscos', c)
+    .then((r) => { API.invalidate('getConfigRiscos'); return r; }),
   salvarCriterioFornecedor: (c) => API.post('salvarCriterioFornecedor', c)
     .then((r) => { API.invalidate('getCriteriosFornecedor'); return r; }),
   excluirCriterioFornecedor: (id) => API.post('excluirCriterioFornecedor', { id })
