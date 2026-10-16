@@ -130,6 +130,10 @@ function route() {
   const params = new URLSearchParams(queryStr || '');
   document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page === page));
   document.querySelectorAll('.nav-group').forEach(g => g.classList.toggle('has-active', !!g.querySelector('.nav-link.active')));
+  // Título da aba do navegador = rótulo da tela no menu (o mesmo título da página),
+  // lido do próprio menu para não manter outra lista de nomes.
+  const linkAtivo = Array.from(document.querySelectorAll('.nav-link')).find((l) => l.dataset.page === page);
+  document.title = linkAtivo ? `${linkAtivo.textContent.trim()} · GRC360` : 'GRC360';
 
   // Menu escondido nao e permissao. Sem esta guarda, digitar #processos na barra
   // de endereco abria a tela para quem nao deveria ve-la — as regras do banco
@@ -247,9 +251,11 @@ function _limitadoAArea() {
 
 /** Primeira tela que este perfil ve — e onde ele cai quando nao pede nada. */
 function _paginaInicialDoPerfil() {
-  const telas = Perfis.telasDoPerfil(window.USER_PERFIS);
-  if (telas === '*') return 'processos';
-  return telas[0] || 'processos';
+  const inicial = Perfis.paginaInicial(window.USER_PERFIS);
+  // Gestor ainda sem área vê o Dashboard bloqueado ("Acesso não configurado"):
+  // começa em Processos, que ele vê.
+  if (inicial === 'admin' && _limitadoAArea() && !window.USER_AREA) return 'processos';
+  return inicial;
 }
 
 function _telaNaoEncontrada() {
@@ -392,7 +398,7 @@ function _htmlErroCarga(mensagem, funcaoTela) {
 async function perguntas() {
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Perguntas do Questionário</h2><p class="page-sub">Gerencie as perguntas e as opções de resposta por categoria</p></div>
+      <div><h2>Perguntas do BIA</h2><p class="page-sub">Gerencie as perguntas e as opções de resposta por categoria</p></div>
       <button class="btn btn-primary" onclick="abrirModalPergunta()">+ Nova Pergunta</button>
     </div>
     <div style="margin-bottom:16px;">
@@ -3976,7 +3982,7 @@ const DEPENDENCIA_ESTRATEGIAS_BACKUP = [
 async function dependencias() {
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Catálogo de Dependências</h2><p class="page-sub">Gerencie as dependências críticas reutilizáveis nos processos</p></div>
+      <div><h2>Dependências</h2><p class="page-sub">Gerencie as dependências críticas reutilizáveis nos processos</p></div>
       <button class="btn btn-primary" onclick="abrirDrawerDependencia()">+ Nova Dependência</button>
     </div>
     ${_seVeTela('fornecedores', `<div style="border:1px solid #e0e0e0;background:#f8f9ff;border-radius:9px;padding:11px 14px;margin-bottom:16px;font-size:0.86em;color:#555;">
@@ -9072,157 +9078,10 @@ async function admin() {
 }
 
 // ============================================================
-// PÁGINA: QUESTIONÁRIO (Avaliação de Processos)
+// QUESTIONÁRIO BIA (drawer "Avaliar Processo"): estilo das opções, score e
+// redimensionar. A antiga tela própria "Questionário" (sem rota nem item de
+// menu, inalcançável) foi removida em 16/10/2026.
 // ============================================================
-let questionarioAreaSelecionada = '';
-
-async function questionario() {
-  app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Questionário BIA</h2><p class="page-sub">Avalie o impacto da interrupção de cada processo</p></div>
-    </div>
-    <div style="margin-bottom:20px;">
-      <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Selecione a Área:</label>
-      <select id="filtroAreaQuestionario" onchange="filtrarProcessosQuestionario(this.value)" style="padding:10px 14px;border:1px solid #ddd;border-radius:7px;font-size:0.95em;min-width:300px;">
-        <option value="">Selecione uma área...</option>
-      </select>
-    </div>
-    <div class="loading" id="loading">
-      <div class="skeleton-table">
-        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:15%;height:16px;"></div><div class="skeleton skeleton-cell" style="width:25%;height:16px;"></div><div class="skeleton skeleton-cell" style="width:15%;height:16px;"></div><div class="skeleton skeleton-cell" style="width:8%;height:16px;"></div><div class="skeleton skeleton-cell" style="width:12%;height:16px;"></div></div>
-        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:15%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:30%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:12%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:8%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:10%;height:14px;"></div></div>
-        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:12%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:22%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:18%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:6%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:14%;height:14px;"></div></div>
-        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:18%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:20%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:14%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:7%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:11%;height:14px;"></div></div>
-        <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:14%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:28%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:10%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:8%;height:14px;"></div><div class="skeleton skeleton-cell" style="width:12%;height:14px;"></div></div>
-      </div>
-    </div>
-    <div id="listaProcessos" style="display:none;"></div>
-    
-    <div class="modal-overlay" id="modalQuestionario"><div class="modal" onclick="event.stopPropagation()" style="max-width:700px;max-height:90vh;overflow-y:auto;">
-      <h3 id="modalTituloQuestionario">Avaliar Processo</h3>
-      <p id="modalProcessoNome" style="color:#666;margin-bottom:20px;font-size:0.95em;"></p>
-      <input type="hidden" id="qProcessoId">
-      <input type="hidden" id="qArea">
-      <input type="hidden" id="qProcesso">
-      
-      <div id="perguntas-container"></div>
-      
-      <div style="background:linear-gradient(135deg,#d60014,#e6262b);padding:20px;border-radius:8px;margin:20px 0;color:white;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-          <span style="font-weight:600;font-size:1.1em;">Score Total</span>
-          <span id="scoreTotal" style="font-size:2.5em;font-weight:700;">0</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid rgba(255,255,255,0.2);">
-          <span style="font-weight:600;">Classificação:</span>
-          <span id="scoreTier" style="font-weight:700;font-size:1.2em;padding:6px 16px;background:rgba(255,255,255,0.2);border-radius:20px;"></span>
-        </div>
-      </div>
-      
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="fecharModalQuestionario()">Cancelar</button>
-        <button class="btn btn-primary" onclick="salvarAvaliacaoProcesso()">Salvar Avaliação</button>
-      </div>
-    </div></div>
-  `;
-
-  try {
-    const [processos, areas, perguntas] = await Promise.all([
-      API.getProcessos(),
-      API.getAreas(),
-      API.getPerguntas()
-    ]);
-    
-    // Preencher dropdown de áreas
-    const filtroArea = document.getElementById('filtroAreaQuestionario');
-    const areasUnicas = [...new Set(areas.map(a => a.nome))].sort();
-    filtroArea.innerHTML = '<option value="">Selecione uma área...</option>' + 
-      areasUnicas.map(a => `<option value="${a}">${a}</option>`).join('');
-    
-    document.getElementById('loading').style.display = 'none';
-    
-    window.questionarioProcessos = processos;
-    window.questionarioAreas = areas;
-    window.questionarioPerguntas = perguntas.filter(p => p.ativa);
-    window.processosPerguntas = null;
-  } catch (err) {
-    console.error('Erro ao carregar questionário:', err);
-    document.getElementById('loading').innerHTML = '<p style="color:#c62828;text-align:center;">Erro ao carregar dados.</p>';
-  }
-}
-
-window.filtrarProcessosQuestionario = (area) => {
-  questionarioAreaSelecionada = area;
-  const container = document.getElementById('listaProcessos');
-  
-  if (!area) {
-    container.style.display = 'none';
-    return;
-  }
-  
-  const processosDaArea = window.questionarioProcessos.filter(p => p.area === area);
-  
-  if (processosDaArea.length === 0) {
-    container.style.display = 'block';
-    container.innerHTML = '<p style="text-align:center;color:#999;padding:40px;">Nenhum processo cadastrado para esta área.</p>';
-    return;
-  }
-  
-  container.style.display = 'block';
-  container.innerHTML = `
-    <div class="group-card">
-      <div class="group-header" style="background:#d60014;color:white;">Processos de ${area}</div>
-      ${processosDaArea.map(p => `
-        <div class="list-row">
-          <div class="list-row-main">
-            <div class="list-row-title">${esc(p.processo)}</div>
-            <div class="list-row-sub">${esc(p.descricao || 'Sem descrição')}</div>
-          </div>
-          <div class="list-row-actions">
-            <button class="btn btn-primary" onclick="abrirModalAvaliacaoProcesso(${p.id}, '${escJs(p.area)}'  , '${escJs(p.processo)}')" style="font-size:0.85em;padding:8px 16px;">Avaliar</button>
-          </div>
-        </div>
-      `).join('')}
-    </div>
-  `;
-};
-
-window.abrirModalAvaliacaoProcesso = (processoId, area, processo) => {
-  document.getElementById('qProcessoId').value = processoId;
-  document.getElementById('qArea').value = area;
-  document.getElementById('qProcesso').value = processo;
-  document.getElementById('modalProcessoNome').textContent = `${area} > ${processo}`;
-  
-  // Renderizar perguntas
-  const container = document.getElementById('perguntas-container');
-  container.innerHTML = window.questionarioPerguntas.map((p, i) => `
-    <div style="margin-bottom:32px;padding:20px;background:#f8f9fa;border-radius:8px;border-left:4px solid #d60014;">
-      <div style="font-weight:600;color:#d60014;margin-bottom:6px;font-size:0.95em;">${p.pergunta}</div>
-      <div style="font-size:0.85em;color:#666;margin-bottom:16px;line-height:1.5;">${esc(p.descricao || '')}</div>
-      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;">
-        <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='#c62828'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
-          <input type="radio" name="pergunta${i}" value="4" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#c62828';this.parentElement.style.background='#ffebee';" style="margin-right:8px;width:18px;height:18px;">
-          <span style="color:#c62828;font-weight:600;font-size:0.9em;">Alto (4)</span>
-        </label>
-        <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='#f57c00'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
-          <input type="radio" name="pergunta${i}" value="2" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#f57c00';this.parentElement.style.background='#fff3e0';" style="margin-right:8px;width:18px;height:18px;">
-          <span style="color:#f57c00;font-weight:600;font-size:0.9em;">Médio (2)</span>
-        </label>
-        <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='#2e7d32'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
-          <input type="radio" name="pergunta${i}" value="1" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#2e7d32';this.parentElement.style.background='#e8f5e9';" style="margin-right:8px;width:18px;height:18px;">
-          <span style="color:#2e7d32;font-weight:600;font-size:0.9em;">Baixo (1)</span>
-        </label>
-        <label style="display:flex;align-items:center;padding:12px;background:white;border:2px solid #e0e0e0;border-radius:6px;cursor:pointer;transition:all 0.2s;" onmouseover="this.style.borderColor='#757575'" onmouseout="if(!this.querySelector('input').checked) this.style.borderColor='#e0e0e0'">
-          <input type="radio" name="pergunta${i}" value="0" onchange="calcularScore();this.parentElement.parentElement.querySelectorAll('label').forEach(l=>{l.style.borderColor='#e0e0e0';l.style.background='white';});this.parentElement.style.borderColor='#757575';this.parentElement.style.background='#f5f5f5';" style="margin-right:8px;width:18px;height:18px;">
-          <span style="color:#757575;font-weight:600;font-size:0.9em;">N/A (0)</span>
-        </label>
-      </div>
-    </div>
-  `).join('');
-  
-  calcularScore();
-  document.getElementById('modalQuestionario').classList.add('open');
-};
-
 window.atualizarEstiloOpcoes = (radio) => {
   const grupo = radio.parentElement.parentElement;
   const CORES_FALLBACK = {'4':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'};
@@ -9513,7 +9372,7 @@ async function riscos() {
   const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Registro de riscos</h2><p class="page-sub">Registro, análise, tratamento e monitoramento dos riscos identificados</p></div>
+      <div><h2>Registro de Riscos</h2><p class="page-sub">Registro, análise, tratamento e monitoramento dos riscos identificados</p></div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-primary" onclick="abrirImportarRisco()" id="btnImportarRisco" style="display:none;">📥 Importar Risco</button>
         <button class="btn btn-primary" onclick="abrirDrawerRisco()" id="btnNovoRisco" style="display:none;">+ Novo Risco</button>
@@ -10007,7 +9866,7 @@ function _svgLinhaTempoRisco(historico, opcoes) {
 async function monitor() {
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Monitor de Risco</h2><p class="page-sub">A carga de risco da empresa ao longo do tempo — empresa e as áreas mais carregadas hoje</p></div>
+      <div><h2>Risco no Tempo</h2><p class="page-sub">A carga de risco da empresa ao longo do tempo — empresa e as áreas mais carregadas hoje</p></div>
     </div>
     <div class="loading" id="loadingMonitor">⏳ Carregando...</div>
     <div id="monitorConteudo"></div>`;
@@ -14618,7 +14477,7 @@ function renderFornecedoresBcp() {
 async function pcns() {
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>📋 Planos de Continuidade (PCNs)</h2><p class="page-sub">Navegue pelos PCNs gerados, organizados por área</p></div>
+      <div><h2>Planos de Continuidade (PCN)</h2><p class="page-sub">Navegue pelos PCNs gerados, organizados por área</p></div>
     </div>
     <div id="pcns-resumo" style="display:none;margin-bottom:20px;"></div>
     <div style="margin-bottom:16px;">
@@ -14798,7 +14657,7 @@ window.excluirPCN = async (id, area, processo) => {
 async function drp() {
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>🛠️ Planos de Recuperação (DRP)</h2><p class="page-sub">Gere, abra e gerencie os Parâmetros DRP das dependências, organizados por categoria</p></div>
+      <div><h2>Planos de Recuperação (DRP)</h2><p class="page-sub">Gere, abra e gerencie os Parâmetros DRP das dependências, organizados por categoria</p></div>
     </div>
     <div id="drp-resumo" style="display:none;margin-bottom:20px;"></div>
     <div style="margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
@@ -15022,7 +14881,7 @@ async function fornecedoresCriterios() {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Critérios de Avaliação de Fornecedores</h2><p class="page-sub">A régua com que todo fornecedor é avaliado — cada critério vale um peso</p></div>
+      <div><h2>Critérios de Avaliação</h2><p class="page-sub">A régua com que todo fornecedor é avaliado — cada critério vale um peso</p></div>
       <button class="btn btn-primary" onclick="abrirModalCriterio()" id="btnNovoCriterio" style="display:none;">+ Novo Critério</button>
     </div>
     <div id="fornLimiarBox" style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 16px;background:#fff;margin-bottom:18px;"></div>

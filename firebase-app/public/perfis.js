@@ -97,6 +97,19 @@
     'admin',
   ];
 
+  // Tela inicial de cada perfil (DECISAO 16/10/2026): escolha explicita, nao
+  // mais "a 1a tela da lista". Admin, SI e Gestor abrem no Dashboard de
+  // Continuidade (visao geral). TI abre no DRP (e o trabalho dele). Operador
+  // continua em Processos (DECISAO 14/10/2026). Com varios perfis vale a
+  // ordem abaixo (o de maior alcance primeiro).
+  var PAGINA_INICIAL = {};
+  PAGINA_INICIAL[PERFIL.ADMIN] = 'admin';
+  PAGINA_INICIAL[PERFIL.SEGURANCA] = 'admin';
+  PAGINA_INICIAL[PERFIL.GESTOR] = 'admin';
+  PAGINA_INICIAL[PERFIL.OPERADOR] = 'processos';
+  PAGINA_INICIAL[PERFIL.TI] = 'drp';
+  var ORDEM_PAGINA_INICIAL = [PERFIL.ADMIN, PERFIL.SEGURANCA, PERFIL.GESTOR, PERFIL.OPERADOR, PERFIL.TI];
+
   var CATALOGO = [
     {
       valor: PERFIL.ADMIN,
@@ -210,6 +223,17 @@
       (TELAS[p] || []).forEach(function (t) { set[t] = true; });
     });
     return Object.keys(set);
+  }
+
+  /** Tela inicial (ver PAGINA_INICIAL): a do perfil de maior alcance que a pessoa tem. */
+  function paginaInicial(valor) {
+    var lista = normalizarLista(valor);
+    for (var i = 0; i < ORDEM_PAGINA_INICIAL.length; i++) {
+      var p = ORDEM_PAGINA_INICIAL[i];
+      if (lista.indexOf(p) !== -1 && podeVerTela(valor, PAGINA_INICIAL[p])) return PAGINA_INICIAL[p];
+    }
+    var telas = telasDoPerfil(valor);
+    return telas === '*' ? 'admin' : (telas[0] || 'processos');
   }
 
   /**
@@ -334,6 +358,8 @@
     ehOperador: ehOperador,
     podeVerTela: podeVerTela,
     telasDoPerfil: telasDoPerfil,
+    paginaInicial: paginaInicial,
+    PAGINA_INICIAL: PAGINA_INICIAL,
     categoriaDeFornecedor: categoriaDeFornecedor,
     podeMexerNaDependencia: podeMexerNaDependencia,
     podeMexerNaArea: podeMexerNaArea,
