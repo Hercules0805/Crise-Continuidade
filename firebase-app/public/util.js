@@ -132,6 +132,32 @@
   }
 
   /**
+   * Paginacao de uma grade (guia de UI, "Tabela + paginacao"): guarda a pagina
+   * atual e corta a lista. aplicar(lista) devolve { itens, inicio, fim, total,
+   * totalPaginas, pagina } ja com a pagina presa entre 1 e o total (lista que
+   * encolheu por filtro nao fica numa pagina que nao existe mais).
+   * reiniciar() volta para a 1a pagina -- chamar ao filtrar ou ordenar.
+   */
+  function criarPaginacao(porPagina) {
+    var tamanho = porPagina || 20;
+    var atual = 1;
+    return {
+      pagina: function () { return atual; },
+      mover: function (delta) { atual += delta; },
+      reiniciar: function () { atual = 1; },
+      aplicar: function (lista) {
+        var total = lista.length;
+        var totalPaginas = Math.max(1, Math.ceil(total / tamanho));
+        if (atual > totalPaginas) atual = totalPaginas;
+        if (atual < 1) atual = 1;
+        var inicio = (atual - 1) * tamanho;
+        var itens = lista.slice(inicio, inicio + tamanho);
+        return { itens: itens, inicio: inicio, fim: inicio + itens.length, total: total, totalPaginas: totalPaginas, pagina: atual };
+      },
+    };
+  }
+
+  /**
    * Rastreia se o formulario de um drawer mudou desde que foi aberto/salvo.
    * `coletor` devolve o payload que o Salvar enviaria (puro: sem toast, sem
    * efeito). A comparacao e o JSON desse payload -- as chaves saem sempre na
@@ -188,7 +214,7 @@
 
   return {
     esc: esc, escJs: escJs, escScript: escScript,
-    comBotaoCarregando: comBotaoCarregando, criarOrdenacao: criarOrdenacao,
+    comBotaoCarregando: comBotaoCarregando, criarOrdenacao: criarOrdenacao, criarPaginacao: criarPaginacao,
     criarRastreadorEdicao: criarRastreadorEdicao,
     formatarCNPJ: formatarCNPJ, formatarTelefoneBR: formatarTelefoneBR,
   };

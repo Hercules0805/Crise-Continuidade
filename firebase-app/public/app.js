@@ -44,6 +44,12 @@ const CATEGORIA_CORES = ['#37474f','#1a237e','#c62828','#e65100','#00838f','#6a1
 // Logo é o único componente realmente chamado como função (só existe o nav e o
 // login precisando dele), ver index.html/login.html.
 // ============================================================
+// Ícones das ações de linha (guia de UI, seção Ícones): lápis laranja e
+// lixeira cinza em SVG, iguais em todas as grades. Emoji ✏️/🗑️ não é mais
+// usado em ação de linha (renderiza diferente em cada sistema e não herda cor).
+const SVG_EDITAR = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2" aria-hidden="true"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>';
+const SVG_EXCLUIR = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2" aria-hidden="true"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+
 const GRC360_LEVEL_LABEL = { low: 'Baixo', medium: 'Médio', high: 'Alto', critical: 'Crítico' };
 
 // DECISÃO 08/10/2026 (GRC360 v2): o nível agora é codificado por FORMA além de
@@ -375,6 +381,22 @@ document.addEventListener('keydown', (e) => {
   if (x) x.click();
 });
 
+// Rodapé de paginação único (guia de UI, "Tabela + paginação"): "Mostrando
+// X–Y de Z" + ‹ Anterior / Próxima ›. `info` é o que criarPaginacao().aplicar()
+// devolve; `fnMover` é o nome da função global que recebe -1/+1.
+function _htmlPaginacao(info, fnMover) {
+  if (!info || !info.total) return '';
+  const { pagina, totalPaginas, inicio, fim, total } = info;
+  return `<div class="paginacao">
+      <span>Mostrando ${inicio + 1}–${fim} de ${total}</span>
+      ${totalPaginas > 1 ? `<div class="paginacao__botoes">
+        <button class="btn btn-ghost" onclick="${fnMover}(-1)" ${pagina <= 1 ? 'disabled' : ''}>‹ Anterior</button>
+        <span>Página ${pagina} de ${totalPaginas}</span>
+        <button class="btn btn-ghost" onclick="${fnMover}(1)" ${pagina >= totalPaginas ? 'disabled' : ''}>Próxima ›</button>
+      </div>` : ''}
+    </div>`;
+}
+
 // Link/atalho para outra tela só para quem pode vê-la -- senão o clique cai em
 // "Esta tela não é do seu perfil" (ex.: Gestor no drawer de Contrato, TI em
 // Dependências). Mesmo critério do route().
@@ -449,8 +471,8 @@ async function perguntas() {
         </div>
         <div class="list-row-actions">
           ${p.ativa ? '<span class="badge badge-green">Ativa</span>' : '<span class="badge badge-gray">Inativa</span>'}
-          <button class="btn-icon" onclick="editarPergunta('${p.id}')">✏️</button>
-          <button class="btn-icon" onclick="excluirPergunta('${p.id}')">🗑️</button>
+          <button class="btn-icon" onclick="editarPergunta('${p.id}')" title="Editar">${SVG_EDITAR}</button>
+          <button class="btn-icon" onclick="excluirPergunta('${p.id}')" title="Excluir">${SVG_EXCLUIR}</button>
         </div>
       </div>`).join('')}</div>`;
   }).join('');
@@ -746,8 +768,8 @@ function renderizarConfigRespostas(config) {
               <span style="font-weight:600;color:#333;">${op.label}</span>
             </div>
             <div class="list-row-actions">
-              <button class="btn-icon" onclick="editarConfigResposta('${escJs(cat)}', ${idx})" title="Editar">✏️</button>
-              <button class="btn-icon" onclick="excluirConfigResposta('${escJs(cat)}', ${idx})" title="Excluir">🗑️</button>
+              <button class="btn-icon" onclick="editarConfigResposta('${escJs(cat)}', ${idx})" title="Editar">${SVG_EDITAR}</button>
+              <button class="btn-icon" onclick="excluirConfigResposta('${escJs(cat)}', ${idx})" title="Excluir">${SVG_EXCLUIR}</button>
             </div>
           </div>`).join('')}
       </div>`;
@@ -919,7 +941,7 @@ async function areas() {
       <div style="display:flex;gap:6px;align-items:center;">
         <select id="fResponsavel" onchange="_preencherContatoResponsavelArea()" style="flex:1;"><option value="">Selecione...</option></select>
         <button type="button" class="btn-icon" onclick="_recarregarPessoasArea()" title="Atualizar lista de pessoas">🔄</button>
-        <button type="button" class="btn-icon" id="btnEditarPessoaArea" onclick="_editarPessoaResponsavelArea()" title="Editar esta pessoa" style="display:none;">✏️</button>
+        <button type="button" class="btn-icon" id="btnEditarPessoaArea" onclick="_editarPessoaResponsavelArea()" title="Editar esta pessoa" style="display:none;">${SVG_EDITAR}</button>
       </div>
       <span style="font-size:0.75em;color:#888;display:block;margin-top:2px;margin-bottom:8px;">Vem do cadastro de Pessoas. <a href="#pessoas" target="_blank" style="color:#d60014;font-weight:600;">👤 Gerenciar Pessoas</a></span>
       <label>Email</label>
@@ -2121,6 +2143,10 @@ window.excluirPessoaCadastro = async (id) => {
 // PÁGINA: PROCESSOS (Tabela com ordenação e filtro)
 // ============================================================
 let processosOrdenacao = criarOrdenacao('score', 'desc');
+const processosPaginacao = criarPaginacao(20);
+// Filtrar ou ordenar volta para a 1ª página.
+window.filtrarProcessos = () => { processosPaginacao.reiniciar(); renderizarProcessos(); };
+window.irParaPaginaProcessos = (delta) => { processosPaginacao.mover(delta); renderizarProcessos(); };
 let processosFiltroArea = '';
 let processosFiltroTier = '';
 // Edição em lote -- ids marcados na tabela (reset a cada carga da tela).
@@ -2135,16 +2161,16 @@ async function processos() {
         ${Perfis.podeEditarProcessos(window.USER_PERFIS) ? '<button class="btn btn-primary" onclick="abrirModalProcesso()">+ Novo Processo</button>' : ''}
       </div>
     </div>
-    <div style="margin-bottom:16px;display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;">
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Área:</label>
-        <select id="filtroArea" onchange="filtrarPorArea(this.value)" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
+    <div class="filters">
+      <div class="field">
+        <label class="field-label">Área</label>
+        <select id="filtroArea" onchange="filtrarPorArea(this.value)" class="field-control">
           <option value="">Todas as áreas</option>
         </select>
       </div>
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Tier:</label>
-        <select id="filtroTier" onchange="filtrarPorTier(this.value)" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:180px;">
+      <div class="field">
+        <label class="field-label">Tier</label>
+        <select id="filtroTier" onchange="filtrarPorTier(this.value)" class="field-control">
           <option value="">Todos os tiers</option>
           <option value="Tier 1">Tier 1 (Crítico)</option>
           <option value="Tier 2">Tier 2 (Essencial)</option>
@@ -2152,50 +2178,54 @@ async function processos() {
           <option value="Pendente">Pendente</option>
         </select>
       </div>
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">PCN:</label>
-        <select id="filtroPCN" onchange="renderizarProcessos()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:140px;">
+      <div class="field">
+        <label class="field-label">PCN</label>
+        <select id="filtroPCN" onchange="filtrarProcessos()" class="field-control" style="min-width:140px;">
           <option value="">Todos</option>
           <option value="com">Com PCN</option>
           <option value="sem">Sem PCN</option>
         </select>
       </div>
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">&nbsp;</label>
-        <input type="text" id="buscaProcesso" placeholder="🔍 Buscar processo..." oninput="renderizarProcessos()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:200px;">
+      <div class="field">
+        <label class="field-label">&nbsp;</label>
+        <input type="search" id="buscaProcesso" placeholder="Buscar processo…" aria-label="Buscar processo" oninput="filtrarProcessos()" class="field-control field-control--busca">
       </div>
-      <div style="display:flex;align-items:flex-end;">
-        <span id="contadorProcessos" style="font-size:0.82em;color:#888;padding:10px 0;white-space:nowrap;"></span>
+      <div class="field">
+        <label class="field-label">&nbsp;</label>
+        <span id="contadorProcessos" class="muted" style="font-size:13px;line-height:40px;white-space:nowrap;"></span>
       </div>
       <div style="margin-left:auto;display:flex;gap:8px;">
-        <button id="btnEnviarArea" onclick="enviarParaArea()" style="display:none;padding:9px 18px;background:#1565c0;color:white;border:none;border-radius:7px;font-weight:600;font-size:0.88em;cursor:pointer;">
-          ✉️ Enviar Questionário para Área
-        </button>
-        <button id="btnRelatorioArea" onclick="enviarRelatorioArea()" style="display:none;padding:9px 18px;background:#2e7d32;color:white;border:none;border-radius:7px;font-weight:600;font-size:0.88em;cursor:pointer;">
-          📄 Enviar Relatório da Área
-        </button>
+        <!-- Ações da área filtrada: .btn-ghost com a cor de status (convenção do guia), não botão sólido solto. -->
+        <button id="btnEnviarArea" class="btn btn-ghost" onclick="enviarParaArea()" style="display:none;color:#1565c0;border-color:#1565c0;">✉️ Enviar Questionário para Área</button>
+        <button id="btnRelatorioArea" class="btn btn-ghost" onclick="enviarRelatorioArea()" style="display:none;color:#2e7d32;border-color:#2e7d32;">📄 Enviar Relatório da Área</button>
       </div>
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table" id="lista" style="display:none;">
-      <table>
+      <!-- Larguras em px (somavam 94% em %): abaixo de 1364px a grade rola e Ações fica fixa. -->
+      <table style="min-width:1364px;">
+        <colgroup>
+          <col style="width:44px"><col style="width:160px"><col style="width:240px"><col style="width:150px"><col style="width:160px">
+          <col style="width:90px"><col style="width:120px"><col style="width:120px"><col style="width:130px"><col style="width:150px">
+        </colgroup>
         <thead>
           <tr>
-            <th style="width:3%;text-align:center;padding-left:6px;padding-right:6px;${Perfis.podeEditarProcessos(window.USER_PERFIS) ? '' : 'visibility:hidden;'}"><input type="checkbox" id="chkTodosProcessos" onchange="toggleTodosProcessos(this.checked)" title="Selecionar todos"></th>
-            <th onclick="ordenarProcessos('area')" style="cursor:pointer;width:10%;">Área <span id="sort-area"></span></th>
-            <th onclick="ordenarProcessos('processo')" style="cursor:pointer;width:15%;">Processo de Negócio <span id="sort-processo"></span></th>
-            <th onclick="ordenarProcessos('responsavel')" style="cursor:pointer;width:10%;">Responsável <span id="sort-responsavel"></span></th>
-            <th onclick="ordenarProcessos('status')" style="cursor:pointer;width:12%;">Tier <span id="sort-status"></span></th>
-            <th class="col-c" onclick="ordenarProcessos('score')" style="cursor:pointer;width:7%;">Score <span id="sort-score"></span></th>
-            <th onclick="ordenarProcessos('biaHomologada')" style="cursor:pointer;width:9%;">BIA Status <span id="sort-biaHomologada"></span></th>
-            <th onclick="ordenarProcessos('bcpStatus')" style="cursor:pointer;width:9%;">BCP Status <span id="sort-bcpStatus"></span></th>
-            <th onclick="ordenarProcessos('drpStatus')" style="cursor:pointer;width:9%;">DRP Status <span id="sort-drpStatus"></span></th>
-            <th class="col-c col-sticky" style="width:10%;">Ações</th>
+            <th style="text-align:center;padding-left:6px;padding-right:6px;${Perfis.podeEditarProcessos(window.USER_PERFIS) ? '' : 'visibility:hidden;'}"><input type="checkbox" id="chkTodosProcessos" onchange="toggleTodosProcessos(this.checked)" title="Selecionar todos"></th>
+            <th onclick="ordenarProcessos('area')" style="cursor:pointer;">Área <span id="sort-area"></span></th>
+            <th onclick="ordenarProcessos('processo')" style="cursor:pointer;">Processo de Negócio <span id="sort-processo"></span></th>
+            <th onclick="ordenarProcessos('responsavel')" style="cursor:pointer;">Responsável <span id="sort-responsavel"></span></th>
+            <th onclick="ordenarProcessos('status')" style="cursor:pointer;">Tier <span id="sort-status"></span></th>
+            <th class="col-c" onclick="ordenarProcessos('score')" style="cursor:pointer;">Score <span id="sort-score"></span></th>
+            <th onclick="ordenarProcessos('biaHomologada')" style="cursor:pointer;">BIA <span id="sort-biaHomologada"></span></th>
+            <th onclick="ordenarProcessos('bcpStatus')" style="cursor:pointer;">BCP <span id="sort-bcpStatus"></span></th>
+            <th onclick="ordenarProcessos('drpStatus')" style="cursor:pointer;">DRP <span id="sort-drpStatus"></span></th>
+            <th class="col-c col-sticky">Ações</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
+    <div id="processosPaginacao"></div>
     <div class="modal-overlay" id="modalDetalhes"><div class="modal" onclick="event.stopPropagation()" style="max-width:700px;max-height:90vh;overflow-y:auto;">
       <h3 id="modalDetalhesTitulo">Detalhes do Processo</h3>
       <div id="modalDetalhesConteudo"></div>
@@ -2621,8 +2651,11 @@ function renderizarProcessos() {
   // Operador Administrativo so consulta: o clique da linha abre o detalhe
   // (somente leitura) e as acoes de editar/avaliar/enviar/excluir somem.
   const soLeituraProcessos = !Perfis.podeEditarProcessos(window.USER_PERFIS);
-  document.getElementById('rows').innerHTML = data.length
-    ? data.map(p => {
+  const pag = processosPaginacao.aplicar(data);
+  const pagEl = document.getElementById('processosPaginacao');
+  if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaProcessos');
+  document.getElementById('rows').innerHTML = pag.itens.length
+    ? pag.itens.map(p => {
         const status = Criticidade.tierDoProcesso(p);
         const statusColor = Criticidade.corDoTier(status);
         return `<tr style="cursor:pointer;" onclick="${soLeituraProcessos ? 'verDetalhesProcesso' : 'editarProcesso'}('${p.id}')">
@@ -2678,8 +2711,8 @@ function renderizarProcessos() {
   // filtro), mas o checkbox "marcar todos" e o botão refletem só o visível.
   const chkTodos = document.getElementById('chkTodosProcessos');
   if (chkTodos) {
-    chkTodos.checked = data.length > 0 && data.every((p) => processosSelecionados.has(p.id));
-    chkTodos.indeterminate = !chkTodos.checked && data.some((p) => processosSelecionados.has(p.id));
+    chkTodos.checked = pag.itens.length > 0 && pag.itens.every((p) => processosSelecionados.has(p.id));
+    chkTodos.indeterminate = !chkTodos.checked && pag.itens.some((p) => processosSelecionados.has(p.id));
   }
   _atualizarBotaoLoteProcessos();
 }
@@ -2700,8 +2733,8 @@ window.toggleProcessoSelecionado = (id, checked) => {
 };
 
 window.toggleTodosProcessos = (checked) => {
-  // Cobre as linhas atualmente renderizadas (já filtradas/buscadas) -- não
-  // existe paginação nesta tela hoje, então "todos" aqui é "todos os visíveis".
+  // Cobre as linhas atualmente renderizadas (já filtradas/buscadas): com a
+  // paginação, "todos" é "todos os desta página".
   document.querySelectorAll('#rows .chk-processo').forEach((el) => {
     const id = el.dataset.id;
     if (!id) return;
@@ -2927,15 +2960,15 @@ window.aplicarEdicaoLoteProcessos = async () => {
 window.filtrarPorArea = (area) => {
   processosFiltroArea = area;
   const btn = document.getElementById('btnEnviarArea');
-  if (btn) btn.style.display = area ? 'block' : 'none';
+  if (btn) btn.style.display = area ? 'inline-flex' : 'none';
   const btnRel = document.getElementById('btnRelatorioArea');
-  if (btnRel) btnRel.style.display = area ? 'block' : 'none';
-  renderizarProcessos();
+  if (btnRel) btnRel.style.display = area ? 'inline-flex' : 'none';
+  filtrarProcessos();
 };
 
 window.filtrarPorTier = (tier) => {
   processosFiltroTier = tier;
-  renderizarProcessos();
+  filtrarProcessos();
 };
 
 window.enviarRelatorioArea = async () => {
@@ -2971,7 +3004,7 @@ window.enviarParaArea = async () => {
 
 window.ordenarProcessos = (coluna) => {
   processosOrdenacao.ordenar(coluna);
-  renderizarProcessos();
+  filtrarProcessos();
 };
 
 // ============================================================
@@ -7236,7 +7269,7 @@ async function vulnerabilidades() {
         </thead>
         <tbody id="vulnerabilidadeRows"></tbody>
       </table>
-      <div id="vulnPaginacao" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:0 4px;font-size:0.85em;color:#666;"></div>
+      <div id="vulnPaginacao"></div>
     </div>
     ${_htmlDrawerVulnerabilidade()}
     ${_htmlDrawerVulnerabilidadeLote()}`;
@@ -7403,13 +7436,7 @@ function renderizarVulnerabilidades() {
 
   const paginacao = document.getElementById('vulnPaginacao');
   if (paginacao) {
-    paginacao.innerHTML = `
-      <span>${totalFiltrado ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${totalFiltrado}` : ''}</span>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <button class="btn btn-ghost" onclick="irParaPaginaVulnerabilidades(-1)" ${vulnerabilidadesPaginaAtual <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
-        <span style="padding:6px 4px;">Página ${vulnerabilidadesPaginaAtual} de ${totalPaginas}</span>
-        <button class="btn btn-ghost" onclick="irParaPaginaVulnerabilidades(1)" ${vulnerabilidadesPaginaAtual >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
-      </div>`;
+    paginacao.innerHTML = _htmlPaginacao({ pagina: vulnerabilidadesPaginaAtual, totalPaginas, inicio, fim: inicio + pagina.length, total: totalFiltrado }, 'irParaPaginaVulnerabilidades');
   }
 }
 
@@ -8880,111 +8907,73 @@ async function admin() {
     const aval = procs.filter(p => p.avaliado || p.score > 0).length;
     const t1 = procs.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T1)).length;
     const t2 = procs.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T2)).length;
-    const t3 = procs.filter(p => (p.avaliado || p.score > 0) && p.score < 6).length;
+    const t3 = procs.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T3)).length;
     return { nome: a.nome, total: procs.length, avaliados: aval, t1, t2, t3 };
   }).filter(a => a.total > 0);
 
-  // Cartão de métrica no padrão GRC360 (bia-metric), com a borda superior
-  // colorida de sempre por cima -- o componente oficial não tem essa opção,
-  // então fica como um override pontual (mesma ideia do card() de Fornecedores).
-  const metric = (label, value, corBorda, trend) => `<div class="bia-metric" style="border-top:4px solid ${corBorda};">
-        <div class="bia-metric__label label">${esc(label)}</div>
-        <div class="bia-metric__value display" style="color:${corBorda};">${value}</div>
-        ${trend ? `<div class="bia-metric__trend body-sm">${esc(trend)}</div>` : ''}
-      </div>`;
+  // Cores de Tier sempre do módulo de criticidade (mesma fonte do Badge e do
+  // mapa de calor) -- antes eram hex soltos e o Tier 3 saía azul aqui e
+  // mostarda em Processos.
+  const corT1 = Criticidade.corDoTier(Criticidade.TIER.T1);
+  const corT2 = Criticidade.corDoTier(Criticidade.TIER.T2);
+  const corT3 = Criticidade.corDoTier(Criticidade.TIER.T3);
+  const pctDe = (n, d) => (d > 0 ? Math.round((n / d) * 100) : 0);
+  const barra = (pct, cor, alto) => `<div class="barra${alto ? ' barra--alta' : ''}"><div class="barra__valor" style="width:${pct}%;background:${cor};"></div></div>`;
+  const linhaTier = (rotulo, n, cor) => `<div class="painel-linha">
+            <span class="painel-linha__rotulo">${rotulo}</span>${barra(pctDe(n, total), cor)}
+            <span class="painel-linha__valor num" style="color:${cor};">${n}</span>
+          </div>`;
 
   document.getElementById('painel').innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px;">
-      ${metric('Total de Processos', total, '#d60014')}
-      ${metric('Avaliados', avaliados, '#2e7d32', pct + '% do total')}
-      ${metric('Pendentes', pendentes, '#999')}
-      ${metric('Tier 1 (Crítico)', tier1, '#c62828')}
+    <div class="painel-metricas">
+      ${_htmlMetricCard({ label: 'Total de Processos', value: total })}
+      ${_htmlMetricCard({ label: 'Avaliados', value: avaliados, trend: pct + '% do total' })}
+      ${_htmlMetricCard({ label: 'Pendentes', value: pendentes })}
+      ${_htmlMetricCard({ label: 'Tier 1 (Crítico)', value: tier1, level: tier1 ? 'critical' : null })}
     </div>
 
-    <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);margin-bottom:28px;border-top:4px solid #c62828;">
-      <div style="font-weight:600;color:#333;margin-bottom:6px;">Cobertura dos Processos Críticos (Tier 1)</div>
-      <div style="font-size:0.82em;color:#999;margin-bottom:16px;">Percentual de processos Tier 1 com BIA, BCP e DRP realizados</div>
+    <div class="painel-card">
+      <div class="painel-card__titulo">Cobertura dos Processos Críticos (Tier 1)</div>
+      <div class="painel-card__sub">Percentual de processos Tier 1 com BIA, BCP e DRP realizados</div>
       <div id="painelTier1Cobertura"></div>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:28px;">
-      <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-        <div style="font-weight:600;color:#333;margin-bottom:16px;">Progresso de Avaliação</div>
-        <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;">
-          <div style="flex:1;background:#f0f0f0;border-radius:20px;height:14px;overflow:hidden;">
-            <div style="width:${pct}%;background:linear-gradient(90deg,#d60014,#3949ab);height:100%;border-radius:20px;transition:width 0.5s;"></div>
-          </div>
-          <span style="font-weight:700;color:#d60014;min-width:40px;">${pct}%</span>
+    <div class="painel-colunas">
+      <div class="painel-card">
+        <div class="painel-card__titulo">Progresso de Avaliação</div>
+        <div class="painel-linha">
+          ${barra(pct, 'var(--red)', true)}
+          <span class="painel-linha__valor num">${pct}%</span>
         </div>
-        <div style="font-size:0.85em;color:#999;">${avaliados} de ${total} processos avaliados</div>
+        <div class="painel-card__sub" style="margin:8px 0 0;">${avaliados} de ${total} processos avaliados</div>
       </div>
 
-      <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-        <div style="font-weight:600;color:#333;margin-bottom:16px;">Distribuição por Tier</div>
-        <div style="display:flex;flex-direction:column;gap:10px;">
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span style="width:130px;font-size:0.85em;color:#555;">Tier 1 (Crítico)</span>
-            <div style="flex:1;background:#f0f0f0;border-radius:20px;height:10px;overflow:hidden;">
-              <div style="width:${avaliados > 0 ? Math.round(tier1/total*100) : 0}%;background:#c62828;height:100%;border-radius:20px;"></div>
-            </div>
-            <span style="font-weight:700;color:#c62828;min-width:24px;text-align:right;">${tier1}</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span style="width:130px;font-size:0.85em;color:#555;">Tier 2 (Essencial)</span>
-            <div style="flex:1;background:#f0f0f0;border-radius:20px;height:10px;overflow:hidden;">
-              <div style="width:${avaliados > 0 ? Math.round(tier2/total*100) : 0}%;background:#f57c00;height:100%;border-radius:20px;"></div>
-            </div>
-            <span style="font-weight:700;color:#f57c00;min-width:24px;text-align:right;">${tier2}</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span style="width:130px;font-size:0.85em;color:#555;">Tier 3 (Suporte)</span>
-            <div style="flex:1;background:#f0f0f0;border-radius:20px;height:10px;overflow:hidden;">
-              <div style="width:${avaliados > 0 ? Math.round(tier3/total*100) : 0}%;background:#1565c0;height:100%;border-radius:20px;"></div>
-            </div>
-            <span style="font-weight:700;color:#1565c0;min-width:24px;text-align:right;">${tier3}</span>
-          </div>
-          <div style="display:flex;align-items:center;gap:10px;">
-            <span style="width:130px;font-size:0.85em;color:#555;">Pendentes</span>
-            <div style="flex:1;background:#f0f0f0;border-radius:20px;height:10px;overflow:hidden;">
-              <div style="width:${Math.round(pendentes/total*100)}%;background:#999;height:100%;border-radius:20px;"></div>
-            </div>
-            <span style="font-weight:700;color:#999;min-width:24px;text-align:right;">${pendentes}</span>
-          </div>
-        </div>
+      <div class="painel-card">
+        <div class="painel-card__titulo">Distribuição por Tier</div>
+        ${linhaTier('Tier 1 (Crítico)', tier1, corT1)}
+        ${linhaTier('Tier 2 (Essencial)', tier2, corT2)}
+        ${linhaTier('Tier 3 (Suporte)', tier3, corT3)}
+        ${linhaTier('Pendentes', pendentes, 'var(--border-strong)')}
       </div>
     </div>
 
-    <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-      <div style="font-weight:600;color:#333;margin-bottom:6px;">Matriz de Calor</div>
-      <div style="font-size:0.82em;color:#999;margin-bottom:16px;">Score por processo — quanto maior o score, mais crítico</div>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;">
-          <thead>
-            <tr style="background:#f5f5f5;">
-              <th style="padding:10px 12px;text-align:left;font-size:0.8em;color:#555;font-weight:600;min-width:140px;">Área</th>
-              <th style="padding:10px 12px;text-align:left;font-size:0.8em;color:#555;font-weight:600;">Processo</th>
-              <th style="padding:10px 12px;text-align:center;font-size:0.8em;color:#555;font-weight:600;width:70px;">Score</th>
-              <th style="padding:10px 12px;text-align:left;font-size:0.8em;color:#555;font-weight:600;">Calor</th>
-            </tr>
-          </thead>
+    <div class="painel-card">
+      <div class="painel-card__titulo">Matriz de Calor</div>
+      <div class="painel-card__sub">Score por processo — quanto maior o score, mais crítico</div>
+      <div class="data-table data-table--compact">
+        <table>
+          <colgroup><col style="width:22%"><col style="width:38%"><col style="width:10%"><col style="width:30%"></colgroup>
+          <thead><tr><th>Área</th><th>Processo</th><th class="col-c">Score</th><th>Calor</th></tr></thead>
           <tbody>
-            ${[...processosVisiveis].sort((a,b) => (b.score||0) - (a.score||0)).map(p => {
+            ${[...processosVisiveis].sort((a, b) => (b.score || 0) - (a.score || 0)).map((p) => {
               const s = p.score || 0;
-              const pct = Math.min(Math.round(s / 24 * 100), 100);
-              const label = s > 0 ? Criticidade.tierCurto(Criticidade.tierPorScore(s)) : Criticidade.TIER.PENDENTE;
-              const bg = s > 0 ? Criticidade.corDoTier(Criticidade.tierPorScore(s)) : '#e0e0e0';
-              return `<tr style="border-top:1px solid #f0f0f0;">
-                <td style="padding:10px 12px;font-size:0.85em;color:#555;">${esc(p.area)}</td>
-                <td style="padding:10px 12px;font-size:0.88em;font-weight:500;">${esc(p.processo)}</td>
-                <td style="padding:10px 12px;text-align:center;font-weight:700;color:${s > 0 ? bg : '#bbb'};">${s > 0 ? s : '-'}</td>
-                <td style="padding:10px 16px;">
-                  <div style="display:flex;align-items:center;gap:10px;">
-                    <div style="flex:1;background:#f0f0f0;border-radius:20px;height:12px;overflow:hidden;min-width:80px;">
-                      <div style="width:${pct}%;background:${bg};height:100%;border-radius:20px;"></div>
-                    </div>
-                    <span style="font-size:0.78em;font-weight:600;color:${s > 0 ? bg : '#bbb'};min-width:55px;">${label}</span>
-                  </div>
-                </td>
+              const tierS = s > 0 ? Criticidade.tierPorScore(s) : Criticidade.TIER.PENDENTE;
+              const cor = s > 0 ? Criticidade.corDoTier(tierS) : 'var(--border)';
+              return `<tr>
+                <td class="muted">${esc(p.area)}</td>
+                <td class="title">${esc(p.processo)}</td>
+                <td class="col-c num" style="font-weight:700;color:${s > 0 ? cor : 'var(--ink-muted)'};">${s > 0 ? s : '–'}</td>
+                <td><div class="painel-linha">${barra(Math.min(pctDe(s, 24), 100), cor)}<span class="painel-linha__valor" style="color:${s > 0 ? cor : 'var(--ink-muted)'};">${Criticidade.tierCurto(tierS)}</span></div></td>
               </tr>`;
             }).join('')}
           </tbody>
@@ -8992,42 +8981,27 @@ async function admin() {
       </div>
     </div>
 
-    <div style="background:white;border-radius:10px;padding:24px;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-      <div style="font-weight:600;color:#333;margin-bottom:16px;">Resumo por Área</div>
-      <table style="width:100%;border-collapse:collapse;">
-        <thead>
-          <tr style="background:#f5f5f5;">
-            <th style="padding:10px 12px;text-align:left;font-size:0.85em;color:#555;font-weight:600;">Área</th>
-            <th style="padding:10px 12px;text-align:center;font-size:0.85em;color:#555;font-weight:600;">Total</th>
-            <th style="padding:10px 12px;text-align:center;font-size:0.85em;color:#555;font-weight:600;">Avaliados</th>
-            <th style="padding:10px 12px;text-align:center;font-size:0.85em;color:#c62828;font-weight:600;">Tier 1</th>
-            <th style="padding:10px 12px;text-align:center;font-size:0.85em;color:#f57c00;font-weight:600;">Tier 2</th>
-            <th style="padding:10px 12px;text-align:center;font-size:0.85em;color:#1565c0;font-weight:600;">Tier 3</th>
-            <th style="padding:10px 12px;text-align:left;font-size:0.85em;color:#555;font-weight:600;">Progresso</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${porArea.map(a => {
-            const pctA = a.total > 0 ? Math.round(a.avaliados / a.total * 100) : 0;
-            return `<tr style="border-top:1px solid #f0f0f0;">
-              <td style="padding:12px;font-weight:500;">${esc(a.nome)}</td>
-              <td style="padding:12px;text-align:center;color:#666;">${a.total}</td>
-              <td style="padding:12px;text-align:center;color:#2e7d32;font-weight:600;">${a.avaliados}</td>
-              <td style="padding:12px;text-align:center;color:#c62828;font-weight:600;">${a.t1 || '-'}</td>
-              <td style="padding:12px;text-align:center;color:#f57c00;font-weight:600;">${a.t2 || '-'}</td>
-              <td style="padding:12px;text-align:center;color:#1565c0;font-weight:600;">${a.t3 || '-'}</td>
-              <td style="padding:12px;min-width:120px;">
-                <div style="display:flex;align-items:center;gap:8px;">
-                  <div style="flex:1;background:#f0f0f0;border-radius:20px;height:8px;overflow:hidden;">
-                    <div style="width:${pctA}%;background:linear-gradient(90deg,#d60014,#3949ab);height:100%;border-radius:20px;"></div>
-                  </div>
-                  <span style="font-size:0.8em;color:#666;min-width:32px;">${pctA}%</span>
-                </div>
-              </td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>
+    <div class="painel-card">
+      <div class="painel-card__titulo">Resumo por Área</div>
+      <div class="data-table data-table--compact">
+        <table>
+          <thead><tr><th>Área</th><th class="col-c">Total</th><th class="col-c">Avaliados</th><th class="col-c">Tier 1</th><th class="col-c">Tier 2</th><th class="col-c">Tier 3</th><th>Progresso</th></tr></thead>
+          <tbody>
+            ${porArea.map((a) => {
+              const pctA = pctDe(a.avaliados, a.total);
+              return `<tr>
+                <td class="title">${esc(a.nome)}</td>
+                <td class="col-c num">${a.total}</td>
+                <td class="col-c num">${a.avaliados}</td>
+                <td class="col-c num" style="color:${corT1};font-weight:600;">${a.t1 || '–'}</td>
+                <td class="col-c num" style="color:${corT2};font-weight:600;">${a.t2 || '–'}</td>
+                <td class="col-c num" style="color:${corT3};font-weight:600;">${a.t3 || '–'}</td>
+                <td><div class="painel-linha">${barra(pctA, 'var(--red)')}<span class="painel-linha__valor num">${pctA}%</span></div></td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
     </div>
   `;
 
@@ -9036,43 +9010,25 @@ async function admin() {
   if (coberturaEl) {
     if (tier1 > 0) {
       const t1Procs = processosVisiveis.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T1));
-      const t1Bia = t1Procs.filter(p => p.biaHomologada === 'BIA Realizado').length;
-      const t1Bcp = t1Procs.filter(p => p.bcpStatus === 'BCP Realizado').length;
-      const t1Drp = t1Procs.filter(p => p.drpStatus === 'DRP Realizado').length;
-      const pctBia = Math.round(t1Bia / tier1 * 100);
-      const pctBcp = Math.round(t1Bcp / tier1 * 100);
-      const pctDrp = Math.round(t1Drp / tier1 * 100);
-      const corBia = pctBia >= 80 ? '#2e7d32' : pctBia >= 50 ? '#f57c00' : '#c62828';
-      const corBcp = pctBcp >= 80 ? '#2e7d32' : pctBcp >= 50 ? '#f57c00' : '#c62828';
-      const corDrp = pctDrp >= 80 ? '#2e7d32' : pctDrp >= 50 ? '#f57c00' : '#c62828';
-      coberturaEl.innerHTML = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">' +
-        '<div style="text-align:center;padding:16px;background:#f8f9fa;border-radius:8px;">' +
-          '<div style="font-size:0.78em;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">BIA Realizado</div>' +
-          '<div style="font-size:2em;font-weight:700;color:' + corBia + ';">' + pctBia + '%</div>' +
-          '<div style="font-size:0.8em;color:#888;margin-top:4px;">' + t1Bia + ' de ' + tier1 + ' processos</div>' +
-          '<div style="margin-top:8px;background:#e0e0e0;border-radius:20px;height:8px;overflow:hidden;">' +
-            '<div style="width:' + pctBia + '%;background:' + corBia + ';height:100%;border-radius:20px;"></div>' +
-          '</div>' +
-        '</div>' +
-        '<div style="text-align:center;padding:16px;background:#f8f9fa;border-radius:8px;">' +
-          '<div style="font-size:0.78em;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">BCP Realizado</div>' +
-          '<div style="font-size:2em;font-weight:700;color:' + corBcp + ';">' + pctBcp + '%</div>' +
-          '<div style="font-size:0.8em;color:#888;margin-top:4px;">' + t1Bcp + ' de ' + tier1 + ' processos</div>' +
-          '<div style="margin-top:8px;background:#e0e0e0;border-radius:20px;height:8px;overflow:hidden;">' +
-            '<div style="width:' + pctBcp + '%;background:' + corBcp + ';height:100%;border-radius:20px;"></div>' +
-          '</div>' +
-        '</div>' +
-        '<div style="text-align:center;padding:16px;background:#f8f9fa;border-radius:8px;">' +
-          '<div style="font-size:0.78em;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">DRP Realizado</div>' +
-          '<div style="font-size:2em;font-weight:700;color:' + corDrp + ';">' + pctDrp + '%</div>' +
-          '<div style="font-size:0.8em;color:#888;margin-top:4px;">' + t1Drp + ' de ' + tier1 + ' processos</div>' +
-          '<div style="margin-top:8px;background:#e0e0e0;border-radius:20px;height:8px;overflow:hidden;">' +
-            '<div style="width:' + pctDrp + '%;background:' + corDrp + ';height:100%;border-radius:20px;"></div>' +
-          '</div>' +
-        '</div>' +
-      '</div>';
+      // Cor por faixa de cobertura: sucesso / alerta / perigo (paleta de status do guia).
+      const corCobertura = (p) => (p >= 80 ? '#2e7d32' : p >= 50 ? '#f57c00' : '#c62828');
+      const kpi = (rotulo, n) => {
+        const p = pctDe(n, tier1);
+        const cor = corCobertura(p);
+        return `<div class="painel-kpi">
+            <div class="painel-kpi__rotulo">${rotulo}</div>
+            <div class="painel-kpi__valor num" style="color:${cor};">${p}%</div>
+            <div class="painel-card__sub" style="margin:4px 0 8px;">${n} de ${tier1} processos</div>
+            ${barra(p, cor)}
+          </div>`;
+      };
+      coberturaEl.innerHTML = `<div class="painel-kpis">
+          ${kpi('BIA Realizado', t1Procs.filter(p => p.biaHomologada === 'BIA Realizado').length)}
+          ${kpi('BCP Realizado', t1Procs.filter(p => p.bcpStatus === 'BCP Realizado').length)}
+          ${kpi('DRP Realizado', t1Procs.filter(p => p.drpStatus === 'DRP Realizado').length)}
+        </div>`;
     } else {
-      coberturaEl.innerHTML = '<p style="font-size:0.9em;color:#999;">Nenhum processo classificado como Tier 1 ainda.</p>';
+      coberturaEl.innerHTML = '<p class="muted" style="font-size:14px;">Nenhum processo classificado como Tier 1 ainda.</p>';
     }
   }
 }
@@ -12410,14 +12366,7 @@ function renderizarIndicadoresDashboard() {
         </tbody>
       </table>
     </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:0.85em;color:#666;">
-      <span>${totalLista ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${totalLista} indicador(es)` : ''}</span>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" onclick="irParaPaginaDashboard(-1)" ${indicadoresDashboardPaginaAtual <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
-        <span style="padding:6px 4px;">Página ${indicadoresDashboardPaginaAtual} de ${totalPaginas}</span>
-        <button class="btn btn-ghost" onclick="irParaPaginaDashboard(1)" ${indicadoresDashboardPaginaAtual >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
-      </div>
-    </div>`;
+    ${_htmlPaginacao({ pagina: indicadoresDashboardPaginaAtual, totalPaginas, inicio, fim: inicio + pagina.length, total: totalLista }, 'irParaPaginaDashboard')}`;
 }
 
 // ============================================================
@@ -12580,14 +12529,7 @@ function renderizarIndicadoresCadastro() {
         </tbody>
       </table>
     </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:0.85em;color:#666;">
-      <span>${total ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${total} indicador(es)` : ''}</span>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" onclick="irParaPaginaIndicadores(-1)" ${indicadoresPaginaAtual <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
-        <span style="padding:6px 4px;">Página ${indicadoresPaginaAtual} de ${totalPaginas}</span>
-        <button class="btn btn-ghost" onclick="irParaPaginaIndicadores(1)" ${indicadoresPaginaAtual >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
-      </div>
-    </div>`;
+    ${_htmlPaginacao({ pagina: indicadoresPaginaAtual, totalPaginas, inicio, fim: inicio + pagina.length, total: total }, 'irParaPaginaIndicadores')}`;
 
   _atualizarBotaoExcluirSelecionados();
 }
@@ -12789,14 +12731,7 @@ function renderizarGradeLancamentos() {
         </tbody>
       </table>
     </div>
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:0.85em;color:#666;">
-      <span>${total ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${total} lançamento(s)` : ''}</span>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" onclick="irParaPaginaLancamentos(-1)" ${indicadoresLancamentoPaginaAtual <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
-        <span style="padding:6px 4px;">Página ${indicadoresLancamentoPaginaAtual} de ${totalPaginas}</span>
-        <button class="btn btn-ghost" onclick="irParaPaginaLancamentos(1)" ${indicadoresLancamentoPaginaAtual >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
-      </div>
-    </div>`;
+    ${_htmlPaginacao({ pagina: indicadoresLancamentoPaginaAtual, totalPaginas, inicio, fim: inicio + pagina.length, total: total }, 'irParaPaginaLancamentos')}`;
 }
 
 // Célula de Desempenho em modo exibição: texto com sinalização visual de que
@@ -14612,7 +14547,7 @@ function renderPCNLista(comPCN) {
         <div style="display:flex;align-items:center;gap:8px;">
           ${_htmlBadge(_nivelTierProcesso(Criticidade.tierDoProcesso(p)), tierLabel(p) + ' • ' + (p.score || 0))}
           <button onclick="abrirPCNDireto('${p.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Abrir PCN">📄</button>
-          <button onclick="event.stopPropagation();excluirPCN('${p.id}','${escJs(p.area)}','${escJs(p.processo)}')" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#bbb'" title="Excluir PCN">🗑️</button>
+          <button class="btn-icon" onclick="event.stopPropagation();excluirPCN('${p.id}','${escJs(p.area)}','${escJs(p.processo)}')" title="Excluir PCN">${SVG_EXCLUIR}</button>
         </div>
       </div>`;
     });
@@ -14788,7 +14723,7 @@ function renderDRPLista(lista, tipo) {
           ${temDRP ? `<button onclick="event.stopPropagation();abrirDRPDireto('${d.id}')" class="btn btn-ghost" style="padding:5px 10px;font-size:0.82em;" title="Abrir a última versão do DRP">📄 Abrir DRP</button>` : ''}
           <button onclick="event.stopPropagation();gerenciarDrpDependencia('${d.id}')" class="btn btn-ghost" style="padding:5px 10px;font-size:0.82em;" title="Gerenciar Parâmetros DRP">⚙️ Gerenciar</button>
           ${temDRP ? `<button onclick="event.stopPropagation();copiarLinkDrpDireto('${d.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Copiar link direto">🔗</button>` : ''}
-          ${(temDRP && podeExcluir) ? `<button onclick="event.stopPropagation();excluirDRPDaLista('${d.id}','${escJs(d.nome)}')" style="background:none;border:none;cursor:pointer;color:#bbb;font-size:1em;padding:4px;" onmouseenter="this.style.color='#c62828'" onmouseleave="this.style.color='#bbb'" title="Excluir DRP">🗑️</button>` : ''}
+          ${(temDRP && podeExcluir) ? `<button class="btn-icon" onclick="event.stopPropagation();excluirDRPDaLista('${d.id}','${escJs(d.nome)}')" title="Excluir DRP">${SVG_EXCLUIR}</button>` : ''}
         </div>
       </div>`;
     });
@@ -15004,8 +14939,8 @@ function renderizarCriterios() {
               <td style="text-align:center;color:#666;font-size:0.9em;">${c.ativo && pesoTotal ? Math.round((c.peso / pesoTotal) * 100) + '%' : '–'}</td>
               <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${isAdmin ? `
-                  <button class="btn-icon" onclick="abrirModalCriterio('${c.id}')" title="Editar">✏️</button>
-                  <button class="btn-icon" onclick="excluirCriterio('${c.id}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
+                  <button class="btn-icon" onclick="abrirModalCriterio('${c.id}')" title="Editar">${SVG_EDITAR}</button>
+                  <button class="btn-icon" onclick="excluirCriterio('${c.id}')" title="Excluir">${SVG_EXCLUIR}</button>` : '–'}
               </td>
             </tr>`).join('')}
         </tbody>
@@ -15162,8 +15097,8 @@ function renderizarCategoriasFornecedor() {
                 : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativa</span>'}</td>
               <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${isAdmin ? `
-                  <button class="btn-icon" onclick="abrirModalCategoriaFornecedor('${c.id}')" title="Editar">✏️</button>
-                  <button class="btn-icon" onclick="excluirCategoriaFornecedor('${c.id}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
+                  <button class="btn-icon" onclick="abrirModalCategoriaFornecedor('${c.id}')" title="Editar">${SVG_EDITAR}</button>
+                  <button class="btn-icon" onclick="excluirCategoriaFornecedor('${c.id}')" title="Excluir">${SVG_EXCLUIR}</button>` : '–'}
               </td>
             </tr>`).join('')}
         </tbody>
@@ -15318,8 +15253,8 @@ function renderizarSubcategoriasFornecedor() {
                 : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativa</span>'}</td>
               <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${isAdmin ? `
-                  <button class="btn-icon" onclick="abrirModalSubcategoriaFornecedor('${s.id}')" title="Editar">✏️</button>
-                  <button class="btn-icon" onclick="excluirSubcategoriaFornecedor('${s.id}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
+                  <button class="btn-icon" onclick="abrirModalSubcategoriaFornecedor('${s.id}')" title="Editar">${SVG_EDITAR}</button>
+                  <button class="btn-icon" onclick="excluirSubcategoriaFornecedor('${s.id}')" title="Excluir">${SVG_EXCLUIR}</button>` : '–'}
               </td>
             </tr>`).join('')}
         </tbody>
@@ -15461,8 +15396,8 @@ function renderizarCriticidadeFornecedorPerguntas() {
                 : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativa</span>'}</td>
               <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${isAdmin ? `
-                  <button class="btn-icon" onclick="abrirDrawerCriticidadePergunta('${p.id}')" title="Editar">✏️</button>
-                  <button class="btn-icon" onclick="excluirCriticidadeFornecedorPergunta('${p.id}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
+                  <button class="btn-icon" onclick="abrirDrawerCriticidadePergunta('${p.id}')" title="Editar">${SVG_EDITAR}</button>
+                  <button class="btn-icon" onclick="excluirCriticidadeFornecedorPergunta('${p.id}')" title="Excluir">${SVG_EXCLUIR}</button>` : '–'}
               </td>
             </tr>`).join('')}
         </tbody>
@@ -15532,7 +15467,7 @@ function renderCriticidadePerguntaOpcoes() {
         <td style="font-weight:600;color:#222;">${esc(op.rotulo)}</td>
         <td style="font-size:0.85em;color:#555;width:15%;">peso ${esc(String(op.score))}</td>
         <td style="text-align:center;white-space:nowrap;width:15%;">
-          <button class="btn-icon" onclick="editarCriticidadeOpcaoItem(${i})" title="Editar">✏️</button>
+          <button class="btn-icon" onclick="editarCriticidadeOpcaoItem(${i})" title="Editar">${SVG_EDITAR}</button>
           <button class="btn-icon" onclick="removerCriticidadeOpcaoItem(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
         </td>
       </tr>`).join('') + `</tbody></table>`;
@@ -15694,19 +15629,31 @@ let fornecedoresFiltroResumo = 'todos'; // 'todos' | 'semAvaliacao' | 'vencida' 
 // ver "TIC" e "sem avaliacao" ativos ao mesmo tempo.
 let fornecedoresFiltroTic = 'todos'; // 'todos' | 'tic' | 'naoTic'
 let fornecedoresOrdenacao = criarOrdenacao('nome', 'asc');
+const fornecedoresPaginacao = criarPaginacao(20);
+
+// Filtrar ou ordenar volta para a 1ª página.
+window.filtrarFornecedores = () => {
+  fornecedoresPaginacao.reiniciar();
+  renderizarFornecedores();
+};
 
 window.filtrarFornecedoresResumo = (modo) => {
   fornecedoresFiltroResumo = fornecedoresFiltroResumo === modo ? 'todos' : modo;
-  renderizarFornecedores();
+  filtrarFornecedores();
 };
 
 window.filtrarFornecedoresTic = (modo) => {
   fornecedoresFiltroTic = fornecedoresFiltroTic === modo ? 'todos' : modo;
-  renderizarFornecedores();
+  filtrarFornecedores();
 };
 
 window.ordenarFornecedores = (coluna) => {
   fornecedoresOrdenacao.ordenar(coluna);
+  filtrarFornecedores();
+};
+
+window.irParaPaginaFornecedores = (delta) => {
+  fornecedoresPaginacao.mover(delta);
   renderizarFornecedores();
 };
 
@@ -15782,19 +15729,22 @@ async function fornecedores() {
       </div>
     </div>
     <div id="fornResumo" style="margin-bottom:18px;"></div>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end;">
-      <input type="text" id="buscaFornecedor" placeholder="🔍 Buscar fornecedor..." oninput="renderizarFornecedores()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:280px;">
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Categoria</label>
-        <select id="filtroFornCadastroCategoria" onchange="renderizarFornecedores()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+    <div class="filters">
+      <div class="field">
+        <label class="field-label">Categoria</label>
+        <select id="filtroFornCadastroCategoria" onchange="filtrarFornecedores()" class="field-control">
           <option value="">Todas as categorias</option>
         </select>
       </div>
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Setor</label>
-        <select id="filtroFornCadastroSetor" onchange="renderizarFornecedores()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:200px;">
+      <div class="field">
+        <label class="field-label">Setor</label>
+        <select id="filtroFornCadastroSetor" onchange="filtrarFornecedores()" class="field-control">
           <option value="">Todos os setores</option>
         </select>
+      </div>
+      <div class="field">
+        <label class="field-label">&nbsp;</label>
+        <input type="search" id="buscaFornecedor" placeholder="Buscar fornecedor…" aria-label="Buscar fornecedor" oninput="filtrarFornecedores()" class="field-control field-control--busca">
       </div>
     </div>
     <div class="loading" id="loadingFornecedores">⏳ Carregando...</div>
@@ -15939,60 +15889,65 @@ function renderizarFornecedores() {
     avaliadoEm: comparadorNulavel((av) => (av && av.avaliadoEm ? av.avaliadoEm : null)),
   });
 
-  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarFornecedores('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-forn-${coluna}"></span></th>`;
+  const th = (coluna, rotulo, classe, titulo) => `<th class="${classe || ''}" onclick="ordenarFornecedores('${coluna}')" style="cursor:pointer;"${titulo ? ` title="${titulo}"` : ''}>${rotulo} <span id="sort-forn-${coluna}"></span></th>`;
+  const pag = fornecedoresPaginacao.aplicar(data);
 
+  // Larguras em px (somavam 109% em %): abaixo de 1356px a grade rola e Ações fica fixa.
   lista.innerHTML = `
     <div class="data-table">
-      <table>
+      <table style="min-width:1356px;">
+        <colgroup>
+          <col style="width:200px"><col style="width:140px"><col style="width:120px"><col style="width:140px"><col style="width:140px">
+          <col style="width:100px"><col style="width:120px"><col style="width:170px"><col style="width:130px"><col style="width:96px">
+        </colgroup>
         <thead>
           <tr>
-            ${th('nome', 'Empresa', 'width:16%;')}
-            ${th('categoria', 'Categoria', 'width:11%;')}
-            ${th('setor', 'Setor', 'width:9%;')}
-            <th style="width:11%;">Contatos</th>
-            <th style="width:11%;">Gestor do Contrato</th>
-            ${th('nota', 'Nota de Conformidade', 'width:10%;text-align:center;')}
-            ${th('criticidade', 'Criticidade', 'width:9%;text-align:center;')}
-            <th style="width:11%;">Situação</th>
-            ${th('avaliadoEm', 'Última avaliação', 'width:10%;')}
-            <th style="width:11%;text-align:center;">Ações</th>
+            ${th('nome', 'Empresa')}
+            ${th('categoria', 'Categoria')}
+            ${th('setor', 'Setor')}
+            <th>Contatos</th>
+            <th title="Gestor do Contrato">Gestor</th>
+            ${th('nota', 'Nota', 'col-c', 'Nota de Conformidade (0 a 100)')}
+            ${th('criticidade', 'Criticidade', 'col-c')}
+            <th>Situação</th>
+            ${th('avaliadoEm', 'Avaliado em', 'col-nw', 'Data da última avaliação')}
+            <th class="col-c col-sticky">Ações</th>
           </tr>
         </thead>
         <tbody>
-          ${data.length ? data.map((f) => {
+          ${pag.itens.length ? pag.itens.map((f) => {
             const av = _avaliacaoDoFornecedor(f.id);
             const sit = _situacaoFornecedor(av);
             return `
             <tr style="cursor:pointer;" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')">
-              <td style="font-weight:600;">${esc(f.nome)}</td>
-              <td style="color:#666;font-size:0.88em;">${esc(f.categoriaFornecedor || '–')}</td>
-              <td style="color:#666;font-size:0.88em;">${esc(f.setor || '–')}</td>
-              <td style="color:#666;font-size:0.88em;">${_resumoPessoasFornecedor(f)}</td>
-              <td style="color:#666;font-size:0.88em;">${_resumoGestoresFornecedor(f)}</td>
-              <td style="text-align:center;">
+              <td class="title">${esc(f.nome)}</td>
+              <td class="muted">${esc(f.categoriaFornecedor || '–')}</td>
+              <td class="muted">${esc(f.setor || '–')}</td>
+              <td class="muted">${_resumoPessoasFornecedor(f)}</td>
+              <td class="muted">${_resumoGestoresFornecedor(f)}</td>
+              <td class="col-c">
                 ${av && av.nota !== null
                   ? `<span title="${esc(FornecedorScore.faixaNota(av.nota).rotulo)} — ${av.nota} de 100">${_htmlBadge(_nivelNotaFornecedor(FornecedorScore.faixaNota(av.nota).rotulo), String(av.nota))}</span>`
                   : '<span style="color:#999;font-weight:600;" title="Sem nota — não é o mesmo que nota zero">–</span>'}
               </td>
-              <td style="text-align:center;">${_badgeCriticidadeFornecedor(av)}</td>
+              <td class="col-c">${_badgeCriticidadeFornecedor(av)}</td>
               <td>
                 ${_htmlBadge(_nivelSituacaoFornecedor(sit), sit.rotulo)}
                 ${sit.aviso ? `<div style="font-size:0.72em;color:#e65100;margin-top:3px;">${esc(sit.aviso)}</div>` : ''}
               </td>
-              <td style="color:#666;font-size:0.9em;">
-                ${av ? `${_dataCurtaForn(av.avaliadoEm)}<div style="font-size:0.8em;color:#aaa;">${esc(av.avaliadoPor || '')}</div>` : '–'}
+              <td class="muted">
+                ${av ? `<span class="num">${_dataCurtaForn(av.avaliadoEm)}</span><div style="font-size:0.8em;">${esc(av.avaliadoPor || '')}</div>` : '–'}
               </td>
-              <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
-                ${podeMexer
-                  ? `<button class="btn-icon" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" title="Editar / avaliar fornecedor">✏️</button>
-                     <button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>`
-                  : `<button class="btn btn-ghost" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" style="padding:5px 12px;font-size:0.86em;">Ver</button>`}
+              <td class="col-c col-nw col-sticky" onclick="event.stopPropagation();">
+                <button class="btn-icon" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" title="${podeMexer ? 'Editar / avaliar fornecedor' : 'Visualizar'}">${SVG_EDITAR}</button>
+                ${podeMexer ? `<button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir">${SVG_EXCLUIR}</button>` : ''}
               </td>
             </tr>`;
-          }).join('') : `<tr><td colspan="10" style="padding:20px;text-align:center;color:#888;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
+          }).join('') : `<tr><td colspan="10" class="muted" style="padding:40px;text-align:center;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
         </tbody>
       </table>
-    </div>`;
+    </div>
+    ${_htmlPaginacao(pag, 'irParaPaginaFornecedores')}`;
 
   fornecedoresOrdenacao.atualizarSetas('sort-forn-', ['nome', 'categoria', 'setor', 'nota', 'criticidade', 'avaliadoEm']);
 }
@@ -16332,8 +16287,8 @@ function renderizarProdutosSoftware() {
                 : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativo</span>'}</td>
               <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${isAdmin ? `
-                  <button class="btn-icon" onclick="abrirModalProdutoSoftware('${esc(p.id)}')" title="Editar">✏️</button>
-                  <button class="btn-icon" onclick="excluirProdutoSoftware('${esc(p.id)}')" title="Excluir" style="color:#c62828;">🗑️</button>` : '–'}
+                  <button class="btn-icon" onclick="abrirModalProdutoSoftware('${esc(p.id)}')" title="Editar">${SVG_EDITAR}</button>
+                  <button class="btn-icon" onclick="excluirProdutoSoftware('${esc(p.id)}')" title="Excluir">${SVG_EXCLUIR}</button>` : '–'}
               </td>
             </tr>`;
           }).join('') : '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">Nenhum produto encontrado.</td></tr>'}
@@ -16568,8 +16523,8 @@ function renderizarPerfis() {
               <td style="color:#666;font-size:0.88em;">${p.atualizadoEm ? new Date(p.atualizadoEm).toLocaleDateString('pt-BR') : '–'}</td>
               <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${podeGerenciar ? `
-                  <button class="btn-icon" onclick="abrirModalPerfil('${esc(p.email)}')" title="Alterar">✏️</button>
-                  ${euMesmo ? '' : `<button class="btn-icon" onclick="excluirPerfilAcesso('${esc(p.email)}')" title="Remover acesso" style="color:#c62828;">🗑️</button>`}` : '–'}
+                  <button class="btn-icon" onclick="abrirModalPerfil('${esc(p.email)}')" title="Alterar">${SVG_EDITAR}</button>
+                  ${euMesmo ? '' : `<button class="btn-icon" onclick="excluirPerfilAcesso('${esc(p.email)}')" title="Remover acesso">${SVG_EXCLUIR}</button>`}` : '–'}
               </td>
             </tr>`;
           }).join('') : `<tr><td colspan="5" style="padding:20px;text-align:center;color:#888;">${houveBusca ? 'Nenhum perfil corresponde à busca.' : 'Ninguém cadastrado. Todo mundo que entrar cai no menor acesso.'}</td></tr>`}
@@ -17137,7 +17092,7 @@ function renderGestoresContrato() {
         <td style="font-size:0.85em;color:#555;">${esc(g.telefone || '-')}</td>
         <td style="font-size:0.85em;color:#555;">${esc(g.email || '-')}</td>
         <td style="text-align:center;white-space:nowrap;">
-          ${g.id ? `<a href="#pessoas?editPessoa=${encodeURIComponent(g.id)}" target="_blank" class="btn-icon" title="Abrir esta pessoa em Pessoas" style="text-decoration:none;">✏️</a>` : ''}
+          ${g.id ? `<a href="#pessoas?editPessoa=${encodeURIComponent(g.id)}" target="_blank" class="btn-icon" title="Abrir esta pessoa em Pessoas" style="text-decoration:none;">${SVG_EDITAR}</a>` : ''}
           <button class="btn-icon" onclick="removerGestorContrato(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
         </td>
       </tr>`).join('') + `</tbody></table>`;
