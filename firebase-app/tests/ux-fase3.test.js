@@ -133,3 +133,37 @@ test('Dashboard de Continuidade: cards padrao, sem o degrade do indigo antigo, T
   assert.strictEqual(linhaTI.children[5].textContent.trim(), String(t3Card || '–'));
   w.close();
 });
+
+test('filtros no padrao .filters/.field: nenhum rotulo antigo, sem "Filtrar por" nem lupa no placeholder', () => {
+  assert.doesNotMatch(APP, /<label style="font-size:0\.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">/);
+  assert.doesNotMatch(APP, />Filtrar por /);
+  // A unica lupa que sobra e a de Contratos (modulo de outra frente, ainda nao publicado).
+  const lupas = (APP.match(/placeholder="🔍[^"]*"/g) || []).filter((p) => !/contrato/i.test(p));
+  assert.deepStrictEqual(lupas, []);
+});
+
+test('listas grandes paginadas: Riscos, Dependencias, Pessoas e Perfis (filtro volta para a 1a pagina)', async () => {
+  const n = 23;
+  const riscos = Array.from({ length: n }, (_, i) => ({ id: 'r' + i, titulo: 'Risco ' + i, area: 'TI', status: 'Identificado', dataIdentificacao: '2026-10-01' }));
+  const deps = Array.from({ length: n }, (_, i) => ({ id: 'd' + i, categoria: 'Servidor', nome: 'SRV ' + i }));
+  const pessoas = Array.from({ length: n }, (_, i) => ({ id: 'p' + i, categoria: 'Pessoas', nome: 'Pessoa ' + String(i).padStart(2, '0'), areas: [] }));
+  const perfis = Array.from({ length: n }, (_, i) => ({ email: `u${i}@fortestecnologia.com.br`, perfis: ['gestor'] }));
+  const casos = [
+    ['riscos', { getRiscos: riscos }, '#riscoRows tr', 'riscosPaginacao', 'irParaPaginaRiscos'],
+    ['dependencias', { getDependencias: deps }, '#depRows tr', 'dependenciasPaginacao', 'irParaPaginaDependencias'],
+    ['pessoas', { getDependencias: pessoas }, '#rowsPessoas tr', 'pessoasPaginacao', 'irParaPaginaPessoas'],
+    ['perfis', { getPerfis: perfis }, '#listaPerfis tbody tr', null, 'irParaPaginaPerfis'],
+  ];
+  for (const [tela, dados, seletor, idPag, fnPag] of casos) {
+    const w = carregar(dados);
+    await w[tela]();
+    await espera();
+    const linhas = () => w.document.querySelectorAll(seletor).length;
+    assert.strictEqual(linhas(), 20, tela + ': 20 por pagina');
+    const rodape = () => (idPag ? w.document.getElementById(idPag) : w.document.querySelector('.paginacao')).textContent;
+    assert.match(rodape(), new RegExp(`Mostrando 1–20 de ${n}`), tela);
+    w[fnPag](1);
+    assert.strictEqual(linhas(), n - 20, tela + ': 2a pagina');
+    w.close();
+  }
+});

@@ -369,3 +369,10 @@ a.btn { text-decoration: none; }
 .painel-card .data-table table { min-width: 0; }
 /* Chip de nível dentro do card de métrica (_htmlMetricCard) fica do tamanho do texto. */
 .bia-metric > .chip, .bia-metric > .badge { align-self: flex-start; }
+/* O min-width:1400px legado (@media max-width:1600px) só para grade larga, de 9+
+   colunas: tabela pequena ocupa a largura disponível sem barra de rolagem.
+   Grades com <colgroup> em px definem o próprio min-width inline (prevalece). */
+@media (max-width: 1600px) {
+  .data-table table { min-width: 0; }
+  .data-table table:has(thead th:nth-child(9)) { min-width: 1400px; }
+}

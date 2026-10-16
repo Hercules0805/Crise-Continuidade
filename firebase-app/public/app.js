@@ -423,8 +423,8 @@ async function perguntas() {
       <div><h2>Perguntas do BIA</h2><p class="page-sub">Gerencie as perguntas e as opções de resposta por categoria</p></div>
       <button class="btn btn-primary" onclick="abrirModalPergunta()">+ Nova Pergunta</button>
     </div>
-    <div style="margin-bottom:16px;">
-      <input type="text" id="buscaPergunta" placeholder="🔍 Buscar pergunta..." oninput="filtrarPerguntas()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:300px;">
+    <div class="filters">
+      <input type="search" id="buscaPergunta" placeholder="Buscar pergunta…" aria-label="Buscar pergunta" oninput="filtrarPerguntas()" class="field-control field-control--busca">
     </div>
     <div class="loading" id="loading">⏳ Carregando...</div>
     <div id="lista"></div>
@@ -914,8 +914,8 @@ async function areas() {
       <div><h2>Áreas</h2><p class="page-sub">Cadastre as áreas da empresa que participam do BIA</p></div>
       ${Perfis.podeMexerNaArea(window.USER_PERFIS) ? '<button class="btn btn-primary" onclick="abrirModalArea()">+ Nova Área</button>' : ''}
     </div>
-    <div style="margin-bottom:16px;">
-      <input type="text" id="buscaArea" placeholder="🔍 Buscar área..." oninput="renderizarAreas()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:300px;">
+    <div class="filters">
+      <input type="search" id="buscaArea" placeholder="Buscar área…" aria-label="Buscar área" oninput="renderizarAreas()" class="field-control field-control--busca">
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table" id="lista" style="display:none;">
@@ -1231,11 +1231,11 @@ async function pessoas() {
         ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button class="btn btn-primary" onclick="abrirModalPessoa()">+ Nova Pessoa</button>' : ''}
       </div>
     </div>
-    <div style="margin-bottom:16px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
-      <input type="text" id="buscaPessoa" placeholder="🔍 Buscar pessoa..." oninput="renderizarPessoas()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;flex:1;">
-      <select id="filtroPessoaArea" onchange="renderizarPessoas()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:180px;"><option value="">Todas as áreas</option></select>
-      <select id="filtroPessoaLider" onchange="renderizarPessoas()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:200px;"><option value="">Todos os líderes</option></select>
-      <select id="filtroPessoaFuncao" onchange="renderizarPessoas()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:180px;">
+    <div class="filters">
+      <input type="search" id="buscaPessoa" placeholder="Buscar pessoa…" aria-label="Buscar pessoa" oninput="filtrarPessoas()" class="field-control field-control--busca">
+      <select id="filtroPessoaArea" onchange="filtrarPessoas()" class="field-control"><option value="">Todas as áreas</option></select>
+      <select id="filtroPessoaLider" onchange="filtrarPessoas()" class="field-control"><option value="">Todos os líderes</option></select>
+      <select id="filtroPessoaFuncao" onchange="filtrarPessoas()" class="field-control">
         <option value="">Todas as funções</option>
         <option value="techLead">Tech Lead</option>
         <option value="teamLead">Team Lead</option>
@@ -1258,6 +1258,7 @@ async function pessoas() {
         <tbody id="rowsPessoas"></tbody>
       </table>
     </div>
+    <div id="pessoasPaginacao"></div>
     ${_htmlDrawerPessoa()}
     <div class="drawer-overlay" id="drawerOverlayOrganograma" onclick="fecharModalOrganograma()"></div>
     <div class="drawer" id="drawerOrganograma">
@@ -1361,8 +1362,8 @@ function renderizarPessoas() {
   // Operador Administrativo (e quem nao edita pessoas) so consulta: sem clique de
   // edicao e sem botoes. Espelha as regras do banco (/dependencias).
   const soLeituraPessoas = !Perfis.podeEditarPessoas(window.USER_PERFIS);
-  document.getElementById('rowsPessoas').innerHTML = data.length
-    ? data.map((p) => `<tr ${soLeituraPessoas ? '' : `style="cursor:pointer;" onclick="abrirModalPessoa('${esc(p.id)}')"`}>
+  const pag = pessoasPaginacao.aplicar(data);  const pagEl = document.getElementById('pessoasPaginacao');  if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaPessoas');  document.getElementById('rowsPessoas').innerHTML = pag.itens.length
+    ? pag.itens.map((p) => `<tr ${soLeituraPessoas ? '' : `style="cursor:pointer;" onclick="abrirModalPessoa('${esc(p.id)}')"`}>
         <td style="font-weight:600;">${esc(p.nome)}</td>
         <td>${esc(p.detalhes || '')}</td>
         <td>${esc(_areasDaPessoa(p).join(', '))}</td>
@@ -1388,9 +1389,12 @@ function renderizarPessoas() {
     : '<tr><td colspan="7" style="text-align:center;color:#999;padding:20px;">Nenhuma pessoa cadastrada.</td></tr>';
 }
 
+const pessoasPaginacao = criarPaginacao(20);
+window.filtrarPessoas = () => { pessoasPaginacao.reiniciar(); renderizarPessoas(); };
+window.irParaPaginaPessoas = (delta) => { pessoasPaginacao.mover(delta); renderizarPessoas(); };
 window.ordenarPessoas = (coluna) => {
   pessoasOrdenacao.ordenar(coluna);
-  renderizarPessoas();
+  filtrarPessoas();
 };
 
 // ------------------------------------------------------------
@@ -4023,15 +4027,15 @@ async function dependencias() {
       <a href="#fornecedores" style="color:#d60014;font-weight:700;">Fornecedores</a>.
       Clique num fornecedor para gerenciá-lo lá.
     </div>`)}
-    <div style="margin-bottom:16px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Categoria:</label>
-        <select id="filtroDepCategoria" onchange="filtrarDependencias()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:250px;">
+    <div class="filters">
+      <div class="field">
+        <label class="field-label">Categoria</label>
+        <select id="filtroDepCategoria" onchange="filtrarDependencias()" class="field-control">
           <option value="">Todas as categorias</option>
         </select>
       </div>
       <div>
-        <input type="text" id="buscaDep" placeholder="🔍 Buscar dependência..." oninput="filtrarDependencias()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:250px;">
+        <input type="search" id="buscaDep" placeholder="Buscar dependência…" aria-label="Buscar dependência" oninput="filtrarDependencias()" class="field-control field-control--busca">
       </div>
     </div>
     <div class="loading">⏳ Carregando...</div>
@@ -4048,6 +4052,7 @@ async function dependencias() {
         <tbody id="depRows"></tbody>
       </table>
     </div>
+    <div id="dependenciasPaginacao"></div>
     ${_htmlDrawerDependencia()}`;
 
   try {
@@ -4100,8 +4105,11 @@ function renderizarDependencias() {
   data = dependenciasOrdenacao.aplicar(data);
   dependenciasOrdenacao.atualizarSetas('sort-dep-', ['categoria', 'nome']);
 
-  document.getElementById('depRows').innerHTML = data.length
-    ? data.map(d => {
+  const pag = dependenciasPaginacao.aplicar(data);
+  const pagEl = document.getElementById('dependenciasPaginacao');
+  if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaDependencias');
+  document.getElementById('depRows').innerHTML = pag.itens.length
+    ? pag.itens.map(d => {
         // Fornecedor e uma linha de /dependencias com categoria Fornecedores,
         // mas a edicao/avaliacao mora na tela Fornecedores: clicar redireciona
         // pra la (irParaFornecedor) e o excluir nao age aqui (fornecedores tem
@@ -4142,11 +4150,13 @@ window.irParaFornecedor = (id) => {
   window.location.hash = 'fornecedores';
 };
 
-window.filtrarDependencias = () => renderizarDependencias();
+const dependenciasPaginacao = criarPaginacao(20);
+window.filtrarDependencias = () => { dependenciasPaginacao.reiniciar(); renderizarDependencias(); };
+window.irParaPaginaDependencias = (delta) => { dependenciasPaginacao.mover(delta); renderizarDependencias(); };
 
 window.ordenarDependencias = (coluna) => {
   dependenciasOrdenacao.ordenar(coluna);
-  renderizarDependencias();
+  filtrarDependencias();
 };
 
 // ============================================================
@@ -5870,8 +5880,8 @@ async function servicos() {
       <div><h2>Serviços</h2><p class="page-sub">Agrupe dependências técnicas num serviço só, para organização e visão consolidada</p></div>
       <button class="btn btn-primary" onclick="abrirDrawerServico()">+ Novo Serviço</button>
     </div>
-    <div style="margin-bottom:16px;">
-      <input type="text" id="buscaServico" placeholder="🔍 Buscar serviço..." oninput="renderizarServicos()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;">
+    <div class="filters">
+      <input type="search" id="buscaServico" placeholder="Buscar serviço…" aria-label="Buscar serviço" oninput="renderizarServicos()" class="field-control field-control--busca">
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table" id="listaServicos" style="display:none;">
@@ -6329,11 +6339,11 @@ async function catalogoBackup() {
       <div><h2>Catálogo do Backup</h2><p class="page-sub">Política de backup de cada Serviço: servidor, stakeholder e jobs de execução</p></div>
       <button class="btn btn-primary" onclick="abrirDrawerBackup()">+ Novo Backup</button>
     </div>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end;">
-      <input type="text" id="buscaBackup" placeholder="🔍 Buscar backup..." oninput="renderizarCatalogoBackup()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;">
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Serviço</label>
-        <select id="filtroBackupServico" onchange="renderizarCatalogoBackup()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:220px;">
+    <div class="filters">
+      <input type="search" id="buscaBackup" placeholder="Buscar backup…" aria-label="Buscar backup" oninput="renderizarCatalogoBackup()" class="field-control field-control--busca">
+      <div class="field">
+        <label class="field-label">Serviço</label>
+        <select id="filtroBackupServico" onchange="renderizarCatalogoBackup()" class="field-control">
           <option value="">Todos os serviços</option>
         </select>
       </div>
@@ -7210,17 +7220,17 @@ async function vulnerabilidades() {
       </div>
     </div>
     <div id="vulnPainelExposicao" style="margin-bottom:14px;"></div>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px;align-items:flex-end;">
-      <input type="text" id="buscaVulnerabilidade" placeholder="🔍 Buscar vulnerabilidade..." oninput="renderizarVulnerabilidades()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;">
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Produto</label>
-        <select id="filtroVulnProduto" onchange="renderizarVulnerabilidades()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:180px;">
+    <div class="filters">
+      <input type="search" id="buscaVulnerabilidade" placeholder="Buscar vulnerabilidade…" aria-label="Buscar vulnerabilidade" oninput="renderizarVulnerabilidades()" class="field-control field-control--busca">
+      <div class="field">
+        <label class="field-label">Produto</label>
+        <select id="filtroVulnProduto" onchange="renderizarVulnerabilidades()" class="field-control">
           <option value="">Todos</option>
         </select>
       </div>
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Severidade</label>
-        <select id="filtroVulnSeveridade" onchange="renderizarVulnerabilidades()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:160px;">
+      <div class="field">
+        <label class="field-label">Severidade</label>
+        <select id="filtroVulnSeveridade" onchange="renderizarVulnerabilidades()" class="field-control">
           <option value="">Todas</option>
           <option value="Crítica">Crítica</option>
           <option value="Alta">Alta</option>
@@ -7228,17 +7238,17 @@ async function vulnerabilidades() {
           <option value="Baixa">Baixa</option>
         </select>
       </div>
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Status da Correção</label>
-        <select id="filtroVulnStatus" onchange="renderizarVulnerabilidades()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:160px;">
+      <div class="field">
+        <label class="field-label">Status da Correção</label>
+        <select id="filtroVulnStatus" onchange="renderizarVulnerabilidades()" class="field-control">
           <option value="">Todos</option>
           ${VULNERABILIDADE_STATUS_CORRECAO.map((s) => `<option value="${s}">${s}</option>`).join('')}
           <option value="__atrasadas__">Atrasadas</option>
         </select>
       </div>
-      <div>
-        <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Tipo</label>
-        <select id="filtroVulnTipo" onchange="vulnerabilidadesPaginaAtual = 1; renderizarVulnerabilidades()" style="padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:180px;">
+      <div class="field">
+        <label class="field-label">Tipo</label>
+        <select id="filtroVulnTipo" onchange="vulnerabilidadesPaginaAtual = 1; renderizarVulnerabilidades()" class="field-control">
           <option value="">Todos</option>
           ${VULNERABILIDADE_TIPOS.map((t) => `<option value="${esc(t.tipo)}">${esc(t.tipo)}</option>`).join('')}
           <option value="__sem_tipo__">Não classificada</option>
@@ -9407,6 +9417,7 @@ async function riscos() {
         <tbody id="riscoRows"></tbody>
       </table>
     </div>
+    <div id="riscosPaginacao"></div>
 
     ${_htmlDrawerRisco()}
     ${_htmlModalEscolherOrigemImportarRisco()}
@@ -9986,8 +9997,11 @@ function renderizarRiscos() {
 
   const processosPorId = RiscoConsolidado.indexarProcessos(riscosProcessosCache);
 
-  document.getElementById('riscoRows').innerHTML = data.length
-    ? data.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${r.id}')">
+  const pag = riscosPaginacao.aplicar(data);
+  const pagEl = document.getElementById('riscosPaginacao');
+  if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaRiscos');
+  document.getElementById('riscoRows').innerHTML = pag.itens.length
+    ? pag.itens.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${r.id}')">
         <td class="num col-nw">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '–'}</td>
         <td>${r.area ? `<span class="chip-area" title="${esc(r.area)}">${esc(r.area)}</span>` : '<span class="muted">–</span>'}</td>
         <td>${r.processo ? esc(r.processo) : (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span class="muted">Corporativo</span>')}</td>
@@ -10080,10 +10094,12 @@ window.clonarRisco = (id) => {
   });
 };
 
-window.filtrarRiscos = () => renderizarRiscos();
+const riscosPaginacao = criarPaginacao(20);
+window.filtrarRiscos = () => { riscosPaginacao.reiniciar(); renderizarRiscos(); };
+window.irParaPaginaRiscos = (delta) => { riscosPaginacao.mover(delta); renderizarRiscos(); };
 window.ordenarRiscos = (coluna) => {
   riscosOrdenacao.ordenar(coluna);
-  renderizarRiscos();
+  filtrarRiscos();
 };
 
 // ------------------------------------------------------------
@@ -12083,8 +12099,9 @@ function _atualizarTelaIndicadorAtual() {
 
 // Mesmo padrão de filtro usado em Processos/Dependências/Componentes/Riscos
 // (ver .amazonq/rules/ui-referencias.md, seção "Barra de filtros").
-const _estiloFiltroLabel = 'font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;';
-const _estiloFiltroInput = 'padding:8px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.9em;min-width:190px;';
+// Mesmos valores de .field-label/.field-control (styles.css): estes estilos vão em atributo style.
+const _estiloFiltroLabel = 'display:block;margin-bottom:4px;font:600 13px/16px var(--font-sans);letter-spacing:0.18em;text-transform:uppercase;color:var(--ink-muted);';
+const _estiloFiltroInput = 'height:40px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);color:var(--ink);padding:0 12px;font:400 14px var(--font-sans);min-width:190px;';
 
 // Barra de filtros compartilhada por Cadastro, Matriz e Lançamento Mensal.
 // `handler` é o nome da função global (window.atualizarFiltro...) chamada no
@@ -12119,7 +12136,7 @@ function _renderBarraFiltrosIndicadores(containerId, filtros, handler, { comMes 
       </div>
       <div>
         <label style="${_estiloFiltroLabel}">Indicador</label>
-        <input type="text" value="${filtros.busca}" oninput="${handler}('busca',this.value)" placeholder="🔍 Buscar indicador..." style="${_estiloFiltroInput}">
+        <input type="text" value="${filtros.busca}" oninput="${handler}('busca',this.value)" placeholder="Buscar indicador…" style="${_estiloFiltroInput}">
       </div>
     </div>`;
 }
@@ -14415,8 +14432,8 @@ async function pcns() {
       <div><h2>Planos de Continuidade (PCN)</h2><p class="page-sub">Navegue pelos PCNs gerados, organizados por área</p></div>
     </div>
     <div id="pcns-resumo" style="display:none;margin-bottom:20px;"></div>
-    <div style="margin-bottom:16px;">
-      <input type="text" id="pcnBusca" placeholder="🔍 Buscar processo..." oninput="filtrarPCNs()" style="width:100%;max-width:400px;padding:10px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;">
+    <div class="filters">
+      <input type="search" id="pcnBusca" placeholder="Buscar processo…" aria-label="Buscar processo" oninput="filtrarPCNs()" class="field-control field-control--busca">
     </div>
     <div class="loading" id="loading">
       <div class="skeleton-table">
@@ -14595,9 +14612,9 @@ async function drp() {
       <div><h2>Planos de Recuperação (DRP)</h2><p class="page-sub">Gere, abra e gerencie os Parâmetros DRP das dependências, organizados por categoria</p></div>
     </div>
     <div id="drp-resumo" style="display:none;margin-bottom:20px;"></div>
-    <div style="margin-bottom:16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
-      <input type="text" id="drpBusca" placeholder="🔍 Buscar dependência..." oninput="filtrarDRPs()" style="flex:1;min-width:220px;max-width:400px;padding:10px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;">
-      <select id="drpFiltroTipo" onchange="filtrarDRPs()" style="padding:10px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;">
+    <div class="filters">
+      <input type="search" id="drpBusca" placeholder="Buscar dependência…" aria-label="Buscar dependência" oninput="filtrarDRPs()" class="field-control field-control--busca">
+      <select id="drpFiltroTipo" onchange="filtrarDRPs()" class="field-control">
         <option value="com">Com DRP gerado</option>
         <option value="todas">Todas as dependências</option>
       </select>
@@ -16189,8 +16206,8 @@ async function produtosSoftware() {
       <div><h2>Produtos de Software</h2><p class="page-sub">Os produtos da empresa — usados para indicar quem é Tech Lead e Team Lead de cada um</p></div>
       <button class="btn btn-primary" onclick="abrirModalProdutoSoftware()" id="btnNovoProdutoSoftware" style="display:none;">+ Novo Produto</button>
     </div>
-    <div style="margin-bottom:16px;">
-      <input type="text" id="buscaProdutoSoftware" placeholder="🔍 Buscar produto..." oninput="renderizarProdutosSoftware()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;">
+    <div class="filters">
+      <input type="search" id="buscaProdutoSoftware" placeholder="Buscar produto…" aria-label="Buscar produto" oninput="renderizarProdutosSoftware()" class="field-control field-control--busca">
     </div>
     <div class="loading" id="loadingProdutosSoftware">⏳ Carregando...</div>
     <div id="listaProdutosSoftware"></div>
@@ -16380,13 +16397,13 @@ async function perfis() {
         Somente administrador mexe nesta tela — se outro perfil pudesse, ele se promoveria a administrador.
       </div>
     </div>
-    <div style="margin-bottom:16px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
-      <input type="text" id="buscaPerfil" placeholder="🔍 Buscar por e-mail..." oninput="renderizarPerfis()" style="padding:8px 14px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:260px;flex:1;">
-      <select id="filtroPerfilTipo" onchange="renderizarPerfis()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:200px;">
+    <div class="filters">
+      <input type="search" id="buscaPerfil" placeholder="Buscar por e-mail…" aria-label="Buscar por e-mail" oninput="filtrarPerfis()" class="field-control field-control--busca">
+      <select id="filtroPerfilTipo" onchange="filtrarPerfis()" class="field-control">
         <option value="">Todos os perfis</option>
         ${Perfis.CATALOGO.map((p) => `<option value="${esc(p.valor)}">${esc(p.rotulo)}</option>`).join('')}
       </select>
-      <select id="filtroPerfilArea" onchange="renderizarPerfis()" style="padding:8px 12px;border:1.5px solid #e0e0e0;border-radius:8px;font-size:0.9em;min-width:180px;">
+      <select id="filtroPerfilArea" onchange="filtrarPerfis()" class="field-control">
         <option value="">Todas as áreas</option>
       </select>
     </div>
@@ -16449,7 +16466,10 @@ async function perfis() {
 }
 
 let perfisOrdenacao = criarOrdenacao('email', 'asc');
-window.ordenarPerfis = (coluna) => { perfisOrdenacao.ordenar(coluna); renderizarPerfis(); };
+const perfisPaginacao = criarPaginacao(20);
+window.filtrarPerfis = () => { perfisPaginacao.reiniciar(); renderizarPerfis(); };
+window.irParaPaginaPerfis = (delta) => { perfisPaginacao.mover(delta); renderizarPerfis(); };
+window.ordenarPerfis = (coluna) => { perfisOrdenacao.ordenar(coluna); filtrarPerfis(); };
 
 function renderizarPerfis() {
   const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIS);
@@ -16491,6 +16511,7 @@ function renderizarPerfis() {
   }
   const houveBusca = !!(termoNorm || tipo || areaSelecionada);
   const data = perfisOrdenacao.aplicar(filtrada);
+  const pag = perfisPaginacao.aplicar(data);
   const th = (coluna, rotulo, estilo) => `<th onclick="ordenarPerfis('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-perfil-${coluna}"></span></th>`;
 
   lista.innerHTML = `
@@ -16509,7 +16530,7 @@ function renderizarPerfis() {
           </tr>
         </thead>
         <tbody>
-          ${data.length ? data.map((p) => {
+          ${pag.itens.length ? pag.itens.map((p) => {
             const euMesmo = p.email === meuEmail;
             const desconhecido = p.perfilGravado && !Perfis.conhecido(p.perfilGravado);
             return `
@@ -16531,6 +16552,7 @@ function renderizarPerfis() {
         </tbody>
       </table>
     </div>
+    ${_htmlPaginacao(pag, 'irParaPaginaPerfis')}
     <div style="font-size:0.75em;color:#999;margin-top:10px;line-height:1.5;">
       Remover alguém desta lista não bloqueia o acesso ao sistema: a pessoa volta ao menor acesso (Gestor de área) e,
       sem área, não consegue alterar nada. Para impedir a entrada, o acesso tem que ser retirado na conta Google dela.
