@@ -43,7 +43,8 @@ async function carregar() {
   });
   ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'sanitizar-pcn.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
-  w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = () => {};');
+  // Pergunta "Há alterações não salvas" (16/10/2026): estes testes escolhem Salvar.
+  w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = () => {}; _perguntarAlteracoesNaoSalvas = async () => "salvar";');
   await w.vulnerabilidades();
   return { w, doc: w.document, gravacoes };
 }

@@ -8,7 +8,12 @@ window.__rodar = async () => {
   const nPost = (acao) => (calls.post || []).filter((a) => a[0] === acao).length;
   const aberto = () => document.getElementById('drawerProcesso').classList.contains('open');
   const set = (id, v) => { document.getElementById(id).value = v; };
-  const zera = () => { Object.keys(calls).forEach((k) => delete calls[k]); toasts.length = 0; };
+  // Pergunta "Há alterações não salvas" (DECISÃO 16/10/2026): o teste escolhe a
+  // resposta (padrão Salvar) e conta quantas vezes ela foi feita.
+  let respostaFechar = 'salvar';
+  let perguntas = 0;
+  _perguntarAlteracoesNaoSalvas = async () => { perguntas++; return respostaFechar; };
+  const zera = () => { Object.keys(calls).forEach((k) => delete calls[k]); toasts.length = 0; perguntas = 0; respostaFechar = 'salvar'; };
 
   window.__ret = {
     getProcessos: [{ id: 'pr1', area: 'TI', processo: 'Backup', descricao: 'd', dependenciaItens: [], dependencia: '', score: 0, respostas: {}, rto: '', rpo: '', mtd: '', biaHomologada: '', bcpStatus: '', descricaoFuncional: '', tierManual: '', bcpContatos: [], drpStatus: '' }],

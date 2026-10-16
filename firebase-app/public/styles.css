@@ -131,6 +131,10 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 .drawer#drawerSelecaoDependenciasRelatorio { width: 420px; }
 .drawer#drawerOrganograma { width: 420px; }
 .drawer.open { transform: translateX(0); }
+/* Drawer fechado fica só deslocado para fora da tela: sem isto o Tab entrava
+   nos campos dele. visibility espera a animação de saída terminar (0.25s). */
+.drawer:not(.open) { visibility: hidden; transition: transform 0.25s ease, visibility 0s linear 0.25s; }
+.drawer.open { visibility: visible; transition: transform 0.25s ease, visibility 0s; }
 .drawer-resize { position: absolute; left: 0; top: 0; width: 5px; height: 100%; cursor: ew-resize; background: transparent; z-index: 10; }
 .drawer-resize:hover, .drawer-resize.resizing { background: #d6001433; }
 .drawer-header { padding: 20px 24px 16px; border-bottom: 2px solid var(--brand-tint); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; }

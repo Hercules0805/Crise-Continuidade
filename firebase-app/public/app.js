@@ -134,6 +134,12 @@ function route() {
   // Menu escondido nao e permissao. Sem esta guarda, digitar #processos na barra
   // de endereco abria a tela para quem nao deveria ve-la — as regras do banco
   // protegiam os dados, mas a tela abria e parecia um sistema quebrado.
+  // Hash que não é tela nenhuma (link antigo, digitado errado): "não encontrada",
+  // nunca "não é do seu perfil" -- e o Admin não cai mais em Processos em silêncio.
+  if (!pages[page]) {
+    _telaNaoEncontrada();
+    return;
+  }
   if (!Perfis.podeVerTela(window.USER_PERFIS, page)) {
     _telaSemAcesso(page);
     return;
@@ -246,6 +252,19 @@ function _paginaInicialDoPerfil() {
   return telas[0] || 'processos';
 }
 
+function _telaNaoEncontrada() {
+  const inicial = _paginaInicialDoPerfil();
+  app.innerHTML = `
+    <div style="max-width:520px;margin:60px auto;text-align:center;">
+      <h2 style="margin-bottom:8px;">Página não encontrada</h2>
+      <p style="color:var(--ink-muted);line-height:1.6;">
+        O endereço <strong>${esc(window.location.hash || '')}</strong> não corresponde a nenhuma tela do sistema.
+        Use o menu ou a busca de telas para encontrar o que procura.
+      </p>
+      <a href="#${esc(inicial)}" class="btn btn-primary" style="margin-top:16px;">Voltar para o início</a>
+    </div>`;
+}
+
 function _telaSemAcesso(pagina) {
   const inicial = _paginaInicialDoPerfil();
   app.innerHTML = `
@@ -265,6 +284,106 @@ function showToast(msg, bg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.style.background = bg; t.style.display = 'block';
   setTimeout(() => t.style.display = 'none', 3500);
+}
+
+// ============================================================
+// FECHAR DRAWER COM ALTERAÇÕES NÃO SALVAS (DECISÃO 16/10/2026 -- substitui
+// "Fechar salva antes de fechar" de 08/10/2026). Sem mudança desde que abriu
+// ou salvou: fecha direto. Com mudança (inclusive cópia/rascunho que ainda
+// não existe no banco, rastreador "esquecido"): pergunta Salvar / Descartar /
+// Continuar editando. O mesmo vale para Fechar, ×, clique fora e Esc.
+// ============================================================
+let _responderPerguntaFechar = null;
+
+function _perguntarAlteracoesNaoSalvas() {
+  // Já há uma pergunta aberta (ex.: dois cliques seguidos no ×): não empilha outra.
+  if (_responderPerguntaFechar) return Promise.resolve('continuar');
+  return new Promise((resolve) => {
+    const el = document.createElement('div');
+    el.className = 'modal-overlay modal-sobre-drawer open';
+    el.id = 'modalAlteracoesNaoSalvas';
+    el.innerHTML = `
+      <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="tituloAlteracoesNaoSalvas" style="max-width:460px;">
+        <h3 id="tituloAlteracoesNaoSalvas">Há alterações não salvas</h3>
+        <p style="color:var(--ink-muted);margin:0;">Salve para manter o que foi alterado ou descarte para fechar sem gravar.</p>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-resposta="continuar">Continuar editando</button>
+          <button type="button" class="btn btn-ghost" data-resposta="descartar" style="color:#c62828;border-color:#c62828;">Descartar</button>
+          <button type="button" class="btn btn-primary" data-resposta="salvar">Salvar</button>
+        </div>
+      </div>`;
+    const responder = (resposta) => {
+      el.remove();
+      _responderPerguntaFechar = null;
+      resolve(resposta);
+    };
+    _responderPerguntaFechar = responder;
+    el.addEventListener('click', (e) => {
+      const botao = e.target.closest('[data-resposta]');
+      if (botao) responder(botao.dataset.resposta);
+      else if (e.target === el) responder('continuar');
+    });
+    document.body.appendChild(el);
+    el.querySelector('[data-resposta="salvar"]').focus();
+  });
+}
+
+/**
+ * Fecha um drawer de edição seguindo a regra acima. `salvar` devolve true só
+ * quando a gravação principal deu certo (validação/erro já mostram o aviso e o
+ * drawer continua aberto). Em cadastro rápido aninhado o próprio salvar fecha
+ * e devolve pro pai -- por isso só chama `fecharSemSalvar` se o drawer ainda
+ * estiver aberto (senão a pilha de drawers pais seria desempilhada duas vezes).
+ * Devolve true quando o drawer fechou.
+ */
+async function _fecharComRastreador({ idDrawer, sujo, salvar, fecharSemSalvar }) {
+  const aberto = () => document.getElementById(idDrawer).classList.contains('open');
+  if (!sujo()) { fecharSemSalvar(); return true; }
+  const resposta = await _perguntarAlteracoesNaoSalvas();
+  if (resposta === 'descartar') { fecharSemSalvar(); return true; }
+  if (resposta !== 'salvar') return false;
+  const ok = await salvar();
+  if (ok && aberto()) fecharSemSalvar();
+  return !aberto();
+}
+
+// Esc fecha o que estiver por cima: a pergunta acima, um modal ou o drawer
+// aberto (pelo × do cabeçalho, que segue a mesma regra do Fechar). Campos com
+// tratamento próprio de teclado (edição inline, busca do menu) ficam de fora.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || e.defaultPrevented) return;
+  if (e.target && e.target.closest && e.target.closest('[onkeydown]')) return;
+  if (_responderPerguntaFechar) { _responderPerguntaFechar('continuar'); return; }
+  const modais = Array.from(document.querySelectorAll('.modal-overlay.open'));
+  const modal = modais[modais.length - 1];
+  if (modal) {
+    const fechar = Array.from(modal.querySelectorAll('.modal-footer button'))
+      .find((b) => /^(Cancelar|Fechar)$/.test(b.textContent.trim()));
+    if (fechar) fechar.click();
+    return;
+  }
+  const drawers = Array.from(document.querySelectorAll('.drawer.open'));
+  const drawer = drawers[drawers.length - 1];
+  if (!drawer) return;
+  const x = Array.from(drawer.querySelectorAll('.drawer-header button')).find((b) => b.textContent.trim() === '×');
+  if (x) x.click();
+});
+
+// Link/atalho para outra tela só para quem pode vê-la -- senão o clique cai em
+// "Esta tela não é do seu perfil" (ex.: Gestor no drawer de Contrato, TI em
+// Dependências). Mesmo critério do route().
+function _seVeTela(pagina, html) {
+  return Perfis.podeVerTela(window.USER_PERFIS, pagina) ? html : '';
+}
+
+// Tela que não carregou: nunca mostrar como "lista vazia" (pareceria que não
+// há nada cadastrado). `funcaoTela` é o nome da função da tela, para o
+// "Tentar de novo" (mesmo padrão já usado em Riscos e no Monitor).
+function _htmlErroCarga(mensagem, funcaoTela) {
+  return `<div style="text-align:center;padding:40px;color:var(--ink-muted);">
+      <div>${esc(mensagem)}</div>
+      <button class="btn btn-ghost" onclick="${funcaoTela}()" style="margin-top:12px;">Tentar de novo</button>
+    </div>`;
 }
 
 // ============================================================
@@ -319,7 +438,7 @@ async function perguntas() {
     return `<div class="group-card"><div class="group-header" style="background:${cor.bg};color:${cor.fg}">${cat}</div>${items.map(p => `
       <div class="list-row ${p.ativa ? '' : 'inativa'}">
         <div class="list-row-main">
-          <div class="list-row-title">${p.pergunta}</div>
+          <div class="list-row-title">${esc(p.pergunta)}</div>
           <div class="list-row-sub">${esc(p.descricao || '')}</div>
         </div>
         <div class="list-row-actions">
@@ -366,7 +485,7 @@ async function perguntas() {
     document.getElementById('loading').innerHTML = `
       <div style="color:#c62828;padding:20px;text-align:center;">
         <h3>❌ Erro ao carregar perguntas</h3>
-        <p>${err.message}</p>
+        <p>${esc(err.message)}</p>
         <p style="font-size:0.85em;color:#666;margin-top:10px;">Verifique o console (F12) para mais detalhes</p>
       </div>`;
   }
@@ -490,7 +609,7 @@ window.renderAvaliacaoInline = () => {
         ${itensCat.map(perg => {
           const i = window.processosPerguntas.indexOf(perg);
           return `<div style="padding:20px 24px;background:#fafafa;border-bottom:1px solid #f0f0f0;">
-            <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${perg.pergunta}</div>
+            <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${esc(perg.pergunta)}</div>
             <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${esc(perg.descricao || '')}</div>
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
               ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default']).slice().sort((a,b) => Number(b.valor) - Number(a.valor)).map(op => {
@@ -574,13 +693,13 @@ function _fecharDrawerProcessoSemSalvar() {
   document.getElementById('drawerProcesso').classList.remove('open');
   document.getElementById('drawerOverlayProcesso').classList.remove('open');
 }
-// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- mas so se algo mudou
-// desde que abriu/salvou (_edProcesso).
-window.fecharDrawerProcesso = async () => {
-  if (!_edProcesso.sujo()) return _fecharDrawerProcessoSemSalvar();
-  const ok = await salvarProcesso();
-  if (ok) _fecharDrawerProcessoSemSalvar();
-};
+// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
+window.fecharDrawerProcesso = () => _fecharComRastreador({
+  idDrawer: 'drawerProcesso',
+  sujo: () => _edProcesso.sujo(),
+  salvar: () => salvarProcesso(),
+  fecharSemSalvar: _fecharDrawerProcessoSemSalvar,
+});
 
 // A "foto" do formulario inclui as respostas da aba Avaliacao (senao mudar so
 // uma resposta contaria como "sem mudanca" e o Fechar a descartaria).
@@ -807,7 +926,14 @@ async function areas() {
       </div>
     </div></div>`;
 
-  const [data, deps] = await Promise.all([API.getAreas(), API.getDependencias()]);
+  let data, deps;
+  try {
+    [data, deps] = await Promise.all([API.getAreas(), API.getDependencias()]);
+  } catch (e) {
+    console.error('areas: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar as áreas.', 'areas');
+    return;
+  }
   pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('lista').style.display = 'block';
@@ -1035,7 +1161,7 @@ function _htmlDrawerPessoa() {
           </label>
           <div id="pessoaTeamLeadProdutos"></div>
           <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Marque a função e, se quiser, os produtos que a pessoa lidera (sem produto também é permitido).
-            <a href="#produtos-software" target="_blank" style="color:#d60014;font-weight:600;">🗂️ Gerenciar Produtos</a>
+            ${_seVeTela('produtos-software', `<a href="#produtos-software" target="_blank" style="color:#d60014;font-weight:600;">🗂️ Gerenciar Produtos</a>`)}
             <button type="button" class="btn-icon" onclick="_recarregarProdutosPessoa()" title="Atualizar lista de produtos">🔄</button></span>
         </div>
         <div style="margin-bottom:16px;">
@@ -1061,7 +1187,6 @@ function _htmlDrawerPessoa() {
         <div id="pessoaPerfilSemEmail" style="display:none;font-size:0.8em;color:#999;margin:6px 0 16px;">Informe um e-mail para atribuir um perfil de sistema.</div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="_fecharModalPessoaSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharModalPessoa()">Fechar</button>
         <button class="btn btn-ghost" id="btnRelatorioPessoa" onclick="gerarRelatorioPessoa()" style="color:#1565c0;border-color:#1565c0;display:none;">📄 Relatório de Vínculos</button>
         <button class="btn btn-primary" id="btnSalvarPessoaCadastro" onclick="salvarPessoaCadastro()">Salvar</button>
@@ -1459,16 +1584,13 @@ function _fecharModalPessoaSemSalvar() {
   document.getElementById('drawerOverlayPessoa').classList.remove('open');
   _reabrirDrawerPaiSeEscondido();
 }
-// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- exceto no cadastro
-// rapido aninhado (empilhado sobre outro drawer), que continua com o
-// comportamento de sempre: o proprio salvarPessoaCadastro ja fecha e volta
-// pro pai ao salvar, entao aqui so fecha sem tentar salvar de novo.
-window.fecharModalPessoa = async () => {
-  if (_temDrawerPaiEmpilhado()) { _fecharModalPessoaSemSalvar(); return; }
-  if (!_edPessoa.sujo()) return _fecharModalPessoaSemSalvar();
-  const ok = await salvarPessoaCadastro();
-  if (ok) _fecharModalPessoaSemSalvar();
-};
+// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
+window.fecharModalPessoa = () => _fecharComRastreador({
+  idDrawer: 'drawerPessoa',
+  sujo: () => _edPessoa.sujo(),
+  salvar: () => salvarPessoaCadastro(),
+  fecharSemSalvar: _fecharModalPessoaSemSalvar,
+});
 
 const _edPessoa = criarRastreadorEdicao(() => _coletarFormularioPessoa());
 
@@ -2120,7 +2242,7 @@ async function processos() {
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="fecharModalAvaliar()">Cancelar</button>
+        <button class="btn btn-ghost" onclick="fecharModalAvaliar()">Fechar</button>
         <button class="btn btn-ghost" onclick="imprimirAvaliacao()" style="color:#1565c0;border-color:#1565c0;">🖨️ Exportar PDF</button>
         <button class="btn btn-primary" onclick="salvarAvaliacaoProcesso()">Salvar Avaliação</button>
       </div>
@@ -2295,7 +2417,6 @@ async function processos() {
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="_fecharDrawerProcessoSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerProcesso()">Fechar</button>
         <button class="btn btn-ghost" onclick="gerarDossieProcesso()" style="color:#1565c0;border-color:#1565c0;">📄 Dossiê</button>
         <button class="btn btn-ghost" onclick="abrirPCNSalvo()" id="btnPcnSalvo" style="color:#2e7d32;border-color:#2e7d32;display:none;">📂 Abrir PCN</button>
@@ -2502,7 +2623,7 @@ function renderizarProcessos() {
         ${soLeituraProcessos ? '<td></td>' : `<td style="text-align:center;padding-left:6px;padding-right:6px;" onclick="event.stopPropagation();"><input type="checkbox" class="chk-processo" data-id="${esc(p.id)}" ${processosSelecionados.has(p.id) ? 'checked' : ''} onchange="toggleProcessoSelecionado('${p.id}', this.checked)"></td>`}
         <td>${esc(p.area)}</td>
         <td><strong>${esc(p.processo)}</strong></td>
-        <td>${p.responsavelArea || p.responsavel || ''}</td>
+        <td>${esc(p.responsavelArea || p.responsavel || '')}</td>
         <td>${_htmlBadge(_nivelTierProcesso(status), status)}</td>
         <td style="text-align:center;font-weight:700;color:${p.avaliado || p.score > 0 ? statusColor : '#bbb'};font-size:0.95em;">${p.avaliado || p.score > 0 ? p.score : '-'}</td>
         <td style="font-size:0.8em;color:#555;">${p.biaHomologada || '-'}</td>
@@ -2544,7 +2665,7 @@ function renderizarProcessos() {
         </td>`}
       </tr>`;
       }).join('')
-    : `<tr><td colspan="8" style="text-align:center;color:#999;padding:40px;">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
+    : `<tr><td colspan="10" style="text-align:center;color:#999;padding:40px;">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
 
   // Coerência da seleção com a lista filtrada: linhas escondidas por filtro
   // continuam marcadas em processosSelecionados (não perde seleção ao trocar
@@ -2816,7 +2937,7 @@ window.enviarRelatorioArea = async () => {
   if (!area) return;
   const areaObj = window.areasDisponiveis.find(a => a.nome === area);
   if (!areaObj || !areaObj.email) return showToast('E-mail do responsável não cadastrado para esta área.', '#e65100');
-  if (!confirm(`Enviar relatório de "${area}" para ${esc(areaObj.responsavel)} (${esc(areaObj.email)})?`)) return;
+  if (!confirm(`Enviar relatório de "${area}" para ${areaObj.responsavel} (${areaObj.email})?`)) return;
   try {
     showToast('⏳ Gerando relatório...', '#1565c0');
     const result = await API.post('gerarRelatorioArea', { area, email: areaObj.email });
@@ -2832,7 +2953,7 @@ window.enviarParaArea = async () => {
   if (!area) return;
   const areaObj = window.areasDisponiveis.find(a => a.nome === area);
   if (!areaObj || !areaObj.email) return showToast('E-mail do responsável não cadastrado para esta área.', '#e65100');
-  if (!confirm(`Enviar questionário para ${esc(areaObj.responsavel)} (${esc(areaObj.email)})?`)) return;
+  if (!confirm(`Enviar questionário para ${areaObj.responsavel} (${areaObj.email})?`)) return;
   try {
     const result = await API.post('gerarTokenArea', { area, email: areaObj.email, nomeResponsavel: areaObj.responsavel || '' });
     if (result.error) throw new Error(result.error);
@@ -3504,7 +3625,7 @@ window.salvarProcesso = async () => {
   // até a gravação real terminar, pra um clique duplo não criar dois
   // processos (antes não importava, porque o drawer já tinha fechado).
   renderizarProcessos();
-  showToast('✅ Salvando...', '#d60014');
+  showToast('⏳ Salvando...', '#d60014');
 
   try {
     const result = await API.salvarProcesso(p);
@@ -3549,7 +3670,7 @@ window.salvarProcesso = async () => {
 window.excluirProcesso = async (id) => {
   const p = window.processosData.find(proc => proc.id === id);
   if (!p) return;
-  if (!confirm(`Excluir o processo "${esc(p.processo)}"? Esta ação não pode ser desfeita.`)) return;
+  if (!confirm(`Excluir o processo "${p.processo}"? Esta ação não pode ser desfeita.`)) return;
   try {
     await API.post('excluirProcesso', { id: String(id), area: p.area, processo: p.processo });
     showToast('🗑️ Excluído.', '#555');
@@ -3644,7 +3765,7 @@ window.avaliarProcesso = (id) => {
         ${itensCat.map(perg => {
           const i = window.processosPerguntas.indexOf(perg);
           return `<div style="padding:20px 24px;background:#fafafa;border-bottom:1px solid #f0f0f0;">
-            <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${perg.pergunta}</div>
+            <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${esc(perg.pergunta)}</div>
             <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${esc(perg.descricao || '')}</div>
             <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
               ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default'] || [{valor:'3',label:'Crítico',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Alto',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Moderado',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'Baixo',cor:'#757575',background:'#f5f5f5'}]).slice().sort((a,b) => Number(b.valor) - Number(a.valor)).map(op => {
@@ -3680,12 +3801,25 @@ window.avaliarProcesso = (id) => {
   document.getElementById('drawerAvaliar').classList.add('open');
   document.getElementById('drawerOverlayAvaliar').classList.add('open');
   iniciarDrawerResizeAvaliar();
+  _edAvaliar.marcar();
 };
 
-window.fecharModalAvaliar = () => {
+// Respostas marcadas no questionário: antes, ×/clique fora/Cancelar descartavam
+// todas sem perguntar.
+const _edAvaliar = criarRastreadorEdicao(() =>
+  Array.from(document.querySelectorAll('#perguntas-container input[type="radio"]:checked')).map((r) => r.name + '=' + r.value));
+
+function _fecharModalAvaliarSemSalvar() {
   document.getElementById('drawerAvaliar').classList.remove('open');
   document.getElementById('drawerOverlayAvaliar').classList.remove('open');
-};
+}
+// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
+window.fecharModalAvaliar = () => _fecharComRastreador({
+  idDrawer: 'drawerAvaliar',
+  sujo: () => _edAvaliar.sujo(),
+  salvar: () => salvarAvaliacaoProcesso(),
+  fecharSemSalvar: _fecharModalAvaliarSemSalvar,
+});
 
 window.imprimirAvaliacao = () => {
   const titulo = document.getElementById('modalAvaliarTitulo').textContent;
@@ -3845,11 +3979,11 @@ async function dependencias() {
       <div><h2>Catálogo de Dependências</h2><p class="page-sub">Gerencie as dependências críticas reutilizáveis nos processos</p></div>
       <button class="btn btn-primary" onclick="abrirDrawerDependencia()">+ Nova Dependência</button>
     </div>
-    <div style="border:1px solid #e0e0e0;background:#f8f9ff;border-radius:9px;padding:11px 14px;margin-bottom:16px;font-size:0.86em;color:#555;">
+    ${_seVeTela('fornecedores', `<div style="border:1px solid #e0e0e0;background:#f8f9ff;border-radius:9px;padding:11px 14px;margin-bottom:16px;font-size:0.86em;color:#555;">
       Os <strong>fornecedores</strong> aparecem neste catálogo, mas são editados e avaliados em
       <a href="#fornecedores" style="color:#d60014;font-weight:700;">Fornecedores</a>.
       Clique num fornecedor para gerenciá-lo lá.
-    </div>
+    </div>`)}
     <div style="margin-bottom:16px;display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
       <div>
         <label style="font-size:0.9em;font-weight:600;color:#555;margin-bottom:6px;display:block;">Filtrar por Categoria:</label>
@@ -3890,7 +4024,11 @@ async function dependencias() {
     // Fonte do select "Area Responsavel" na aba DRP -- mesmo catalogo que
     // Areas/Fornecedor ja usam.
     window.areasData = areas;
-  } catch(e) { dependenciasData = []; }
+  } catch (e) {
+    console.error('dependencias: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar as dependências.', 'dependencias');
+    return;
+  }
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaDeps').style.display = 'block';
   // Popular filtro de categorias
@@ -3930,11 +4068,13 @@ function renderizarDependencias() {
         // pra la (irParaFornecedor) e o excluir nao age aqui (fornecedores tem
         // avaliacoes atreladas, geridas la).
         const ehForn = Perfis.categoriaDeFornecedor(d.categoria);
-        const acao = ehForn ? `irParaFornecedor('${d.id}')` : `editarDep('${d.id}')`;
+        // Fornecedor é gerido em Fornecedores: quem não vê essa tela (TI) só consulta a linha.
+        const veForn = Perfis.podeVerTela(window.USER_PERFIS, 'fornecedores');
+        const acao = ehForn ? (veForn ? `irParaFornecedor('${d.id}')` : '') : `editarDep('${d.id}')`;
         const acoesCell = ehForn
-          ? `<button class="btn-icon" onclick="irParaFornecedor('${d.id}')" title="Gerenciar em Fornecedores">
+          ? (!veForn ? '' : `<button class="btn-icon" onclick="irParaFornecedor('${d.id}')" title="Gerenciar em Fornecedores">
                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-             </button>`
+             </button>`)
           : `<button class="btn-icon" onclick="editarDep('${d.id}')" title="Editar">
                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
              </button>
@@ -4868,7 +5008,6 @@ function _htmlDrawerDependencia() {
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="_fecharDrawerDependenciaSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerDependencia()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarDep" onclick="salvarDep()">Salvar</button>
       </div>
@@ -5019,19 +5158,13 @@ function _fecharDrawerDependenciaSemSalvar() {
   window._servicoNovaDependenciaCategoria = null;
   _reabrirDrawerPaiSeEscondido();
 }
-// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- exceto no cadastro
-// rapido aninhado (mesmas flags que salvarDep ja usa pra detectar isso),
-// que mantem o comportamento de sempre: fecha otimista e volta pro pai,
-// sem esperar a gravacao real terminar.
-window.fecharDrawerDependencia = async () => {
-  if (window._backupNovoServidor || window._servicoNovaDependenciaCategoria) {
-    _fecharDrawerDependenciaSemSalvar();
-    return;
-  }
-  if (!_edDep.sujo()) return _fecharDrawerDependenciaSemSalvar();
-  const ok = await salvarDep();
-  if (ok) _fecharDrawerDependenciaSemSalvar();
-};
+// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
+window.fecharDrawerDependencia = () => _fecharComRastreador({
+  idDrawer: 'drawerDependencia',
+  sujo: () => _edDep.sujo(),
+  salvar: () => salvarDep(),
+  fecharSemSalvar: _fecharDrawerDependenciaSemSalvar,
+});
 
 const _edDep = criarRastreadorEdicao(() => _coletarFormularioDependencia());
 
@@ -5146,7 +5279,7 @@ window.salvarDep = async () => {
   }
   _refreshAposSalvarDependencia();
   window.dependenciasCatalogo = dependenciasData;
-  showToast('✅ Salvando...', '#d60014');
+  showToast('⏳ Salvando...', '#d60014');
 
   try {
     // Enviar ao backend SEM o ID temporário para novos registros
@@ -5733,7 +5866,11 @@ async function servicos() {
     // sem popular aqui também, essa sobrescrita apagaria o catálogo completo
     // (mesmo cuidado já aplicado em backups()).
     dependenciasData = depsList.filter((d) => !['Pessoas', 'Pessoa'].includes(d.categoria));
-  } catch (e) { servicosData = []; }
+  } catch (e) {
+    console.error('servicos: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar os serviços.', 'servicos');
+    return;
+  }
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaServicos').style.display = 'block';
   renderizarServicos();
@@ -5815,7 +5952,6 @@ function _htmlDrawerServico() {
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="_fecharDrawerServicoSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerServico()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarServico" onclick="salvarServico()">Salvar</button>
       </div>
@@ -5909,15 +6045,13 @@ function _fecharDrawerServicoSemSalvar() {
   document.getElementById('drawerOverlayServico').classList.remove('open');
   _reabrirDrawerPaiSeEscondido();
 }
-// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- exceto no cadastro
-// rapido aninhado, que mantem o comportamento de sempre (salvarServico ja
-// fecha e volta pro pai ao salvar).
-window.fecharDrawerServico = async () => {
-  if (_temDrawerPaiEmpilhado()) { _fecharDrawerServicoSemSalvar(); return; }
-  if (!_edServico.sujo()) return _fecharDrawerServicoSemSalvar();
-  const ok = await salvarServico();
-  if (ok) _fecharDrawerServicoSemSalvar();
-};
+// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
+window.fecharDrawerServico = () => _fecharComRastreador({
+  idDrawer: 'drawerServico',
+  sujo: () => _edServico.sujo(),
+  salvar: () => salvarServico(),
+  fecharSemSalvar: _fecharDrawerServicoSemSalvar,
+});
 
 const _edServico = criarRastreadorEdicao(() => _coletarFormularioServico());
 
@@ -6201,7 +6335,11 @@ async function catalogoBackup() {
     // sem popular aqui também, essa sobrescrita apagaria o catálogo completo
     // (mesmo cuidado já aplicado em servicos()).
     dependenciasData = depsList.filter((d) => !['Pessoas', 'Pessoa'].includes(d.categoria));
-  } catch (e) { backupsData = []; }
+  } catch (e) {
+    console.error('catalogoBackup: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar o catálogo de backup.', 'catalogoBackup');
+    return;
+  }
 
   const filtroServico = document.getElementById('filtroBackupServico');
   if (filtroServico) {
@@ -6377,7 +6515,6 @@ function _htmlDrawerBackup() {
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="_fecharDrawerBackupSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerBackup()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarBackup" onclick="salvarBackup()">Salvar</button>
       </div>
@@ -6432,15 +6569,13 @@ function _fecharDrawerBackupSemSalvar() {
   document.getElementById('drawerOverlayBackup').classList.remove('open');
   _reabrirDrawerPaiSeEscondido();
 }
-// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- exceto no cadastro
-// rapido aninhado, que mantem o comportamento de sempre (salvarBackup ja
-// fecha e volta pro pai ao salvar).
-window.fecharDrawerBackup = async () => {
-  if (_temDrawerPaiEmpilhado()) { _fecharDrawerBackupSemSalvar(); return; }
-  if (!_edBackup.sujo()) return _fecharDrawerBackupSemSalvar();
-  const ok = await salvarBackup();
-  if (ok) _fecharDrawerBackupSemSalvar();
-};
+// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
+window.fecharDrawerBackup = () => _fecharComRastreador({
+  idDrawer: 'drawerBackup',
+  sujo: () => _edBackup.sujo(),
+  salvar: () => salvarBackup(),
+  fecharSemSalvar: _fecharDrawerBackupSemSalvar,
+});
 
 const _edBackup = criarRastreadorEdicao(() => _coletarFormularioBackup());
 
@@ -7123,8 +7258,9 @@ async function vulnerabilidades() {
     if (areasList) window.areasData = areasList;
     if (produtosList) produtosSoftwareData = produtosList;
   } catch (e) {
-    console.error('Vulnerabilidades: falha ao carregar', e);
-    vulnerabilidadesData = [];
+    console.error('vulnerabilidades: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar as vulnerabilidades.', 'vulnerabilidades');
+    return;
   }
 
   const filtroProduto = document.getElementById('filtroVulnProduto');
@@ -7931,7 +8067,6 @@ function _htmlDrawerVulnerabilidade() {
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="_fecharDrawerVulnerabilidadeSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerVulnerabilidade()">Fechar</button>
         <button class="btn btn-ghost" id="btnImportarVulnParaRisco" onclick="importarVulnerabilidadeParaRisco()" style="display:none;color:#c62828;border-color:#c62828;"></button>
         <button class="btn btn-primary" id="btnSalvarVulnerabilidade" onclick="salvarVulnerabilidade()">Salvar</button>
@@ -8579,13 +8714,13 @@ function _fecharDrawerVulnerabilidadeSemSalvar() {
   document.getElementById('drawerVulnerabilidade').classList.remove('open');
   document.getElementById('drawerOverlayVulnerabilidade').classList.remove('open');
 }
-// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- mas so se algo mudou
-// desde que abriu/salvou (_edVulnerabilidade): sem mudanca nao ha o que gravar.
-window.fecharDrawerVulnerabilidade = async () => {
-  if (!_edVulnerabilidade.sujo()) return _fecharDrawerVulnerabilidadeSemSalvar();
-  const ok = await salvarVulnerabilidade();
-  if (ok) _fecharDrawerVulnerabilidadeSemSalvar();
-};
+// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
+window.fecharDrawerVulnerabilidade = () => _fecharComRastreador({
+  idDrawer: 'drawerVulnerabilidade',
+  sujo: () => _edVulnerabilidade.sujo(),
+  salvar: () => salvarVulnerabilidade(),
+  fecharSemSalvar: _fecharDrawerVulnerabilidadeSemSalvar,
+});
 
 const _edVulnerabilidade = criarRastreadorEdicao(() => _coletarFormularioVulnerabilidade());
 
@@ -8695,7 +8830,14 @@ async function admin() {
     <div id="painel" style="display:none;"></div>
   `;
 
-  const [processos, areas] = await Promise.all([API.getProcessos(), API.getAreas()]);
+  let processos, areas;
+  try {
+    [processos, areas] = await Promise.all([API.getProcessos(), API.getAreas()]);
+  } catch (e) {
+    console.error('admin: falha ao carregar', e);
+    document.getElementById('loading').outerHTML = _htmlErroCarga('Não foi possível carregar o dashboard.', 'admin');
+    return;
+  }
 
   // Gestor (sem Admin/Segurança) sem área: bloquear acesso.
   if (_limitadoAArea() && !window.USER_AREA) {
@@ -9213,7 +9355,7 @@ window.salvarAvaliacaoProcesso = async () => {
     const result = await API.post('salvarRespostas', { area, processo, scores });
     if (result.error) throw new Error(result.error);
     if (window.processosPerguntas) {
-      fecharModalAvaliar();
+      _fecharModalAvaliarSemSalvar();
       showToast('✅ Avaliação salva com sucesso!', '#2e7d32');
       API.invalidate('getProcessos');
       processos();
@@ -9221,6 +9363,7 @@ window.salvarAvaliacaoProcesso = async () => {
       fecharModalQuestionario();
       showToast('✅ Avaliação salva com sucesso!', '#2e7d32');
     }
+    return true;
   } catch (err) {
     showToast('❌ Erro ao salvar: ' + err.message, '#c62828');
     // Reabilitar botões em caso de erro
@@ -10032,7 +10175,7 @@ function renderizarRiscos() {
     ? data.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${r.id}')">
         <td class="num col-nw">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '–'}</td>
         <td>${r.area ? `<span class="chip-area" title="${esc(r.area)}">${esc(r.area)}</span>` : '<span class="muted">–</span>'}</td>
-        <td>${r.processo || (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span class="muted">Corporativo</span>')}</td>
+        <td>${r.processo ? esc(r.processo) : (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span class="muted">Corporativo</span>')}</td>
         <td>${esc(_rotuloOrigemRisco(r.origem))}</td>
         <td class="title" title="${esc(r.titulo)}">${esc(r.titulo)}</td>
         <td class="muted">${esc((r.categorias || []).join(', ')) || '–'}</td>
@@ -10467,7 +10610,6 @@ function _htmlDrawerRisco() {
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="_fecharDrawerRiscoSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerRisco()">Fechar</button>
         <button class="btn btn-primary" onclick="salvarRisco()" id="btnSalvarRisco">Salvar</button>
       </div>
@@ -10652,16 +10794,13 @@ function _fecharDrawerRiscoSemSalvar() {
   document.getElementById('drawerRisco').classList.remove('open');
   document.getElementById('drawerOverlayRisco').classList.remove('open');
 }
-// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- so fecha se salvarRisco
-// devolver true (gravacao principal confirmada); validacao/erro mostram o
-// mesmo aviso de sempre e o drawer continua aberto.
-window.fecharDrawerRisco = async () => {
-  // Sem mudança desde que abriu/salvou não há o que gravar (e quem só pode ver
-  // o risco, sem permissão de escrita, também fecha sem tentar).
-  if (!_edRisco.sujo()) return _fecharDrawerRiscoSemSalvar();
-  const ok = await salvarRisco();
-  if (ok) _fecharDrawerRiscoSemSalvar();
-};
+// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
+window.fecharDrawerRisco = () => _fecharComRastreador({
+  idDrawer: 'drawerRisco',
+  sujo: () => _edRisco.sujo(),
+  salvar: () => salvarRisco(),
+  fecharSemSalvar: _fecharDrawerRiscoSemSalvar,
+});
 
 window.editarRisco = (id) => abrirDrawerRisco(riscosData.find(r => r.id === id));
 
@@ -10865,7 +11004,7 @@ async function _renderAvisosOrigemRisco(r) {
     ? `<div style="border:1px solid #fce8ea;border-left:4px solid #d60014;border-radius:8px;padding:10px 14px;background:#fffafa;font-size:0.85em;">
         <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center;">
           <strong>🛡️ Vulnerabilidade ${esc(v.codigo || '')} — ${esc(v.nome || '')}</strong>
-          <a href="#vulnerabilidades?vuln=${esc(v.id)}" style="color:#d60014;font-weight:700;">Abrir vulnerabilidade →</a>
+          ${_seVeTela('vulnerabilidades', `<a href="#vulnerabilidades?vuln=${esc(v.id)}" style="color:#d60014;font-weight:700;">Abrir vulnerabilidade →</a>`)}
         </div>
         <div style="margin-top:6px;color:#555;display:flex;flex-wrap:wrap;gap:6px 16px;">
           <span>Severidade: <strong>${esc(faixa)}</strong></span>
@@ -12578,7 +12717,7 @@ function renderizarIndicadoresCadastro() {
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                 </button>` : ''}
               </td>
-            </tr>`).join('') : `<tr><td colspan="${isAdmin ? 6 : 5}" style="text-align:center;color:#999;padding:40px;">Nenhum indicador encontrado.</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" style="text-align:center;color:#999;padding:40px;">Nenhum indicador encontrado.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -12880,7 +13019,7 @@ async function _removerLancamentoIndicador(indicador, mes) {
 window.excluirLancamento = async (indicadorId, mes) => {
   const indicador = indicadoresData.find(d => d.id === indicadorId);
   if (!indicador) return;
-  if (!confirm(`Excluir o lançamento de ${_formatMes(mes)} de "${esc(indicador.nome)}"? Esta ação não pode ser desfeita.`)) return;
+  if (!confirm(`Excluir o lançamento de ${_formatMes(mes)} de "${indicador.nome}"? Esta ação não pode ser desfeita.`)) return;
   try {
     await _removerLancamentoIndicador(indicador, mes);
     showToast('✅ Lançamento excluído!', '#2e7d32');
@@ -12961,7 +13100,7 @@ function renderizarIndicadoresMatriz() {
   let html = '';
   Object.entries(porPilar).sort((a, b) => a[0].localeCompare(b[0])).forEach(([pilar, itens]) => {
     html += `<div style="margin-bottom:20px;">
-      <div style="background:linear-gradient(135deg,#d60014,#e6262b);color:white;padding:10px 18px;border-radius:8px 8px 0 0;font-weight:700;font-size:0.92em;">📁 ${pilar}</div>
+      <div style="background:linear-gradient(135deg,#d60014,#e6262b);color:white;padding:10px 18px;border-radius:8px 8px 0 0;font-weight:700;font-size:0.92em;">📁 ${esc(pilar)}</div>
       <div class="data-table" style="border-radius:0 0 8px 8px;overflow-x:auto;">
         <table style="table-layout:auto;min-width:${minWidth}px;">
           <thead>
@@ -14562,7 +14701,7 @@ async function pcns() {
     document.getElementById('loading').innerHTML = `
       <div style="color:#c62828;padding:20px;text-align:center;">
         <h3>❌ Erro ao carregar PCNs</h3>
-        <p>${err.message}</p>
+        <p>${esc(err.message)}</p>
       </div>`;
   }
 }
@@ -14595,7 +14734,7 @@ function renderPCNLista(comPCN) {
     const areaId = 'pcn-area-' + area.replace(/[^a-zA-Z0-9]/g, '_');
     html += `<div style="margin-bottom:20px;">
       <div onclick="toggleAreaPCN('${areaId}')" style="background:linear-gradient(135deg,#d60014,#e6262b);color:white;padding:12px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;">
-        <span style="font-weight:700;font-size:0.95em;">📁 ${area}</span>
+        <span style="font-weight:700;font-size:0.95em;">📁 ${esc(area)}</span>
         <span style="font-size:0.78em;opacity:0.8;">${procs.length} processo${procs.length > 1 ? 's' : ''} ▾</span>
       </div>
       <div id="${areaId}" style="border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">`;
@@ -14697,7 +14836,7 @@ async function drp() {
     document.getElementById('loading').innerHTML = `
       <div style="color:#c62828;padding:20px;text-align:center;">
         <h3>❌ Erro ao carregar DRPs</h3>
-        <p>${err.message}</p>
+        <p>${esc(err.message)}</p>
       </div>`;
   }
 }
@@ -15515,7 +15654,6 @@ function _htmlDrawerCriticidadePergunta() {
         </div>
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="_fecharDrawerCriticidadePerguntaSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerCriticidadePergunta()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarCriticidadePergunta" onclick="salvarCriticidadePergunta()">Salvar</button>
       </div>
@@ -15606,12 +15744,13 @@ function _fecharDrawerCriticidadePerguntaSemSalvar() {
   document.getElementById('drawerCriticidadePergunta').classList.remove('open');
   document.getElementById('drawerOverlayCriticidadePergunta').classList.remove('open');
 }
-// "Fechar" salva antes de fechar (DECISAO 08/10/2026).
-window.fecharDrawerCriticidadePergunta = async () => {
-  if (!_edCriticidadePergunta.sujo()) return _fecharDrawerCriticidadePerguntaSemSalvar();
-  const ok = await salvarCriticidadePergunta();
-  if (ok) _fecharDrawerCriticidadePerguntaSemSalvar();
-};
+// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
+window.fecharDrawerCriticidadePergunta = () => _fecharComRastreador({
+  idDrawer: 'drawerCriticidadePergunta',
+  sujo: () => _edCriticidadePergunta.sujo(),
+  salvar: () => salvarCriticidadePergunta(),
+  fecharSemSalvar: _fecharDrawerCriticidadePerguntaSemSalvar,
+});
 
 const _edCriticidadePergunta = criarRastreadorEdicao(() => _coletarFormularioCriticidadePergunta());
 
@@ -16167,6 +16306,7 @@ window.salvarAvaliacaoFornecedor = async () => {
     if (!confirm(`Faltam ${partes.join(' e ')}.\n\nA avaliação vai ser gravada como incompleta e a nota fica provisória. Salvar assim mesmo?`)) return;
   }
 
+  const snapAvaliacao = _snapshotAvaliacaoFornecedor();
   const btn = document.getElementById('btnSalvarAvaliacaoForn');
   btn.disabled = true;
   try {
@@ -16194,6 +16334,8 @@ window.salvarAvaliacaoFornecedor = async () => {
 
     const abre = FornecedorScore.abreRisco(r.nota, configFornecedor.limiarRisco);
     showToast(`✅ Avaliação salva!${abre ? ' Um risco será aberto para este fornecedor em alguns segundos.' : ''}`, '#2e7d32');
+    _edAvalFornecedor.marcar(snapAvaliacao);
+    return true;
   } catch (e) {
     showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
   } finally {
@@ -16870,7 +17012,7 @@ function _htmlDrawerFornecedorCadastro() {
           <button type="button" class="btn btn-ghost" id="btnAdicionarGestorContrato" onclick="adicionarGestorContrato()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
           <button type="button" class="btn-icon" onclick="_recarregarPessoasFornecedor()" title="Atualizar lista de pessoas">🔄</button>
         </div>
-        <a href="#pessoas" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:8px;">👤 Gerenciar Pessoas</a>
+        ${_seVeTela('pessoas', `<a href="#pessoas" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:8px;">👤 Gerenciar Pessoas</a>`)}
       </div>
 
       <div style="display:grid;grid-template-columns:1fr;gap:16px;">
@@ -16880,7 +17022,7 @@ function _htmlDrawerFornecedorCadastro() {
             <select id="fornCadSetor" style="${inp}flex:1;"><option value="">Selecione...</option></select>
             <button type="button" class="btn-icon" onclick="_recarregarAreasFornecedor()" title="Atualizar lista de áreas">🔄</button>
           </div>
-          <a href="#areas" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;">+ Cadastrar nova área</a>
+          ${_seVeTela('areas', `<a href="#areas" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;">+ Cadastrar nova área</a>`)}
         </div>
       </div>
       </div>
@@ -16908,7 +17050,6 @@ function _htmlDrawerFornecedorCadastro() {
 
       </div>
       <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="_fecharDrawerFornecedorCadastroSemSalvar()">Cancelar</button>
         <button class="btn btn-ghost" onclick="fecharDrawerFornecedorCadastro()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarFornecedorCadastro" onclick="salvarFornecedorCadastro()">Salvar</button>
         <button class="btn btn-primary" id="btnSalvarAvaliacaoForn" onclick="salvarAvaliacaoFornecedor()" style="display:none;">Salvar avaliação</button>
@@ -17300,6 +17441,7 @@ window.abrirDrawerFornecedorCadastro = (id, abaInicial) => {
   document.getElementById('drawerFornecedorCadastro').classList.add('open');
   document.getElementById('drawerOverlayFornecedorCadastro').classList.add('open');
   _edFornecedor.marcar();
+  _edAvalFornecedor.marcar();
 };
 
 /**
@@ -17396,16 +17538,32 @@ function _fecharDrawerFornecedorCadastroSemSalvar() {
   document.getElementById('drawerFornecedorCadastro').classList.remove('open');
   document.getElementById('drawerOverlayFornecedorCadastro').classList.remove('open');
 }
-// "Fechar" salva antes de fechar (DECISAO 08/10/2026) -- salva o cadastro
-// (aba Dados), nao a avaliacao de Criticidade/Conformidade, que tem seu
-// proprio botao "Salvar avaliação" e continua uma acao a parte.
-window.fecharDrawerFornecedorCadastro = async () => {
-  if (!_edFornecedor.sujo()) return _fecharDrawerFornecedorCadastroSemSalvar();
-  const ok = await salvarFornecedorCadastro();
-  if (ok) _fecharDrawerFornecedorCadastroSemSalvar();
-};
+// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
+window.fecharDrawerFornecedorCadastro = () => _fecharComRastreador({
+  idDrawer: 'drawerFornecedorCadastro',
+  sujo: () => _edFornecedor.sujo() || _edAvalFornecedor.sujo(),
+  // "Salvar" grava o que mudou: o cadastro, a avaliação ou os dois.
+  salvar: async () => {
+    if (_edFornecedor.sujo() && !(await salvarFornecedorCadastro())) return false;
+    if (_edAvalFornecedor.sujo() && !(await salvarAvaliacaoFornecedor())) return false;
+    return true;
+  },
+  fecharSemSalvar: _fecharDrawerFornecedorCadastroSemSalvar,
+});
 
 const _edFornecedor = criarRastreadorEdicao(() => _coletarFormularioFornecedor());
+// A avaliação (abas Criticidade/Conformidade) tem gravação própria
+// (salvarAvaliacaoFornecedor) -- rastreador separado, para o Fechar perceber
+// quando só ela mudou (antes ela era descartada em silêncio).
+function _snapshotAvaliacaoFornecedor() {
+  return {
+    aplicaveis: _coletarCriteriosAplicaveisFornecedor(),
+    respostas: _coletarRespostasFornecedor(),
+    criticidade: _coletarRespostasCriticidadeFornecedor(),
+    observacao: document.getElementById('fornObservacao').value.trim(),
+  };
+}
+const _edAvalFornecedor = criarRastreadorEdicao(_snapshotAvaliacaoFornecedor);
 
 // Só a aba Dados -- a avaliação (Criticidade/Conformidade) tem o próprio Salvar.
 function _coletarFormularioFornecedor() {

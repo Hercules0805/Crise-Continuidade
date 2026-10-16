@@ -10,7 +10,12 @@ window.__rodar = async () => {
   const aberto = (id) => document.getElementById(id).classList.contains('open');
   const set = (id, v) => { document.getElementById(id).value = v; };
   const html = (fn) => document.body.insertAdjacentHTML('beforeend', fn());
-  const zera = () => { Object.keys(calls).forEach((k) => delete calls[k]); toasts.length = 0; };
+  // Pergunta "Há alterações não salvas" (DECISÃO 16/10/2026): o teste escolhe a
+  // resposta (padrão Salvar) e conta quantas vezes ela foi feita.
+  let respostaFechar = 'salvar';
+  let perguntas = 0;
+  _perguntarAlteracoesNaoSalvas = async () => { perguntas++; return respostaFechar; };
+  const zera = () => { Object.keys(calls).forEach((k) => delete calls[k]); toasts.length = 0; perguntas = 0; respostaFechar = 'salvar'; };
 
   // ------------------------------------------------------------ Vulnerabilidade
   html(_htmlDrawerVulnerabilidade);
@@ -300,6 +305,8 @@ window.__rodar = async () => {
   ok(n('salvarDependencia') === 1, 'fornecedor: so adicionou canal de suporte = grava');
   zera(); abrirDrawerFornecedorCadastro(); await fecharDrawerFornecedorCadastro();
   ok(n('salvarDependencia') === 0 && !aberto('drawerFornecedorCadastro'), 'fornecedor: novo em branco fecha sem criar');
+  zera(); respostaFechar = 'descartar'; abrirDrawerFornecedorCadastro('fo1'); set('fornObservacao', 'obs nova'); await fecharDrawerFornecedorCadastro();
+  ok(perguntas === 1 && n('salvarDependencia') === 0 && !aberto('drawerFornecedorCadastro'), 'fornecedor: so mexeu na avaliacao = pergunta (antes descartava em silencio)');
 
   // ------------------------------------------------------------ Risco
   html(_htmlDrawerRisco);
@@ -311,7 +318,23 @@ window.__rodar = async () => {
   zera(); await abrirDrawerRisco(r1); set('rTitulo', 'Risco 1b'); await fecharDrawerRisco();
   ok(n('salvarRisco') === 1 && !aberto('drawerRisco'), 'risco: mexeu = 1 gravacao');
   zera(); await abrirDrawerRisco({ ...r1, id: '', titulo: 'Risco 1 (copia)' }); await fecharDrawerRisco();
-  ok(n('salvarRisco') === 1 && !aberto('drawerRisco'), 'risco: COPIA (rascunho sem id) + Fechar grava, nunca descarta');
+  ok(n('salvarRisco') === 1 && !aberto('drawerRisco') && perguntas === 1, 'risco: COPIA (rascunho sem id) + Fechar pergunta; Salvar grava');
+  zera(); respostaFechar = 'descartar'; await abrirDrawerRisco({ ...r1, id: '', titulo: 'Risco 1 (copia)' }); await fecharDrawerRisco();
+  ok(n('salvarRisco') === 0 && !aberto('drawerRisco') && perguntas === 1, 'risco: COPIA + Fechar + Descartar = nao cria o registro');
+  zera(); await abrirDrawerRisco(r1); await fecharDrawerRisco();
+  ok(perguntas === 0, 'risco: sem mexer, Fechar nem pergunta');
+  zera(); respostaFechar = 'descartar'; await abrirDrawerRisco(r1); set('rTitulo', 'Descartado'); await fecharDrawerRisco();
+  ok(n('salvarRisco') === 0 && !aberto('drawerRisco') && perguntas === 1, 'risco: mexeu + Descartar = 0 gravacoes e fecha');
+  zera(); respostaFechar = 'continuar'; await abrirDrawerRisco(r1); set('rTitulo', 'Continua'); await fecharDrawerRisco();
+  ok(n('salvarRisco') === 0 && aberto('drawerRisco') && perguntas === 1, 'risco: mexeu + Continuar editando = 0 gravacoes e continua aberto');
+  respostaFechar = 'descartar';
+  // O jsdom deste teste nao executa atributos onclick="..." (runScripts
+  // 'outside-only'): liga o × ao Fechar do jeito que o navegador faria.
+  Array.from(document.querySelectorAll('#drawerRisco .drawer-header button')).find((x) => x.textContent.trim() === '×')
+    .addEventListener('click', () => fecharDrawerRisco());
+  document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  await new Promise((r) => setTimeout(r, 0));
+  ok(n('salvarRisco') === 0 && !aberto('drawerRisco') && perguntas === 2, 'risco: Esc segue a mesma regra do Fechar (perguntou e descartou)');
   zera(); await abrirDrawerRisco(); await fecharDrawerRisco();
   ok(n('salvarRisco') === 0 && !aberto('drawerRisco') && toasts.length === 0, 'risco: novo em branco fecha sem criar e sem aviso');
   zera(); await abrirDrawerRisco(r1); set('rTitulo', 'Risco 1c'); await salvarRisco(); await fecharDrawerRisco();
@@ -332,7 +355,9 @@ window.__rodar = async () => {
   zera(); abrirDrawerDependencia(d1); dependenciasData[0].drpSalvo = '[{"versao":1}]'; await fecharDrawerDependencia();
   ok(n('salvarDependencia') === 0, 'dependencia: gerar DRP (muda drpSalvo em memoria) nao conta como edicao do formulario');
   zera(); abrirDrawerDependencia({ categoria: 'Servidor', nome: 'Semente' }); await fecharDrawerDependencia();
-  ok(n('salvarDependencia') === 1, 'dependencia: rascunho com nome sugerido (sem id) + Fechar grava');
+  ok(n('salvarDependencia') === 1 && perguntas === 1, 'dependencia: rascunho com nome sugerido (sem id) + Fechar pergunta; Salvar grava');
+  zera(); respostaFechar = 'descartar'; abrirDrawerDependencia({ categoria: 'Servidor', nome: 'Semente' }); await fecharDrawerDependencia();
+  ok(n('salvarDependencia') === 0 && !aberto('drawerDependencia'), 'dependencia: rascunho + Descartar = nao cria');
   zera(); abrirDrawerDependencia(); await fecharDrawerDependencia();
   ok(n('salvarDependencia') === 0 && !aberto('drawerDependencia'), 'dependencia: novo em branco fecha sem criar');
 
