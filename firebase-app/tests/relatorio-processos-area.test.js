@@ -166,7 +166,9 @@ test('sem nenhuma area marcada: avisa e nao abre pagina nenhuma', async () => {
 test('erro ao carregar areas/processos: avisa e nao abre o drawer', async () => {
   const { w, toasts, doc } = await carregar({ falhaCarga: true });
   await w.abrirSelecaoAreasRelatorio();
-  assert.match(toasts[0], /Não foi possível carregar áreas e processos: sem rede/);
+  // Mensagem para pessoas (_mensagemErro): a acao que falhou, sem o texto tecnico do erro.
+  assert.match(toasts[0], /Não foi possível carregar áreas e processos\. Tente de novo\./);
+  assert.doesNotMatch(toasts[0], /sem rede/);
   assert.ok(!doc.getElementById('drawerSelecaoAreasRelatorio').classList.contains('open'));
 });
 

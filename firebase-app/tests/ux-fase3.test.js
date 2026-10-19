@@ -234,3 +234,17 @@ test('confirmacoes no modal do sistema (nao o confirm() nativo); Cancelar = nao,
   assert.strictEqual(await p2, true);
   w.close();
 });
+
+test('mensagens de erro para pessoas: texto tecnico vira frase clara; mensagem do servidor em portugues passa', () => {
+  const w = carregar({});
+  w.console.error = () => {};
+  const m = (e, p) => w._mensagemErro(e, p);
+  assert.strictEqual(m({ code: 'permission-denied', message: 'Missing or insufficient permissions.' }), 'Você não tem permissão para esta ação.');
+  assert.match(m(new w.TypeError('Failed to fetch')), /Sem conexão/);
+  assert.strictEqual(m(new w.Error('Já existe um processo com esse nome nesta área.')), 'Já existe um processo com esse nome nesta área.');
+  assert.strictEqual(m(new w.Error("Cannot read properties of undefined (reading 'x')"), 'Não foi possível salvar.'), 'Não foi possível salvar.');
+  assert.strictEqual(m(null, 'Não foi possível salvar.'), 'Não foi possível salvar.');
+  // Nenhum aviso mostra mais o e.message cru.
+  assert.doesNotMatch(APP, /showToast\([^;]*\b(e|err)\.message/);
+  w.close();
+});

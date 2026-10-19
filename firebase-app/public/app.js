@@ -566,6 +566,27 @@ document.addEventListener('keydown', (e) => {
   else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primeiro.focus(); }
 });
 
+// Mensagem de erro para o usuário, nunca o texto técnico cru. Erros conhecidos
+// (permissão, sessão, rede, tempo, não encontrado) viram uma frase clara;
+// mensagem já escrita para pessoas (validação do servidor, em português) passa
+// como veio; texto técnico (inglês do SDK, stack, JSON) vira `padrao`. O erro
+// completo vai para o console, para quem for investigar.
+function _mensagemErro(e, padrao = 'Não foi possível concluir a operação. Tente de novo.') {
+  const codigo = String((e && e.code) || '');
+  const msg = String((e && e.message) || (typeof e === 'string' ? e : '')).trim();
+  const tudo = codigo + ' ' + msg;
+  if (e) console.error(e);
+  if (/permission-denied|insufficient permissions|PERMISSION_DENIED|\b403\b/i.test(tudo)) return 'Você não tem permissão para esta ação.';
+  if (/unauthenticated|\b401\b|id ?token|auth\/|sess(ão|ao) expirad/i.test(tudo)) return 'Sua sessão expirou. Entre de novo e tente outra vez.';
+  if (/unavailable|failed to fetch|networkerror|network request|offline|ERR_INTERNET|ERR_NETWORK/i.test(tudo)) return 'Sem conexão com o servidor. Verifique a internet e tente de novo.';
+  if (/deadline-exceeded|timeout|timed out/i.test(tudo)) return 'O servidor demorou para responder. Tente de novo.';
+  if (/not-found|NOT_FOUND|\b404\b/.test(tudo)) return 'O registro não foi encontrado (pode ter sido excluído).';
+  const pareceTecnico = !msg
+    || /Firebase|TypeError|ReferenceError|SyntaxError|Cannot read|is not a function|undefined|\bnull\b|[{}[\]]|\bat \S+ \(|\b[A-Z][A-Z_]{5,}\b/.test(msg)
+    || !/[áéíóúâêôãõçÁÉÍÓÚÂÊÔÃÕÇ]|\b(não|nao|de|do|da|em|um|uma|para|já|ja|com)\b/i.test(msg);
+  return pareceTecnico ? padrao : msg;
+}
+
 // Link/atalho para outra tela só para quem pode vê-la -- senão o clique cai em
 // "Esta tela não é do seu perfil" (ex.: Gestor no drawer de Contrato, TI em
 // Dependências). Mesmo critério do route().
@@ -1022,7 +1043,7 @@ window.salvarConfigResposta = async () => {
       window.configRespostasData = config;
       renderizarConfigRespostas(config);
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     }
   });
 };
@@ -1055,7 +1076,7 @@ window.salvarPergunta = async () => {
       showToast('✅ Salvo!', '#2e7d32');
       perguntas();
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     }
   });
 };
@@ -1283,7 +1304,7 @@ window.salvarArea = async () => {
       showToast('✅ Salvo!', '#2e7d32');
       renderizarAreas();
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     }
   });
 };
@@ -1628,7 +1649,7 @@ window._recarregarProdutosPessoa = async () => {
     API.invalidate('getProdutosSoftware');
     produtosSoftwareData = await API.getProdutosSoftware();
   } catch (e) {
-    return showToast('❌ Não foi possível atualizar os produtos: ' + (e.message || 'erro desconhecido'), '#c62828');
+    return showToast('❌ ' + _mensagemErro(e, 'Não foi possível atualizar os produtos. Tente de novo.'), '#c62828');
   }
   renderLiderancaPessoa();
   showToast('Lista de produtos atualizada.', '#2e7d32');
@@ -1823,7 +1844,7 @@ function _espelharPerfilPessoaEmSegundoPlano(dados) {
   API.salvarPerfilAcesso(dados)
     .then(() => API.getPerfis())
     .then((perfis) => { perfisData = perfis; })
-    .catch((e) => showToast('⚠️ Pessoa salva, mas não foi possível salvar o perfil de sistema: ' + (e.message || 'erro desconhecido'), '#e65100'));
+    .catch((e) => showToast('⚠️ Pessoa salva, mas não foi possível salvar o perfil de sistema: ' + _mensagemErro(e, 'tente de novo pela tela Perfis de Acesso.'), '#e65100'));
 }
 
 // ============================================================
@@ -2272,7 +2293,7 @@ window.salvarPessoaCadastro = async () => {
       _popularSelectBackupStakeholder(r.id);
       showToast(perfilCancelado ? '✅ Salvo. Perfil de sistema não foi alterado.' : '✅ Salvo!', perfilCancelado ? '#e65100' : '#2e7d32');
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
       return false;
     }
 
@@ -2306,7 +2327,7 @@ window.excluirPessoaCadastro = async (id) => {
     renderizarPessoas();
     showToast('🗑️ Excluído.', '#555');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -3154,7 +3175,7 @@ window.enviarRelatorioArea = async () => {
     if (result.error) throw new Error(result.error);
     showToast('✅ Relatório enviado para ' + areaObj.email, '#2e7d32');
   } catch(err) {
-    showToast('❌ Erro: ' + err.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(err), '#c62828');
   }
 };
 
@@ -3169,7 +3190,7 @@ window.enviarParaArea = async () => {
     if (result.error) throw new Error(result.error);
     showToast('✅ Questionário enviado para ' + areaObj.email, '#2e7d32');
   } catch(err) {
-    showToast('❌ Erro: ' + err.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(err), '#c62828');
   }
 };
 
@@ -3861,7 +3882,7 @@ window.salvarProcesso = async () => {
     return true;
   } catch (err) {
     console.error('Erro ao salvar processo:', err);
-    showToast('❌ Erro ao salvar: ' + err.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(err, 'Não foi possível salvar. Tente de novo.'), '#c62828');
     // Reverter optimistic update
     if (p.id) {
       API.invalidate('getProcessos');
@@ -3888,7 +3909,7 @@ window.excluirProcesso = async (id) => {
     API.invalidate('getProcessos');
     renderizarProcessos();
   } catch(e) {
-    showToast('❌ Erro ao excluir: ' + e.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir. Tente de novo.'), '#c62828');
   }
 };
 
@@ -4126,7 +4147,7 @@ window.enviarConvite = async () => {
     fecharModalEnviar();
     showToast('✅ Convite enviado para ' + email, '#2e7d32');
   } catch(err) {
-    showToast('❌ Erro: ' + err.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(err), '#c62828');
   }
 };
 
@@ -4633,7 +4654,7 @@ window.criarDrpDependencia = async (nome) => {
     }
     renderDrpDependenciasTags();
   } catch (e) {
-    showToast('Erro ao criar dependência: ' + e.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível criar a dependência. Tente de novo.'), '#c62828');
   }
 };
 
@@ -4783,7 +4804,7 @@ window.removerDrpRoteiroTeste = async (categoria) => {
     renderDrpRoteirosTeste();
     showToast('🗑️ Roteiro excluído.', '#555');
   } catch (e) {
-    showToast('❌ ' + e.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
 };
 
@@ -4814,7 +4835,7 @@ window.gerarRoteiroTeste = () => {
     abrirModalEscolherTipoTeste(candidatos);
   } catch (err) {
     console.error('Erro em gerarRoteiroTeste:', err);
-    showToast('❌ Erro inesperado: ' + err.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(err), '#c62828');
   }
 };
 
@@ -4839,7 +4860,7 @@ async function _gerarRoteiroTesteParaCategoria(categoria) {
     await _abrirPopupRoteiroTeste(categoria, [{ ...novaVersao, html }], d);
   } catch (err) {
     console.error('Erro ao gerar Roteiro de Teste:', err);
-    showToast('❌ ' + err.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(err), '#c62828');
   } finally {
     if (btn) { btn.disabled = false; btn.innerHTML = textoOriginal; btn.style.opacity = '1'; }
   }
@@ -4852,7 +4873,7 @@ window.abrirRoteiroTesteDireto = async (categoria) => {
   try {
     versoes = (await API.get('obterRoteiroTeste', { id })).versoes || [];
   } catch (e) {
-    return showToast('❌ ' + e.message, '#c62828');
+    return showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
   const daCategoria = versoes.filter((v) => v.categoria === categoria);
   if (!daCategoria.length) return showToast('Nenhuma versão encontrada para este tipo de teste.', '#e65100');
@@ -5476,7 +5497,7 @@ window.excluirDep = async (id) => {
     renderizarDependencias();
     showToast('✅ Excluída!', '#2e7d32');
     API.invalidate('getDependencias');
-  } catch(e) { showToast('Erro: ' + e.message, '#c62828'); }
+  } catch(e) { showToast('❌ ' + _mensagemErro(e), '#c62828'); }
 };
 
 window.salvarDep = async () => {
@@ -5586,7 +5607,7 @@ window.salvarDep = async () => {
     showToast('✅ Salvo!', '#2e7d32');
     return true;
   } catch(e) {
-    showToast('❌ Erro: ' + e.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(e), '#c62828');
     if (!aninhado && btnSalvarDep) btnSalvarDep.disabled = false;
     // Reverter (remove o registro temporário criado nesta operação)
     if (isNew && tempId) {
@@ -5710,7 +5731,7 @@ window.abrirSelecaoDependenciasRelatorio = async () => {
   try {
     catalogo = await API.getDependencias();
   } catch (e) {
-    showToast('❌ Não foi possível carregar o catálogo de dependências: ' + (e.message || 'erro desconhecido'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível carregar o catálogo de dependências. Tente de novo.'), '#c62828');
     return;
   }
   window._relatorioDepsCatalogo = catalogo;
@@ -5794,7 +5815,7 @@ window.abrirSelecaoAreasRelatorio = async () => {
   try {
     [areas, processos] = await Promise.all([API.getAreas(), API.getProcessos()]);
   } catch (e) {
-    showToast('❌ Não foi possível carregar áreas e processos: ' + (e.message || 'erro desconhecido'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível carregar áreas e processos. Tente de novo.'), '#c62828');
     return;
   }
   window._relatorioAreasGrupos = _gruposRelatorioAreas(areas, processos);
@@ -5945,7 +5966,7 @@ window.abrirSelecaoPessoaRelatorio = async () => {
   try {
     catalogo = (await API.getDependencias()).filter((d) => d.categoria === 'Pessoas');
   } catch (e) {
-    showToast('❌ Não foi possível carregar as pessoas: ' + (e.message || 'erro desconhecido'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível carregar as pessoas. Tente de novo.'), '#c62828');
     return;
   }
   window._relatorioPessoasCatalogo = catalogo;
@@ -5988,7 +6009,7 @@ window.confirmarGerarRelatorioProcessosPorDependencia = async () => {
     try {
       processos = await API.getProcessos();
     } catch (e) {
-      showToast('❌ Não foi possível gerar o relatório: ' + (e.message || 'erro desconhecido'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível gerar o relatório. Tente de novo.'), '#c62828');
       return;
     }
     fecharSelecaoDependenciasRelatorio();
@@ -6505,7 +6526,7 @@ window.salvarServico = async () => {
       showToast('✅ Salvo!', '#2e7d32');
       return true;
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
       return false;
     }
   });
@@ -6524,7 +6545,7 @@ window.excluirServico = async (id) => {
     renderizarServicos();
     showToast('🗑️ Excluído.', '#555');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -7156,7 +7177,7 @@ async function _gravarBackupAtual() {
     if (document.getElementById('backupRows')) renderizarCatalogoBackup();
     return r.id;
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     return null;
   }
 }
@@ -7183,7 +7204,7 @@ window.excluirBackup = async (id) => {
     if (document.getElementById('backupRows')) renderizarCatalogoBackup();
     showToast('🗑️ Excluído.', '#555');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -7732,7 +7753,7 @@ window.salvarLimiarVulnerabilidade = async () => {
     renderizarVulnerabilidades();
     showToast('✅ Limiar salvo. Vale para as próximas edições e para a varredura diária.', '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
   }
 };
 
@@ -8805,7 +8826,7 @@ window._recarregarDependenciasVulnerabilidade = async () => {
     pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
     _vulnDepsCatalogo = deps.filter((d) => VULN_CATEGORIAS_DEPENDENCIA.includes(d.categoria));
   } catch (e) {
-    return showToast('❌ Não foi possível atualizar a lista: ' + (e.message || 'erro desconhecido'), '#c62828');
+    return showToast('❌ ' + _mensagemErro(e, 'Não foi possível atualizar a lista. Tente de novo.'), '#c62828');
   }
   _popularItensDependenciaVuln();
   _renderChipsDependenciaVuln();
@@ -8821,7 +8842,7 @@ window._recarregarProdutosVulnerabilidade = async () => {
     produtosSoftwareData = produtos;
     pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
   } catch (e) {
-    return showToast('❌ Não foi possível atualizar a lista: ' + (e.message || 'erro desconhecido'), '#c62828');
+    return showToast('❌ ' + _mensagemErro(e, 'Não foi possível atualizar a lista. Tente de novo.'), '#c62828');
   }
   _popularSelectProdutoSoftwareVuln(produto);
   _popularSelectResponsavelVuln(resp);
@@ -8837,7 +8858,7 @@ window._recarregarPessoasVulnerabilidade = async () => {
     pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
     window.areasData = areas;
   } catch (e) {
-    return showToast('❌ Não foi possível atualizar a lista: ' + (e.message || 'erro desconhecido'), '#c62828');
+    return showToast('❌ ' + _mensagemErro(e, 'Não foi possível atualizar a lista. Tente de novo.'), '#c62828');
   }
   _popularSelectResponsavelVuln(resp);
   _popularSelectEquipeVuln(equipe);
@@ -8957,7 +8978,7 @@ window.importarVulnerabilidadeParaRisco = async () => {
     renderizarVulnerabilidades();
     showToast(r.jaExiste ? 'Já existe um risco aberto para esta vulnerabilidade.' : '✅ Risco criado no Registro de Riscos!', r.jaExiste ? '#e65100' : '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível importar.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível importar.'), '#c62828');
   } finally {
     if (btn) { btn.disabled = false; if (btn.textContent === '⏳ Importando...') btn.textContent = textoOriginal; }
   }
@@ -9047,7 +9068,7 @@ window.salvarVulnerabilidade = async () => {
       showToast('✅ Salvo! Se a severidade cruzar o limiar, um risco é aberto automaticamente em instantes.', '#2e7d32');
       return true;
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
       return false;
     }
   });
@@ -9064,7 +9085,7 @@ window.excluirVulnerabilidade = async (id) => {
     renderizarVulnerabilidades();
     showToast('🗑️ Excluído.', '#555');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -9385,7 +9406,7 @@ window.salvarAvaliacaoProcesso = async () => {
     }
     return true;
   } catch (err) {
-    showToast('❌ Erro ao salvar: ' + err.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(err, 'Não foi possível salvar. Tente de novo.'), '#c62828');
     // Reabilitar botões em caso de erro
     btns.forEach((btn, i) => {
       btn.disabled = false;
@@ -10267,7 +10288,7 @@ window.salvarApetiteRiscos = async () => {
     renderizarRiscos();
     showToast('✅ Apetite de risco salvo.', '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
   }
 };
 
@@ -10836,7 +10857,7 @@ window.excluirRisco = async (id) => {
     renderizarRiscos();
     showToast('✅ Excluído!', '#2e7d32');
     API.invalidate('getRiscos');
-  } catch (e) { showToast('Erro: ' + e.message, '#c62828'); }
+  } catch (e) { showToast('❌ ' + _mensagemErro(e), '#c62828'); }
 };
 
 // Le o formulario do drawer de Risco pro estado atual da tela -- usado por
@@ -10971,7 +10992,7 @@ window.salvarRisco = async () => {
       showToast(avancado ? `✅ Salvo! Status avançado para "${avancado}".` : '✅ Salvo!', '#2e7d32');
       API.invalidate('getRiscos');
       return true;
-    } catch (e) { showToast('❌ Erro: ' + e.message, '#c62828'); return false; }
+    } catch (e) { showToast('❌ ' + _mensagemErro(e), '#c62828'); return false; }
   });
 };
 
@@ -11802,7 +11823,7 @@ window.confirmarImportarRiscosPCN = async () => {
     API.invalidate('getRiscos');
     riscosData = await API.getRiscos();
     renderizarRiscos();
-  } catch (e) { showToast('❌ Erro ao importar: ' + e.message, '#c62828'); }
+  } catch (e) { showToast('❌ ' + _mensagemErro(e, 'Não foi possível importar. Tente de novo.'), '#c62828'); }
 };
 
 // Extrai a tabela "Avaliação de Riscos" de um PCN gerado (mesma heurística do
@@ -11946,7 +11967,7 @@ window.abrirImportarRiscosVulnerabilidade = async () => {
   try {
     vulns = await API.getVulnerabilidades();
   } catch (e) {
-    showToast('❌ Não foi possível carregar as vulnerabilidades: ' + (e.message || 'erro desconhecido'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível carregar as vulnerabilidades. Tente de novo.'), '#c62828');
   }
   window._riscoImportVulnsCache = vulns;
   const select = document.getElementById('importVulnSelect');
@@ -11994,7 +12015,7 @@ window.confirmarImportarRiscoVulnerabilidade = async () => {
     renderizarRiscos();
     showToast(r.jaExiste ? 'Já existe um risco aberto para esta vulnerabilidade.' : '✅ Risco importado!', r.jaExiste ? '#e65100' : '#2e7d32');
   } catch (e) {
-    showToast('❌ Erro ao importar: ' + (e.message || 'erro desconhecido'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível importar. Tente de novo.'), '#c62828');
   }
 };
 
@@ -12100,7 +12121,7 @@ window.carregarRiscosDRPImport = async () => {
   try {
     versoes = (await API.get('obterDRP', { id })).versoes || [];
   } catch (e) {
-    return showToast('❌ ' + (e.message || 'Não foi possível carregar o DRP.'), '#c62828');
+    return showToast('❌ ' + _mensagemErro(e, 'Não foi possível carregar o DRP.'), '#c62828');
   }
   const versao = versoes[idx];
   if (!versao) return showToast('Nenhuma versão de DRP encontrada.', '#e65100');
@@ -12178,7 +12199,7 @@ window.confirmarImportarRiscosDRP = async () => {
     API.invalidate('getRiscos');
     riscosData = await API.getRiscos();
     renderizarRiscos();
-  } catch (e) { showToast('❌ Erro ao importar: ' + e.message, '#c62828'); }
+  } catch (e) { showToast('❌ ' + _mensagemErro(e, 'Não foi possível importar. Tente de novo.'), '#c62828'); }
 };
 
 // ============================================================
@@ -12678,7 +12699,7 @@ window.salvarEdicaoMetaMinima = async (el, id) => {
     showToast('✅ Meta atualizada!', '#2e7d32');
     _atualizarTelaIndicadorAtual();
   } catch (e) {
-    showToast('Erro: ' + e.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(e), '#c62828');
     input.disabled = false;
   }
 };
@@ -12781,7 +12802,7 @@ window.excluirIndicadoresSelecionados = async () => {
     API.invalidate('getIndicadoresSeguranca');
     showToast(`✅ ${ids.length} indicador(es) excluído(s)!`, '#2e7d32');
     renderizarIndicadoresCadastro();
-  } catch (e) { showToast('❌ Erro ao excluir: ' + e.message, '#c62828'); }
+  } catch (e) { showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir. Tente de novo.'), '#c62828'); }
 };
 
 window.ordenarIndicadores = (coluna) => {
@@ -12995,7 +13016,7 @@ window.salvarEdicaoDesempenho = async (el, indicadorId, mes) => {
     showToast(`✅ Desempenho atualizado!${riscoGerado ? ' Risco gerado automaticamente por desvio de meta.' : ''}`, '#2e7d32');
     renderizarGradeLancamentos();
   } catch (e) {
-    showToast('❌ Erro ao atualizar: ' + e.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível atualizar. Tente de novo.'), '#c62828');
     input.disabled = false;
   }
 };
@@ -13028,7 +13049,7 @@ window.excluirLancamento = async (indicadorId, mes) => {
     await _removerLancamentoIndicador(indicador, mes);
     showToast('✅ Lançamento excluído!', '#2e7d32');
     renderizarGradeLancamentos();
-  } catch (e) { showToast('❌ Erro ao excluir: ' + e.message, '#c62828'); }
+  } catch (e) { showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir. Tente de novo.'), '#c62828'); }
 };
 
 window.lancarResultadoManual = async () => {
@@ -13047,7 +13068,7 @@ window.lancarResultadoManual = async () => {
     showToast(`✅ Resultado lançado!${riscoGerado ? ' Risco gerado automaticamente por desvio de meta.' : ''}`, '#2e7d32');
     _renderFiltrosLancamento();
     renderizarGradeLancamentos();
-  } catch (e) { showToast('❌ Erro ao lançar: ' + e.message, '#c62828'); }
+  } catch (e) { showToast('❌ ' + _mensagemErro(e, 'Não foi possível lançar o resultado. Tente de novo.'), '#c62828'); }
 };
 
 // ============================================================
@@ -13214,7 +13235,7 @@ window.excluirIndicador = async (id) => {
     _atualizarTelaIndicadorAtual();
     showToast('✅ Excluído!', '#2e7d32');
     API.invalidate('getIndicadoresSeguranca');
-  } catch (e) { showToast('Erro: ' + e.message, '#c62828'); }
+  } catch (e) { showToast('❌ ' + _mensagemErro(e), '#c62828'); }
 };
 
 window.salvarIndicador = async () => {
@@ -13251,7 +13272,7 @@ window.salvarIndicador = async () => {
       }
       _atualizarTelaIndicadorAtual();
       API.invalidate('getIndicadoresSeguranca');
-    } catch (e) { showToast('Erro: ' + e.message, '#c62828'); }
+    } catch (e) { showToast('❌ ' + _mensagemErro(e), '#c62828'); }
   });
 };
 
@@ -13452,7 +13473,7 @@ window.confirmarImportarIndicadoresCSV = async () => {
     showToast(`✅ Importação concluída!${indicadoresCriados ? ' ' + indicadoresCriados + ' indicador(es) criado(s).' : ''}${riscosGerados ? ' ' + riscosGerados + ' risco(s) gerado(s) automaticamente.' : ''}`, '#2e7d32');
     indicadoresData = await API.getIndicadoresSeguranca();
     _atualizarTelaIndicadorAtual();
-  } catch (e) { showToast('❌ Erro ao importar: ' + e.message, '#c62828'); }
+  } catch (e) { showToast('❌ ' + _mensagemErro(e, 'Não foi possível importar. Tente de novo.'), '#c62828'); }
 };
 
 
@@ -13479,7 +13500,7 @@ window.enviarBIADependencias = async () => {
     if (result.error) throw new Error(result.error);
     showToast('✅ Formulário enviado para ' + email, '#2e7d32');
   } catch(e) {
-    showToast('❌ ' + e.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
 };
 
@@ -13498,7 +13519,7 @@ window.copiarLinkBIA = async () => {
     await navigator.clipboard.writeText(result.link);
     showToast('✅ Link copiado! Cole no chat para enviar.', '#2e7d32');
   } catch(e) {
-    showToast('❌ ' + e.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
 };
 
@@ -13519,7 +13540,7 @@ window.enviarLinkLevantamento = async () => {
     const result = await API.post('gerarTokenLevantamento', { area: p.area, processo: p.processo, email });
     if (result.error) throw new Error(result.error);
     showToast('✅ Formulário enviado para ' + email, '#2e7d32');
-  } catch(e) { showToast('❌ ' + e.message, '#c62828'); }
+  } catch(e) { showToast('❌ ' + _mensagemErro(e), '#c62828'); }
 };
 
 window.copiarLinkLevantamento = async () => {
@@ -13532,7 +13553,7 @@ window.copiarLinkLevantamento = async () => {
     if (result.error) throw new Error(result.error);
     await navigator.clipboard.writeText(result.link);
     showToast('✅ Link copiado!', '#2e7d32');
-  } catch(e) { showToast('❌ ' + e.message, '#c62828'); }
+  } catch(e) { showToast('❌ ' + _mensagemErro(e), '#c62828'); }
 };
 
 window.abrirLevantamento = () => {
@@ -13547,7 +13568,7 @@ window.abrirLevantamento = () => {
     if (!win) return showToast('Popup bloqueado.', '#e65100');
     win.document.write(_buildLevantamentoView(data, p));
     win.document.close();
-  }).catch(e => showToast('❌ ' + e.message, '#c62828'));
+  }).catch(e => showToast('❌ ' + _mensagemErro(e), '#c62828'));
 };
 
 function _buildLevantamentoView(lev, p) {
@@ -13580,7 +13601,7 @@ window.abrirLevantamentoDireto = (id) => {
     if (!win) return showToast('Popup bloqueado.', '#e65100');
     win.document.write(_buildLevantamentoView(data, p));
     win.document.close();
-  }).catch(e => showToast('❌ ' + e.message, '#c62828'));
+  }).catch(e => showToast('❌ ' + _mensagemErro(e), '#c62828'));
 };
 // enviarDRPComponentes/copiarLinkDRP (link _DRP_ por e-mail) foram removidos:
 // "Componentes do Serviço" se fundiu em Dependencias, e o link de BIA
@@ -13786,7 +13807,7 @@ window.gerarPCNProcesso = async () => {
     showToast('✅ PCN gerado e salvo!', '#2e7d32');
   } catch(err) {
     console.error('Erro PCN:', err);
-    showToast('❌ ' + err.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(err), '#c62828');
     if (win) win.close();
   } finally { if (btn) { btn.disabled = false; btn.innerHTML = textoOriginal; btn.style.opacity = '1'; } }
 };
@@ -13806,7 +13827,7 @@ window.abrirPCNSalvo = async () => {
   try {
     pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes, await _tokenParaPCN());
   } catch (e) {
-    return showToast('❌ ' + e.message, '#c62828');
+    return showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado.', '#e65100');
@@ -13981,7 +14002,7 @@ window.salvarEdicaoPcnBcp = async () => {
     renderPcnResumoBcp();
     showToast('✅ PCN atualizado!', '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + e.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
   });
 };
@@ -14205,7 +14226,7 @@ window.abrirPCNDireto = async (id) => {
   try {
     pcnHtml = _buildPCNPage(ultimaVersao.html, { processo: p.processo, area: p.area, tier, score: p.score }, id, versoes, await _tokenParaPCN());
   } catch (e) {
-    return showToast('❌ ' + e.message, '#c62828');
+    return showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado.', '#e65100');
@@ -14280,7 +14301,7 @@ window.gerarDRPDependencia = async () => {
       : '✅ DRP gerado e salvo!', '#2e7d32');
   } catch (err) {
     console.error('Erro DRP:', err);
-    showToast('❌ ' + err.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(err), '#c62828');
     if (win) win.close();
   } finally { if (btn) { btn.disabled = false; btn.innerHTML = textoOriginal; btn.style.opacity = '1'; } }
 };
@@ -14295,7 +14316,7 @@ window.abrirDRPSalvo = async () => {
   try {
     versoes = (await API.get('obterDRP', { id })).versoes || [];
   } catch (e) {
-    return showToast('❌ ' + e.message, '#c62828');
+    return showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
   if (!versoes.length) return showToast('Nenhuma versão de DRP encontrada.', '#e65100');
   const ultima = versoes[versoes.length - 1];
@@ -14303,7 +14324,7 @@ window.abrirDRPSalvo = async () => {
   try {
     drpHtml = _buildDRPPage(ultima.html, { nome: d.nome, categoria: d.categoria }, id, versoes, await _tokenParaPCN());
   } catch (e) {
-    return showToast('❌ ' + e.message, '#c62828');
+    return showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado.', '#e65100');
@@ -14769,7 +14790,7 @@ window.excluirPCN = async (id, area, processo) => {
     API.invalidate('getProcessos');
     pcns(); // Recarregar lista
   } catch(e) {
-    showToast('❌ ' + e.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
 };
 
@@ -14941,7 +14962,7 @@ window.abrirDRPDireto = async (id) => {
   try {
     versoes = (await API.get('obterDRP', { id })).versoes || [];
   } catch (e) {
-    return showToast('❌ ' + e.message, '#c62828');
+    return showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
   if (!versoes.length) return showToast('Nenhuma versão de DRP encontrada.', '#e65100');
   const ultima = versoes[versoes.length - 1];
@@ -14949,7 +14970,7 @@ window.abrirDRPDireto = async (id) => {
   try {
     drpHtml = _buildDRPPage(ultima.html, { nome: d.nome, categoria: d.categoria }, id, versoes, await _tokenParaPCN());
   } catch (e) {
-    return showToast('❌ ' + e.message, '#c62828');
+    return showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado.', '#e65100');
@@ -14980,7 +15001,7 @@ window.excluirDRPDaLista = async (id, nome) => {
     API.invalidate('getDependencias');
     drp(); // Recarregar lista
   } catch (e) {
-    showToast('❌ ' + e.message, '#c62828');
+    showToast('❌ ' + _mensagemErro(e), '#c62828');
   }
 };
 
@@ -15076,7 +15097,7 @@ window.salvarLimiarFornecedor = async () => {
     configFornecedor.limiarRisco = valor;
     showToast('✅ Limiar salvo!', '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
   }
 };
 
@@ -15172,7 +15193,7 @@ window.salvarCriterio = async () => {
       renderizarCriterios();
       showToast('✅ Salvo!', '#2e7d32');
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     }
   });
 };
@@ -15186,7 +15207,7 @@ window.excluirCriterio = async (id) => {
     renderizarCriterios();
     showToast('✅ Excluído.', '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -15318,7 +15339,7 @@ window.salvarCategoriaFornecedor = async () => {
       renderizarCategoriasFornecedor();
       showToast('✅ Salvo!', '#2e7d32');
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     }
   });
 };
@@ -15332,7 +15353,7 @@ window.excluirCategoriaFornecedor = async (id) => {
     renderizarCategoriasFornecedor();
     showToast('✅ Excluída.', '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -15484,7 +15505,7 @@ window.salvarSubcategoriaFornecedor = async () => {
       renderizarSubcategoriasFornecedor();
       showToast('✅ Salvo!', '#2e7d32');
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     }
   });
 };
@@ -15498,7 +15519,7 @@ window.excluirSubcategoriaFornecedor = async (id) => {
     renderizarSubcategoriasFornecedor();
     showToast('✅ Excluída.', '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -15776,7 +15797,7 @@ window.salvarCriticidadePergunta = async () => {
       showToast('✅ Salvo!', '#2e7d32');
       return true;
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
       return false;
     }
   });
@@ -15791,7 +15812,7 @@ window.excluirCriticidadeFornecedorPergunta = async (id) => {
     renderizarCriticidadeFornecedorPerguntas();
     showToast('✅ Excluída.', '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -16422,7 +16443,7 @@ window.salvarAvaliacaoFornecedor = async () => {
     _edAvalFornecedor.marcar(snapAvaliacao);
     return true;
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
   } finally {
     btn.disabled = false;
   }
@@ -16597,7 +16618,7 @@ window.salvarProdutoSoftware = async () => {
       renderizarProdutosSoftware();
       showToast('✅ Salvo!', '#2e7d32');
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     }
   });
 };
@@ -16616,7 +16637,7 @@ window.excluirProdutoSoftware = async (id) => {
     renderizarProdutosSoftware();
     showToast('✅ Excluído.', '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -16954,7 +16975,7 @@ window.salvarPerfilAcesso = async () => {
       renderizarPerfis();
       showToast('✅ Acesso salvo!', '#2e7d32');
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     }
   });
 };
@@ -16967,7 +16988,7 @@ window.excluirPerfilAcesso = async (email) => {
     renderizarPerfis();
     showToast('✅ Acesso removido.', '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível remover.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível remover.'), '#c62828');
   }
 };
 
@@ -17728,7 +17749,7 @@ window.salvarFornecedorCadastro = async () => {
     showToast('✅ Salvo!', '#2e7d32');
     return true;
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     return false;
   }
   });
@@ -17771,7 +17792,7 @@ window.excluirFornecedorCadastro = async (id) => {
     renderizarFornecedores();
     showToast('✅ Fornecedor excluído.', '#2e7d32');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -18905,7 +18926,7 @@ window.salvarContrato = async () => {
       showToast('✅ Contrato salvo!', '#2e7d32');
       return true;
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
       return false;
     }
   });
@@ -18941,7 +18962,7 @@ window.excluirContrato = async (id) => {
     renderizarContratos();
     showToast('🗑️ Contrato excluído.', '#555');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -19189,7 +19210,7 @@ window.registrarEventoContrato = async () => {
       await _carregarEventosContrato(contratoId);
       showToast(atualizar ? '✅ Evento registrado e contrato atualizado.' : '✅ Evento registrado.', '#2e7d32');
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível registrar o evento.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível registrar o evento.'), '#c62828');
     }
   });
 };
@@ -19204,7 +19225,7 @@ window.excluirEventoContrato = async (id) => {
     renderEventosContrato();
     showToast('🗑️ Evento excluído.', '#555');
   } catch (err) {
-    showToast('❌ ' + (err.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(err, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -19501,7 +19522,7 @@ window.salvarItemListaContrato = async () => {
       showToast('✅ Salvo!', '#2e7d32');
       return true;
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
       return false;
     }
   });
@@ -19522,7 +19543,7 @@ window.excluirItemListaContrato = async (id) => {
     renderizarListaContrato();
     showToast('🗑️ Excluído.', '#555');
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
 };
 
@@ -19538,7 +19559,7 @@ window.cadastrarPadroesListaContrato = async () => {
       renderizarListaContrato();
       showToast(`✅ ${padroes.length} itens cadastrados.`, '#2e7d32');
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível cadastrar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível cadastrar.'), '#c62828');
       _listaContratoItens = await cfg.get().catch(() => _listaContratoItens);
       renderizarListaContrato();
     }
@@ -19857,7 +19878,7 @@ window.salvarConfigNotificacoesTela = async () => {
       _popularConfigNotificacoes(configNotificacoesData);
       showToast('✅ Configuração salva.', '#2e7d32');
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     }
   });
 };
@@ -19869,7 +19890,7 @@ window.enviarEmailTesteNotificacoes = async () => {
       if (r && r.error) throw new Error(r.error);
       showToast(`✅ E-mail de teste enviado para ${(r && r.para) || 'você'}. Confira a caixa de entrada (e o spam).`, '#2e7d32');
     } catch (e) {
-      showToast('❌ ' + (e.message || 'Não foi possível enviar o e-mail de teste.'), '#c62828');
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível enviar o e-mail de teste.'), '#c62828');
     }
   });
 };
@@ -19879,7 +19900,7 @@ window.recarregarNotificacoesEmail = async () => {
     notificacoesEmailData = await API.getNotificacoesEmail();
     renderizarNotificacoesEmail();
   } catch (e) {
-    showToast('❌ ' + (e.message || 'Não foi possível atualizar o log.'), '#c62828');
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível atualizar o log.'), '#c62828');
   }
 };
 
