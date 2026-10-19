@@ -288,3 +288,9 @@ test('card de metrica clicavel: rotulo em cima, numero embaixo, filtro ativo por
   assert.doesNotMatch(b.getAttribute('onclick'), /'pilar','Pilar d'Água'/, 'apostrofo escapado no onclick');
   w.close();
 });
+
+test('paginacao de todas as listas pelo mesmo helper (sem contador de pagina proprio)', () => {
+  assert.doesNotMatch(APP, /PaginaAtual|notificacoesEmailPagina/);
+  assert.ok((APP.match(/= criarPaginacao\(/g) || []).length >= 12, 'listas paginadas com criarPaginacao');
+  assert.doesNotMatch(APP, /‹ Anterior<\/button>\s*<span style="padding:6px 4px;">Página/, 'sem rodape copiado');
+});

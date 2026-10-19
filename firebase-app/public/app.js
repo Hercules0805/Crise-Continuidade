@@ -7278,8 +7278,8 @@ window.excluirBackup = async (id) => {
 // ============================================================
 let vulnerabilidadesData = [];
 let vulnerabilidadesOrdenacao = criarOrdenacao('codigo', 'desc');
-let vulnerabilidadesPaginaAtual = 1;
 const VULNERABILIDADES_POR_PAGINA = 20;
+const vulnerabilidadesPaginacao = criarPaginacao(VULNERABILIDADES_POR_PAGINA);
 // Selecao para edicao em lote / clonar (mesmo padrao de processosSelecionados).
 // Sobrevive a filtro, ordenacao e troca de pagina.
 let vulnerabilidadesSelecionadas = new Set();
@@ -7538,7 +7538,7 @@ async function vulnerabilidades() {
       </div>
       <div class="field">
         <label class="field-label">Tipo</label>
-        <select id="filtroVulnTipo" onchange="vulnerabilidadesPaginaAtual = 1; renderizarVulnerabilidades()" class="field-control">
+        <select id="filtroVulnTipo" onchange="vulnerabilidadesPaginacao.reiniciar(); renderizarVulnerabilidades()" class="field-control">
           <option value="">Todos</option>
           ${VULNERABILIDADE_TIPOS.map((t) => `<option value="${esc(t.tipo)}">${esc(t.tipo)}</option>`).join('')}
           <option value="__sem_tipo__">Não classificada</option>
@@ -7610,7 +7610,7 @@ async function vulnerabilidades() {
 
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaVulnerabilidades').style.display = 'block';
-  vulnerabilidadesPaginaAtual = 1;
+  vulnerabilidadesPaginacao.reiniciar();
   vulnerabilidadesSelecionadas = new Set();
   renderizarVulnerabilidades();
 }
@@ -7698,11 +7698,9 @@ function renderizarVulnerabilidades() {
   }
 
   const totalFiltrado = data.length;
-  const totalPaginas = Math.max(1, Math.ceil(totalFiltrado / VULNERABILIDADES_POR_PAGINA));
-  if (vulnerabilidadesPaginaAtual > totalPaginas) vulnerabilidadesPaginaAtual = totalPaginas;
-  if (vulnerabilidadesPaginaAtual < 1) vulnerabilidadesPaginaAtual = 1;
-  const inicio = (vulnerabilidadesPaginaAtual - 1) * VULNERABILIDADES_POR_PAGINA;
-  const pagina = data.slice(inicio, inicio + VULNERABILIDADES_POR_PAGINA);
+  const pagInfo = vulnerabilidadesPaginacao.aplicar(data);
+  const { totalPaginas, inicio } = pagInfo;
+  const pagina = pagInfo.itens;
 
   document.getElementById('vulnerabilidadeRows').innerHTML = pagina.length
     ? pagina.map((v) => {
@@ -7736,7 +7734,7 @@ function renderizarVulnerabilidades() {
 
   const paginacao = document.getElementById('vulnPaginacao');
   if (paginacao) {
-    paginacao.innerHTML = _htmlPaginacao({ pagina: vulnerabilidadesPaginaAtual, totalPaginas, inicio, fim: inicio + pagina.length, total: totalFiltrado }, 'irParaPaginaVulnerabilidades');
+    paginacao.innerHTML = _htmlPaginacao(pagInfo, 'irParaPaginaVulnerabilidades');
   }
 }
 
@@ -7814,8 +7812,8 @@ window.salvarLimiarVulnerabilidade = async () => {
   }
 };
 
-window.ordenarVulnerabilidades = (coluna) => { vulnerabilidadesOrdenacao.ordenar(coluna); vulnerabilidadesPaginaAtual = 1; renderizarVulnerabilidades(); };
-window.irParaPaginaVulnerabilidades = (delta) => { vulnerabilidadesPaginaAtual += delta; renderizarVulnerabilidades(); };
+window.ordenarVulnerabilidades = (coluna) => { vulnerabilidadesOrdenacao.ordenar(coluna); vulnerabilidadesPaginacao.reiniciar(); renderizarVulnerabilidades(); };
+window.irParaPaginaVulnerabilidades = (delta) => { vulnerabilidadesPaginacao.mover(delta); renderizarVulnerabilidades(); };
 
 // ------------------------------------------------------------
 // Selecao, edicao em lote e clonar (DECISAO 15/10/2026) -- mesmo padrao de
@@ -7931,7 +7929,7 @@ window.clonarVulnerabilidadesSelecionadas = async () => {
       }
     }
     vulnerabilidadesSelecionadas = new Set();
-    vulnerabilidadesPaginaAtual = 1;
+    vulnerabilidadesPaginacao.reiniciar();
     renderizarVulnerabilidades();
     if (!erros.length) {
       showToast(`✅ ${codigos.length} cópia(s) criada(s): ${codigos[0]}${codigos.length > 1 ? ' a ' + codigos[codigos.length - 1] : ''}.`, '#2e7d32');
@@ -12265,14 +12263,14 @@ window.confirmarImportarRiscosDRP = async () => {
 // ============================================================
 let indicadoresData = [];
 let indicadoresOrdenacao = { coluna: 'nome', direcao: 'asc' };
-let indicadoresPaginaAtual = 1;
 const INDICADORES_POR_PAGINA = 20;
+const indicadoresPaginacao = criarPaginacao(INDICADORES_POR_PAGINA);
 let indicadoresFiltrosCadastro = { pilar: '', responsavel: '', busca: '' };
 let indicadoresFiltrosMatriz = { pilar: '', responsavel: '', busca: '' };
 let indicadoresSelecionados = new Set();
 let indicadoresPaginaIds = [];
 let indicadoresDashboardFiltro = { modo: 'foraDaMeta', pilar: null };
-let indicadoresDashboardPaginaAtual = 1;
+const indicadoresDashboardPaginacao = criarPaginacao(INDICADORES_POR_PAGINA);
 let indicadoresDashboardMes = '';
 const INDICADOR_PILARES = ['Crise e Continuidade', 'GRC', 'Operações e Infra', 'Produto e Aplicações'];
 const INDICADOR_TIPOS = ['CR', 'Estratégico', 'Operacional'];
@@ -12506,7 +12504,7 @@ async function _lancarResultadosIndicador(indicador, novasEntradas, arquivoOrige
 // ============================================================
 async function indicadoresDashboard() {
   indicadoresDashboardFiltro = { modo: 'foraDaMeta', pilar: null };
-  indicadoresDashboardPaginaAtual = 1;
+  indicadoresDashboardPaginacao.reiniciar();
   indicadoresDashboardMes = '';
   app.innerHTML = `
     <div class="page-header">
@@ -12528,18 +12526,18 @@ window.filtrarDashboardIndicadores = (modo, pilar) => {
   const atual = indicadoresDashboardFiltro;
   const mesmoFiltro = atual.modo === modo && (modo !== 'pilar' || atual.pilar === pilar);
   indicadoresDashboardFiltro = mesmoFiltro ? { modo: 'todos', pilar: null } : { modo, pilar: pilar || null };
-  indicadoresDashboardPaginaAtual = 1;
+  indicadoresDashboardPaginacao.reiniciar();
   renderizarIndicadoresDashboard();
 };
 
 window.irParaPaginaDashboard = (delta) => {
-  indicadoresDashboardPaginaAtual += delta;
+  indicadoresDashboardPaginacao.mover(delta);
   renderizarIndicadoresDashboard();
 };
 
 window.atualizarMesDashboard = (mes) => {
   indicadoresDashboardMes = mes;
-  indicadoresDashboardPaginaAtual = 1;
+  indicadoresDashboardPaginacao.reiniciar();
   renderizarIndicadoresDashboard();
 };
 
@@ -12585,11 +12583,9 @@ function renderizarIndicadoresDashboard() {
     : [...lista].sort((a, b) => (a.nome || '').localeCompare(b.nome || ''));
 
   const totalLista = lista.length;
-  const totalPaginas = Math.max(1, Math.ceil(totalLista / INDICADORES_POR_PAGINA));
-  if (indicadoresDashboardPaginaAtual > totalPaginas) indicadoresDashboardPaginaAtual = totalPaginas;
-  if (indicadoresDashboardPaginaAtual < 1) indicadoresDashboardPaginaAtual = 1;
-  const inicio = (indicadoresDashboardPaginaAtual - 1) * INDICADORES_POR_PAGINA;
-  const pagina = lista.slice(inicio, inicio + INDICADORES_POR_PAGINA);
+  const pagInfo = indicadoresDashboardPaginacao.aplicar(lista);
+  const { totalPaginas, inicio } = pagInfo;
+  const pagina = pagInfo.itens;
 
   conteudo.innerHTML = `
     <div style="margin-bottom:16px;">
@@ -12638,7 +12634,7 @@ function renderizarIndicadoresDashboard() {
         </tbody>
       </table>
     </div>
-    ${_htmlPaginacao({ pagina: indicadoresDashboardPaginaAtual, totalPaginas, inicio, fim: inicio + pagina.length, total: totalLista }, 'irParaPaginaDashboard')}`;
+    ${_htmlPaginacao(pagInfo, 'irParaPaginaDashboard')}`;
 }
 
 // ============================================================
@@ -12646,7 +12642,7 @@ function renderizarIndicadoresDashboard() {
 // ============================================================
 async function indicadoresCadastro() {
   const isAdmin = Perfis.podeEditarIndicadores(window.USER_PERFIS);
-  indicadoresPaginaAtual = 1;
+  indicadoresPaginacao.reiniciar();
   indicadoresFiltrosCadastro = { pilar: '', responsavel: '', busca: '' };
   indicadoresSelecionados = new Set();
   app.innerHTML = `
@@ -12679,12 +12675,12 @@ function _renderFiltrosIndicadoresCadastro() {
 
 window.atualizarFiltroCadastro = (campo, valor) => {
   indicadoresFiltrosCadastro[campo] = valor;
-  indicadoresPaginaAtual = 1;
+  indicadoresPaginacao.reiniciar();
   renderizarIndicadoresCadastro();
 };
 
 window.irParaPaginaIndicadores = (delta) => {
-  indicadoresPaginaAtual += delta;
+  indicadoresPaginacao.mover(delta);
   renderizarIndicadoresCadastro();
 };
 
@@ -12759,11 +12755,9 @@ function renderizarIndicadoresCadastro() {
   });
 
   const total = data.length;
-  const totalPaginas = Math.max(1, Math.ceil(total / INDICADORES_POR_PAGINA));
-  if (indicadoresPaginaAtual > totalPaginas) indicadoresPaginaAtual = totalPaginas;
-  if (indicadoresPaginaAtual < 1) indicadoresPaginaAtual = 1;
-  const inicio = (indicadoresPaginaAtual - 1) * INDICADORES_POR_PAGINA;
-  const pagina = data.slice(inicio, inicio + INDICADORES_POR_PAGINA);
+  const pagInfo = indicadoresPaginacao.aplicar(data);
+  const { totalPaginas, inicio } = pagInfo;
+  const pagina = pagInfo.itens;
   indicadoresPaginaIds = pagina.map(d => d.id);
   const todosPaginaSelecionados = pagina.length > 0 && pagina.every(d => indicadoresSelecionados.has(d.id));
 
@@ -12801,7 +12795,7 @@ function renderizarIndicadoresCadastro() {
         </tbody>
       </table>
     </div>
-    ${_htmlPaginacao({ pagina: indicadoresPaginaAtual, totalPaginas, inicio, fim: inicio + pagina.length, total: total }, 'irParaPaginaIndicadores')}`;
+    ${_htmlPaginacao(pagInfo, 'irParaPaginaIndicadores')}`;
 
   _atualizarBotaoExcluirSelecionados();
 }
@@ -12860,12 +12854,12 @@ window.ordenarIndicadores = (coluna) => {
 // PÁGINA: INDICADORES — LANÇAMENTO MENSAL
 // ============================================================
 let indicadoresFiltrosLancamento = { pilar: '', responsavel: '', mes: '', busca: '' };
-let indicadoresLancamentoPaginaAtual = 1;
+const indicadoresLancamentoPaginacao = criarPaginacao(INDICADORES_POR_PAGINA);
 
 async function indicadoresLancamento() {
   const isAdmin = Perfis.podeEditarIndicadores(window.USER_PERFIS);
   indicadoresFiltrosLancamento = { pilar: '', responsavel: '', mes: '', busca: '' };
-  indicadoresLancamentoPaginaAtual = 1;
+  indicadoresLancamentoPaginacao.reiniciar();
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Lançamento Mensal</h2><p class="page-sub">Registre o resultado do mês de um indicador, manualmente ou por importação em lote</p></div>
@@ -12949,12 +12943,12 @@ function _renderFiltrosLancamento() {
 
 window.atualizarFiltroLancamento = (campo, valor) => {
   indicadoresFiltrosLancamento[campo] = valor;
-  indicadoresLancamentoPaginaAtual = 1;
+  indicadoresLancamentoPaginacao.reiniciar();
   renderizarGradeLancamentos();
 };
 
 window.irParaPaginaLancamentos = (delta) => {
-  indicadoresLancamentoPaginaAtual += delta;
+  indicadoresLancamentoPaginacao.mover(delta);
   renderizarGradeLancamentos();
 };
 
@@ -12968,11 +12962,9 @@ function renderizarGradeLancamentos() {
   data.sort((a, b) => String(b.mes).localeCompare(String(a.mes)) || (a.indicadorNome || '').localeCompare(b.indicadorNome || ''));
 
   const total = data.length;
-  const totalPaginas = Math.max(1, Math.ceil(total / INDICADORES_POR_PAGINA));
-  if (indicadoresLancamentoPaginaAtual > totalPaginas) indicadoresLancamentoPaginaAtual = totalPaginas;
-  if (indicadoresLancamentoPaginaAtual < 1) indicadoresLancamentoPaginaAtual = 1;
-  const inicio = (indicadoresLancamentoPaginaAtual - 1) * INDICADORES_POR_PAGINA;
-  const pagina = data.slice(inicio, inicio + INDICADORES_POR_PAGINA);
+  const pagInfo = indicadoresLancamentoPaginacao.aplicar(data);
+  const { totalPaginas, inicio } = pagInfo;
+  const pagina = pagInfo.itens;
 
   el.innerHTML = `
     <div class="data-table">
@@ -13003,7 +12995,7 @@ function renderizarGradeLancamentos() {
         </tbody>
       </table>
     </div>
-    ${_htmlPaginacao({ pagina: indicadoresLancamentoPaginaAtual, totalPaginas, inicio, fim: inicio + pagina.length, total: total }, 'irParaPaginaLancamentos')}`;
+    ${_htmlPaginacao(pagInfo, 'irParaPaginaLancamentos')}`;
 }
 
 // Célula de Desempenho em modo exibição: texto com sinalização visual de que
@@ -17837,8 +17829,8 @@ window.excluirFornecedorCadastro = async (id) => {
 // ============================================================
 let contratosData = [];
 let contratosOrdenacao = criarOrdenacao('codigo', 'desc');
-let contratosPaginaAtual = 1;
 const CONTRATOS_POR_PAGINA = 20;
+const contratosPaginacao = criarPaginacao(CONTRATOS_POR_PAGINA);
 let contratosFiltroPainel = ''; // '' | vigentes | vencimento | janela | reajuste
 let tiposContratoData = [];
 let indexadoresReajusteData = [];
@@ -17978,10 +17970,10 @@ async function contratos() {
     <div id="contratosPainel" style="margin-bottom:12px;"></div>
     <!-- Filtros em 1 linha (15/10/2026): os de uso diario a vista, o resto em "Mais filtros". -->
     <div class="filtros-linha">
-      <input type="search" id="buscaContrato" placeholder="Buscar contrato…" aria-label="Buscar contrato" oninput="contratosPaginaAtual = 1; renderizarContratos()" class="field-control field-control--busca filtros-linha__busca">
-      <select id="filtroContratoFornecedor" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Fornecedor" title="Fornecedor"><option value="">Fornecedor: todos</option></select>
-      <select id="filtroContratoStatus" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Status" title="Status"><option value="">Status: todos</option></select>
-      <select id="filtroContratoAlerta" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Alerta" title="Alerta">
+      <input type="search" id="buscaContrato" placeholder="Buscar contrato…" aria-label="Buscar contrato" oninput="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control field-control--busca filtros-linha__busca">
+      <select id="filtroContratoFornecedor" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Fornecedor" title="Fornecedor"><option value="">Fornecedor: todos</option></select>
+      <select id="filtroContratoStatus" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Status" title="Status"><option value="">Status: todos</option></select>
+      <select id="filtroContratoAlerta" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Alerta" title="Alerta">
         <option value="">Alerta: todos</option>
         <option value="__qualquer__">Com algum alerta</option>
         <option value="vencido">Vencido</option>
@@ -17998,9 +17990,9 @@ async function contratos() {
       <span id="contadorContratos" class="filtros-linha__contador"></span>
     </div>
     <div id="maisFiltrosContratos" class="filtros-linha filtros-linha--extra" style="display:none;">
-      <select id="filtroContratoTipo" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Tipo" title="Tipo"><option value="">Tipo: todos</option></select>
-      <select id="filtroContratoArea" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Área" title="Área"><option value="">Área: todas</option></select>
-      <select id="filtroContratoRenovacao" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Renovação automática" title="Renovação automática">
+      <select id="filtroContratoTipo" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Tipo" title="Tipo"><option value="">Tipo: todos</option></select>
+      <select id="filtroContratoArea" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Área" title="Área"><option value="">Área: todas</option></select>
+      <select id="filtroContratoRenovacao" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Renovação automática" title="Renovação automática">
         <option value="">Renovação automática: todas</option><option value="sim">Renovação automática: sim</option><option value="nao">Renovação automática: não</option>
       </select>
     </div>
@@ -18027,7 +18019,7 @@ async function contratos() {
         </thead>
         <tbody id="contratoRows"></tbody>
       </table>
-      <div id="contratosPaginacao" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:0 4px;font-size:0.85em;color:#666;"></div>
+      <div id="contratosPaginacao"></div>
     </div>
     ${_htmlDrawerContrato()}`;
 
@@ -18084,7 +18076,7 @@ async function contratos() {
 
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaContratos').style.display = 'block';
-  contratosPaginaAtual = 1;
+  contratosPaginacao.reiniciar();
   contratosFiltroPainel = '';
   renderizarContratos();
 
@@ -18100,10 +18092,10 @@ async function contratos() {
 }
 
 window.ordenarContratos = (coluna) => { contratosOrdenacao.ordenar(coluna); renderizarContratos(); };
-window.irParaPaginaContratos = (delta) => { contratosPaginaAtual += delta; renderizarContratos(); };
+window.irParaPaginaContratos = (delta) => { contratosPaginacao.mover(delta); renderizarContratos(); };
 window.filtrarContratosPainel = (modo) => {
   contratosFiltroPainel = contratosFiltroPainel === modo ? '' : modo;
-  contratosPaginaAtual = 1;
+  contratosPaginacao.reiniciar();
   renderizarContratos();
 };
 window.irParaFornecedoresSemContrato = () => {
@@ -18157,7 +18149,7 @@ window.alternarMaisFiltrosContratos = () => {
 window.limparFiltrosContratos = () => {
   _FILTROS_CONTRATOS.forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
   contratosFiltroPainel = '';
-  contratosPaginaAtual = 1;
+  contratosPaginacao.reiniciar();
   renderizarContratos();
 };
 
@@ -18235,11 +18227,9 @@ function renderizarContratos() {
   }
 
   const totalFiltrado = data.length;
-  const totalPaginas = Math.max(1, Math.ceil(totalFiltrado / CONTRATOS_POR_PAGINA));
-  if (contratosPaginaAtual > totalPaginas) contratosPaginaAtual = totalPaginas;
-  if (contratosPaginaAtual < 1) contratosPaginaAtual = 1;
-  const inicio = (contratosPaginaAtual - 1) * CONTRATOS_POR_PAGINA;
-  const pagina = data.slice(inicio, inicio + CONTRATOS_POR_PAGINA);
+  const pagInfo = contratosPaginacao.aplicar(data);
+  const { totalPaginas, inicio } = pagInfo;
+  const pagina = pagInfo.itens;
 
   const vazio = !contratosData.length
     ? `Nenhum contrato cadastrado ainda.${podeEditar && !statusContratoData.length ? '<br><span style="font-size:0.9em;">Comece cadastrando os <a href="#contratos-status" style="color:#d60014;font-weight:600;">status de contrato</a> — sem eles nenhum contrato conta como vigente.</span>' : ''}`
@@ -18272,13 +18262,7 @@ function renderizarContratos() {
 
   const paginacao = document.getElementById('contratosPaginacao');
   if (paginacao) {
-    paginacao.innerHTML = `
-      <span>${totalFiltrado ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${totalFiltrado}` : ''}</span>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <button class="btn btn-ghost" onclick="irParaPaginaContratos(-1)" ${contratosPaginaAtual <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
-        <span style="padding:6px 4px;">Página ${contratosPaginaAtual} de ${totalPaginas}</span>
-        <button class="btn btn-ghost" onclick="irParaPaginaContratos(1)" ${contratosPaginaAtual >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
-      </div>`;
+    paginacao.innerHTML = _htmlPaginacao(pagInfo, 'irParaPaginaContratos');
   }
 }
 
@@ -19648,8 +19632,8 @@ window.novoContratoDoFornecedor = () => {
 // ============================================================
 let notificacoesEmailData = [];
 let configNotificacoesData = null;
-let notificacoesEmailPagina = 1;
 const NOTIFICACOES_POR_PAGINA = 20;
+const notificacoesPaginacao = criarPaginacao(NOTIFICACOES_POR_PAGINA);
 
 const NOTIF_STATUS = {
   pendente: { rotulo: 'Pendente', cor: '#757575', fundo: '#f5f5f5' },
@@ -19758,11 +19742,11 @@ async function notificacoesEmail() {
       <div class="filters">
         <div class="field">
           <label class="field-label">&nbsp;</label>
-          <input type="search" id="buscaNotificacoes" placeholder="Buscar por contrato, destinatário ou assunto…" aria-label="Buscar notificação" oninput="notificacoesEmailPagina = 1; renderizarNotificacoesEmail()" class="field-control field-control--busca">
+          <input type="search" id="buscaNotificacoes" placeholder="Buscar por contrato, destinatário ou assunto…" aria-label="Buscar notificação" oninput="notificacoesPaginacao.reiniciar(); renderizarNotificacoesEmail()" class="field-control field-control--busca">
         </div>
         <div class="field">
           <label class="field-label">Status</label>
-          <select id="filtroNotificacaoStatus" onchange="notificacoesEmailPagina = 1; renderizarNotificacoesEmail()" class="field-control">
+          <select id="filtroNotificacaoStatus" onchange="notificacoesPaginacao.reiniciar(); renderizarNotificacoesEmail()" class="field-control">
             <option value="">Todos</option>
             ${Object.entries(NOTIF_STATUS).map(([k, v]) => `<option value="${k}">${v.rotulo}</option>`).join('')}
           </select>
@@ -19779,7 +19763,7 @@ async function notificacoesEmail() {
           <thead><tr><th>Data</th><th>Tipo</th><th>Contrato</th><th>Para</th><th>Assunto</th><th>Status</th></tr></thead>
           <tbody id="notificacoesRows"></tbody>
         </table>
-        <div id="notificacoesPaginacao" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:0 4px;font-size:0.85em;color:#666;"></div>
+        <div id="notificacoesPaginacao"></div>
       </div>
     </div>
 
@@ -19811,7 +19795,7 @@ async function notificacoesEmail() {
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('notifConteudo').style.display = 'block';
   _popularConfigNotificacoes(configNotificacoesData);
-  notificacoesEmailPagina = 1;
+  notificacoesPaginacao.reiniciar();
   renderizarNotificacoesEmail();
 }
 
@@ -19933,7 +19917,7 @@ window.recarregarNotificacoesEmail = async () => {
   }
 };
 
-window.irParaPaginaNotificacoes = (delta) => { notificacoesEmailPagina += delta; renderizarNotificacoesEmail(); };
+window.irParaPaginaNotificacoes = (delta) => { notificacoesPaginacao.mover(delta); renderizarNotificacoesEmail(); };
 
 function renderizarNotificacoesEmail() {
   let data = [...notificacoesEmailData];
@@ -19945,10 +19929,9 @@ function renderizarNotificacoesEmail() {
   const contador = document.getElementById('contadorNotificacoes');
   if (contador) contador.textContent = `${data.length} de ${notificacoesEmailData.length} e-mail(s) recente(s)`;
 
-  const totalPaginas = Math.max(1, Math.ceil(data.length / NOTIFICACOES_POR_PAGINA));
-  notificacoesEmailPagina = Math.min(Math.max(1, notificacoesEmailPagina), totalPaginas);
-  const inicio = (notificacoesEmailPagina - 1) * NOTIFICACOES_POR_PAGINA;
-  const pagina = data.slice(inicio, inicio + NOTIFICACOES_POR_PAGINA);
+  const pagInfo = notificacoesPaginacao.aplicar(data);
+  const { totalPaginas, inicio } = pagInfo;
+  const pagina = pagInfo.itens;
 
   document.getElementById('notificacoesRows').innerHTML = pagina.length
     ? pagina.map((n) => `
@@ -19964,13 +19947,7 @@ function renderizarNotificacoesEmail() {
 
   const pag = document.getElementById('notificacoesPaginacao');
   if (pag) {
-    pag.innerHTML = `
-      <span>${data.length ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${data.length}` : ''}</span>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <button class="btn btn-ghost" onclick="irParaPaginaNotificacoes(-1)" ${notificacoesEmailPagina <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
-        <span style="padding:6px 4px;">Página ${notificacoesEmailPagina} de ${totalPaginas}</span>
-        <button class="btn btn-ghost" onclick="irParaPaginaNotificacoes(1)" ${notificacoesEmailPagina >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
-      </div>`;
+    pag.innerHTML = _htmlPaginacao(pagInfo, 'irParaPaginaNotificacoes');
   }
 }
 
