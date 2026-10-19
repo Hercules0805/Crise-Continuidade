@@ -136,6 +136,9 @@ function route() {
     window._routePendente = true;
     return;
   }
+  // Troca de tela descarta qualquer cadastro rápido empilhado (o HTML dele some com a tela).
+  window._drawerPaiEmpilhados = [];
+  window._registroCadastroRapido = null;
   const hash = window.location.hash.slice(1) || _paginaInicialDoPerfil();
   const [page, queryStr] = hash.split('?');
   const params = new URLSearchParams(queryStr || '');
@@ -1177,27 +1180,7 @@ async function areas() {
         <tbody id="rows"></tbody>
       </table>
     </div>
-    <div class="modal-overlay" id="modal"><div class="modal" onclick="event.stopPropagation()">
-      <h3 id="modalTitulo">Nova Área</h3>
-      <input type="hidden" id="fId">
-      <label>Nome da Área</label>
-      <input type="text" id="fNome" placeholder="Ex: Segurança da Informação">
-      <label>Responsável</label>
-      <div style="display:flex;gap:6px;align-items:center;">
-        <select id="fResponsavel" onchange="_preencherContatoResponsavelArea()" style="flex:1;"><option value="">Selecione...</option></select>
-        <button type="button" class="btn-icon" onclick="_recarregarPessoasArea()" title="Atualizar lista de pessoas">🔄</button>
-        <button type="button" class="btn-icon" id="btnEditarPessoaArea" onclick="_editarPessoaResponsavelArea()" title="Editar esta pessoa" style="display:none;">${SVG_EDITAR}</button>
-      </div>
-      <span style="font-size:0.75em;color:#888;display:block;margin-top:2px;margin-bottom:8px;">Vem do cadastro de Pessoas. <a href="#pessoas" target="_blank" style="color:#d60014;font-weight:600;">👤 Gerenciar Pessoas</a></span>
-      <label>Email</label>
-      <input type="email" id="fEmail" placeholder="Preenchido pela Pessoa" readonly style="background:#f5f6fa;color:#555;">
-      <label>Telefone</label>
-      <input type="text" id="fTelefone" placeholder="Preenchido pela Pessoa" readonly style="background:#f5f6fa;color:#555;">
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="fecharModalArea()">Cancelar</button>
-        <button class="btn btn-primary" id="btnSalvarArea" onclick="salvarArea()">Salvar</button>
-      </div>
-    </div></div>`;
+    ${_htmlModalArea()}`;
 
   let data, deps;
   try {
@@ -1288,7 +1271,35 @@ window.abrirModalArea = (a) => {
 };
 
 /** Fecha o modal de Área. Própria (não a fecharModal global, que Processos sobrescreveu para o drawer). */
-window.fecharModalArea = () => document.getElementById('modal').classList.remove('open');
+function _htmlModalArea() {
+  return `
+    <div class="modal-overlay" id="modal"><div class="modal" onclick="event.stopPropagation()">
+      <h3 id="modalTitulo">Nova Área</h3>
+      <input type="hidden" id="fId">
+      <label>Nome da Área</label>
+      <input type="text" id="fNome" placeholder="Ex: Segurança da Informação">
+      <label>Responsável</label>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <select id="fResponsavel" onchange="_preencherContatoResponsavelArea()" style="flex:1;"><option value="">Selecione...</option></select>
+        <button type="button" class="btn-icon" onclick="_recarregarPessoasArea()" title="Atualizar lista de pessoas">🔄</button>
+        <button type="button" class="btn-icon" id="btnEditarPessoaArea" onclick="_editarPessoaResponsavelArea()" title="Editar esta pessoa" style="display:none;">${SVG_EDITAR}</button>
+      </div>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:2px;margin-bottom:8px;">Vem do cadastro de Pessoas. ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaPessoaDeArea()">+ Nova pessoa</button>' : ''}</span>
+      <label>Email</label>
+      <input type="email" id="fEmail" placeholder="Preenchido pela Pessoa" readonly style="background:#f5f6fa;color:#555;">
+      <label>Telefone</label>
+      <input type="text" id="fTelefone" placeholder="Preenchido pela Pessoa" readonly style="background:#f5f6fa;color:#555;">
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalArea()">Cancelar</button>
+        <button class="btn btn-primary" id="btnSalvarArea" onclick="salvarArea()">Salvar</button>
+      </div>
+    </div></div>`;
+}
+
+window.fecharModalArea = () => {
+  document.getElementById('modal').classList.remove('open');
+  _reabrirDrawerPaiSeEscondido();
+};
 
 /** Acha a Pessoa (por nome) selecionada como Responsável. */
 function _pessoaResponsavelArea() {
@@ -1314,7 +1325,8 @@ function _atualizarBotaoEditarPessoaArea() {
 window._editarPessoaResponsavelArea = () => {
   const p = _pessoaResponsavelArea();
   if (!p) return showToast('Selecione um responsável cadastrado como Pessoa.', '#e65100');
-  window.open('#pessoas?editPessoa=' + encodeURIComponent(p.id), '_blank');
+  // Edita por cima do modal da Área (cadastro rápido) e volta com o nome atualizado.
+  _cadastroRapidoPessoa('modal', null, (pe) => _popularSelectResponsavelArea(pe.nome), p.id);
 };
 
 /** Recarrega pessoasData e repopula o select de Responsável, preservando a seleção. */
@@ -1355,11 +1367,15 @@ window.salvarArea = async () => {
       // no array ja carregado, sem reconstruir a pagina inteira nem buscar Areas
       // e Dependencias de novo (o que areas() fazia).
       const item = { ...r.dado, id: r.id };
+      window.areasData = window.areasData || [];
       const idx = window.areasData.findIndex((x) => String(x.id) === String(r.id));
       if (idx >= 0) window.areasData[idx] = item; else window.areasData.push(item);
-      fecharModalArea();
+      // Aberto por cima de outro formulário (cadastro rápido): devolve a área criada.
+      if (_temDrawerPaiEmpilhado()) _entregarCadastroRapido(item, fecharModalArea);
+      else fecharModalArea();
       showToast('✅ Salvo!', '#2e7d32');
-      renderizarAreas();
+      // Só redesenha a grade na própria tela de Áreas.
+      if (document.getElementById('buscaArea')) renderizarAreas();
     } catch (e) {
       showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
     }
@@ -1434,7 +1450,7 @@ function _htmlDrawerPessoa() {
           </label>
           <div id="pessoaTeamLeadProdutos"></div>
           <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Marque a função e, se quiser, os produtos que a pessoa lidera (sem produto também é permitido).
-            ${_seVeTela('produtos-software', `<a href="#produtos-software" target="_blank" style="color:#d60014;font-weight:600;">🗂️ Gerenciar Produtos</a>`)}
+            ${Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novoProdutoDePessoa()">+ Novo produto</button>' : ''}
             <button type="button" class="btn-icon" onclick="_recarregarProdutosPessoa()" title="Atualizar lista de produtos">🔄</button></span>
         </div>
         <div style="margin-bottom:16px;">
@@ -2332,9 +2348,10 @@ window.salvarPessoaCadastro = async () => {
         perfis: perfisParaEntidade,
       });
       _edPessoa.marcar({ ...estadoDoFormulario, id: id || r.id });
-      if (_temDrawerPaiEmpilhado()) {
-        _fecharModalPessoaSemSalvar();
-      } else if (!id) {
+      // Cadastro rápido (aberto por cima de outro formulário): fecha e devolve a
+      // pessoa para a origem -- depois de atualizar pessoasData, logo abaixo.
+      const empilhado = _temDrawerPaiEmpilhado();
+      if (!empilhado && !id) {
         // Sem fechar o drawer, o próximo "Salvar" precisa gravar no MESMO
         // registro em vez de criar uma segunda pessoa idêntica.
         document.getElementById('pessoaId').value = r.id;
@@ -2348,6 +2365,7 @@ window.salvarPessoaCadastro = async () => {
       if (idx >= 0) pessoasData[idx] = item; else pessoasData.push(item);
       if (document.getElementById('rowsPessoas')) renderizarPessoas();
       _popularSelectBackupStakeholder(r.id);
+      if (empilhado) _entregarCadastroRapido(item, _fecharModalPessoaSemSalvar);
       showToast(perfilCancelado ? '✅ Salvo. Perfil de sistema não foi alterado.' : '✅ Salvo!', perfilCancelado ? '#e65100' : '#2e7d32');
     } catch (e) {
       showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
@@ -5600,6 +5618,9 @@ window.salvarDep = async () => {
   const veioDoBackup = !!window._backupNovoServidor;
   const veioDoServico = !!window._servicoNovaDependenciaCategoria;
   const aninhado = veioDoBackup || veioDoServico;
+  // Cadastro rápido genérico (_abrirCadastroRapido): o drawer espera a gravação
+  // real e só então devolve a dependência, com o id definitivo, para a origem.
+  const cadastroRapido = !aninhado && _temDrawerPaiEmpilhado();
 
   // Optimistic: atualizar a UI imediatamente; só FECHA o drawer quando foi
   // aberto por cima de outro (cadastro rápido de Servidor/Serviço a partir do
@@ -5643,6 +5664,7 @@ window.salvarDep = async () => {
     }
     if (!aninhado && btnSalvarDep) btnSalvarDep.disabled = false;
     API.invalidate('getDependencias');
+    if (cadastroRapido && result.id) _entregarCadastroRapido({ ...d, id: result.id }, _fecharDrawerDependenciaSemSalvar);
     // Cadastro rápido de Servidor a partir do Backup: seleciona com o id REAL
     // (nunca o id temporário otimista acima) -- é exatamente o cuidado que
     // evita recriar a "referência fantasma" já corrigida uma vez neste
@@ -6962,23 +6984,221 @@ function _popularSelectBackupStakeholder(valorSelecionado) {
  * aberta por cima do Backup precisa reabrir o Backup primeiro e só depois o
  * Serviço -- um slot único perderia o registro de quem reabrir em que ordem.
  */
-function _esconderDrawerPaiTemporariamente(idDrawer, idOverlay) {
+// `aoSalvar(registro)` (opcional): o que o formulário de origem faz com o item
+// criado no cadastro empilhado -- normalmente repopular o campo e selecioná-lo.
+// O cadastro filho entrega o registro com _entregarCadastroRapido ao salvar.
+function _esconderDrawerPaiTemporariamente(idDrawer, idOverlay, aoSalvar) {
   const d = document.getElementById(idDrawer);
-  const o = document.getElementById(idOverlay);
+  const o = idOverlay ? document.getElementById(idOverlay) : null;
   if (d) d.classList.remove('open');
   if (o) o.classList.remove('open');
   window._drawerPaiEmpilhados = window._drawerPaiEmpilhados || [];
-  window._drawerPaiEmpilhados.push({ idDrawer, idOverlay });
+  window._drawerPaiEmpilhados.push({ idDrawer, idOverlay, aoSalvar });
 }
 
 function _reabrirDrawerPaiSeEscondido() {
   const info = (window._drawerPaiEmpilhados || []).pop();
+  const registro = window._registroCadastroRapido;
+  window._registroCadastroRapido = null;
   if (!info) return;
   const d = document.getElementById(info.idDrawer);
-  const o = document.getElementById(info.idOverlay);
+  const o = info.idOverlay ? document.getElementById(info.idOverlay) : null;
   if (d) d.classList.add('open');
   if (o) o.classList.add('open');
+  if (registro && typeof info.aoSalvar === 'function') {
+    try {
+      const r = info.aoSalvar(registro);
+      if (r && typeof r.catch === 'function') r.catch((e) => console.error('cadastro rápido:', e));
+    } catch (e) { console.error('cadastro rápido:', e); }
+  }
 }
+
+// ============================================================
+// CADASTRO RÁPIDO (DECISÃO 19/10/2026): "+ Novo X" abre o cadastro completo da
+// entidade POR CIMA do formulário atual (que fica escondido, não destruído) e,
+// ao salvar, devolve o item criado já selecionado no campo de origem. Substitui
+// os links "Gerenciar X" que abriam outra aba do navegador e pediam 🔄.
+//   pai/overlay: ids do drawer ou modal de origem (overlay pode ser null);
+//   preparar:    async, opcional -- injeta o HTML do cadastro e carrega o que ele
+//                precisa quando a tela atual não tem;
+//   abrir:       abre o cadastro filho;
+//   aoSalvar:    recebe o registro criado, com o pai já reaberto.
+// ============================================================
+async function _abrirCadastroRapido({ pai, overlay, preparar, abrir, aoSalvar }) {
+  try {
+    if (preparar) await preparar();
+  } catch (e) {
+    return showToast('❌ ' + _mensagemErro(e, 'Não foi possível abrir o cadastro. Tente de novo.'), '#c62828');
+  }
+  _esconderDrawerPaiTemporariamente(pai, overlay, aoSalvar);
+  abrir();
+}
+
+// O cadastro filho, depois de gravar estando empilhado: guarda o registro para o
+// pai e fecha (o fechar sem salvar dele reabre o pai e chama o aoSalvar).
+function _entregarCadastroRapido(registro, fecharSemSalvar) {
+  window._registroCadastroRapido = registro;
+  fecharSemSalvar();
+}
+
+// Injeta o HTML de um cadastro na tela atual se ele não existe aqui (fica dentro
+// de #app, então some sozinho na troca de tela).
+function _garantirHtmlCadastro(idElemento, gerador) {
+  if (!document.getElementById(idElemento)) document.getElementById('app').insertAdjacentHTML('beforeend', gerador());
+}
+
+// ---- Pessoa ----
+// O drawer de Pessoa lê áreas, produtos e (na edição, para quem gerencia perfis)
+// os perfis de acesso: carrega o que a tela atual ainda não tem.
+async function _prepararCadastroPessoa() {
+  _garantirHtmlCadastro('drawerPessoa', _htmlDrawerPessoa);
+  if (!window.areasData) window.areasData = await API.getAreas();
+  if (!produtosSoftwareData || !produtosSoftwareData.length) {
+    try { produtosSoftwareData = await API.getProdutosSoftware(); } catch (e) { console.error(e); }
+  }
+  if (Perfis.podeGerenciarPerfis(window.USER_PERFIS) && (!perfisData || !perfisData.length)) {
+    try { perfisData = await API.getPerfis(); } catch (e) { console.error(e); }
+  }
+}
+
+function _cadastroRapidoPessoa(pai, overlay, aoSalvar, idPessoa) {
+  return _abrirCadastroRapido({ pai, overlay, preparar: _prepararCadastroPessoa, abrir: () => abrirModalPessoa(idPessoa), aoSalvar });
+}
+
+/** Responsável da Área: opções vêm de Pessoas; valor antigo sem pessoa continua visível. */
+function _popularSelectResponsavelArea(valorAtual) {
+  const sel = document.getElementById('fResponsavel');
+  if (!sel) return;
+  const temNaLista = pessoasData.some((p) => p.nome === valorAtual);
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    pessoasData.map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('') +
+    (valorAtual && !temNaLista ? `<option value="${esc(valorAtual)}">${esc(valorAtual)} (não cadastrado como pessoa)</option>` : '');
+  sel.value = valorAtual || '';
+  _preencherContatoResponsavelArea();
+}
+
+window.novaPessoaDeArea = () => _cadastroRapidoPessoa('modal', null, (p) => _popularSelectResponsavelArea(p.nome));
+window.novaPessoaDeVulnerabilidade = () => _cadastroRapidoPessoa('drawerVulnerabilidade', 'drawerOverlayVulnerabilidade',
+  (p) => { _popularSelectResponsavelVuln(p.nome); _equipePelaPessoaVuln(); });
+window.novaPessoaDePerfil = () => _cadastroRapidoPessoa('modalPerfil', null, (p) => {
+  _popularSelectPessoaPerfil();
+  if (!p.email) return showToast('Pessoa cadastrada, mas sem e-mail: só quem tem e-mail pode receber acesso.', '#e65100');
+  document.getElementById('perfPessoa').value = String(p.email).trim();
+  aoEscolherPessoaPerfil();
+});
+window.novaPessoaDeFornecedor = () => _cadastroRapidoPessoa('drawerFornecedorCadastro', 'drawerOverlayFornecedorCadastro', (p) => {
+  _popularSelectBuscaGestor();
+  document.getElementById('gestorContratoBusca').value = String(p.id);
+  adicionarGestorContrato();
+});
+window.editarGestorDeFornecedor = (idPessoa) => _cadastroRapidoPessoa('drawerFornecedorCadastro', 'drawerOverlayFornecedorCadastro', (p) => {
+  // O gestor guarda uma cópia (snapshot) da pessoa: atualiza com o que foi editado.
+  const lista = window._fornecedorGestores || [];
+  const i = lista.findIndex((g) => String(g.id) === String(p.id));
+  if (i >= 0) lista[i] = _snapshotGestorDaPessoa(p);
+  renderGestoresContrato();
+  _popularSelectBuscaGestor();
+}, idPessoa);
+
+// ---- Área ----
+window.novaAreaDeFornecedor = () => _abrirCadastroRapido({
+  pai: 'drawerFornecedorCadastro', overlay: 'drawerOverlayFornecedorCadastro',
+  preparar: async () => { _garantirHtmlCadastro('modal', _htmlModalArea); },
+  abrir: () => abrirModalArea(),
+  aoSalvar: (a) => _popularSelectAreasFornecedor(a.nome),
+});
+
+// ---- Dependência ----
+window.novaDependenciaDeVulnerabilidade = () => {
+  const cat = (document.getElementById('vulnDepCategoria') || {}).value || '';
+  return _abrirCadastroRapido({
+    pai: 'drawerVulnerabilidade', overlay: 'drawerOverlayVulnerabilidade',
+    preparar: async () => {
+      _garantirHtmlCadastro('drawerDependencia', _htmlDrawerDependencia);
+      // O drawer de Dependência usa o catálogo técnico e as áreas (responsável do DRP).
+      const deps = await API.getDependencias();
+      dependenciasData = deps.filter((d) => !['Pessoas', 'Pessoa'].includes(d.categoria));
+      window.dependenciasCatalogo = dependenciasData;
+      if (!window.areasData) window.areasData = await API.getAreas();
+    },
+    // Já vem com a categoria escolhida no campo (se for uma categoria técnica).
+    abrir: () => abrirDrawerDependencia(DEPENDENCIA_CATEGORIAS_TECNICAS.includes(cat) ? { categoria: cat } : undefined),
+    aoSalvar: (d) => {
+      if (!VULN_CATEGORIAS_DEPENDENCIA.includes(d.categoria)) {
+        return showToast(`Dependência criada na categoria "${d.categoria}", que não se aplica a vulnerabilidades.`, '#e65100');
+      }
+      _vulnDepsCatalogo.push({ ...d });
+      window._vulnDependencias = window._vulnDependencias || [];
+      window._vulnDependencias.push({ id: d.id, categoria: d.categoria, nome: d.nome });
+      _popularItensDependenciaVuln();
+      _renderChipsDependenciaVuln();
+    },
+  });
+};
+
+// ---- Fornecedor e listas, a partir do Contrato ----
+window.novoFornecedorDeContrato = () => _abrirCadastroRapido({
+  pai: 'drawerContrato', overlay: 'drawerOverlayContrato',
+  preparar: async () => {
+    _garantirHtmlCadastro('drawerFornecedorCadastro', _htmlDrawerFornecedorCadastro);
+    // O cadastro de Fornecedor usa categorias e subcategorias (a tela de Contratos não carrega).
+    if (!categoriasFornecedorData.length || !subcategoriasFornecedorData.length) {
+      [categoriasFornecedorData, subcategoriasFornecedorData] = await Promise.all([API.getCategoriasFornecedor(), API.getSubcategoriasFornecedor()]);
+    }
+    if (!fornecedoresData.length) fornecedoresData = _contratoFornecedores.slice();
+  },
+  abrir: () => abrirDrawerFornecedorCadastro(),
+  aoSalvar: (f) => {
+    _contratoFornecedores.push(f);
+    _contratoFornecedores.sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+    _popularSelectFornecedorContrato(f.id, f.nome);
+    _popularSelectGestorContrato();
+  },
+});
+
+// chave da lista -> [campo do Contrato, nome da variável com os itens, texto vazio do select]
+const _LISTA_CONTRATO_CAMPO = {
+  tipos: ['contratoTipo', 'tiposContratoData'],
+  status: ['contratoStatus', 'statusContratoData'],
+  indexadores: ['contratoIndexador', 'indexadoresReajusteData', 'Sem indexador'],
+};
+window.novoItemListaDeContrato = (chave) => {
+  const [campo, , vazio] = _LISTA_CONTRATO_CAMPO[chave];
+  return _abrirCadastroRapido({
+    pai: 'drawerContrato', overlay: 'drawerOverlayContrato',
+    preparar: async () => {
+      // O drawer muda conforme a lista (Status tem "Situação"): recria para esta.
+      ['drawerListaContrato', 'drawerOverlayListaContrato'].forEach((id) => { const el = document.getElementById(id); if (el) el.remove(); });
+      document.getElementById('app').insertAdjacentHTML('beforeend', _htmlDrawerListaContrato(chave));
+      _listaContratoChave = chave;
+      _listaContratoItens = await LISTAS_CONTRATO[chave].get();
+    },
+    abrir: () => abrirDrawerListaContrato(),
+    aoSalvar: (item) => {
+      if (chave === 'tipos') tiposContratoData = _listaContratoItens;
+      else if (chave === 'status') statusContratoData = _listaContratoItens;
+      else indexadoresReajusteData = _listaContratoItens;
+      const sel = document.getElementById(campo);
+      sel.innerHTML = _optionsListaContrato(_listaContratoItens, item.id, vazio);
+      sel.value = item.id;
+      if (chave === 'status') _atualizarAlertasDrawerContrato();
+    },
+  });
+};
+
+// ---- Produto de Software ----
+window.novoProdutoDePessoa = () => _abrirCadastroRapido({
+  pai: 'drawerPessoa', overlay: 'drawerOverlayPessoa',
+  preparar: async () => { _garantirHtmlCadastro('modalProdutoSoftware', _htmlModalProdutoSoftware); },
+  abrir: () => abrirModalProdutoSoftware(),
+  aoSalvar: () => renderLiderancaPessoa(),
+});
+window.novoProdutoDeVulnerabilidade = () => _abrirCadastroRapido({
+  pai: 'drawerVulnerabilidade', overlay: 'drawerOverlayVulnerabilidade',
+  preparar: async () => { _garantirHtmlCadastro('modalProdutoSoftware', _htmlModalProdutoSoftware); },
+  abrir: () => abrirModalProdutoSoftware(),
+  aoSalvar: (p) => { _popularSelectProdutoSoftwareVuln(p.id); _sugerirResponsavelPeloProdutoVuln(); },
+});
 
 /**
  * true quando este drawer foi aberto por cima de outro (cadastro rápido, ex.:
@@ -8200,7 +8420,7 @@ function _htmlDrawerVulnerabilidade() {
                   <select id="vulnProdutoSoftware" style="${inp}flex:1;" onchange="_sugerirResponsavelPeloProdutoVuln()"><option value="">Selecione...</option></select>
                   <button type="button" class="btn-icon" onclick="_recarregarProdutosVulnerabilidade()" title="Atualizar lista de produtos">🔄</button>
                 </div>
-                <a href="#produtos-software" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">🗂️ Gerenciar Produtos</a>
+                ${Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novoProdutoDeVulnerabilidade()">+ Novo produto</button>' : ''}
               </div>
               <div>
                 <label style="${lbl}">Versão</label>
@@ -8221,7 +8441,7 @@ function _htmlDrawerVulnerabilidade() {
               <div id="vulnDepChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
               <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-top:4px;">
                 <span style="font-size:0.74em;color:#888;">Informe o produto de software, as dependências afetadas ou os dois.</span>
-                <a href="#dependencias" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;">🗂️ Gerenciar Dependências</a>
+                ${Perfis.podeVerTela(window.USER_PERFIS, 'dependencias') ? '<button type="button" class="link-acao" style="margin-top:0;" onclick="novaDependenciaDeVulnerabilidade()">+ Nova dependência</button>' : ''}
               </div>
               <input type="hidden" id="vulnProduto">
               <div id="vulnProdutoLegado" style="display:none;font-size:0.8em;color:#555;background:#f7f7f7;border-radius:6px;padding:6px 10px;margin-top:8px;">
@@ -8359,7 +8579,7 @@ function _htmlDrawerVulnerabilidade() {
                   <select id="vulnResponsavel" style="${inp}flex:1;" onchange="_equipePelaPessoaVuln()"><option value="">Selecione...</option></select>
                   <button type="button" class="btn-icon" onclick="_recarregarPessoasVulnerabilidade()" title="Atualizar lista de pessoas e áreas">🔄</button>
                 </div>
-                <a href="#pessoas" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">👤 Gerenciar Pessoas</a>
+                ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaPessoaDeVulnerabilidade()">+ Nova pessoa</button>' : ''}
                 <div id="vulnResponsavelDica" style="font-size:0.74em;color:#888;margin-top:4px;"></div>
               </div>
             </div>
@@ -16507,18 +16727,7 @@ async function produtosSoftware() {
     </div>
     <div class="loading" id="loadingProdutosSoftware">⏳ Carregando...</div>
     <div id="listaProdutosSoftware"></div>
-    <div class="modal-overlay" id="modalProdutoSoftware"><div class="modal" onclick="event.stopPropagation()">
-      <h3 id="modalProdutoSoftwareTitulo">Novo Produto</h3>
-      <input type="hidden" id="prodSoftId">
-      <label>Produto</label>
-      <input type="text" id="prodSoftNome" placeholder="Ex: Fortes Ponto">
-      <label class="check-label"><input type="checkbox" id="prodSoftAtivo" checked> Produto ativo</label>
-      <span style="font-size:0.75em;color:#888;display:block;">Desativar tira o produto das listas para novas associações. Quem já está associado continua vendo o produto marcado como inativo.</span>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="fecharModalProdutoSoftware()">Cancelar</button>
-        <button class="btn btn-primary" id="btnSalvarProdutoSoftware" onclick="salvarProdutoSoftware()">Salvar</button>
-      </div>
-    </div></div>`;
+    ${_htmlModalProdutoSoftware()}`;
 
   document.getElementById('btnNovoProdutoSoftware').style.display = isAdmin ? 'inline-block' : 'none';
 
@@ -16612,6 +16821,22 @@ function renderizarProdutosSoftware() {
   produtosSoftwareOrdenacao.atualizarSetas('sort-prodsoft-', ['nome', 'status']);
 }
 
+function _htmlModalProdutoSoftware() {
+  return `
+    <div class="modal-overlay" id="modalProdutoSoftware"><div class="modal" onclick="event.stopPropagation()">
+      <h3 id="modalProdutoSoftwareTitulo">Novo Produto</h3>
+      <input type="hidden" id="prodSoftId">
+      <label>Produto</label>
+      <input type="text" id="prodSoftNome" placeholder="Ex: Fortes Ponto">
+      <label class="check-label"><input type="checkbox" id="prodSoftAtivo" checked> Produto ativo</label>
+      <span style="font-size:0.75em;color:#888;display:block;">Desativar tira o produto das listas para novas associações. Quem já está associado continua vendo o produto marcado como inativo.</span>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="fecharModalProdutoSoftware()">Cancelar</button>
+        <button class="btn btn-primary" id="btnSalvarProdutoSoftware" onclick="salvarProdutoSoftware()">Salvar</button>
+      </div>
+    </div></div>`;
+}
+
 window.abrirModalProdutoSoftware = (id) => {
   const p = id ? produtosSoftwareData.find((x) => String(x.id) === String(id)) : null;
   document.getElementById('modalProdutoSoftwareTitulo').textContent = p ? 'Editar Produto' : 'Novo Produto';
@@ -16621,7 +16846,10 @@ window.abrirModalProdutoSoftware = (id) => {
   document.getElementById('modalProdutoSoftware').classList.add('open');
 };
 
-window.fecharModalProdutoSoftware = () => document.getElementById('modalProdutoSoftware').classList.remove('open');
+window.fecharModalProdutoSoftware = () => {
+  document.getElementById('modalProdutoSoftware').classList.remove('open');
+  _reabrirDrawerPaiSeEscondido();
+};
 
 window.salvarProdutoSoftware = async () => {
   const nome = document.getElementById('prodSoftNome').value.trim();
@@ -16629,13 +16857,19 @@ window.salvarProdutoSoftware = async () => {
 
   await comBotaoCarregando('btnSalvarProdutoSoftware', async () => {
     try {
-      await API.salvarProdutoSoftware({
+      const r = await API.salvarProdutoSoftware({
         id: document.getElementById('prodSoftId').value || null,
         nome,
         ativo: document.getElementById('prodSoftAtivo').checked,
       });
-      fecharModalProdutoSoftware();
       produtosSoftwareData = await API.getProdutosSoftware();
+      // Aberto por cima de outro formulário (cadastro rápido): devolve o produto criado.
+      if (_temDrawerPaiEmpilhado()) {
+        const novo = produtosSoftwareData.find((x) => String(x.id) === String(r && r.id)) || { id: r && r.id, nome, ativo: true };
+        _entregarCadastroRapido(novo, fecharModalProdutoSoftware);
+      } else {
+        fecharModalProdutoSoftware();
+      }
       renderizarProdutosSoftware();
       showToast('✅ Salvo!', '#2e7d32');
     } catch (e) {
@@ -16713,7 +16947,7 @@ async function perfis() {
         <select id="perfPessoa" onchange="aoEscolherPessoaPerfil()"></select>
         <div style="font-size:0.75em;color:#999;margin-top:4px;">
           Só aparecem pessoas com e-mail cadastrado na tela de Pessoas.
-          Não achou quem procura? <a href="#pessoas" target="_blank" style="color:#d60014;font-weight:600;">👤 Cadastrar / gerenciar Pessoas</a>
+          Não achou quem procura? <button type="button" class="link-acao" onclick="novaPessoaDePerfil()">+ Nova pessoa</button>
         </div>
       </div>
       <label>E-mail corporativo</label>
@@ -16931,6 +17165,24 @@ function _popularAreaPerfilPorPessoa(email, atual) {
   }
 }
 
+/** Pessoas com e-mail para dar acesso (modo novo do modal de Perfil). */
+function _popularSelectPessoaPerfil() {
+  const selPessoa = document.getElementById('perfPessoa');
+  if (!selPessoa) return;
+  const opts = _pessoasComEmailParaPerfil();
+  // E-mails que ja tem acesso: ainda aparecem, mas marcados, pra nao dar a
+  // impressao de que sumiram -- so nao viram um segundo perfil.
+  const jaTemAcesso = new Set(perfisData.map((x) => String(x.email || '').toLowerCase()));
+  selPessoa.innerHTML = '<option value="">Selecione uma pessoa...</option>' +
+    opts.map((pe) => {
+      const em = pe.email.trim();
+      const marca = jaTemAcesso.has(em.toLowerCase()) ? ' — já tem acesso' : '';
+      return `<option value="${esc(em)}">${esc(pe.nome || em)} (${esc(em)})${marca}</option>`;
+    }).join('') +
+    (opts.length ? '' : '<option value="" disabled>Nenhuma pessoa com e-mail cadastrado</option>');
+  selPessoa.value = '';
+}
+
 window.abrirModalPerfil = (email) => {
   const p = email ? perfisData.find((x) => x.email === email) : null;
   document.getElementById('modalPerfilTitulo').textContent = p ? 'Alterar acesso' : 'Dar acesso a alguém';
@@ -16948,18 +17200,7 @@ window.abrirModalPerfil = (email) => {
     pessoaBox.style.display = 'none';
   } else {
     pessoaBox.style.display = 'block';
-    const opts = _pessoasComEmailParaPerfil();
-    // E-mails que ja tem acesso: ainda aparecem, mas marcados, pra nao dar a
-    // impressao de que sumiram -- so nao viram um segundo perfil.
-    const jaTemAcesso = new Set(perfisData.map((x) => String(x.email || '').toLowerCase()));
-    selPessoa.innerHTML = '<option value="">Selecione uma pessoa...</option>' +
-      opts.map((pe) => {
-        const em = pe.email.trim();
-        const marca = jaTemAcesso.has(em.toLowerCase()) ? ' — já tem acesso' : '';
-        return `<option value="${esc(em)}">${esc(pe.nome || em)} (${esc(em)})${marca}</option>`;
-      }).join('') +
-      (opts.length ? '' : '<option value="" disabled>Nenhuma pessoa com e-mail cadastrado</option>');
-    selPessoa.value = '';
+    _popularSelectPessoaPerfil();
     document.getElementById('perfEmail').value = '';
   }
   // Marca os perfis existentes (ou Gestor por padrão para alguém novo).
@@ -17145,7 +17386,7 @@ function _htmlDrawerFornecedorCadastro() {
           <button type="button" class="btn btn-ghost" id="btnAdicionarGestorContrato" onclick="adicionarGestorContrato()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
           <button type="button" class="btn-icon" onclick="_recarregarPessoasFornecedor()" title="Atualizar lista de pessoas">🔄</button>
         </div>
-        ${_seVeTela('pessoas', `<a href="#pessoas" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:8px;">👤 Gerenciar Pessoas</a>`)}
+        ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaPessoaDeFornecedor()">+ Nova pessoa</button>' : ''}
       </div>
 
       <div style="display:grid;grid-template-columns:1fr;gap:16px;">
@@ -17155,7 +17396,7 @@ function _htmlDrawerFornecedorCadastro() {
             <select id="fornCadSetor" style="${inp}flex:1;"><option value="">Selecione...</option></select>
             <button type="button" class="btn-icon" onclick="_recarregarAreasFornecedor()" title="Atualizar lista de áreas">🔄</button>
           </div>
-          ${_seVeTela('areas', `<a href="#areas" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;">+ Cadastrar nova área</a>`)}
+          ${Perfis.podeMexerNaArea(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaAreaDeFornecedor()">+ Nova área</button>' : ''}
         </div>
       </div>
       </div>
@@ -17419,7 +17660,7 @@ function renderGestoresContrato() {
         <td style="font-size:0.85em;color:#555;">${esc(g.telefone || '-')}</td>
         <td style="font-size:0.85em;color:#555;">${esc(g.email || '-')}</td>
         <td style="text-align:center;white-space:nowrap;">
-          ${g.id ? `<a href="#pessoas?editPessoa=${encodeURIComponent(g.id)}" target="_blank" class="btn-icon" title="Abrir esta pessoa em Pessoas" style="text-decoration:none;">${SVG_EDITAR}</a>` : ''}
+          ${g.id && Perfis.podeEditarPessoas(window.USER_PERFIS) ? `<button type="button" class="btn-icon" onclick="editarGestorDeFornecedor('${escJs(g.id)}')" title="Editar esta pessoa">${SVG_EDITAR}</button>` : ''}
           <button class="btn-icon" onclick="removerGestorContrato(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
         </td>
       </tr>`).join('') + `</tbody></table>`;
@@ -17678,6 +17919,7 @@ function _popularAvaliacaoFornecedor(f) {
 function _fecharDrawerFornecedorCadastroSemSalvar() {
   document.getElementById('drawerFornecedorCadastro').classList.remove('open');
   document.getElementById('drawerOverlayFornecedorCadastro').classList.remove('open');
+  _reabrirDrawerPaiSeEscondido();
 }
 // Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
 window.fecharDrawerFornecedorCadastro = () => _fecharComRastreador({
@@ -17767,6 +18009,8 @@ window.salvarFornecedorCadastro = async () => {
     const idx = fornecedoresData.findIndex((x) => String(x.id) === String(r.id));
     if (idx >= 0) fornecedoresData[idx] = item; else fornecedoresData.push(item);
     renderizarFornecedores();
+    // Aberto por cima de outro formulário (cadastro rápido): devolve o fornecedor.
+    if (_temDrawerPaiEmpilhado()) _entregarCadastroRapido(item, _fecharDrawerFornecedorCadastroSemSalvar);
     showToast('✅ Salvo!', '#2e7d32');
     return true;
   } catch (e) {
@@ -18364,15 +18608,15 @@ function _htmlDrawerContrato() {
             <div style="${grid('1fr 1fr')}">
               <div><label style="${lbl}">Fornecedor ${req}</label>
                 <select id="contratoFornecedor" style="${inp}" onchange="_popularSelectGestorContrato()"></select>
-                ${_seVeTela('fornecedores', `<a href="#fornecedores" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">🗂️ Gerenciar Fornecedores</a>`)}</div>
+                ${Perfis.podeGerenciarFornecedores(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novoFornecedorDeContrato()">+ Novo fornecedor</button>' : ''}</div>
               <div><label style="${lbl}">Tipo do contrato ${req}</label>
                 <select id="contratoTipo" style="${inp}"></select>
-                ${_seVeTela('contratos-tipos', `<a href="#contratos-tipos" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">🗂️ Gerenciar Tipos</a>`)}</div>
+                ${Perfis.podeEditarContratos(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novoItemListaDeContrato(\'tipos\')">+ Novo tipo</button>' : ''}</div>
             </div>
             <div style="${grid('1fr 1fr')}">
               <div><label style="${lbl}">Status do contrato ${req}</label>
                 <select id="contratoStatus" style="${inp}" onchange="_atualizarAlertasDrawerContrato()"></select>
-                ${_seVeTela('contratos-status', `<a href="#contratos-status" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">🗂️ Gerenciar Status</a>`)}</div>
+                ${Perfis.podeEditarContratos(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novoItemListaDeContrato(\'status\')">+ Novo status</button>' : ''}</div>
               <div><label style="${lbl}">Área responsável ${req}</label>
                 <select id="contratoArea" style="${inp}"></select></div>
             </div>
@@ -18468,7 +18712,7 @@ function _htmlDrawerContrato() {
                   </select></div>
                 <div><label style="${lbl}">Indexador de reajuste</label>
                   <select id="contratoIndexador" style="${inp}"></select>
-                  ${_seVeTela('contratos-indexadores', `<a href="#contratos-indexadores" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">🗂️ Gerenciar Indexadores</a>`)}</div>
+                  ${Perfis.podeEditarContratos(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novoItemListaDeContrato(\'indexadores\')">+ Novo indexador</button>' : ''}</div>
               </div>
             </div>
 
@@ -19359,23 +19603,14 @@ function contratosTipos() { return _telaListaSimples('tipos'); }
 function contratosIndexadores() { return _telaListaSimples('indexadores'); }
 function contratosStatus() { return _telaListaSimples('status'); }
 
-async function _telaListaSimples(chave) {
+/** Drawer de um item de lista de Contrato (Tipos, Status, Indexadores) -- o
+ *  rótulo e o campo Situação dependem da lista. Usado na tela da lista e no
+ *  cadastro rápido a partir do drawer de Contrato. */
+function _htmlDrawerListaContrato(chave) {
   const cfg = LISTAS_CONTRATO[chave];
-  _listaContratoChave = chave;
-  _listaContratoOrdenacao = criarOrdenacao('nome', 'asc');
-  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
   const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
   const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
-  app.innerHTML = `
-    <div class="page-header">
-      <div><h2>${esc(cfg.titulo)}</h2><p class="page-sub">${esc(cfg.sub)}</p></div>
-      <div style="display:flex;gap:8px;">
-        <a href="#contratos" class="btn btn-ghost">← Contratos</a>
-        ${podeEditar ? `<button class="btn btn-primary" onclick="abrirDrawerListaContrato()">${esc(cfg.novo)}</button>` : ''}
-      </div>
-    </div>
-    <div class="loading">⏳ Carregando...</div>
-    <div id="listaContratoItens"></div>
+  return `
     <div class="drawer-overlay" id="drawerOverlayListaContrato" onclick="fecharDrawerListaContrato()"></div>
     <div class="drawer" id="drawerListaContrato">
       <div class="drawer-header">
@@ -19399,6 +19634,26 @@ async function _telaListaSimples(chave) {
         <button class="btn btn-primary" id="btnSalvarListaContrato" onclick="salvarItemListaContrato()">Salvar</button>
       </div>
     </div>`;
+}
+
+async function _telaListaSimples(chave) {
+  const cfg = LISTAS_CONTRATO[chave];
+  _listaContratoChave = chave;
+  _listaContratoOrdenacao = criarOrdenacao('nome', 'asc');
+  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>${esc(cfg.titulo)}</h2><p class="page-sub">${esc(cfg.sub)}</p></div>
+      <div style="display:flex;gap:8px;">
+        <a href="#contratos" class="btn btn-ghost">← Contratos</a>
+        ${podeEditar ? `<button class="btn btn-primary" onclick="abrirDrawerListaContrato()">${esc(cfg.novo)}</button>` : ''}
+      </div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="listaContratoItens"></div>
+    ${_htmlDrawerListaContrato(chave)}`;
   try {
     const [itens, contratosList] = await Promise.all([cfg.get(), API.getContratos().catch(() => [])]);
     _listaContratoItens = itens;
@@ -19503,6 +19758,7 @@ window.abrirDrawerListaContrato = (id) => {
 function _fecharDrawerListaContratoSemSalvar() {
   document.getElementById('drawerListaContrato').classList.remove('open');
   document.getElementById('drawerOverlayListaContrato').classList.remove('open');
+  _reabrirDrawerPaiSeEscondido();
 }
 window._fecharDrawerListaContratoSemSalvar = _fecharDrawerListaContratoSemSalvar;
 
@@ -19532,6 +19788,11 @@ window.salvarItemListaContrato = async () => {
       _edListaContrato.marcar({ ...item, id: salvoId });
       _listaContratoItens = await cfg.get();
       renderizarListaContrato();
+      // Aberto por cima do Contrato (cadastro rápido): devolve o item criado.
+      if (_temDrawerPaiEmpilhado()) {
+        const salvo = _listaContratoItens.find((x) => String(x.id) === String(salvoId)) || { ...item, id: salvoId };
+        _entregarCadastroRapido(salvo, _fecharDrawerListaContratoSemSalvar);
+      }
       showToast('✅ Salvo!', '#2e7d32');
       return true;
     } catch (e) {
