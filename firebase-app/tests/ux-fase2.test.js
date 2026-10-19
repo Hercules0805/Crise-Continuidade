@@ -15,9 +15,14 @@ function menu() {
   return Array.from(doc.querySelectorAll('.nav-group')).map((g) => {
     const itens = [];
     let secao = 'operacao';
+    // Grupo dividido em seções temáticas (Riscos: Vulnerabilidades e Riscos): o
+    // separador abre uma seção com nome; só "Configuração" é configuração.
+    let tema = '';
     Array.from(g.querySelector('.nav-dropdown').children).forEach((el) => {
-      if (el.classList.contains('nav-secao')) secao = 'configuracao';
-      else itens.push({ page: el.dataset.page, rotulo: el.textContent.trim(), secao });
+      if (el.classList.contains('nav-secao')) {
+        tema = el.textContent.trim();
+        secao = tema === 'Configuração' ? 'configuracao' : 'operacao';
+      } else itens.push({ page: el.dataset.page, rotulo: el.textContent.trim(), secao, tema });
     });
     return { grupo: g.dataset.group, itens };
   });
@@ -58,16 +63,29 @@ test('menu: grupos na ordem, tela principal primeiro, alfabetico dentro de cada 
   const ORDEM = ['continuidade', 'riscos', 'indicadores', 'fornecedores', 'contratos', 'servicos', 'administracao'];
   assert.deepStrictEqual(m.map((g) => g.grupo), ORDEM.filter((g) => m.some((x) => x.grupo === g)));
   assert.ok(m.length >= 6);
-  const principal = { continuidade: 'admin', riscos: 'riscos', indicadores: 'indicadores-dashboard', fornecedores: 'fornecedores', contratos: 'contratos', servicos: 'servicos' };
+  // Riscos e dividido em duas secoes tematicas (sem tela "principal" do grupo):
+  // a regra "principal primeiro" vale dentro de cada secao, e a ordem e alfabetica.
+  const principal = { continuidade: 'admin', indicadores: 'indicadores-dashboard', fornecedores: 'fornecedores', contratos: 'contratos', servicos: 'servicos' };
   for (const g of m) {
     if (principal[g.grupo]) assert.strictEqual(g.itens[0].page, principal[g.grupo], g.grupo + ': principal primeiro');
-    for (const secao of ['operacao', 'configuracao']) {
-      let nomes = g.itens.filter((i) => i.secao === secao).map((i) => i.rotulo);
-      if (secao === 'operacao' && principal[g.grupo]) nomes = nomes.slice(1);
+    const temas = [...new Set(g.itens.map((i) => i.tema))];
+    for (const tema of temas) {
+      let nomes = g.itens.filter((i) => i.tema === tema).map((i) => i.rotulo);
+      if (tema === '' && principal[g.grupo]) nomes = nomes.slice(1);
       const ordenado = [...nomes].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-      assert.deepStrictEqual(nomes, ordenado, `${g.grupo}/${secao} em ordem alfabetica`);
+      assert.deepStrictEqual(nomes, ordenado, `${g.grupo}/${tema || 'operacao'} em ordem alfabetica`);
     }
   }
+});
+
+test('menu Riscos: telas de vulnerabilidade primeiro, depois as de risco', () => {
+  const g = menu().find((x) => x.grupo === 'riscos');
+  assert.deepStrictEqual(g.itens.map((i) => [i.tema, i.page]), [
+    ['Vulnerabilidades', 'vulnerabilidades-painel'],
+    ['Vulnerabilidades', 'vulnerabilidades'],
+    ['Riscos', 'riscos'],
+    ['Riscos', 'monitor'],
+  ]);
 });
 
 test('menu: cadastros de configuracao ficam sob o separador "Configuracao"', () => {

@@ -11,7 +11,7 @@
   <!-- GRC360 v2 (layout/lay-v2): tokens depois do pacote v1 e antes de styles.css; fonte Open Sans (confirmar a oficial) -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap">
   <link rel="stylesheet" href="vendor/grc360/tokens-v2.css?v=1">
-  <link rel="stylesheet" href="styles.css?v=29">
+  <link rel="stylesheet" href="styles.css?v=30">
 </head>
 <body>
   <nav class="nav">
@@ -39,10 +39,12 @@
       <div class="nav-group" data-group="riscos">
         <button type="button" class="nav-group-label" aria-haspopup="true" aria-expanded="false">Riscos <span class="caret">▾</span></button>
         <div class="nav-dropdown">
-          <a href="#riscos" class="nav-link" data-page="riscos">Registro de Riscos</a>
+          <div class="nav-secao">Vulnerabilidades</div>
           <a href="#vulnerabilidades-painel" class="nav-link" data-page="vulnerabilidades-painel">Painel de Vulnerabilidades</a>
-          <a href="#monitor" class="nav-link" data-page="monitor">Risco no Tempo</a>
           <a href="#vulnerabilidades" class="nav-link" data-page="vulnerabilidades">Vulnerabilidades</a>
+          <div class="nav-secao">Riscos</div>
+          <a href="#riscos" class="nav-link" data-page="riscos">Registro de Riscos</a>
+          <a href="#monitor" class="nav-link" data-page="monitor">Risco no Tempo</a>
         </div>
       </div>
       <div class="nav-group" data-group="indicadores">
