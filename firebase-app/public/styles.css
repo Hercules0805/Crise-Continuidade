@@ -376,3 +376,25 @@ a.btn { text-decoration: none; }
   .data-table table { min-width: 0; }
   .data-table table:has(thead th:nth-child(9)) { min-width: 1400px; }
 }
+
+/* Cabeçalho de grupo das listas agrupadas (PCNs, DRP, Matriz de Indicadores): claro, sem degradê. */
+.grupo-cab { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: var(--surface-sunken); color: var(--ink); border: 1px solid var(--border); border-radius: var(--r-md) var(--r-md) 0 0; font-weight: 700; }
+.grupo-cab--clicavel { cursor: pointer; user-select: none; }
+.grupo-cab--clicavel:hover { background: var(--red-tint); }
+.grupo-cab__conta { font-size: 13px; font-weight: 400; color: var(--ink-muted); }
+/* Cards de métrica em quantidade variável (resumos de PCN/DRP). */
+.painel-metricas--auto { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+/* Score do questionário BIA: destaque claro (sem o degradê vermelho). */
+.score-bia { background: var(--red-tint); border: 1px solid var(--border); border-radius: var(--r-md); padding: 20px; margin: 20px 0; }
+.score-bia__linha { display: flex; justify-content: space-between; align-items: center; }
+.score-bia__linha + .score-bia__linha { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.score-bia__valor { font-size: 40px; font-weight: 700; color: var(--red); font-variant-numeric: tabular-nums; }
+
+/* ABAS DOS DRAWERS (_marcarAba) -- ativa: texto ink + sublinhado vermelho (padrão v2 do nav) */
+.aba-drawer { color: var(--ink-muted); border-bottom: 3px solid transparent; }
+.aba-drawer:hover { color: var(--ink); }
+.aba-drawer--ativa { color: var(--ink); border-bottom-color: var(--red); }
+
+/* Validação: campo obrigatório (.req) e campo com erro (_avisarCampo) */
+.req { color: var(--red); margin-left: 2px; }
+.campo-invalido { border-color: #c62828 !important; box-shadow: 0 0 0 3px rgba(198, 40, 40, 0.15) !important; }

@@ -292,10 +292,13 @@ function _telaSemAcesso(pagina) {
 }
 
 // Utilitários
+let _timerToast = null;
 function showToast(msg, bg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.style.background = bg; t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', 3500);
+  // Mensagem longa (ex.: pendências do Risco) fica mais tempo: 3,5 s a 9 s.
+  clearTimeout(_timerToast);
+  _timerToast = setTimeout(() => t.style.display = 'none', Math.max(3500, Math.min(9000, String(msg).length * 70)));
 }
 
 // ============================================================
@@ -395,6 +398,41 @@ function _htmlPaginacao(info, fnMover) {
         <button class="btn btn-ghost" onclick="${fnMover}(1)" ${pagina >= totalPaginas ? 'disabled' : ''}>Próxima ›</button>
       </div>` : ''}
     </div>`;
+}
+
+// Aba de drawer ativa/inativa (as 8 funções trocarAba*): o estado vai em classe
+// e aria-selected; as cores ficam no CSS (.aba-drawer). Limpa a cor/borda inline
+// do HTML inicial do botão, senão ela venceria a classe.
+function _marcarAba(btn, ativa) {
+  if (!btn) return;
+  btn.classList.add('aba-drawer');
+  btn.classList.toggle('aba-drawer--ativa', !!ativa);
+  btn.setAttribute('role', 'tab');
+  btn.setAttribute('aria-selected', ativa ? 'true' : 'false');
+  btn.style.color = '';
+  btn.style.borderBottom = '';
+}
+
+// Validação de formulário: leva até o campo -- troca para a aba onde ele está
+// (painel-X -> tab-X), foca e marca a borda até a pessoa mexer -- e mostra o aviso.
+// Devolve undefined, como showToast: `return _avisarCampo(...)` = "não salvou".
+function _avisarCampo(idCampo, mensagem) {
+  const campo = document.getElementById(idCampo);
+  if (campo) {
+    const painel = campo.closest('[id^="painel-"]');
+    if (painel && painel.style.display === 'none') {
+      const aba = document.getElementById(painel.id.replace(/^painel-/, 'tab-'));
+      const chamada = aba && (aba.getAttribute('onclick') || '').match(/^\s*(\w+)\('([^']*)'\)/);
+      if (chamada && typeof window[chamada[1]] === 'function') window[chamada[1]](chamada[2]);
+      else if (aba) aba.click();
+    }
+    campo.classList.add('campo-invalido');
+    const limpar = () => campo.classList.remove('campo-invalido');
+    campo.addEventListener('input', limpar, { once: true });
+    campo.addEventListener('change', limpar, { once: true });
+    try { campo.focus(); } catch (e) { /* campo oculto */ }
+  }
+  showToast(mensagem, '#e65100');
 }
 
 // Link/atalho para outra tela só para quem pode vê-la -- senão o clique cai em
@@ -548,9 +586,7 @@ window.trocarAbaProcesso = (aba) => {
   const estavaLimpo = !_edProcesso.sujo();
   ['identificacao','avaliacao','bia','bcp','drp'].forEach(a => {
     document.getElementById('painel-' + a).style.display = a === aba ? 'block' : 'none';
-    const btn = document.getElementById('tab-' + a);
-    btn.style.color = a === aba ? '#d60014' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
+    _marcarAba(document.getElementById('tab-' + a), a === aba);
   });
   if (aba === 'bcp') {
     renderFornecedoresBcp();
@@ -1161,7 +1197,7 @@ function _htmlDrawerPessoa() {
       <div class="drawer-body">
         <input type="hidden" id="pessoaId">
         <div style="margin-bottom:16px;">
-          <label style="${lbl}">Nome</label>
+          <label style="${lbl}">Nome <span class="req" aria-hidden="true">*</span></label>
           <input type="text" id="pessoaNome" placeholder="Nome da pessoa" style="${inp}">
         </div>
         <div style="margin-bottom:16px;">
@@ -2035,7 +2071,7 @@ ${corpo}
 
 window.salvarPessoaCadastro = async () => {
   const nome = document.getElementById('pessoaNome').value.trim();
-  if (!nome) return showToast('Informe o nome da pessoa.', '#e65100');
+  if (!nome) return _avisarCampo('pessoaNome', 'Informe o nome da pessoa.');
   const id = document.getElementById('pessoaId').value || null;
   const email = document.getElementById('pessoaEmail').value.trim();
 
@@ -2270,14 +2306,14 @@ async function processos() {
           </ul>
         </div>
         <div id="perguntas-container"></div>
-        <div style="background:linear-gradient(135deg,#d60014,#e6262b);padding:20px;border-radius:8px;margin:20px 0;color:white;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-            <span style="font-weight:600;font-size:1.1em;">Score Total</span>
-            <span id="scoreTotal" style="font-size:2.5em;font-weight:700;">0</span>
+        <div class="score-bia">
+          <div class="score-bia__linha">
+            <span style="font-weight:600;">Score Total</span>
+            <span id="scoreTotal" class="score-bia__valor">0</span>
           </div>
-          <div style="display:flex;justify-content:space-between;align-items:center;padding-top:12px;border-top:1px solid rgba(255,255,255,0.2);">
-            <span style="font-weight:600;">Classificação:</span>
-            <span id="scoreTier" style="font-weight:700;font-size:1.2em;padding:6px 16px;background:rgba(255,255,255,0.2);border-radius:20px;"></span>
+          <div class="score-bia__linha">
+            <span style="font-weight:600;">Classificação</span>
+            <span id="scoreTier"></span>
           </div>
         </div>
       </div>
@@ -2308,12 +2344,12 @@ async function processos() {
           <!-- ABA: IDENTIFICACAO -->
           <div id="painel-identificacao">
             <div style="margin-bottom:20px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Processo de Negócio</label>
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Processo de Negócio <span class="req" aria-hidden="true">*</span></label>
               <input type="text" id="fProcesso" placeholder="Ex: Gestão de Identidades e Acessos" style="width:100%;padding:10px 12px;border:2px solid #d60014;border-radius:7px;font-size:1em;font-weight:600;box-sizing:border-box;">
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área</label>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área <span class="req" aria-hidden="true">*</span></label>
                 <select id="fArea" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;"></select>
               </div>
               <div>
@@ -3633,8 +3669,8 @@ function _coletarFormularioProcesso() {
 window.salvarProcesso = async () => {
   const { p, avalScores, avalTotal, temResposta } = _coletarFormularioProcesso();
 
-  if (!p.area) return showToast('Selecione a área.', '#e65100');
-  if (!p.processo) return showToast('Informe o processo.', '#e65100');
+  if (!p.area) return _avisarCampo('fArea', 'Selecione a área.');
+  if (!p.processo) return _avisarCampo('fProcesso', 'Informe o processo.');
   // Prevenir duplicatas: se não tem id, verificar se já existe processo com mesmo nome e área
   if (!p.id) {
     const duplicado = (window.processosData || []).find(x => x.area.toLowerCase() === p.area.toLowerCase() && x.processo.toLowerCase() === p.processo.toLowerCase());
@@ -4245,9 +4281,7 @@ window.moverDrpItem = (campo, idx, direcao) => {
 window.trocarAbaDependencia = (aba) => {
   ['geral', 'drp', 'plano', 'registros', 'processos'].forEach(a => {
     document.getElementById('painel-dep-' + a).style.display = a === aba ? 'block' : 'none';
-    const btn = document.getElementById('tab-dep-' + a);
-    btn.style.color = a === aba ? '#d60014' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
+    _marcarAba(document.getElementById('tab-dep-' + a), a === aba);
   });
   // Ao entrar na aba Plano, re-renderiza o preview do DRP salvo.
   if (aba === 'plano') renderDrpResumo();
@@ -4991,14 +5025,14 @@ function _htmlDrawerDependencia() {
           <div id="painel-dep-geral">
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
               <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria</label>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria <span class="req" aria-hidden="true">*</span></label>
                 <select id="depCategoria" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
                   <option value="">Selecione...</option>
                   ${DEPENDENCIA_CATEGORIAS_TECNICAS.map(c => `<option value="${c}">${c}</option>`).join('')}
                 </select>
               </div>
               <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Nome</label>
+                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Nome <span class="req" aria-hidden="true">*</span></label>
                 <input type="text" id="depNome" placeholder="Ex: Switches e roteadores" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
               </div>
             </div>
@@ -5292,8 +5326,8 @@ window.salvarDep = async () => {
     // no merge otimista.
     drpSalvo: existente ? (existente.drpSalvo || '') : '',
   };
-  if (!d.categoria) return showToast('Informe a categoria.', '#e65100');
-  if (!d.nome) return showToast('Informe o nome.', '#e65100');
+  if (!d.categoria) return _avisarCampo('depCategoria', 'Informe a categoria.');
+  if (!d.nome) return _avisarCampo('depNome', 'Informe o nome.');
   // Sem esta guarda, digitar "Fornecedores" no campo de categoria criaria um
   // fornecedor que esta tela nao mostra mais: sumiria da vista de quem acabou
   // de cadastrar.
@@ -5975,7 +6009,7 @@ function _htmlDrawerServico() {
 
           <div id="painel-servico-dados">
             <div style="margin-bottom:16px;">
-              <label style="${lbl}">Nome</label>
+              <label style="${lbl}">Nome <span class="req" aria-hidden="true">*</span></label>
               <input type="text" id="servicoNome" placeholder="Ex: Serviço de E-mail Corporativo" style="${inp}">
             </div>
             <div style="margin-bottom:16px;">
@@ -6010,9 +6044,7 @@ function _htmlDrawerServico() {
 window.trocarAbaServico = (aba) => {
   ['dados', 'backups'].forEach((a) => {
     document.getElementById('painel-servico-' + a).style.display = a === aba ? 'block' : 'none';
-    const btn = document.getElementById('tab-servico-' + a);
-    btn.style.color = a === aba ? '#d60014' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
+    _marcarAba(document.getElementById('tab-servico-' + a), a === aba);
   });
 };
 
@@ -6267,7 +6299,7 @@ function _renderServicoProcessosImpactados() {
 window.salvarServico = async () => {
   const dados = _coletarFormularioServico();
   const { id, nome, descricao } = dados;
-  if (!nome) return showToast('Informe o nome do serviço.', '#e65100');
+  if (!nome) return _avisarCampo('servicoNome', 'Informe o nome do serviço.');
 
   return await comBotaoCarregando('btnSalvarServico', async () => {
     try {
@@ -6573,9 +6605,7 @@ function _htmlDrawerBackup() {
 window.trocarAbaBackup = (aba) => {
   ['dados', 'jobs'].forEach((a) => {
     document.getElementById('painel-backup-' + a).style.display = a === aba ? 'block' : 'none';
-    const btn = document.getElementById('tab-backup-' + a);
-    btn.style.color = a === aba ? '#d60014' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
+    _marcarAba(document.getElementById('tab-backup-' + a), a === aba);
   });
 };
 
@@ -7943,12 +7973,12 @@ function _htmlDrawerVulnerabilidade() {
               </div>
             </div>
             <div style="margin-bottom:14px;">
-              <label style="${lbl}">Nome da Vulnerabilidade</label>
+              <label style="${lbl}">Nome da Vulnerabilidade <span class="req" aria-hidden="true">*</span></label>
               <input type="text" id="vulnNome" style="${inp}">
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:4px;">
               <div>
-                <label style="${lbl}">Tipo de Vulnerabilidade <span style="color:#d60014;">*</span></label>
+                <label style="${lbl}">Tipo de Vulnerabilidade <span class="req" aria-hidden="true">*</span></label>
                 <select id="vulnTipo" style="${inp}" onchange="trocarTipoVulnerabilidade()"></select>
               </div>
               <div>
@@ -8265,9 +8295,7 @@ window.limparCvssVulnerabilidade = () => {
 window.trocarAbaVulnerabilidade = (aba) => {
   ['identificacao', 'severidade', 'correcao'].forEach((a) => {
     document.getElementById('painel-vuln-' + a).style.display = a === aba ? 'block' : 'none';
-    const btn = document.getElementById('tab-vuln-' + a);
-    btn.style.color = a === aba ? '#d60014' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
+    _marcarAba(document.getElementById('tab-vuln-' + a), a === aba);
   });
 };
 
@@ -8812,14 +8840,11 @@ function _coletarFormularioVulnerabilidade() {
 window.salvarVulnerabilidade = async () => {
   const v = _coletarFormularioVulnerabilidade();
   const id = v.id;
-  if (!v.nome) return showToast('Informe o nome da vulnerabilidade.', '#e65100');
-  if (!v.tipo) {
-    trocarAbaVulnerabilidade('identificacao');
-    return showToast('Informe o tipo da vulnerabilidade.', '#e65100');
-  }
+  if (!v.nome) return _avisarCampo('vulnNome', 'Informe o nome da vulnerabilidade.');
+  if (!v.tipo) return _avisarCampo('vulnTipo', 'Informe o tipo da vulnerabilidade.');
   // Basta um dos dois: o produto da empresa (catálogo) ou o ativo afetado (texto).
   // Basta um: produto de software, uma dependencia afetada ou (registro antigo) o texto legado.
-  if (!v.produto && !v.produtoSoftwareId && !v.dependenciasAfetadas.length) return showToast('Informe o produto de software ou ao menos uma dependência afetada.', '#e65100');
+  if (!v.produto && !v.produtoSoftwareId && !v.dependenciasAfetadas.length) return _avisarCampo('vulnProduto', 'Informe o produto de software ou ao menos uma dependência afetada.');
 
   return await comBotaoCarregando('btnSalvarVulnerabilidade', async () => {
     try {
@@ -9129,23 +9154,11 @@ window.calcularScore = () => {
   });
   
   document.getElementById('scoreTotal').textContent = total;
-  document.getElementById('scoreTotal').style.color = 'white';
   
   // Calcular tier
-  // O tier vem da regra unica; as cores aqui sao tons pastel proprios desta
-  // tela (fundo de destaque), diferentes das cores de badge de Criticidade.
+  // Mesmo chip de Tier da lista de Processos (antes: tons pastel próprios desta tela).
   const tier = Criticidade.tierPorScore(total);
-  const FUNDO_TIER = {
-    [Criticidade.TIER.T1]: '#ffcdd2',
-    [Criticidade.TIER.T2]: '#ffe0b2',
-    [Criticidade.TIER.T3]: '#bbdefb',
-  };
-  const tierColor = FUNDO_TIER[tier];
-  
-  const tierEl = document.getElementById('scoreTier');
-  tierEl.textContent = tier;
-  tierEl.style.background = tierColor;
-  tierEl.style.color = total > 0 ? '#d60014' : 'white';
+  document.getElementById('scoreTier').innerHTML = _htmlBadge(total > 0 ? _nivelTierProcesso(tier) : null, total > 0 ? tier : Criticidade.TIER.PENDENTE);
 };
 
 window.fecharModalQuestionario = () => {
@@ -10161,7 +10174,7 @@ function _htmlDrawerRisco() {
             </div>
 
             <div style="margin-bottom:16px;">
-              <label style="${lbl}">Título / Evento</label>
+              <label style="${lbl}">Título / Evento <span class="req" aria-hidden="true">*</span></label>
               <input type="text" id="rTitulo" placeholder="Ex: Falha de energia no data center" style="${inp}border:2px solid #d60014;font-weight:600;" oninput="_atualizarEtapasNist()">
             </div>
             <div style="margin-bottom:16px;">
@@ -10450,9 +10463,7 @@ function _htmlDrawerRisco() {
 window.trocarAbaRisco = (aba) => {
   ['identificacao', 'avaliacao', 'resposta', 'monitoramento'].forEach(a => {
     document.getElementById('painel-risco-' + a).style.display = a === aba ? 'block' : 'none';
-    const btn = document.getElementById('tab-risco-' + a);
-    btn.style.color = a === aba ? '#d60014' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
+    _marcarAba(document.getElementById('tab-risco-' + a), a === aba);
   });
 };
 
@@ -10709,7 +10720,7 @@ function _coletarFormularioRisco() {
 
 window.salvarRisco = async () => {
   const r = _coletarFormularioRisco();
-  if (!r.titulo) return showToast('Informe o título do risco.', '#e65100');
+  if (!r.titulo) return _avisarCampo('rTitulo', 'Informe o título do risco.');
 
   // Exigencias da etapa (NIST SP 800-37): so na MUDANCA de status.
   const original = window._riscoOriginal || { status: '', score: null };
@@ -12911,7 +12922,7 @@ function renderizarIndicadoresMatriz() {
   let html = '';
   Object.entries(porPilar).sort((a, b) => a[0].localeCompare(b[0])).forEach(([pilar, itens]) => {
     html += `<div style="margin-bottom:20px;">
-      <div style="background:linear-gradient(135deg,#d60014,#e6262b);color:white;padding:10px 18px;border-radius:8px 8px 0 0;font-weight:700;font-size:0.92em;">📁 ${esc(pilar)}</div>
+      <div class="grupo-cab">📁 ${esc(pilar)}</div>
       <div class="data-table" style="border-radius:0 0 8px 8px;overflow-x:auto;">
         <table style="table-layout:auto;min-width:${minWidth}px;">
           <thead>
@@ -14481,30 +14492,14 @@ async function pcns() {
     // Cards de resumo
     const tier1 = comPCN.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T1)).length;
     const tier2 = comPCN.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T2)).length;
-    const tier3 = comPCN.filter(p => p.score > 0 && p.score < 6).length;
-    document.getElementById('pcns-resumo').style.display = 'flex';
+    const tier3 = comPCN.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T3)).length;
+    document.getElementById('pcns-resumo').style.display = 'block';
     document.getElementById('pcns-resumo').innerHTML = `
-      <div style="display:flex;gap:12px;flex-wrap:wrap;">
-        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #d60014;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-          <div style="font-size:1.6em;font-weight:700;color:#d60014;">${comPCN.length}</div>
-          <div style="font-size:0.75em;color:#666;">Total PCNs</div>
-        </div>
-        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #c62828;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-          <div style="font-size:1.6em;font-weight:700;color:#c62828;">${tier1}</div>
-          <div style="font-size:0.75em;color:#666;">Tier 1</div>
-        </div>
-        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #f57c00;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-          <div style="font-size:1.6em;font-weight:700;color:#f57c00;">${tier2}</div>
-          <div style="font-size:0.75em;color:#666;">Tier 2</div>
-        </div>
-        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #1565c0;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-          <div style="font-size:1.6em;font-weight:700;color:#1565c0;">${tier3}</div>
-          <div style="font-size:0.75em;color:#666;">Tier 3</div>
-        </div>
-        <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #2e7d32;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-          <div style="font-size:1.6em;font-weight:700;color:#2e7d32;">${Object.keys(_agruparPorArea(comPCN)).length}</div>
-          <div style="font-size:0.75em;color:#666;">Áreas</div>
-        </div>
+      <div class="painel-metricas painel-metricas--auto">
+        ${_htmlMetricCard({ label: 'Total de PCNs', value: comPCN.length })}
+        ${_htmlMetricCard({ label: 'Tier 1', value: tier1, level: tier1 ? 'critical' : null })}
+        ${_htmlMetricCard({ label: 'Tier 2', value: tier2, level: tier2 ? 'high' : null })}
+        ${_htmlMetricCard({ label: 'Tier 3', value: tier3, level: tier3 ? 'medium' : null })}
       </div>`;
 
     renderPCNLista(comPCN);
@@ -14544,9 +14539,9 @@ function renderPCNLista(comPCN) {
   Object.entries(porArea).sort((a, b) => a[0].localeCompare(b[0])).forEach(([area, procs]) => {
     const areaId = 'pcn-area-' + area.replace(/[^a-zA-Z0-9]/g, '_');
     html += `<div style="margin-bottom:20px;">
-      <div onclick="toggleAreaPCN('${areaId}')" style="background:linear-gradient(135deg,#d60014,#e6262b);color:white;padding:12px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;">
-        <span style="font-weight:700;font-size:0.95em;">📁 ${esc(area)}</span>
-        <span style="font-size:0.78em;opacity:0.8;">${procs.length} processo${procs.length > 1 ? 's' : ''} ▾</span>
+      <div onclick="toggleAreaPCN('${areaId}')" class="grupo-cab grupo-cab--clicavel">
+        <span>📁 ${esc(area)}</span>
+        <span class="grupo-cab__conta">${procs.length} processo${procs.length > 1 ? 's' : ''} ▾</span>
       </div>
       <div id="${areaId}" style="border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">`;
 
@@ -14670,24 +14665,13 @@ function renderDRPResumo() {
   const comDRP = _depsComDRP();
   const porCategoria = _agruparPorCategoria(comDRP);
   const topCats = Object.entries(porCategoria).sort((a, b) => b[1].length - a[1].length).slice(0, 3);
-  const cores = ['#c62828', '#f57c00', '#1565c0'];
   const semDRP = (dependenciasData || []).length - comDRP.length;
-  box.style.display = 'flex';
+  box.style.display = 'block';
   box.innerHTML = `
-    <div style="display:flex;gap:12px;flex-wrap:wrap;">
-      <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #d60014;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-        <div style="font-size:1.6em;font-weight:700;color:#d60014;">${comDRP.length}</div>
-        <div style="font-size:0.75em;color:#666;">Com DRP</div>
-      </div>
-      <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid #999;min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-        <div style="font-size:1.6em;font-weight:700;color:#999;">${semDRP}</div>
-        <div style="font-size:0.75em;color:#666;">Sem DRP</div>
-      </div>
-      ${topCats.map(([cat, arr], i) => `
-      <div style="background:white;border-radius:8px;padding:14px 20px;border-top:3px solid ${cores[i]};min-width:100px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,0.08);">
-        <div style="font-size:1.6em;font-weight:700;color:${cores[i]};">${arr.length}</div>
-        <div style="font-size:0.75em;color:#666;">${esc(cat)}</div>
-      </div>`).join('')}
+    <div class="painel-metricas painel-metricas--auto">
+      ${_htmlMetricCard({ label: 'Com DRP', value: comDRP.length })}
+      ${_htmlMetricCard({ label: 'Sem DRP', value: semDRP })}
+      ${topCats.map(([cat, arr]) => _htmlMetricCard({ label: cat, value: arr.length })).join('')}
     </div>`;
 }
 
@@ -14716,9 +14700,9 @@ function renderDRPLista(lista, tipo) {
   Object.entries(porCategoria).sort((a, b) => a[0].localeCompare(b[0])).forEach(([cat, deps]) => {
     const catId = 'drp-cat-' + cat.replace(/[^a-zA-Z0-9]/g, '_');
     html += `<div style="margin-bottom:20px;">
-      <div onclick="toggleCategoriaDRP('${catId}')" style="background:linear-gradient(135deg,#d60014,#e6262b);color:white;padding:12px 20px;border-radius:8px 8px 0 0;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;">
-        <span style="font-weight:700;font-size:0.95em;">📁 ${esc(cat)}</span>
-        <span style="font-size:0.78em;opacity:0.8;">${deps.length} dependência${deps.length > 1 ? 's' : ''} ▾</span>
+      <div onclick="toggleCategoriaDRP('${catId}')" class="grupo-cab grupo-cab--clicavel">
+        <span>📁 ${esc(cat)}</span>
+        <span class="grupo-cab__conta">${deps.length} dependência${deps.length > 1 ? 's' : ''} ▾</span>
       </div>
       <div id="${catId}" style="border:1.5px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;overflow:hidden;">`;
 
@@ -15110,8 +15094,8 @@ function renderizarCategoriasFornecedor() {
             <tr style="cursor:pointer;${c.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalCategoriaFornecedor('${c.id}')">
               <td style="font-weight:600;">${esc(c.nome)}</td>
               <td style="text-align:center;">${c.ativo
-                ? '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#e8f5e9;color:#2e7d32;">Ativa</span>'
-                : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativa</span>'}</td>
+                ? '<span class=\"badge badge-green\">Ativa</span>'
+                : '<span class=\"badge badge-gray\">Inativa</span>'}</td>
               <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${isAdmin ? `
                   <button class="btn-icon" onclick="abrirModalCategoriaFornecedor('${c.id}')" title="Editar">${SVG_EDITAR}</button>
@@ -15266,8 +15250,8 @@ function renderizarSubcategoriasFornecedor() {
               <td style="font-weight:600;">${esc(s.nome)}</td>
               <td>${esc(_nomeCategoriaFornecedorPorId(s.categoriaId)) || '<span style="color:#c62828;">(categoria não encontrada)</span>'}</td>
               <td style="text-align:center;">${s.ativo
-                ? '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#e8f5e9;color:#2e7d32;">Ativa</span>'
-                : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativa</span>'}</td>
+                ? '<span class=\"badge badge-green\">Ativa</span>'
+                : '<span class=\"badge badge-gray\">Inativa</span>'}</td>
               <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${isAdmin ? `
                   <button class="btn-icon" onclick="abrirModalSubcategoriaFornecedor('${s.id}')" title="Editar">${SVG_EDITAR}</button>
@@ -15409,8 +15393,8 @@ function renderizarCriticidadeFornecedorPerguntas() {
               <td style="font-weight:600;">${esc(p.texto)}</td>
               <td style="font-size:0.85em;color:#555;">${p.opcoes.length} opção${p.opcoes.length === 1 ? '' : 'ões'}</td>
               <td style="text-align:center;">${p.ativa
-                ? '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#e8f5e9;color:#2e7d32;">Ativa</span>'
-                : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativa</span>'}</td>
+                ? '<span class=\"badge badge-green\">Ativa</span>'
+                : '<span class=\"badge badge-gray\">Inativa</span>'}</td>
               <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${isAdmin ? `
                   <button class="btn-icon" onclick="abrirDrawerCriticidadePergunta('${p.id}')" title="Editar">${SVG_EDITAR}</button>
@@ -16300,8 +16284,8 @@ function renderizarProdutosSoftware() {
               <td style="font-size:0.88em;color:#444;">${nomes(l.techLead)}</td>
               <td style="font-size:0.88em;color:#444;">${nomes(l.teamLead)}</td>
               <td style="text-align:center;">${p.ativo
-                ? '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#e8f5e9;color:#2e7d32;">Ativo</span>'
-                : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:#f5f5f5;color:#888;">Inativo</span>'}</td>
+                ? '<span class=\"badge badge-green\">Ativo</span>'
+                : '<span class=\"badge badge-gray\">Inativo</span>'}</td>
               <td style="text-align:center;" onclick="event.stopPropagation();">
                 ${isAdmin ? `
                   <button class="btn-icon" onclick="abrirModalProdutoSoftware('${esc(p.id)}')" title="Editar">${SVG_EDITAR}</button>
@@ -16767,7 +16751,7 @@ function _htmlDrawerFornecedorCadastro() {
       <div id="painel-forn-dados">
       <label style="${lbl}margin-bottom:10px;">Dados do fornecedor</label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
-        <div><label style="${lbl}">Razão Social</label><input type="text" id="fornCadNome" placeholder="Ex: Alfa Tecnologia S.A." style="${inp}"></div>
+        <div><label style="${lbl}">Razão Social <span class="req" aria-hidden="true">*</span></label><input type="text" id="fornCadNome" placeholder="Ex: Alfa Tecnologia S.A." style="${inp}"></div>
         <div><label style="${lbl}">Nome Fantasia</label><input type="text" id="fornCadNomeFantasia" placeholder="Ex: Alfa Tech" style="${inp}"></div>
       </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
@@ -16897,9 +16881,7 @@ function _htmlDrawerFornecedorCadastro() {
 window.trocarAbaFornecedor = (aba) => {
   ['dados', 'criticidade', 'conformidade'].forEach((a) => {
     document.getElementById('painel-forn-' + a).style.display = a === aba ? 'block' : 'none';
-    const btn = document.getElementById('tab-forn-' + a);
-    btn.style.color = a === aba ? '#d60014' : '#999';
-    btn.style.borderBottom = a === aba ? '3px solid #d60014' : '3px solid transparent';
+    _marcarAba(document.getElementById('tab-forn-' + a), a === aba);
   });
   // Cada aba tem seu próprio salvar: Dados grava o cadastro; Criticidade/
   // Conformidade gravam a avaliação (backends distintos). O botão só aparece
@@ -16951,7 +16933,7 @@ function _limparFormularioPessoaFornecedor() {
 
 window.adicionarPessoaFornecedor = () => {
   const nome = document.getElementById('pessoaFornNome').value.trim();
-  if (!nome) return showToast('Informe o nome da pessoa.', '#e65100');
+  if (!nome) return _avisarCampo('pessoaFornNome', 'Informe o nome da pessoa.');
   const item = {
     nome,
     cargo: document.getElementById('pessoaFornCargo').value.trim(),
@@ -17424,7 +17406,7 @@ function _coletarFormularioFornecedor() {
 window.salvarFornecedorCadastro = async () => {
   const dados = _coletarFormularioFornecedor();
   const { id, nome } = dados;
-  if (!nome) return showToast('Informe a razão social do fornecedor.', '#e65100');
+  if (!nome) return _avisarCampo('fornCadNome', 'Informe a razão social do fornecedor.');
 
   return await comBotaoCarregando('btnSalvarFornecedorCadastro', async () => {
   try {

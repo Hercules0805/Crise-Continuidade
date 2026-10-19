@@ -167,3 +167,49 @@ test('listas grandes paginadas: Riscos, Dependencias, Pessoas e Perfis (filtro v
     w.close();
   }
 });
+
+test('mesma informacao, mesma cor: sem degrade vermelho em tela, Ativo/Inativo sempre .badge', () => {
+  // Os dois degrades que sobram sao as capas dos documentos PCN/DRP (janela propria).
+  const degrades = (APP.match(/linear-gradient\(135deg,#d60014,#e6262b\)/g) || []).length;
+  const capas = (APP.match(/\.cover\{background:linear-gradient\(135deg,#d60014,#e6262b\)/g) || []).length;
+  assert.strictEqual(degrades, capas, 'degrade so nas capas dos documentos');
+  assert.doesNotMatch(APP, /#3949ab/);
+  assert.doesNotMatch(APP, /background:#e8f5e9;color:#2e7d32;">Ativ/);
+  assert.doesNotMatch(APP, /background:#f5f5f5;color:#888;">Inativ/);
+});
+
+test('abas dos drawers: estado por classe e aria-selected (sem pintar com hex no JS)', () => {
+  assert.doesNotMatch(APP, /btn\.style\.borderBottom = a === aba \? '3px solid #d60014'/);
+  const w = carregar({});
+  w.document.body.insertAdjacentHTML('beforeend', '<button id="tab-x-a" style="color:#d60014;border-bottom:3px solid #d60014;">A</button>');
+  const b = w.document.getElementById('tab-x-a');
+  w._marcarAba(b, false);
+  assert.strictEqual(b.getAttribute('aria-selected'), 'false');
+  assert.ok(b.classList.contains('aba-drawer') && !b.classList.contains('aba-drawer--ativa'));
+  assert.strictEqual(b.style.color, '', 'cor inline limpa (senao venceria a classe)');
+  w._marcarAba(b, true);
+  assert.strictEqual(b.getAttribute('aria-selected'), 'true');
+  assert.ok(b.classList.contains('aba-drawer--ativa'));
+  w.close();
+});
+
+test('validacao leva ate o campo: troca para a aba dele, foca e marca a borda', async () => {
+  const w = carregar({ getRiscos: [] });
+  await w.riscos();
+  await espera();
+  await w.abrirDrawerRisco();
+  w.trocarAbaRisco('avaliacao');
+  const toasts = [];
+  w.showToast = (m) => toasts.push(m);
+  await w.salvarRisco();
+  const campo = w.document.getElementById('rTitulo');
+  assert.ok(campo.classList.contains('campo-invalido'), 'borda de erro');
+  assert.strictEqual(w.document.activeElement, campo, 'foco no campo');
+  assert.notStrictEqual(w.document.getElementById('painel-risco-identificacao').style.display, 'none', 'voltou para a aba do campo');
+  assert.strictEqual(toasts.length, 1);
+  campo.value = 'x';
+  campo.dispatchEvent(new w.Event('input'));
+  assert.ok(!campo.classList.contains('campo-invalido'), 'ao digitar, a marca some');
+  assert.match(w.document.querySelector('label + #rTitulo, #rTitulo').previousElementSibling.innerHTML, /class="req"/, 'obrigatorio com asterisco');
+  w.close();
+});
