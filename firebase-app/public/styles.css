@@ -430,3 +430,9 @@ a.btn { text-decoration: none; }
 .vazio-inline { font-size: 13px; color: var(--ink-muted); margin: 4px 0; padding: 4px 0; }
 .nav-busca-resultados .vazio { border: none; border-radius: 0; background: transparent; text-align: left; }
 .data-table td.vazio, .data-table td.vazio:nth-child(1) { font-weight: 400; color: var(--ink-muted); text-align: center; }
+
+/* Card de métrica clicável (_htmlMetricCardFiltro) */
+.bia-metric--filtro { min-width: 140px; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.bia-metric--filtro:hover { border-color: var(--border-strong); }
+.bia-metric--ativo { outline: 2px solid var(--red); outline-offset: 2px; }
+.metricas-filtro { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }

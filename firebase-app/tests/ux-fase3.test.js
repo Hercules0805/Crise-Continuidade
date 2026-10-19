@@ -274,3 +274,17 @@ test('estado vazio em tres formatos de classe (tela, linha de tabela, nota), sem
   assert.strictEqual(w._htmlVazio('Nenhum <x>', 'det'), '<div class="vazio">Nenhum &lt;x&gt;<div class="vazio__detalhe">det</div></div>');
   w.close();
 });
+
+test('card de metrica clicavel: rotulo em cima, numero embaixo, filtro ativo por classe, onclick com nome escapado', () => {
+  assert.doesNotMatch(APP, /anelAtivo|cardBase/, 'sem o aro de filtro inline copiado por tela');
+  const w = carregar({});
+  const html = w._htmlMetricCardFiltro({ label: "Pilar d'Água", value: 3, ativo: true, onclick: `filtrarDashboardIndicadores('pilar','${w.escJs("Pilar d'Água")}')`, titulo: 't' });
+  w.document.body.insertAdjacentHTML('beforeend', html);
+  const b = w.document.body.lastElementChild;
+  assert.strictEqual(b.tagName, 'BUTTON');
+  assert.ok(b.classList.contains('bia-metric--ativo'));
+  assert.strictEqual(b.getAttribute('aria-pressed'), 'true');
+  assert.deepStrictEqual(Array.from(b.children).map((c) => c.className), ['bia-metric__label label', 'bia-metric__value display']);
+  assert.doesNotMatch(b.getAttribute('onclick'), /'pilar','Pilar d'Água'/, 'apostrofo escapado no onclick');
+  w.close();
+});

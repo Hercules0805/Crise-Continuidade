@@ -633,6 +633,17 @@ function _htmlVazio(texto, detalhe) {
   return `<div class="vazio">${esc(texto)}${detalhe ? `<div class="vazio__detalhe">${esc(detalhe)}</div>` : ''}</div>`;
 }
 
+// Card de métrica clicável que filtra a lista (Dashboard de Indicadores,
+// Fornecedores): mesmo visual do _htmlMetricCard (rótulo em cima, número
+// embaixo), filtro ativo marcado por classe e aria-pressed. `onclick` é código
+// JS já pronto (quem chama escapa os argumentos com escJs).
+function _htmlMetricCardFiltro({ label, value, cor, ativo, onclick, titulo }) {
+  return `<button type="button" class="bia-metric bia-metric--filtro${ativo ? ' bia-metric--ativo' : ''}" onclick="${onclick}" title="${esc(titulo || '')}" aria-pressed="${ativo ? 'true' : 'false'}">
+      <span class="bia-metric__label label">${esc(label)}</span>
+      <span class="bia-metric__value display"${cor ? ` style="color:${cor};"` : ''}>${esc(String(value))}</span>
+    </button>`;
+}
+
 // Link/atalho para outra tela só para quem pode vê-la -- senão o clique cai em
 // "Esta tela não é do seu perfil" (ex.: Gestor no drawer de Contrato, TI em
 // Dependências). Mesmo critério do route().
@@ -9785,8 +9796,8 @@ function _renderPainelRiscoConsolidado() {
     : '';
 
   const cartaoEmpresa = `
-    <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;">
-      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Carga de risco da empresa</div>
+    <div class="painel-card" style="padding:16px 18px;margin-bottom:0;">
+      <div class="painel-kpi__rotulo" style="text-align:left;margin-bottom:0;">Carga de risco da empresa</div>
       <div style="display:flex;align-items:baseline;gap:8px;margin:8px 0 10px;">
         <span style="font-size:2.8em;font-weight:800;line-height:1;color:#d60014;">${semNada ? '–' : emp.carga}</span>
         ${semNada ? '' : '<span style="font-size:0.85em;color:#aaa;">pontos</span>'}
@@ -10139,7 +10150,7 @@ async function monitor() {
   conteudo.innerHTML = `
     <div style="display:flex;gap:14px;align-items:center;margin-bottom:16px;">
       <div>
-        <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Retrato mais recente</div>
+        <div class="painel-kpi__rotulo" style="text-align:left;margin-bottom:0;">Retrato mais recente</div>
         <div style="font-size:1.3em;font-weight:800;color:#d60014;">${_dataCurta(ultimo.dia)}</div>
       </div>
       <span style="padding:4px 12px;border-radius:12px;font-size:0.82em;font-weight:700;background:${statusIdade.fundo};color:${statusIdade.cor};">
@@ -10162,15 +10173,15 @@ async function monitor() {
       </div>
     </div>
 
-    <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;margin-bottom:16px;">
-      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">Carga ao longo do tempo</div>
+    <div class="painel-card" style="padding:16px 18px;margin-bottom:16px;">
+      <div class="painel-kpi__rotulo" style="text-align:left;margin-bottom:10px;">Carga ao longo do tempo</div>
       ${grafico ? grafico.svg : '<div style="color:#999;">Sem dados suficientes para o gráfico.</div>'}
       <div style="margin-top:8px;">${grafico ? grafico.legendaHtml : ''}</div>
       ${historico.length < 5 ? `<div style="font-size:0.76em;color:#999;margin-top:10px;">Só ${historico.length} dia${historico.length === 1 ? '' : 's'} de histórico até agora — a curva fica mais útil conforme os dias passam.</div>` : ''}
     </div>
 
-    <div style="border:1px solid #e0e0e0;border-radius:10px;padding:16px 18px;background:#fff;margin-bottom:16px;">
-      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">Impacto financeiro estimado ao longo do tempo</div>
+    <div class="painel-card" style="padding:16px 18px;margin-bottom:16px;">
+      <div class="painel-kpi__rotulo" style="text-align:left;margin-bottom:10px;">Impacto financeiro estimado ao longo do tempo</div>
       ${graficoFinanceiro ? graficoFinanceiro.svg : '<div style="color:#999;">Sem dados suficientes para o gráfico.</div>'}
       <div style="margin-top:8px;">${graficoFinanceiro ? graficoFinanceiro.legendaHtml : ''}</div>
       ${ultimo.semImpactoFinanceiro ? `<div style="font-size:0.76em;color:#e65100;margin-top:10px;">⚠ ${ultimo.semImpactoFinanceiro} risco${ultimo.semImpactoFinanceiro > 1 ? 's' : ''} sem estimativa financeira — fora desta conta, o que a puxa para baixo</div>` : ''}
@@ -12552,18 +12563,11 @@ function renderizarIndicadoresDashboard() {
   const porPilar = {};
   indicadoresData.forEach(d => { const p = d.pilar || 'Sem Pilar'; porPilar[p] = (porPilar[p] || 0) + 1; });
 
-  // Cartão de métrica no padrão GRC360 (bia-metric), com clique/aro de filtro
-  // ativo por cima -- mesma técnica do card() de Fornecedores.
-  const cardBase = 'min-width:140px;text-align:center;cursor:pointer;';
-  const anelAtivo = 'outline:2.5px solid #d60014;outline-offset:2px;';
-
-  const cardsPilar = Object.entries(porPilar).sort((a, b) => a[0].localeCompare(b[0])).map(([p, n]) => {
-    const ativo = f.modo === 'pilar' && f.pilar === p;
-    return `<div class="bia-metric" style="${cardBase}${ativo ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('pilar','${p}')" title="Clique para filtrar por este pilar">
-      <div class="bia-metric__value display">${n}</div>
-      <div class="bia-metric__label label">${p}</div>
-    </div>`;
-  }).join('');
+  // Cards clicáveis que filtram a lista (_htmlMetricCardFiltro).
+  const cardsPilar = Object.entries(porPilar).sort((a, b) => a[0].localeCompare(b[0])).map(([p, n]) => _htmlMetricCardFiltro({
+    label: p, value: n, ativo: f.modo === 'pilar' && f.pilar === p,
+    onclick: `filtrarDashboardIndicadores('pilar','${escJs(p)}')`, titulo: 'Clique para filtrar por este pilar',
+  })).join('');
 
   // Lista filtrada de acordo com o card ativo.
   let lista, titulo;
@@ -12595,19 +12599,10 @@ function renderizarIndicadoresDashboard() {
         ${_mesesDisponiveis().map(m => `<option value="${m}" ${m === mesRef ? 'selected' : ''}>${_formatMes(m)}</option>`).join('')}
       </select>
     </div>
-    <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:24px;">
-      <div class="bia-metric" style="${cardBase}${f.modo === 'todos' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('todos')" title="Clique para ver todos os indicadores">
-        <div class="bia-metric__value display">${total}</div>
-        <div class="bia-metric__label label">Total de Indicadores</div>
-      </div>
-      <div class="bia-metric" style="${cardBase}${f.modo === 'foraDaMeta' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('foraDaMeta')" title="Clique para filtrar os fora da meta">
-        <div class="bia-metric__value display" style="color:var(--risk-critical);">${foraDaMeta.length}</div>
-        <div class="bia-metric__label label">Fora da Meta</div>
-      </div>
-      <div class="bia-metric" style="${cardBase}${f.modo === 'semMeta' ? anelAtivo : ''}" onclick="filtrarDashboardIndicadores('semMeta')" title="Clique para filtrar os sem meta definida">
-        <div class="bia-metric__value display" style="color:#757575;">${semMeta.length}</div>
-        <div class="bia-metric__label label">Sem Meta Definida</div>
-      </div>
+    <div class="metricas-filtro">
+      ${_htmlMetricCardFiltro({ label: 'Total de Indicadores', value: total, ativo: f.modo === 'todos', onclick: "filtrarDashboardIndicadores('todos')", titulo: 'Clique para ver todos os indicadores' })}
+      ${_htmlMetricCardFiltro({ label: 'Fora da Meta', value: foraDaMeta.length, cor: 'var(--risk-critical)', ativo: f.modo === 'foraDaMeta', onclick: "filtrarDashboardIndicadores('foraDaMeta')", titulo: 'Clique para filtrar os fora da meta' })}
+      ${_htmlMetricCardFiltro({ label: 'Sem Meta Definida', value: semMeta.length, cor: 'var(--ink-muted)', ativo: f.modo === 'semMeta', onclick: "filtrarDashboardIndicadores('semMeta')", titulo: 'Clique para filtrar os sem meta definida' })}
       ${cardsPilar}
     </div>
     <h3 style="font-size:1em;color:#d60014;margin-bottom:12px;">${titulo}</h3>
@@ -16129,8 +16124,6 @@ function renderizarFornecedores() {
 
   const ativos = criteriosFornecedorData.filter(FornecedorScore.criterioAtivo);
 
-  const anelAtivo = 'outline:2.5px solid #d60014;outline-offset:2px;';
-
   if (resumo) {
     const comNota = fornecedoresData.filter((f) => { const a = _avaliacaoDoFornecedor(f.id); return a && a.nota !== null; });
     const semAvaliacao = fornecedoresData.length - comNota.length;
@@ -16143,14 +16136,8 @@ function renderizarFornecedores() {
       return { n, t: 'sem contrato vigente', c: n ? '#e65100' : '#999', titulo: 'Filtrar fornecedores sem contrato vigente', ativo: fornecedoresFiltroResumo === 'semContrato', onclick: "filtrarFornecedoresResumo('semContrato')" };
     };
 
-    // Cartão de métrica no padrão GRC360 (bia-metric), com clique/aro de
-    // filtro ativo por cima -- o componente oficial não tem esses dois
-    // comportamentos, então a estrutura é montada aqui, só reaproveitando as
-    // classes/visual do pacote (ver nota em _htmlMetricCard, no topo do arquivo).
-    const card = (x) => `<div class="bia-metric" style="cursor:pointer;min-width:130px;${x.ativo ? anelAtivo : ''}" onclick="${x.onclick}" title="${esc(x.titulo)}">
-                <div class="bia-metric__label label">${esc(x.t)}</div>
-                <div class="bia-metric__value display" style="color:${x.c};">${x.n}</div>
-              </div>`;
+    // Cards clicáveis que filtram a lista (_htmlMetricCardFiltro).
+    const card = (x) => _htmlMetricCardFiltro({ label: x.t, value: x.n, cor: x.c, ativo: x.ativo, onclick: x.onclick, titulo: x.titulo });
 
     resumo.innerHTML = !ativos.length
       ? `<div style="border:1px solid #ffe0b2;background:#fff8e1;border-radius:10px;padding:14px 16px;color:#e65100;font-size:0.9em;">
@@ -16703,7 +16690,7 @@ async function perfis() {
       <button class="btn btn-primary" onclick="abrirModalPerfil()" id="btnNovoPerfil" style="display:none;">+ Dar acesso a alguém</button>
     </div>
     <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 16px;background:#fff;margin-bottom:18px;">
-      <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;margin-bottom:10px;">O que cada perfil pode</div>
+      <div class="painel-kpi__rotulo" style="text-align:left;margin-bottom:10px;">O que cada perfil pode</div>
       ${Perfis.CATALOGO.map((p) => `
         <div style="display:flex;gap:10px;margin-bottom:7px;font-size:0.86em;">
           <span style="font-weight:700;color:#d60014;min-width:130px;">${esc(p.rotulo)}</span>
