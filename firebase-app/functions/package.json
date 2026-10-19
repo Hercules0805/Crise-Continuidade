@@ -4,7 +4,7 @@
   "description": "Cloud Functions do BIA: endpoints públicos de token (avaliação/dependências/componentes/levantamento) que escrevem no Firestore com privilégio de admin.",
   "main": "index.js",
   "engines": {
-    "node": "20"
+    "node": "22"
   },
   "scripts": {
     "serve": "firebase emulators:start --only functions,firestore",
