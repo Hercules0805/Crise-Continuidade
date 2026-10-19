@@ -2512,44 +2512,6 @@ async function processos() {
         <button class="btn btn-primary" onclick="enviarConvite()">Enviar</button>
       </div>
     </div></div>
-    <div class="drawer-overlay" id="drawerOverlayAvaliar" onclick="fecharModalAvaliar()"></div>
-    <div class="drawer" id="drawerAvaliar">
-      <div class="drawer-resize" id="drawerResizeAvaliar"></div>
-      <div class="drawer-header">
-        <div>
-          <h3 id="modalAvaliarTitulo" style="margin:0;">Avaliar Processo</h3>
-          <p id="modalAvaliarNome" style="color:#888;font-size:0.85em;margin:4px 0 0;"></p>
-        </div>
-        <button onclick="fecharModalAvaliar()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;flex-shrink:0;">&times;</button>
-      </div>
-      <div class="drawer-body">
-        <input type="hidden" id="qProcessoId">
-        <input type="hidden" id="qArea">
-        <input type="hidden" id="qProcesso">
-        <div style="background:#f0f4ff;border-left:4px solid #d60014;border-radius:0 7px 7px 0;padding:14px 18px;margin-bottom:24px;">
-          <div style="font-size:0.78em;font-weight:700;color:#d60014;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px;">📋 Premissas da Avaliação</div>
-          <ul style="margin:0;padding-left:18px;">
-            <li style="font-size:0.88em;color:#333;line-height:1.6;">O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.</li>
-          </ul>
-        </div>
-        <div id="perguntas-container"></div>
-        <div class="score-bia">
-          <div class="score-bia__linha">
-            <span style="font-weight:600;">Score Total</span>
-            <span id="scoreTotal" class="score-bia__valor">0</span>
-          </div>
-          <div class="score-bia__linha">
-            <span style="font-weight:600;">Classificação</span>
-            <span id="scoreTier"></span>
-          </div>
-        </div>
-      </div>
-      <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="fecharModalAvaliar()">Fechar</button>
-        <button class="btn btn-ghost" onclick="imprimirAvaliacao()" style="color:#1565c0;border-color:#1565c0;">🖨️ Exportar PDF</button>
-        <button class="btn btn-primary" onclick="salvarAvaliacaoProcesso()">Salvar Avaliação</button>
-      </div>
-    </div>
     <div class="drawer-overlay" id="drawerOverlayProcesso" onclick="fecharDrawerProcesso()"></div>
     <div class="drawer" id="drawerProcesso">
       <div class="drawer-resize" id="drawerResize"></div>
@@ -2611,6 +2573,15 @@ async function processos() {
 
           <!-- ABA: AVALIAÇÃO -->
           <div id="painel-avaliacao" style="display:none;">
+            <div class="premissas-avaliacao">
+              <div class="premissas-avaliacao__titulo">Premissas da avaliação</div>
+              <ul>
+                <li>O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.</li>
+              </ul>
+            </div>
+            <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+              <button type="button" class="btn btn-ghost" onclick="imprimirAvaliacao()">🖨️ Exportar PDF</button>
+            </div>
             <div id="avaliacaoScoreResumo" style="margin-bottom:20px;"></div>
             <div id="avaliacaoPerguntas"></div>
           </div>
@@ -3823,15 +3794,6 @@ window.editarProcesso = (id) => {
   abrirModalProcesso(window.processosData.find(p => p.id === id));
 };
 
-window.avaliarProcessoFromBia = () => {
-  const id = document.getElementById('fId').value || '';
-  if (!id) return;
-  // So navega pra tela de Avaliacao -- nao tenta salvar aqui (quem decide
-  // salvar o Processo e o botao Salvar/Fechar dele, nao esta navegacao).
-  _fecharDrawerProcessoSemSalvar();
-  setTimeout(() => avaliarProcesso(id), 300);
-};
-
 // Le o formulario do drawer de Processo (puro: sem toast, sem efeito) --
 // usado por salvarProcesso e pelo rastreador de edicao (_edProcesso).
 function _coletarFormularioProcesso() {
@@ -4027,111 +3989,22 @@ window.fecharModalDetalhes = () => {
   document.getElementById('modalDetalhes').classList.remove('open');
 };
 
+// ✔ da lista: o questionário BIA vive só na aba Avaliação do Processo (antes havia
+// também o drawer "Avaliar Processo", com o mesmo questionário noutra interface).
 window.avaliarProcesso = (id) => {
-  const p = window.processosData.find(proc => proc.id === id);
-  if (!p) return;
-  document.getElementById('qProcessoId').value = p.id;
-  document.getElementById('qArea').value = p.area;
-  document.getElementById('qProcesso').value = p.processo;
-  document.getElementById('modalAvaliarNome').textContent = p.area;
-  document.getElementById('modalAvaliarTitulo').textContent = p.processo;
-  const container = document.getElementById('perguntas-container');
-  const OPCOES_RESPOSTA = window.configRespostas || {
-    'Geral': [
-      {valor:'4',label:'Acontece o tempo todo',cor:'#c62828',background:'#ffebee'},
-      {valor:'2',label:'Acontece com alguma frequência',cor:'#f57c00',background:'#fff3e0'},
-      {valor:'1',label:'Acontece raramente',cor:'#2e7d32',background:'#e8f5e9'},
-      {valor:'0',label:'Nunca aconteceu',cor:'#757575',background:'#f5f5f5'}
-    ],
-    '_default': [
-      {valor:'4',label:'Alto (4)',cor:'#c62828',background:'#ffebee'},
-      {valor:'2',label:'Médio (2)',cor:'#f57c00',background:'#fff3e0'},
-      {valor:'1',label:'Baixo (1)',cor:'#2e7d32',background:'#e8f5e9'},
-      {valor:'0',label:'N/A (0)',cor:'#757575',background:'#f5f5f5'}
-    ]
-  };
-  const CAT_CORES_PALETTE = CATEGORIA_CORES;
-  const CAT_CORES_AVALIAR = {};
-  [...new Set(window.processosPerguntas.map(p => p.categoria))].forEach((c, i) => {
-    CAT_CORES_AVALIAR[c] = CAT_CORES_PALETTE[i % CAT_CORES_PALETTE.length];
-  });
-  const pergsOrdenadas = [
-    ...window.processosPerguntas.filter(p => p.categoria === 'Geral'),
-    ...window.processosPerguntas.filter(p => p.categoria !== 'Geral'),
-  ];
-  const gruposCats = [];
-  const vistosCats = {};
-  pergsOrdenadas.forEach(p => { if (!vistosCats[p.categoria]) { vistosCats[p.categoria] = true; gruposCats.push(p.categoria); } });
-  container.innerHTML = gruposCats.map(cat => {
-    const cor = CAT_CORES_AVALIAR[cat] || '#555';
-    const itensCat = pergsOrdenadas.filter(p => p.categoria === cat);
-    return `<div style="margin-bottom:20px;">
-      <div style="background:${cor};color:white;padding:8px 16px;border-radius:7px 7px 0 0;font-size:0.8em;font-weight:700;letter-spacing:0.5px;text-transform:uppercase;">${cat}</div>
-      <div style="border:1.5px solid ${cor};border-top:none;border-radius:0 0 7px 7px;overflow:hidden;">
-        ${itensCat.map(perg => {
-          const i = window.processosPerguntas.indexOf(perg);
-          return `<div style="padding:20px 24px;background:#fafafa;border-bottom:1px solid #f0f0f0;">
-            <div style="font-weight:600;color:#1a1a2e;margin-bottom:3px;font-size:0.92em;">${esc(perg.pergunta)}</div>
-            <div style="font-size:0.81em;color:#888;margin-bottom:12px;line-height:1.5;">${esc(perg.descricao || '')}</div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
-              ${(OPCOES_RESPOSTA[cat] || OPCOES_RESPOSTA['_default'] || [{valor:'3',label:'Crítico',cor:'#c62828',background:'#ffebee'},{valor:'2',label:'Alto',cor:'#f57c00',background:'#fff3e0'},{valor:'1',label:'Moderado',cor:'#2e7d32',background:'#e8f5e9'},{valor:'0',label:'Baixo',cor:'#757575',background:'#f5f5f5'}]).slice().sort((a,b) => Number(b.valor) - Number(a.valor)).map(op => {
-                const opCor = (op.cor && op.cor !== 'undefined') ? op.cor : ({'4':'#c62828','2':'#f57c00','1':'#2e7d32','0':'#757575'}[String(op.valor)] || '#555');
-                const opBg = (op.background && op.background !== 'undefined') ? op.background : ({'4':'#ffebee','2':'#fff3e0','1':'#e8f5e9','0':'#f5f5f5'}[String(op.valor)] || '#f5f5f5');
-                return `
-                <label style="display:flex;align-items:flex-start;padding:12px 14px;background:white;border:2px solid #e0e0e0;border-radius:8px;cursor:pointer;min-height:56px;">
-                  <input type="radio" name="pergunta${i}" value="${op.valor}" data-cor="${opCor}" data-bg="${opBg}" data-label="${op.label}" onchange="calcularScore();atualizarEstiloOpcoes(this);" style="margin-right:8px;margin-top:2px;width:15px;height:15px;flex-shrink:0;">
-                  <span style="color:${opCor};font-weight:600;font-size:0.85em;line-height:1.4;">${op.label}</span>
-                </label>`;}).join('')}
-            </div>
-          </div>`;
-        }).join('')}
-      </div>
-    </div>`;
-  }).join('');
-  calcularScore();
-  // Pré-selecionar respostas anteriores
-  if (p.respostas && Object.keys(p.respostas).length > 0) {
-    window.processosPerguntas.forEach((perg, i) => {
-      const val = p.respostas[perg.pergunta];
-      if (val !== undefined) {
-        const radio = document.querySelector(`input[name="pergunta${i}"][value="${val}"]`);
-        if (radio) {
-          radio.checked = true;
-          atualizarEstiloOpcoes(radio);
-          radio.dispatchEvent(new Event('change'));
-        }
-      }
-    });
-    calcularScore();
-  }
-  document.getElementById('drawerAvaliar').classList.add('open');
-  document.getElementById('drawerOverlayAvaliar').classList.add('open');
-  iniciarDrawerResizeAvaliar();
-  _edAvaliar.marcar();
+  if (!window.processosData.find((proc) => proc.id === id)) return;
+  editarProcesso(id);
+  trocarAbaProcesso('avaliacao');
 };
 
-// Respostas marcadas no questionário: antes, ×/clique fora/Cancelar descartavam
-// todas sem perguntar.
-const _edAvaliar = criarRastreadorEdicao(() =>
-  Array.from(document.querySelectorAll('#perguntas-container input[type="radio"]:checked')).map((r) => r.name + '=' + r.value));
-
-function _fecharModalAvaliarSemSalvar() {
-  document.getElementById('drawerAvaliar').classList.remove('open');
-  document.getElementById('drawerOverlayAvaliar').classList.remove('open');
-}
-// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
-window.fecharModalAvaliar = () => _fecharComRastreador({
-  idDrawer: 'drawerAvaliar',
-  sujo: () => _edAvaliar.sujo(),
-  salvar: () => salvarAvaliacaoProcesso(),
-  fecharSemSalvar: _fecharModalAvaliarSemSalvar,
-});
-
 window.imprimirAvaliacao = () => {
-  const titulo = document.getElementById('modalAvaliarTitulo').textContent;
-  const area = document.getElementById('modalAvaliarNome').textContent;
-  const scoreTotal = document.getElementById('scoreTotal').textContent;
-  const scoreTier = document.getElementById('scoreTier').textContent;
+  // Lê da aba Avaliação do drawer de Processo (respostas ainda não salvas incluídas).
+  const titulo = document.getElementById('fProcesso').value;
+  const area = document.getElementById('fArea').value;
+  calcularScoreInline();
+  const scoreTotal = window._avaliacaoScore || 0;
+  const scoreTier = scoreTotal > 0 ? Criticidade.tierPorScore(scoreTotal) : Criticidade.TIER.PENDENTE;
+  const escopoAval = document.getElementById('avaliacaoPerguntas');
 
   // Coletar respostas selecionadas
   const pergs = window.processosPerguntas || window.questionarioPerguntas || [];
@@ -4158,9 +4031,8 @@ window.imprimirAvaliacao = () => {
       '<div style="border:1.5px solid ' + cor + ';border-top:none;border-radius:0 0 6px 6px;overflow:hidden;">' +
       itens.map((perg, idx) => {
         const i = pergs.indexOf(perg);
-        const sel = document.querySelector('input[name="pergunta' + i + '"]:checked');
+        const sel = escopoAval.querySelector('input[name="avalInline' + i + '"]:checked');
         const valSel = sel ? String(sel.value) : null;
-        console.log('perg', i, perg.pergunta.substring(0,30), 'valSel:', valSel);
         return '<div style="padding:14px 16px;background:#fafafa;border-bottom:1px solid #f0f0f0;">' +
           '<div style="font-weight:600;font-size:13px;margin-bottom:3px;">' + perg.pergunta + '</div>' +
           '<div style="font-size:11px;color:#888;margin-bottom:10px;">' + (perg.descricao || '') + '</div>' +
@@ -9547,8 +9419,7 @@ async function admin() {
 }
 
 // ============================================================
-// QUESTIONÁRIO BIA (drawer "Avaliar Processo"): estilo das opções, score e
-// redimensionar. A antiga tela própria "Questionário" (sem rota nem item de
+// QUESTIONÁRIO BIA (aba Avaliação do Processo): estilo das opções. A antiga tela própria "Questionário" (sem rota nem item de
 // menu, inalcançável) foi removida em 16/10/2026.
 // ============================================================
 window.atualizarEstiloOpcoes = (radio) => {
@@ -9573,30 +9444,6 @@ window.atualizarEstiloOpcoes = (radio) => {
   });
 };
 
-function iniciarDrawerResizeAvaliar() {
-  const drawer = document.getElementById('drawerAvaliar');
-  const handle = document.getElementById('drawerResizeAvaliar');
-  if (!handle || handle._resizeInit) return;
-  handle._resizeInit = true;
-  let startX, startW;
-  handle.addEventListener('mousedown', e => {
-    startX = e.clientX;
-    startW = drawer.offsetWidth;
-    handle.classList.add('resizing');
-    const onMove = ev => {
-      const newW = Math.min(Math.max(startW + (startX - ev.clientX), 400), window.innerWidth * 0.95);
-      drawer.style.width = newW + 'px';
-    };
-    const onUp = () => {
-      handle.classList.remove('resizing');
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  });
-}
-
 function iniciarDrawerResize() {
   const drawer = document.getElementById('drawerProcesso');
   const handle = document.getElementById('drawerResize');
@@ -9620,77 +9467,6 @@ function iniciarDrawerResize() {
     document.addEventListener('mouseup', onUp);
   });
 }
-
-window.calcularScore = () => {
-  let total = 0;
-  const pergs = window.processosPerguntas || window.questionarioPerguntas || [];
-  pergs.forEach((p, i) => {
-    const selected = document.querySelector(`input[name="pergunta${i}"]:checked`);
-    if (selected) {
-      total += parseInt(selected.value);
-    }
-  });
-  
-  document.getElementById('scoreTotal').textContent = total;
-  
-  // Calcular tier
-  // Mesmo chip de Tier da lista de Processos (antes: tons pastel próprios desta tela).
-  const tier = Criticidade.tierPorScore(total);
-  document.getElementById('scoreTier').innerHTML = _htmlBadge(total > 0 ? _nivelTierProcesso(tier) : null, total > 0 ? tier : Criticidade.TIER.PENDENTE);
-};
-
-window.fecharModalQuestionario = () => {
-  document.getElementById('modalQuestionario').classList.remove('open');
-};
-
-window.salvarAvaliacaoProcesso = async () => {
-  const area = document.getElementById('qArea').value;
-  const processo = document.getElementById('qProcesso').value;
-  const scores = {};
-  let todasRespondidas = true;
-  const pergs = window.processosPerguntas || window.questionarioPerguntas || [];
-  pergs.forEach((p, i) => {
-    const selected = document.querySelector(`input[name="pergunta${i}"]:checked`);
-    if (selected) scores[p.pergunta] = parseInt(selected.value);
-    else todasRespondidas = false;
-  });
-  if (!todasRespondidas) return showToast('Por favor, responda todas as perguntas.', '#e65100');
-
-  // Desabilitar botões de salvar e mostrar loading
-  const btns = document.querySelectorAll('button[onclick="salvarAvaliacaoProcesso()"]');
-  const textoOriginal = [];
-  btns.forEach((btn, i) => {
-    textoOriginal[i] = btn.innerHTML;
-    btn.disabled = true;
-    btn.innerHTML = '⏳ Salvando...';
-    btn.style.opacity = '0.7';
-    btn.style.cursor = 'not-allowed';
-  });
-
-  try {
-    const result = await API.post('salvarRespostas', { area, processo, scores });
-    if (result.error) throw new Error(result.error);
-    if (window.processosPerguntas) {
-      _fecharModalAvaliarSemSalvar();
-      showToast('✅ Avaliação salva com sucesso!', '#2e7d32');
-      API.invalidate('getProcessos');
-      processos();
-    } else {
-      fecharModalQuestionario();
-      showToast('✅ Avaliação salva com sucesso!', '#2e7d32');
-    }
-    return true;
-  } catch (err) {
-    showToast('❌ ' + _mensagemErro(err, 'Não foi possível salvar. Tente de novo.'), '#c62828');
-    // Reabilitar botões em caso de erro
-    btns.forEach((btn, i) => {
-      btn.disabled = false;
-      btn.innerHTML = textoOriginal[i];
-      btn.style.opacity = '1';
-      btn.style.cursor = 'pointer';
-    });
-  }
-};
 
 
 // ============================================================

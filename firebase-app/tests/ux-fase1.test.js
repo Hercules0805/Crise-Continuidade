@@ -29,7 +29,7 @@ function carregar(perfis, falhar = {}, extra = '') {
     },
   });
   SCRIPTS_REAIS.forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
-  // `extra` roda no MESMO eval do app.js, para alcançar as const internas (ex.: _edAvaliar).
+  // `extra` roda no MESMO eval do app.js, para alcançar as const internas.
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = () => {};\n' + extra);
   return w;
 }
@@ -93,22 +93,19 @@ test('atalho para tela que o perfil nao ve nao aparece', () => {
   g.close();
 });
 
-test('questionario BIA: x/clique fora com respostas marcadas pergunta antes de descartar', async () => {
+test('questionario BIA: uma interface so -- o check da lista abre o Processo na aba Avaliacao', async () => {
   const w = carregar(['admin'], {}, `
-    window.__perguntas = 0;
-    _perguntarAlteracoesNaoSalvas = async () => { window.__perguntas++; return 'descartar'; };
-    window.__marcarAvaliar = () => _edAvaliar.marcar();`);
-  w.document.body.insertAdjacentHTML('beforeend', `
-    <div class="drawer open" id="drawerAvaliar"></div><div class="drawer-overlay open" id="drawerOverlayAvaliar"></div>
-    <div id="perguntas-container"><input type="radio" name="pergunta0" value="4"></div>`);
-  w.__marcarAvaliar();
-  await w.fecharModalAvaliar();
-  assert.strictEqual(w.__perguntas, 0, 'sem resposta nova: fecha sem perguntar');
-  w.document.getElementById('drawerAvaliar').classList.add('open');
-  w.__marcarAvaliar();
-  w.document.querySelector('input[name="pergunta0"]').checked = true;
-  await w.fecharModalAvaliar();
-  assert.strictEqual(w.__perguntas, 1, 'marcou resposta: pergunta');
-  assert.ok(!w.document.getElementById('drawerAvaliar').classList.contains('open'), 'Descartar fecha');
+    window.__abas = [];
+    editarProcesso = (id) => { window.__editado = id; };
+    trocarAbaProcesso = (aba) => { window.__abas.push(aba); };`);
+  w.processosData = [{ id: 'p1', processo: 'Folha', area: 'RH' }];
+  w.avaliarProcesso('p1');
+  assert.strictEqual(w.__editado, 'p1');
+  assert.strictEqual(w.__abas.join(), 'avaliacao');
+  const app = fs.readFileSync(path.join(PUB, 'app.js'), 'utf8');
+  assert.doesNotMatch(app, /drawerAvaliar|salvarAvaliacaoProcesso|_edAvaliar/, 'drawer "Avaliar Processo" removido');
+  const aba = app.slice(app.indexOf('<div id="painel-avaliacao"'), app.indexOf('<!-- ABA: BIA -->'));
+  assert.match(aba, /premissas-avaliacao/);
+  assert.match(aba, /imprimirAvaliacao\(\)/);
   w.close();
 });

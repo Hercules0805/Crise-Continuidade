@@ -125,7 +125,6 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 .drawer-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 100; }
 .drawer-overlay.open { display: block; }
 .drawer { position: fixed; top: 0; right: 0; height: 100vh; width: 70vw; min-width: 320px; max-width: 90vw; background: white; box-shadow: -4px 0 24px rgba(0,0,0,0.15); z-index: 101; display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.25s ease; }
-.drawer#drawerAvaliar { width: 680px; }
 .drawer#drawerPessoa { width: 480px; }
 .drawer#drawerListaContrato { width: 480px; }
 .drawer#drawerNotificacao { width: 720px; }
@@ -411,6 +410,11 @@ a.btn { text-decoration: none; }
 .score-bia { background: var(--red-tint); border: 1px solid var(--border); border-radius: var(--r-md); padding: 20px; margin: 20px 0; }
 .score-bia__linha { display: flex; justify-content: space-between; align-items: center; }
 .score-bia__linha + .score-bia__linha { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+/* Premissas do questionário BIA (aba Avaliação do Processo) */
+.premissas-avaliacao { background: var(--surface-2, #f7f7f9); border-left: 4px solid var(--red, #d60014); border-radius: 0 var(--r-md) var(--r-md) 0; padding: 14px 18px; margin-bottom: 16px; }
+.premissas-avaliacao__titulo { font-size: 11px; font-weight: 700; color: var(--red, #d60014); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
+.premissas-avaliacao ul { margin: 0; padding-left: 18px; }
+.premissas-avaliacao li { font-size: 13px; color: var(--ink, #333); line-height: 1.6; }
 .score-bia__valor { font-size: 40px; font-weight: 700; color: var(--red); font-variant-numeric: tabular-nums; }
 
 /* ABAS DOS DRAWERS (_marcarAba) -- ativa: texto ink + sublinhado vermelho (padrão v2 do nav) */
