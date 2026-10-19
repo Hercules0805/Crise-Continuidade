@@ -316,6 +316,28 @@ describe('Security Rules — retrato diário do risco', () => {
   });
 });
 
+// Foto mensal do backlog de vulnerabilidades (19/10/2026): so contagens
+// agregadas, leitura de toda a empresa (o Gestor ve o Painel); escrita so do
+// servidor (varreduraDiariaVulnerabilidades).
+describe('Security Rules — foto mensal do Painel de Vulnerabilidades', () => {
+  test('gestor e admin leem; fora do dominio, nao', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('painel_vulnerabilidades/2026-09').set({ mes: '2026-09', abertas: 7 });
+    });
+    await assertSucceeds(db(GESTOR).doc('painel_vulnerabilidades/2026-09').get());
+    await assertSucceeds(db(ADMIN).collection('painel_vulnerabilidades').get());
+    await assertFails(db(FORA).doc('painel_vulnerabilidades/2026-09').get());
+  });
+
+  test('NEM admin grava ou apaga a foto — só o servidor', async () => {
+    await assertFails(db(ADMIN).doc('painel_vulnerabilidades/2026-10').set({ mes: '2026-10', abertas: 0 }));
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('painel_vulnerabilidades/2026-08').set({ mes: '2026-08', abertas: 3 });
+    });
+    await assertFails(db(ADMIN).doc('painel_vulnerabilidades/2026-08').delete());
+  });
+});
+
 // Perfis do RBAC cumulativo (28/09/2026). Semeados com o array `perfis`.
 const SI = { email: 'si@fortestecnologia.com.br' };
 const TI_USER = { email: 'ti@fortestecnologia.com.br' };

@@ -22,6 +22,7 @@ const { COLECAO: COLECAO_MEDICOES, FONTE, idDaMedicao, medicaoDeRespostaBia, med
 const fornecedorRisco = require('./fornecedorRisco');
 const vulnerabilidadeRisco = require('./vulnerabilidadeRisco');
 const vulnerabilidadeContexto = require('./vulnerabilidadeContexto');
+const painelVulnerabilidades = require('./painelVulnerabilidades');
 const retratoRisco = require('./retratoRisco');
 const contratoCiclo = require('./contratoCiclo');
 const notificacoes = require('./notificacoes');
@@ -435,6 +436,17 @@ exports.riscoDeVulnerabilidade = onDocumentWritten(
     const antes = event.data && event.data.before && event.data.before.exists ? event.data.before.data() : null;
     const excluida = !depois;
     try {
+      // Data de aceite para a tendencia do Painel (painelVulnerabilidades.js).
+      // A regravacao dispara este gatilho de novo e E ESSA execucao que
+      // sincroniza o risco: sincronizar nas duas ao mesmo tempo poderia abrir
+      // o risco em dobro (as duas leriam "sem risco ativo").
+      const hojeSP = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+      const patchAceite = painelVulnerabilidades.patchDataAceite(depois, hojeSP);
+      if (patchAceite) {
+        await event.data.after.ref.set(patchAceite, { merge: true });
+        logger.info('riscoDeVulnerabilidade: data de aceite ajustada; o risco sincroniza na proxima execucao', { vulnerabilidadeId: event.params.id });
+        return;
+      }
       const decisao = await sincronizarRiscoDaVulnerabilidade(event.params.id, depois || antes, excluida);
       logger.info(`riscoDeVulnerabilidade: ${decisao.acao}`, { vulnerabilidadeId: event.params.id, motivo: decisao.motivo });
     } catch (err) {
@@ -465,6 +477,17 @@ exports.varreduraDiariaVulnerabilidades = onSchedule(
       }
     }
     logger.info('varreduraDiariaVulnerabilidades: concluida', contagem);
+    // Foto do backlog para a tendencia do Painel de Vulnerabilidades. Usa a
+    // data de Sao Paulo (o agendamento e no fuso dela, 05:30 = 08:30 UTC).
+    try {
+      const hoje = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+      const foto = painelVulnerabilidades.fotoDoMes(snap.docs.map((d) => d.data()), hoje);
+      await db.collection(painelVulnerabilidades.COLECAO).doc(foto.mes)
+        .set(Object.assign({}, foto, { geradoEm: new Date().toISOString() }));
+      logger.info('varreduraDiariaVulnerabilidades: foto do painel gravada', { mes: foto.mes, abertas: foto.abertas });
+    } catch (err) {
+      logger.error('varreduraDiariaVulnerabilidades: falha ao gravar a foto do painel', { erro: err.message });
+    }
   }
 );
 
@@ -734,6 +757,7 @@ exports.vulnerabilidadeDeRiscoAceito = onDocumentWritten(
       const linha = `${hoje} — Risco aceito no Registro de Riscos${just ? `: ${just}` : '.'}`;
       await ref.set({
         statusCorrecao: 'Aceita',
+        dataAceite: hoje,
         observacoes: v.observacoes ? `${v.observacoes}\n${linha}` : linha,
         atualizadoEm: new Date().toISOString(),
         atualizadoPor: 'automacao:registro-de-riscos',

@@ -6,6 +6,7 @@ const app = document.getElementById('app');
 const pages = {
   processos, perguntas, areas, pessoas, admin, dependencias, pcns, drp, riscos, relatorios, servicos,
   vulnerabilidades,
+  'vulnerabilidades-painel': vulnerabilidadesPainel,
   'indicadores-dashboard': indicadoresDashboard,
   'indicadores-cadastro': indicadoresCadastro,
   'indicadores-lancamento': indicadoresLancamento,
@@ -7911,6 +7912,7 @@ function _renderPainelExposicaoVuln() {
       ${atrasadas ? chip(`⏰ Atrasadas: ${atrasadas}`, '#c62828', '#fdecea') : ''}
       ${semRisco.length ? `${chip(`⚠️ Acima do limiar sem risco: ${semRisco.length}`, '#e65100', '#fff3e0')}
         <button class="btn btn-ghost" onclick="selecionarVulnSemRisco()" style="padding:4px 10px;font-size:0.8em;">Selecionar para exportar</button>` : ''}
+      <a href="#vulnerabilidades-painel" style="font-size:0.8em;font-weight:600;color:var(--red);">Ver painel completo →</a>
       <span style="margin-left:auto;font-size:0.8em;color:#666;display:inline-flex;align-items:center;gap:6px;">
         Risco automático a partir de CVSS
         ${podeRegua
@@ -7937,6 +7939,466 @@ window.salvarLimiarVulnerabilidade = async () => {
     showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
   }
 };
+
+// ============================================================
+// PÁGINA: PAINEL DE VULNERABILIDADES (visão executiva, 19/10/2026)
+//
+// Uma seção por pergunta da diretoria, na ordem: exposição, tendência, ação
+// imediata, prazos, serviços e dados críticos. Toda a conta está em
+// vulnerabilidade-painel.js (testada à parte); aqui só se desenha.
+// Admin, Segurança e Gestor. O Gestor não vê a lista de Vulnerabilidades nem o
+// Registro de Riscos inteiro: as linhas não levam ao drawer e o critério
+// "acima do limiar sem risco" fica de fora para ele.
+// ============================================================
+let _painelVuln = null;
+const _painelVulnFiltro = { produto: '', tipo: '', meses: 12 };
+const _JANELA_PAINEL_VULN = 90;
+const _COR_PAINEL_VULN = { total: CATEGORIA_CORES[0], criticasAltas: CATEGORIA_CORES[2], novas: CATEGORIA_CORES[3], corrigidas: CATEGORIA_CORES[9] };
+
+async function vulnerabilidadesPainel() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Painel de Vulnerabilidades</h2><p class="page-sub">Visão executiva da gestão de vulnerabilidades: exposição, tendência, ação imediata, prazos e processos críticos</p></div>
+      ${_seVeTela('vulnerabilidades', '<button class="btn btn-ghost" onclick="location.hash=\'#vulnerabilidades\'">Ver lista de vulnerabilidades</button>')}
+    </div>
+    <div class="filters">
+      <div class="field">
+        <label class="field-label" for="painelVulnProduto">Produto</label>
+        <select id="painelVulnProduto" class="field-control" onchange="filtrarPainelVulnerabilidades()"><option value="">Todos</option></select>
+      </div>
+      <div class="field">
+        <label class="field-label" for="painelVulnTipo">Tipo</label>
+        <select id="painelVulnTipo" class="field-control" onchange="filtrarPainelVulnerabilidades()">
+          <option value="">Todos</option>
+          ${VULNERABILIDADE_TIPOS.map((t) => `<option value="${esc(t.tipo)}">${esc(t.tipo)}</option>`).join('')}
+          <option value="__sem_tipo__">Não classificada</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label" for="painelVulnMeses">Período da tendência</label>
+        <select id="painelVulnMeses" class="field-control" onchange="filtrarPainelVulnerabilidades()">
+          <option value="12">Últimos 12 meses</option>
+          <option value="6">Últimos 6 meses</option>
+        </select>
+      </div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="painelVulnConteudo" class="painel-exec"></div>`;
+
+  const podeVerLista = Perfis.podeVerTela(window.USER_PERFIS, 'vulnerabilidades');
+  try {
+    const [vulns, processos, produtos, cfg, fotos, riscos] = await Promise.all([
+      API.getVulnerabilidades(),
+      API.getProcessos().catch((e) => { console.error('Painel de Vulnerabilidades: processos não carregaram', e); return null; }),
+      API.getProdutosSoftware().catch(() => null),
+      API.getConfigVulnerabilidade().catch(() => ({ limiarCvss: 7 })),
+      API.getFotosPainelVulnerabilidades().catch((e) => { console.error('Painel de Vulnerabilidades: fotos mensais não carregaram; a tendência fica só reconstruída', e); return []; }),
+      // O Gestor só lê os riscos da própria área (regra do banco): sem a lista
+      // inteira, o critério "acima do limiar sem risco" mentiria para ele.
+      podeVerLista ? API.getRiscos().catch(() => null) : Promise.resolve(null),
+    ]);
+    if (produtos) produtosSoftwareData = produtos;
+    _painelVuln = {
+      vulns: vulns || [],
+      processos,
+      fotos: fotos || [],
+      riscos,
+      limiar: cfg && Number.isFinite(Number(cfg.limiarCvss)) ? Number(cfg.limiarCvss) : 7,
+      podeVerLista,
+    };
+  } catch (e) {
+    console.error('Painel de Vulnerabilidades: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar as vulnerabilidades.', 'vulnerabilidadesPainel');
+    return;
+  }
+  document.querySelector('.loading').style.display = 'none';
+
+  const selProduto = document.getElementById('painelVulnProduto');
+  const nomes = [...new Set(_painelVuln.vulns.map(_nomeProdutoVuln).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  selProduto.innerHTML = '<option value="">Todos</option>' + nomes.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+  selProduto.value = nomes.includes(_painelVulnFiltro.produto) ? _painelVulnFiltro.produto : '';
+  document.getElementById('painelVulnTipo').value = _painelVulnFiltro.tipo;
+  document.getElementById('painelVulnMeses').value = String(_painelVulnFiltro.meses);
+  renderizarPainelVulnerabilidades();
+}
+
+window.filtrarPainelVulnerabilidades = () => {
+  _painelVulnFiltro.produto = document.getElementById('painelVulnProduto').value;
+  _painelVulnFiltro.tipo = document.getElementById('painelVulnTipo').value;
+  _painelVulnFiltro.meses = Number(document.getElementById('painelVulnMeses').value) || 12;
+  renderizarPainelVulnerabilidades();
+};
+
+function _vulnsDoPainelFiltradas() {
+  const f = _painelVulnFiltro;
+  return _painelVuln.vulns.filter((v) => {
+    if (f.produto && _nomeProdutoVuln(v) !== f.produto) return false;
+    if (f.tipo === '__sem_tipo__') return !v.tipo;
+    if (f.tipo && v.tipo !== f.tipo) return false;
+    return true;
+  });
+}
+
+function renderizarPainelVulnerabilidades() {
+  const cont = document.getElementById('painelVulnConteudo');
+  if (!cont || !_painelVuln) return;
+  if (!_painelVuln.vulns.length) {
+    cont.innerHTML = _htmlVazio('Nenhuma vulnerabilidade cadastrada ainda.', 'O painel se preenche conforme as vulnerabilidades forem registradas.');
+    return;
+  }
+  const vulns = _vulnsDoPainelFiltradas();
+  if (!vulns.length) {
+    cont.innerHTML = _htmlVazio('Nenhuma vulnerabilidade com estes filtros.', 'Troque o produto ou o tipo para ver o painel.');
+    return;
+  }
+  const VP = VulnerabilidadePainel;
+  const comFiltro = !!(_painelVulnFiltro.produto || _painelVulnFiltro.tipo);
+  // A foto mensal é da empresa inteira: com filtro, a série é só reconstruída.
+  const serie = VP.serieMensal(vulns, { meses: _painelVulnFiltro.meses, fotos: comFiltro ? [] : _painelVuln.fotos });
+  const janelas = VP.janelas(null, _JANELA_PAINEL_VULN);
+  cont.innerHTML = [
+    _htmlPainelVulnExposicao(vulns, serie),
+    _htmlPainelVulnTendencia(vulns, serie, janelas, comFiltro),
+    _htmlPainelVulnAcao(vulns),
+    _htmlPainelVulnPrazos(vulns, janelas),
+    _htmlPainelVulnCriticos(vulns),
+  ].join('');
+}
+
+function _secaoPainelVuln(numero, pergunta, referencia) {
+  return `<div class="painel-pergunta"><span class="painel-pergunta__num">${numero}</span>${esc(pergunta)}<span class="painel-pergunta__ref">${esc(referencia)}</span></div>`;
+}
+
+/** "+3 vs. set/26" -- variação do valor de hoje contra o fechamento do mês anterior. */
+function _tendenciaPainelVuln(atual, anterior, campo) {
+  if (!anterior) return '';
+  const d = atual - anterior[campo];
+  const mes = VulnerabilidadePainel.rotuloMes(anterior.mes);
+  if (d === 0) return `Igual a ${mes}`;
+  return `${d > 0 ? '▲ +' : '▼ '}${d} vs. ${mes}`;
+}
+
+function _barraPainelVuln(pct, cor) {
+  return `<div class="barra"><div class="barra__valor" style="width:${Math.max(0, Math.min(100, pct))}%;background:${cor};"></div></div>`;
+}
+
+function _corSeveridadeVuln(s) {
+  return s === VulnerabilidadePainel.SEM_SEVERIDADE ? 'var(--border-strong)' : VulnerabilidadeSeveridade.faixa({ severidadeManual: s }).cor;
+}
+
+// ---- 1. Exposição atual ----
+function _htmlPainelVulnExposicao(vulns, serie) {
+  const VP = VulnerabilidadePainel;
+  const e = VP.exposicao(vulns);
+  const anterior = serie.length > 1 ? serie[serie.length - 2] : null;
+  const nivelCA = e.porSeveridade['Crítica'] ? 'critical' : (e.porSeveridade['Alta'] ? 'high' : null);
+  const aceitasCA = e.aceitasPorSeveridade['Crítica'] + e.aceitasPorSeveridade['Alta'];
+  const linhas = VP.SEVERIDADES.concat(e.semSeveridade ? [VP.SEM_SEVERIDADE] : []).map((s) => {
+    const n = e.porSeveridade[s];
+    const cor = _corSeveridadeVuln(s);
+    return `<div class="painel-linha">
+        <span class="painel-linha__rotulo">${esc(s)}</span>${_barraPainelVuln(e.abertas ? (n / e.abertas) * 100 : 0, cor)}
+        <span class="painel-linha__valor num">${n}</span>
+      </div>`;
+  }).join('');
+  const produtos = VP.porProduto(vulns, _nomeProdutoVuln).slice(0, 8);
+  const maiorIndice = produtos.length ? produtos[0].indice || 1 : 1;
+  const linhasProduto = produtos.map((p) => `<div class="painel-linha">
+        <span class="painel-linha__rotulo painel-linha__rotulo--longo" title="${esc(p.nome)}">${esc(p.nome)}</span>${_barraPainelVuln((p.indice / maiorIndice) * 100, 'var(--red)')}
+        <span class="painel-linha__valor num" title="Índice ${p.indice}">${p.total}</span>
+      </div>`).join('');
+  return `
+    ${_secaoPainelVuln(1, 'Qual é a exposição atual?', 'NIST CSF 2.0 · ID.RA-01')}
+    <div class="painel-metricas">
+      ${_htmlMetricCard({ label: 'Em aberto', value: e.abertas, trend: _tendenciaPainelVuln(e.abertas, anterior, 'abertas') })}
+      ${_htmlMetricCard({ label: 'Críticas + Altas em aberto', value: e.criticasAltas, level: nivelCA, trend: _tendenciaPainelVuln(e.criticasAltas, anterior, 'criticasAltas') })}
+      ${_htmlMetricCard({ label: 'Índice de exposição', value: e.indice, trend: _tendenciaPainelVuln(e.indice, anterior, 'indice') || 'Crítica 10 · Alta 5 · Média 2 · Baixa 1' })}
+      ${_htmlMetricCard({ label: 'Aceitas (risco assumido)', value: e.aceitas, trend: aceitasCA ? `${aceitasCA} Crítica${aceitasCA === 1 ? '' : 's'} ou Alta${aceitasCA === 1 ? '' : 's'}` : '' })}
+    </div>
+    <div class="painel-colunas">
+      <div class="painel-card">
+        <div class="painel-card__titulo">Em aberto por severidade</div>
+        <div class="painel-card__sub">Pendentes e em correção. Severidade pelo CVSS (faixas NVD) ou, sem CVSS, a escolhida na avaliação</div>
+        ${e.abertas ? linhas : '<div class="vazio-inline">Nenhuma vulnerabilidade em aberto.</div>'}
+      </div>
+      <div class="painel-card">
+        <div class="painel-card__titulo">Produtos mais expostos</div>
+        <div class="painel-card__sub">Barra pelo índice de exposição; número = vulnerabilidades em aberto</div>
+        ${linhasProduto || '<div class="vazio-inline">Nenhuma vulnerabilidade em aberto.</div>'}
+      </div>
+    </div>`;
+}
+
+// ---- 2. Tendência ----
+function _htmlPainelVulnTendencia(vulns, serie, janelas, comFiltro) {
+  const VP = VulnerabilidadePainel;
+  window._painelVulnSerie = serie;
+  const atual = VP.mttr(vulns, janelas.atual.de, janelas.atual.ate);
+  const antes = VP.mttr(vulns, janelas.anterior.de, janelas.anterior.ate);
+  const mov = VP.movimento(vulns, janelas.atual.de, janelas.atual.ate);
+  const reconstruidos = serie.filter((p) => p.fonte === 'reconstruida').length;
+  // Tempo de correção: subir é piorar (▲ vermelho), cair é melhorar (▼ verde).
+  let variacaoMttr = '';
+  if (atual.media !== null && antes.media !== null && atual.media !== antes.media) {
+    const piorou = atual.media > antes.media;
+    variacaoMttr = `<div class="painel-card__sub" style="margin:4px 0 0;color:${piorou ? '#c62828' : '#2e7d32'};">${piorou ? '▲' : '▼'} ${Math.abs(atual.media - antes.media)} dia${Math.abs(atual.media - antes.media) === 1 ? '' : 's'} vs. os ${_JANELA_PAINEL_VULN} dias anteriores (${antes.media})</div>`;
+  }
+  const mttrSev = VP.SEVERIDADES.filter((s) => atual.porSeveridade[s])
+    .map((s) => `${_htmlBadge(_nivelSeveridadeVulnerabilidade(s), s)} <span class="num">${atual.porSeveridade[s].media} dia${atual.porSeveridade[s].media === 1 ? '' : 's'}</span> <span class="muted">(${atual.porSeveridade[s].n})</span>`)
+    .join('&nbsp;&nbsp; ');
+  const legenda = (itens) => itens.map(([nome, cor]) => `<span class="painel-legenda"><span class="painel-legenda__cor" style="background:${cor};"></span>${esc(nome)}</span>`).join('');
+  return `
+    ${_secaoPainelVuln(2, 'Estamos melhorando ou piorando?', 'NIST SP 800-40 · SP 800-55')}
+    <div class="painel-colunas">
+      <div class="painel-card">
+        <div class="painel-card__titulo">Backlog em aberto no fim de cada mês</div>
+        <div class="painel-card__sub">Linha caindo = exposição diminuindo</div>
+        ${_svgPainelVulnBacklog(serie)}
+        <div style="margin-top:8px;">${legenda([['Total em aberto', _COR_PAINEL_VULN.total], ['Críticas + Altas', _COR_PAINEL_VULN.criticasAltas]])}</div>
+      </div>
+      <div class="painel-card">
+        <div class="painel-card__titulo">Entradas × saídas por mês</div>
+        <div class="painel-card__sub">Corrigidas acima das novas = o time está vencendo o backlog</div>
+        ${_svgPainelVulnMovimento(serie)}
+        <div style="margin-top:8px;">${legenda([['Novas (detectadas)', _COR_PAINEL_VULN.novas], ['Corrigidas', _COR_PAINEL_VULN.corrigidas]])}</div>
+      </div>
+    </div>
+    ${reconstruidos ? `<div class="painel-nota">${reconstruidos === serie.length - 1 && !comFiltro ? 'Os meses anteriores' : `${reconstruidos} ${reconstruidos === 1 ? 'mês foi reconstruído' : 'meses foram reconstruídos'}`} pelas datas de detecção e correção, com a severidade de hoje${comFiltro ? ' (com filtro, a série é sempre reconstruída: a foto mensal é da empresa inteira)' : '. A partir de agora, a varredura diária grava o fechamento de cada mês'}.</div>` : ''}
+    <div class="painel-card">
+      <div class="painel-card__titulo">Velocidade de correção — últimos ${_JANELA_PAINEL_VULN} dias</div>
+      <div class="painel-card__sub">Tempo médio de correção (MTTR) = da detecção até a correção</div>
+      <div class="painel-kpis">
+        <div class="painel-kpi">
+          <div class="painel-kpi__rotulo">Tempo médio de correção</div>
+          <div class="painel-kpi__valor num">${atual.media !== null ? `${atual.media} dia${atual.media === 1 ? '' : 's'}` : '–'}</div>
+          ${atual.n ? `<div class="painel-card__sub" style="margin:4px 0 0;">${atual.n} corrigida${atual.n === 1 ? '' : 's'} no período</div>` : '<div class="painel-card__sub" style="margin:4px 0 0;">Nenhuma corrigida no período</div>'}
+          ${variacaoMttr}
+        </div>
+        <div class="painel-kpi">
+          <div class="painel-kpi__rotulo">Taxa de fechamento</div>
+          <div class="painel-kpi__valor num" style="color:${mov.taxaFechamento === null ? 'inherit' : (mov.taxaFechamento >= 100 ? '#2e7d32' : '#c62828')};">${mov.taxaFechamento !== null ? mov.taxaFechamento + '%' : '–'}</div>
+          <div class="painel-card__sub" style="margin:4px 0 0;">${mov.corrigidas} corrigida${mov.corrigidas === 1 ? '' : 's'} para ${mov.novas} nova${mov.novas === 1 ? '' : 's'}</div>
+        </div>
+        <div class="painel-kpi">
+          <div class="painel-kpi__rotulo">Saldo do backlog</div>
+          <div class="painel-kpi__valor num" style="color:${mov.saldo > 0 ? '#c62828' : (mov.saldo < 0 ? '#2e7d32' : 'inherit')};">${mov.saldo > 0 ? '+' : ''}${mov.saldo}</div>
+          <div class="painel-card__sub" style="margin:4px 0 0;">${mov.saldo > 0 ? 'Entrou mais do que saiu' : (mov.saldo < 0 ? 'Saiu mais do que entrou' : 'Entradas e saídas empatadas')}</div>
+        </div>
+      </div>
+      ${mttrSev ? `<div style="margin-top:14px;font-size:13px;">Por severidade: ${mttrSev}</div>` : ''}
+    </div>`;
+}
+
+/** Geometria comum dos dois gráficos mensais (mesmo tamanho, mesmos rótulos de mês). */
+function _eixosPainelVuln(serie, maxValor) {
+  const L = 600, A = 220, M = { topo: 14, baixo: 30, esq: 36, dir: 10 };
+  const areaW = L - M.esq - M.dir, areaH = A - M.topo - M.baixo;
+  const max = Math.max(1, maxValor) * 1.15;
+  const n = serie.length;
+  const passoX = areaW / n;
+  const xCentro = (i) => M.esq + passoX * i + passoX / 2;
+  const y = (v) => M.topo + areaH - (areaH * v) / max;
+  let grade = '';
+  for (let f = 0; f <= 4; f++) {
+    const v = Math.round((max / 4) * f);
+    grade += `<line x1="${M.esq}" y1="${y(v)}" x2="${L - M.dir}" y2="${y(v)}" stroke="#eee" stroke-width="1"/>`
+      + `<text x="${M.esq - 6}" y="${y(v) + 4}" text-anchor="end" font-size="10" fill="#999">${v}</text>`;
+  }
+  const rotulos = serie.map((p, i) => `<text x="${xCentro(i)}" y="${A - M.baixo + 16}" text-anchor="middle" font-size="10" fill="#999">${esc(VulnerabilidadePainel.rotuloMes(p.mes))}</text>`).join('');
+  // Alvo de hover por mês: a coluna inteira, transparente (mesma classe do
+  // Monitor, para o toque fora fechar a dica).
+  const alvos = serie.map((p, i) => `<rect class="ponto-monitor-hit" x="${M.esq + passoX * i}" y="${M.topo}" width="${passoX}" height="${areaH}" fill="transparent" style="cursor:pointer;" onmouseenter="_mostrarDicaPainelVuln(event,${i})" onmouseleave="_esconderDicaMonitor()" onclick="_mostrarDicaPainelVuln(event,${i})"/>`).join('');
+  const moldura = `<line x1="${M.esq}" y1="${M.topo}" x2="${M.esq}" y2="${A - M.baixo}" stroke="#ccc"/><line x1="${M.esq}" y1="${A - M.baixo}" x2="${L - M.dir}" y2="${A - M.baixo}" stroke="#ccc"/>`;
+  return { L, A, passoX, xCentro, y, base: A - M.baixo, fundo: grade + rotulos + moldura, alvos };
+}
+
+function _svgPainelVulnBacklog(serie) {
+  const g = _eixosPainelVuln(serie, Math.max(...serie.map((p) => p.abertas)));
+  const linha = (campo, cor) => {
+    const pontos = serie.map((p, i) => `${g.xCentro(i)},${g.y(p[campo])}`).join(' ');
+    return (serie.length > 1 ? `<polyline points="${pontos}" fill="none" stroke="${cor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : '')
+      + serie.map((p, i) => `<circle cx="${g.xCentro(i)}" cy="${g.y(p[campo])}" r="3" fill="${p.fonte === 'reconstruida' ? '#fff' : cor}" stroke="${cor}" stroke-width="1.5"/>`).join('');
+  };
+  return `<svg viewBox="0 0 ${g.L} ${g.A}" style="width:100%;height:auto;display:block;" role="img" aria-label="Backlog de vulnerabilidades em aberto por mês">
+    ${g.fundo}${linha('abertas', _COR_PAINEL_VULN.total)}${linha('criticasAltas', _COR_PAINEL_VULN.criticasAltas)}${g.alvos}
+  </svg>`;
+}
+
+function _svgPainelVulnMovimento(serie) {
+  const g = _eixosPainelVuln(serie, Math.max(...serie.map((p) => Math.max(p.novas, p.corrigidas))));
+  const larg = Math.min(16, g.passoX * 0.32);
+  const barra = (x, v, cor) => (v > 0 ? `<rect x="${x}" y="${g.y(v)}" width="${larg}" height="${g.base - g.y(v)}" fill="${cor}" rx="2"/>` : '');
+  const barras = serie.map((p, i) => barra(g.xCentro(i) - larg - 1, p.novas, _COR_PAINEL_VULN.novas) + barra(g.xCentro(i) + 1, p.corrigidas, _COR_PAINEL_VULN.corrigidas)).join('');
+  return `<svg viewBox="0 0 ${g.L} ${g.A}" style="width:100%;height:auto;display:block;" role="img" aria-label="Vulnerabilidades novas e corrigidas por mês">
+    ${g.fundo}${barras}${g.alvos}
+  </svg>`;
+}
+
+/** HTML da dica de um mês (texto de VulnerabilidadePainel.linhasDicaMes, escapado). */
+function _conteudoDicaPainelVuln(ponto) {
+  const [titulo, ...linhas] = VulnerabilidadePainel.linhasDicaMes(ponto);
+  return `<div style="font-weight:700;color:var(--ink);">${esc(titulo)}</div>`
+    + linhas.map((l) => `<div style="margin-top:3px;">${esc(l)}</div>`).join('');
+}
+
+window._mostrarDicaPainelVuln = (ev, i) => {
+  const ponto = (window._painelVulnSerie || [])[i];
+  if (!ponto) return;
+  const el = _dicaMonitorEl();
+  el.innerHTML = _conteudoDicaPainelVuln(ponto);
+  _posicionarDicaGrafico(el, ev);
+};
+
+// ---- 3. Ação imediata ----
+const _NIVEL_MOTIVO_PAINEL_VULN = {
+  'Crítica': 'critical', 'Processo Tier 1': 'critical', 'Alta com exploit': 'high', 'Atrasada': 'high', 'Acima do limiar sem risco': 'medium',
+};
+const _LIMITE_ACAO_PAINEL_VULN = 10;
+
+function _htmlPainelVulnAcao(vulns) {
+  const VP = VulnerabilidadePainel;
+  const d = _painelVuln;
+  const riscoAberto = d.riscos
+    ? (id) => d.riscos.some((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(id) && r.status !== 'Encerrado')
+    : null;
+  const itens = VP.acaoImediata(vulns, { processos: d.processos || [], limiar: d.limiar, riscoAberto });
+  const criterios = 'Em aberto e: Crítica, Alta com exploit disponível, prazo vencido, atinge processo Tier 1'
+    + (riscoAberto ? `, ou severidade no limiar de risco (${d.limiar}) sem risco aberto` : '');
+  const linhas = itens.slice(0, _LIMITE_ACAO_PAINEL_VULN).map((it) => {
+    const v = it.v;
+    const sev = VP.severidade(v);
+    const clicavel = d.podeVerLista;
+    const motivos = it.motivos.map((m) => {
+      const rot = m === VP.MOTIVO.ATRASADA ? `Atrasada ${it.diasAtraso}d` : m;
+      return _htmlBadge(_NIVEL_MOTIVO_PAINEL_VULN[m] || null, rot);
+    }).join(' ');
+    return `<tr${clicavel ? ` style="cursor:pointer;" onclick="location.hash='#vulnerabilidades?vuln=${escJs(String(v.id))}'" title="Abrir a vulnerabilidade"` : ''}>
+        <td class="num">${esc(v.codigo || '–')}</td>
+        <td class="title">${esc(v.nome || '–')}<div class="muted" style="font-size:12px;">${esc(_nomeProdutoVuln(v) || 'Sem produto')}</div></td>
+        <td>${_htmlBadge(_nivelSeveridadeVulnerabilidade(sev), sev)}</td>
+        <td>${motivos}</td>
+        <td>${_pillStatusCorrecaoVulnerabilidade(v.statusCorrecao)}</td>
+        <td>${esc(v.responsavel || v.equipeResponsavel || '–')}${v.responsavel && v.equipeResponsavel ? `<div class="muted" style="font-size:12px;">${esc(v.equipeResponsavel)}</div>` : ''}</td>
+      </tr>`;
+  }).join('');
+  const resto = itens.length - _LIMITE_ACAO_PAINEL_VULN;
+  return `
+    ${_secaoPainelVuln(3, 'Quais vulnerabilidades exigem ação imediata?', 'NIST SP 800-40 · priorização')}
+    <div class="painel-card">
+      <div class="painel-card__titulo">Ação imediata ${itens.length ? `<span class="muted" style="font-weight:400;">· ${itens.length}</span>` : ''}</div>
+      <div class="painel-card__sub">${esc(criterios)}. Ordem: gravidade, processo crítico e dias de atraso</div>
+      ${itens.length ? `<div class="data-table data-table--compact">
+        <table>
+          <colgroup><col style="width:90px"><col><col style="width:110px"><col style="width:300px"><col style="width:130px"><col style="width:170px"></colgroup>
+          <thead><tr><th>Código</th><th>Vulnerabilidade</th><th>Severidade</th><th>Por quê</th><th>Status</th><th>Responsável</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>
+      ${resto > 0 ? `<div class="painel-nota" style="margin:10px 0 0;">E mais ${resto} vulnerabilidade${resto === 1 ? '' : 's'} nestes critérios.</div>` : ''}`
+    : _htmlVazio('Nada exige ação imediata.', 'Nenhuma vulnerabilidade em aberto atende aos critérios acima.')}
+    </div>`;
+}
+
+// ---- 4. Prazos ----
+function _htmlPainelVulnPrazos(vulns, janelas) {
+  const VP = VulnerabilidadePainel;
+  const cp = VP.cumprimentoPrazo(vulns, janelas.atual.de, janelas.atual.ate);
+  const at = VP.atraso(vulns);
+  const equipes = VP.porEquipe(vulns, janelas.atual.de, janelas.atual.ate);
+  const pctCor = (p) => (p === null ? 'inherit' : p >= 80 ? '#2e7d32' : p >= 50 ? '#f57c00' : '#c62828');
+  const linhas = equipes.map((e) => `<tr>
+      <td class="title">${esc(e.equipe)}</td>
+      <td class="col-c num">${e.abertas}</td>
+      <td class="col-c num"${e.atrasadas ? ' style="color:#c62828;font-weight:700;"' : ''}>${e.atrasadas || '–'}</td>
+      <td class="col-c num"${e.semPrazo ? ' style="color:#e65100;"' : ''}>${e.semPrazo || '–'}</td>
+      <td class="col-c num">${e.corrigidas || '–'}</td>
+      <td class="col-c num" style="color:${pctCor(e.pctNoPrazo)};font-weight:600;">${e.pctNoPrazo !== null ? e.pctNoPrazo + '%' : '–'}</td>
+      <td class="col-c num">${e.mttr !== null ? e.mttr + ' d' : '–'}</td>
+    </tr>`).join('');
+  return `
+    ${_secaoPainelVuln(4, 'As equipes estão corrigindo dentro dos prazos?', 'NIST SP 800-40 · SP 800-55')}
+    <div class="painel-metricas">
+      ${_htmlMetricCard({ label: `Corrigidas no prazo (${_JANELA_PAINEL_VULN} dias)`, value: cp.pct !== null ? cp.pct + '%' : '–', trend: cp.comPrazo ? `${cp.noPrazo} de ${cp.comPrazo} com data prevista` : 'Nenhuma corrigida com data prevista' })}
+      ${_htmlMetricCard({ label: 'Atrasadas hoje', value: at.atrasadas, level: at.atrasadas ? 'high' : null, trend: at.atrasadas ? `Atraso médio ${at.diasMedio} dia${at.diasMedio === 1 ? '' : 's'} · maior ${at.diasMaximo}` : '' })}
+      ${_htmlMetricCard({ label: 'Em aberto sem prazo definido', value: at.semPrazo, trend: at.pctSemPrazo !== null ? `${at.pctSemPrazo}% das em aberto` : '' })}
+      ${_htmlMetricCard({ label: `Corrigidas sem data prevista (${_JANELA_PAINEL_VULN} dias)`, value: cp.semPrazoDefinido, trend: 'Fora do percentual de prazo' })}
+    </div>
+    ${at.semPrazo ? `<div class="painel-nota">O prazo é a Data Prevista de Correção de cada vulnerabilidade. Sem ela, não há como medir atraso: ${at.semPrazo} em aberto ainda não têm prazo.</div>` : ''}
+    <div class="painel-card">
+      <div class="painel-card__titulo">Por equipe responsável</div>
+      <div class="painel-card__sub">Backlog e atraso de hoje; corrigidas, % no prazo e tempo médio de correção nos últimos ${_JANELA_PAINEL_VULN} dias</div>
+      ${equipes.length ? `<div class="data-table data-table--compact">
+        <table>
+          <thead><tr><th>Equipe</th><th class="col-c">Em aberto</th><th class="col-c">Atrasadas</th><th class="col-c">Sem prazo</th><th class="col-c">Corrigidas</th><th class="col-c">% no prazo</th><th class="col-c">Tempo médio</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>` : '<div class="vazio-inline">Nenhuma equipe com vulnerabilidades em aberto ou corrigidas no período.</div>'}
+    </div>`;
+}
+
+// ---- 5. Serviços e dados críticos ----
+function _htmlPainelVulnCriticos(vulns) {
+  const VP = VulnerabilidadePainel;
+  const d = _painelVuln;
+  const T = Criticidade.TIER;
+  const dados = VP.exposicaoDados(vulns);
+  const sv = VP.semVinculo(vulns);
+  let blocoProcessos;
+  if (!d.processos) {
+    blocoProcessos = `<div class="painel-card">${_htmlErroCarga('Não foi possível carregar os processos de negócio.', 'vulnerabilidadesPainel')}</div>`;
+  } else {
+    const exp = VP.processosExpostos(vulns, d.processos);
+    const totalProc = exp.processos.length;
+    const linhasTier = [T.T1, T.T2, T.T3, T.PENDENTE].map((t) => {
+      const n = exp.porTier[t] || 0;
+      const cor = t === T.PENDENTE ? 'var(--border-strong)' : Criticidade.corDoTier(t);
+      return `<div class="painel-linha">
+          <span class="painel-linha__rotulo">${esc(t === T.PENDENTE ? 'Pendente (sem BIA)' : t)}</span>${_barraPainelVuln(totalProc ? (n / totalProc) * 100 : 0, cor)}
+          <span class="painel-linha__valor num">${n}</span>
+        </div>`;
+    }).join('');
+    const criticos = exp.processos.filter((p) => p.tier === T.T1 || p.tier === T.T2);
+    const linhasCriticos = criticos.map((p) => `<tr>
+        <td class="title">${esc(p.processo)}</td>
+        <td class="muted">${esc(p.area || '–')}</td>
+        <td>${_htmlBadge(_nivelTierProcesso(p.tier), Criticidade.tierCurto(p.tier))}</td>
+        <td class="col-c num">${p.total}</td>
+        <td>${_htmlBadge(_nivelSeveridadeVulnerabilidade(p.piorSeveridade), p.piorSeveridade)}</td>
+      </tr>`).join('');
+    blocoProcessos = `
+      <div class="painel-colunas">
+        <div class="painel-card">
+          <div class="painel-card__titulo">Processos de negócio expostos</div>
+          <div class="painel-card__sub">Processos que dependem de algum ativo afetado por vulnerabilidade em aberto, por Tier do BIA</div>
+          ${totalProc ? linhasTier : '<div class="vazio-inline">Nenhum processo atingido pelas vulnerabilidades em aberto.</div>'}
+          ${sv.total ? `<div class="painel-nota" style="margin:12px 0 0;">⚠ ${sv.total} em aberto (${sv.pct}%) sem dependência vinculada — o impacto delas nos processos não aparece aqui.</div>` : ''}
+        </div>
+        <div class="painel-card">
+          <div class="painel-card__titulo">Exposição legal e de dados pessoais</div>
+          <div class="painel-card__sub">Em aberto com subtipo LGPD/Privacidade, ou Não Conformidade com exposição legal Alta ou Grave</div>
+          <div class="painel-kpis" style="grid-template-columns:1fr 1fr;">
+            <div class="painel-kpi"><div class="painel-kpi__rotulo">Total</div><div class="painel-kpi__valor num"${dados.total ? ' style="color:#c62828;"' : ''}>${dados.total}</div></div>
+            <div class="painel-kpi"><div class="painel-kpi__rotulo">LGPD / Privacidade</div><div class="painel-kpi__valor num">${dados.lgpd}</div></div>
+          </div>
+          ${dados.vulnerabilidades.slice(0, 5).map((v) => `<div class="painel-linha" style="margin-top:10px;"><span class="num" style="width:70px;flex-shrink:0;">${esc(v.codigo || '–')}</span><span style="flex:1;font-size:13px;">${esc(v.nome || '–')}</span>${_htmlBadge(_nivelSeveridadeVulnerabilidade(VP.severidade(v)), VP.severidade(v))}</div>`).join('')}
+        </div>
+      </div>
+      <div class="painel-card">
+        <div class="painel-card__titulo">Processos críticos atingidos (Tier 1 e Tier 2)</div>
+        <div class="painel-card__sub">Pela cadeia vulnerabilidade → dependência afetada → processo do BIA, mais crítico primeiro</div>
+        ${criticos.length ? `<div class="data-table data-table--compact">
+          <table>
+            <colgroup><col><col style="width:200px"><col style="width:100px"><col style="width:120px"><col style="width:170px"></colgroup>
+            <thead><tr><th>Processo</th><th>Área</th><th>Tier</th><th class="col-c">Em aberto</th><th>Pior severidade</th></tr></thead>
+            <tbody>${linhasCriticos}</tbody>
+          </table>
+        </div>` : '<div class="vazio-inline">Nenhum processo Tier 1 ou Tier 2 atingido por vulnerabilidade em aberto.</div>'}
+      </div>`;
+  }
+  return `
+    ${_secaoPainelVuln(5, 'Existe risco relevante para os serviços e dados críticos?', 'NIST CSF 2.0 · ID.RA-04 / GV.RM')}
+    ${blocoProcessos}`;
+}
 
 window.ordenarVulnerabilidades = (coluna) => { vulnerabilidadesOrdenacao.ordenar(coluna); vulnerabilidadesPaginacao.reiniciar(); renderizarVulnerabilidades(); };
 window.irParaPaginaVulnerabilidades = (delta) => { vulnerabilidadesPaginacao.mover(delta); renderizarVulnerabilidades(); };
@@ -10012,15 +10474,19 @@ window._mostrarDicaMonitor = (ev, campo, sIdx, i) => {
   if (!ctx) return;
   const el = _dicaMonitorEl();
   el.innerHTML = _conteudoDicaMonitor(ctx, sIdx, i);
+  _posicionarDicaGrafico(el, ev);
+};
+
+/** Mostra a dica flutuante acima do alvo do evento; se não couber, abaixo. Sempre dentro da janela. */
+function _posicionarDicaGrafico(el, ev) {
   el.style.display = 'block';
-  // Acima do ponto; se não couber, abaixo. Sempre dentro da janela.
   const alvo = ev.currentTarget.getBoundingClientRect();
   const w = el.offsetWidth, h = el.offsetHeight;
   const esq = Math.min(Math.max(8, alvo.left + alvo.width / 2 - w / 2), window.innerWidth - w - 8);
   const topo = alvo.top - h - 10 >= 8 ? alvo.top - h - 10 : alvo.bottom + 10;
   el.style.left = esq + 'px';
   el.style.top = topo + 'px';
-};
+}
 
 window._esconderDicaMonitor = () => {
   const el = document.getElementById('dicaMonitor');

@@ -456,6 +456,16 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ---- Foto mensal do backlog de vulnerabilidades (19/10/2026) ----
+    // Um documento por mes ('AAAA-MM'), so contagens agregadas (nenhum nome de
+    // vulnerabilidade) -- mesma leitura ampla de /vulnerabilidades, que ja e
+    // isCorpUser. Escrita so pelo servidor (varreduraDiariaVulnerabilidades,
+    // Admin SDK): ponto de tendencia forjado pelo navegador nao vale nada.
+    match /painel_vulnerabilidades/{mes} {
+      allow read: if isCorpUser();
+      allow write: if false;
+    }
+
     // ---- Tokens ----
     // FECHADO PARA TODO MUNDO, de propósito (20/09/2026).
     //

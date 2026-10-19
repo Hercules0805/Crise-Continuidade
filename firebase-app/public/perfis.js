@@ -69,7 +69,7 @@
   var TELAS = {};
   TELAS[PERFIL.ADMIN] = '*';
   TELAS[PERFIL.SEGURANCA] = [
-    'processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades',
+    'processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades', 'vulnerabilidades-painel',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
     'dependencias', 'areas', 'pessoas', 'relatorios', 'servicos', 'catalogo-backup', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
@@ -96,8 +96,10 @@
   ];
   // DECISAO 15/10/2026: Contratos tem a mesma posse de Fornecedores (Admin, SI,
   // Operador). O Gestor so CONSULTA os contratos da propria area.
+  // DECISAO 19/10/2026: o Gestor ve o Painel de Vulnerabilidades (visao
+  // executiva, so leitura), mas nao a lista nem o cadastro.
   TELAS[PERFIL.GESTOR] = [
-    'processos', 'pcns', 'drp', 'riscos',
+    'processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades-painel',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
     'contratos',
     'admin',

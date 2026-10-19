@@ -47,6 +47,7 @@ const COLLECTION = {
   servicos: 'servicos',
   backups: 'backups',
   vulnerabilidades: 'vulnerabilidades',
+  painelVulnerabilidades: 'painel_vulnerabilidades',
   contratos: 'contratos',
   eventosContrato: 'eventos_contrato',
   tiposContrato: 'tipos_contrato',
@@ -553,7 +554,19 @@ async function _lerVulnerabilidades() {
     dataCorrecao: v.dataCorrecao || '',
     evidenciaCorrecao: v.evidenciaCorrecao || '',
     observacoes: v.observacoes || '',
+    // Só leitura (Painel de Vulnerabilidades, 19/10/2026): quando saiu do
+    // backlog por aceite (gravado pelo servidor, ver functions/painelVulnerabilidades.js)
+    // e a última edição, fallback de data para as aceitas/corrigidas antigas.
+    dataAceite: v.dataAceite || '',
+    atualizadoEm: v.atualizadoEm || '',
   })).sort((a, b) => b.codigo.localeCompare(a.codigo, 'pt-BR'));
+}
+
+// Fotos mensais do backlog (uma por 'AAAA-MM'), gravadas pela varredura diária.
+// Coleção pequena (12 docs/ano): lê tudo e ordena aqui.
+async function _lerFotosPainelVulnerabilidades() {
+  const docs = await _getAll(COLLECTION.painelVulnerabilidades);
+  return docs.map((d) => Object.assign({}, d, { mes: d.mes || d.id })).sort((a, b) => a.mes.localeCompare(b.mes));
 }
 
 const _CAMPOS_VULNERABILIDADE = [
@@ -2119,6 +2132,7 @@ const _GET_FIRESTORE = {
   getServicos: () => _lerServicos(),
   getBackups: () => _lerBackups(),
   getVulnerabilidades: () => _lerVulnerabilidades(),
+  getFotosPainelVulnerabilidades: () => _lerFotosPainelVulnerabilidades(),
   getContratos: () => _lerContratos(),
   getEventosContrato: (params) => _lerEventosContrato(params),
   getTiposContrato: () => _lerListaContrato(COLLECTION.tiposContrato),
@@ -2425,6 +2439,7 @@ const API = {
   excluirBackup: (id) => API.post('excluirBackup', { id })
     .then((r) => { API.invalidate('getBackups'); return r; }),
   getVulnerabilidades: () => API.get('getVulnerabilidades'),
+  getFotosPainelVulnerabilidades: () => API.get('getFotosPainelVulnerabilidades'),
   salvarVulnerabilidade: (v) => API.post('salvarVulnerabilidade', v)
     .then((r) => { API.invalidate('getVulnerabilidades'); return r; }),
   excluirVulnerabilidade: (id) => API.post('excluirVulnerabilidade', { id })
