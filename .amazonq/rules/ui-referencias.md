@@ -431,6 +431,31 @@ duplicar lista) se outro campo de busca global for criado no futuro.
 
 **DECISÃO 04/10/2026 (refinamento) — select de Servidor só lista a categoria técnica "Servidor":** o select acima listava as 7 categorias técnicas juntas (com a categoria como sufixo pra desambiguar). Pedido explícito: só itens da própria categoria "Servidor" (uma das 7 de `DEPENDENCIA_CATEGORIAS_TECNICAS`) ficam disponíveis — sufixo de categoria removido (ficaria sempre repetindo "— Servidor"). O "+ Novo" pré-preenche a Categoria do formulário de Dependência com "Servidor", já que é a única que faz sentido nesse contexto.
 
+### DECISÃO 16/10/2026 — componentes comuns (revisão de UX, Fases 3 e 4)
+
+Tela nova usa estes componentes; tela antiga que for tocada migra para eles. Testes: `tests/ux-fase3.test.js` e `tests/ux-fase4.test.js`.
+
+| Necessidade | Use | Não use |
+|---|---|---|
+| Barra de filtros | `.filters` > `.field` > `.field-label` (sem ":" nem "Filtrar por") + `.field-control`; busca `type="search"` com `.field-control--busca`, placeholder sem 🔍 | `<label style="font-size:0.9em...">`, select com borda inline |
+| Paginação | `const xPaginacao = criarPaginacao(20)` (`util.js`) + `xPaginacao.aplicar(lista)` no render + `_htmlPaginacao(pag, 'irParaPaginaX')`; `filtrarX()`/`ordenarX()` chamam `xPaginacao.reiniciar()` | contador `xPaginaAtual` + rodapé copiado |
+| Ações de linha | `${SVG_EDITAR}` / `${SVG_EXCLUIR}` dentro de `.btn-icon` com `title` (vira `aria-label` sozinho); quem só consulta vê o lápis com title "Visualizar" | emoji ✏️/🗑️, botão "Ver" |
+| Cards de número | `_htmlMetricCard({ label, value, level, trend })` em `.painel-metricas` (ou `.painel-metricas--auto` para quantidade variável) | `<div style="border-top:3px solid #hex">` |
+| Bloco de dashboard | `.painel-card` (+ `__titulo`, `__sub`), barras `.barra`/`.barra__valor`, KPIs `.painel-kpi`; tabela interna `.data-table` | cartão com `box-shadow`, degradê |
+| Cabeçalho de grupo (listas agrupadas) | `.grupo-cab` (`--clicavel` se recolhe) | faixa em degradê vermelho com texto branco |
+| Cor de Tier | `Criticidade.corDoTier(tier)` ou o chip `_htmlBadge(_nivelTierProcesso(tier), rotulo)`; contagem de Tier 3 por `Criticidade.ehTier(p, TIER.T3)` | hex `#c62828/#f57c00/#1565c0`, "score < 6" |
+| Ativo/Inativo | `.badge.badge-green` / `.badge.badge-gray` | `<span style="background:#e8f5e9...">` |
+| Abas de drawer | `trocarAbaX` chama `_marcarAba(botao, ativa)` (classe `.aba-drawer`/`--ativa` + `aria-selected`) | `btn.style.color = '#d60014'` |
+| Validação de campo | `return _avisarCampo('idDoCampo', 'Informe X.')` (troca para a aba do campo, foca, marca `.campo-invalido`) + `<span class="req" aria-hidden="true">*</span>` no rótulo | `return showToast('Informe X.', '#e65100')` sozinho |
+| Confirmação | `if (!await confirmarAcao('Excluir X?')) return;` (modal do sistema; botão com o verbo; Esc = Cancelar) | `confirm()` nativo, `esc()` dentro da mensagem |
+| Erro de carga | `_htmlErroCarga('Não foi possível carregar X.', 'nomeDaTela')` | `catch → []` (vira "Nenhum X cadastrado") |
+| Atalho para outra tela | `_seVeTela('pagina', html)` | link sem checar perfil |
+| Grade larga | `<colgroup>` em px + `min-width` inline; o `min-width:1400px` legado só vale para 9+ colunas | `width:%` somando ≠ 100 |
+
+**Acessibilidade (Fase 4)** — feita num ponto só em `app.js` (bloco "ACESSIBILIDADE DE DRAWERS E MODAIS"), sem precisar marcar cada drawer: ao ganhar `.open`, todo `.drawer`/`.modal-overlay` recebe `role="dialog"`, `aria-modal` e o `<h3>` como `aria-labelledby`, foca o 1º campo e guarda quem abriu; ao fechar, o foco volta. Tab fica preso no diálogo aberto mais recente. Botão só de ícone ganha `aria-label` (do `title`; o `×` vira "Fechar"). `#toast` é `role="status" aria-live="polite"`. Por isso: **todo drawer/modal precisa de um `<h3>` de título** e **todo botão só de ícone precisa de `title`**.
+
+**Ainda não unificado** (decisão pendente, não copiar como padrão): cadastro rápido por link "Gerenciar X" em nova aba + 🔄 (o padrão é o drawer empilhado, `_esconderDrawerPaiTemporariamente`); questionário BIA em duas interfaces (drawer "Avaliar Processo" e aba Avaliação do Processo); mensagens de erro que mostram `e.message` técnico.
+
 ## 5. Divergências conhecidas (não corrigidas nesta rodada — cuidado ao copiar o "padrão errado")
 
 Estas inconsistências existem hoje no código e são conhecidas; normalizar aos poucos, ao tocar em cada tela — não foram corrigidas de uma vez por exigirem mudança em muitos pontos sem verificação visual disponível neste ambiente:

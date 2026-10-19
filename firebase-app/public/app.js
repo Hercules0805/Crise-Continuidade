@@ -468,6 +468,99 @@ function confirmarAcao(mensagem, opcoes = {}) {
   });
 }
 
+// ============================================================
+// ACESSIBILIDADE DE DRAWERS E MODAIS (Fase 4 da revisão de UX, 16/10/2026)
+// Num ponto só, sem editar cada um dos ~40 drawers/modais: quando um .drawer ou
+// .modal-overlay ganha a classe "open", recebe role="dialog"/aria-modal e o
+// título como rótulo, guarda quem estava com o foco e foca o 1º campo; ao
+// fechar, devolve o foco. O Tab fica preso no diálogo aberto mais recente.
+// Botões só com ícone (×, lápis, lixeira) ganham aria-label a partir do title.
+// ============================================================
+const _SELETOR_FOCAVEL = 'input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+const _focoAntesDoDialogo = new WeakMap();
+
+function _caixaDoDialogo(el) {
+  return el.classList.contains('modal-overlay') ? (el.querySelector('.modal') || el) : el;
+}
+
+function _focaveisVisiveis(caixa) {
+  return Array.from(caixa.querySelectorAll(_SELETOR_FOCAVEL))
+    .filter((f) => f.offsetParent !== null || f === document.activeElement);
+}
+
+function _rotularBotoesDeIcone(raiz) {
+  raiz.querySelectorAll('button:not([aria-label])').forEach((b) => {
+    const texto = b.textContent.trim();
+    if (texto === '×') b.setAttribute('aria-label', 'Fechar');
+    else if (!texto && b.title) b.setAttribute('aria-label', b.title);
+  });
+}
+
+function _aoAbrirDialogo(el) {
+  const caixa = _caixaDoDialogo(el);
+  caixa.setAttribute('role', caixa.getAttribute('role') || 'dialog');
+  caixa.setAttribute('aria-modal', 'true');
+  const titulo = caixa.querySelector('h3');
+  if (titulo && !caixa.getAttribute('aria-labelledby')) {
+    if (!titulo.id) titulo.id = 'titulo-' + (el.id || 'dialogo') + '-' + Math.random().toString(36).slice(2, 7);
+    caixa.setAttribute('aria-labelledby', titulo.id);
+  }
+  _rotularBotoesDeIcone(caixa);
+  if (!_focoAntesDoDialogo.has(el) && document.activeElement && document.activeElement !== document.body) {
+    _focoAntesDoDialogo.set(el, document.activeElement);
+  }
+  // Depois da animação de entrada: foca o 1º campo de formulário (ou o 1º botão).
+  setTimeout(() => {
+    if (!el.classList.contains('open') || caixa.contains(document.activeElement)) return;
+    const campos = _focaveisVisiveis(caixa);
+    const alvo = campos.find((f) => /^(INPUT|SELECT|TEXTAREA)$/.test(f.tagName)) || campos[0];
+    if (alvo) { try { alvo.focus({ preventScroll: true }); } catch (e) { /* elemento saiu da tela */ } }
+  }, 60);
+}
+
+function _aoFecharDialogo(el) {
+  const antes = _focoAntesDoDialogo.get(el);
+  _focoAntesDoDialogo.delete(el);
+  if (antes && document.contains(antes) && !document.querySelector('.drawer.open, .modal-overlay.open')) {
+    try { antes.focus({ preventScroll: true }); } catch (e) { /* elemento saiu da tela */ }
+  }
+}
+
+new MutationObserver((mudancas) => {
+  mudancas.forEach((m) => {
+    if (m.type === 'attributes') {
+      const el = m.target;
+      if (!el.classList || !(el.classList.contains('drawer') || el.classList.contains('modal-overlay'))) return;
+      const abriu = el.classList.contains('open');
+      const estava = (m.oldValue || '').split(/\s+/).includes('open');
+      if (abriu && !estava) _aoAbrirDialogo(el);
+      else if (!abriu && estava) _aoFecharDialogo(el);
+    } else {
+      m.addedNodes.forEach((n) => {
+        if (n.nodeType !== 1) return;
+        _rotularBotoesDeIcone(n);
+        // Diálogo criado já aberto (ex.: _perguntarAlteracoesNaoSalvas, confirmarAcao)
+        if ((n.classList.contains('modal-overlay') || n.classList.contains('drawer')) && n.classList.contains('open')) _aoAbrirDialogo(n);
+      });
+    }
+  });
+}).observe(document.body, { attributes: true, attributeFilter: ['class'], attributeOldValue: true, subtree: true, childList: true });
+
+// Tab preso no diálogo aberto mais recente (modal acima de drawer).
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Tab') return;
+  const abertos = Array.from(document.querySelectorAll('.modal-overlay.open, .drawer.open'));
+  const topo = abertos.find((x) => x.classList.contains('modal-overlay')) || abertos[abertos.length - 1];
+  if (!topo) return;
+  const caixa = _caixaDoDialogo(topo);
+  const campos = _focaveisVisiveis(caixa);
+  if (!campos.length) return;
+  const primeiro = campos[0], ultimo = campos[campos.length - 1];
+  if (!caixa.contains(document.activeElement)) { e.preventDefault(); primeiro.focus(); }
+  else if (e.shiftKey && document.activeElement === primeiro) { e.preventDefault(); ultimo.focus(); }
+  else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primeiro.focus(); }
+});
+
 // Link/atalho para outra tela só para quem pode vê-la -- senão o clique cai em
 // "Esta tela não é do seu perfil" (ex.: Gestor no drawer de Contrato, TI em
 // Dependências). Mesmo critério do route().
