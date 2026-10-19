@@ -1019,3 +1019,75 @@ test('enviarEmailTeste: sem segredo configurado o transporte real avisa o que fa
   await assert.rejects(() => WRITE_ACTIONS.enviarEmailTeste(makeDb(seedAdmin(seed())), {}, ctx({ smtp: { usuario: 'pendente', senha: 'pendente' } })),
     /SMTP não configurado/);
 });
+
+// ============================================================
+// CONTATOS DO DRP: gestor vem dos CONTRATOS; pessoas relacionadas (19/10/2026)
+// ============================================================
+
+function seedContatos() {
+  const s = seedSla();
+  // Pessoas do cadastro (e-mail/telefone/cargo vem daqui) e um gestor LEGADO no fornecedor.
+  s.dependencias.p1 = { categoria: 'Pessoas', nome: 'Gabriel Fortes', detalhes: 'Analista de Segurança', telefone: '(85) 99999-0001', email: 'gabriel@fortestecnologia.com.br' };
+  s.dependencias.p2 = { categoria: 'Pessoas', nome: 'Bruno Lima', detalhes: 'Compras', telefone: '(85) 99999-0002', email: 'bruno@fortestecnologia.com.br' };
+  s.dependencias.p3 = { categoria: 'Pessoas', nome: 'Antigo Gestor', detalhes: 'Legado', telefone: '(85) 99999-0003', email: 'antigo@fortestecnologia.com.br' };
+  s.dependencias.p4 = { categoria: 'Pessoas', nome: 'Gestor do Contrato Encerrado', detalhes: 'x', telefone: '(85) 99999-0004', email: 'enc@fortestecnologia.com.br' };
+  s.dependencias.f1.gestoresContrato = [{ id: 'p3', nome: 'Antigo Gestor', telefone: '(85) 99999-0003', email: 'antigo@fortestecnologia.com.br' }];
+  s.dependencias.f2.pessoasRelacionadas = [{ id: 'p2', nome: 'Bruno Lima', papel: 'Financeiro/Compras' }, { id: 'p-removida', nome: 'Saiu', papel: 'Outro' }];
+  s.contratos.c1.gestor = { id: 'p1', nome: 'Gabriel Fortes' };
+  s.contratos.c1.area = 'Segurança da Informação';
+  s.contratos.c3.gestor = { id: 'p4', nome: 'Gestor do Contrato Encerrado' };
+  return s;
+}
+
+test('contatos do DRP: gestor do contrato VIGENTE (do cadastro de Pessoas) e pessoas relacionadas com o papel', async () => {
+  const { promptEnviado } = await gerarDrpCapturando(seedContatos(), '<h2>1. Objetivo</h2><p>x</p>');
+  assert.ok(promptEnviado.includes('- Gabriel Fortes (Segurança da Informação) — Gestor do contrato CT-0001 — Analista de Segurança | Telefone: (85) 99999-0001 | E-mail: gabriel@fortestecnologia.com.br'));
+  assert.ok(promptEnviado.includes('- Bruno Lima (Operadora Y) — Financeiro/Compras — Compras | Telefone: (85) 99999-0002 | E-mail: bruno@fortestecnologia.com.br'));
+});
+
+test('contatos do DRP: o gestor LEGADO do fornecedor e o gestor de contrato encerrado nao entram; pessoa removida e ignorada', async () => {
+  const { promptEnviado } = await gerarDrpCapturando(seedContatos(), '<h2>1. Objetivo</h2><p>x</p>');
+  assert.ok(!promptEnviado.includes('Antigo Gestor'), 'gestoresContrato legado nao vale mais');
+  assert.ok(!promptEnviado.includes('Gestor do Contrato Encerrado'));
+  assert.ok(!promptEnviado.includes('Saiu'));
+});
+
+test('contatos do DRP: contratos que nao cobrem a dependencia nem sao de fornecedor ligado nao trazem gestor', async () => {
+  const s = seedContatos();
+  s.contratos.c4.gestor = { id: 'p4', nome: 'Gestor do Contrato Encerrado' };
+  const { promptEnviado } = await gerarDrpCapturando(s, '<h2>1. Objetivo</h2><p>x</p>');
+  assert.ok(!promptEnviado.includes('CT-0004 —'));
+  assert.ok(!promptEnviado.includes('Gestor do Contrato Encerrado'));
+});
+
+test('contatos do DRP: gestor do contrato sem cadastro (sem id) nao vira contato inventado; sem valores de contrato', async () => {
+  const s = seedContatos();
+  s.contratos.c1.gestor = { id: null, nome: 'Fulano Sem Cadastro' };
+  const { promptEnviado, r } = await gerarDrpCapturando(s, '<h2>1. Objetivo</h2><p>x</p>');
+  assert.ok(!promptEnviado.includes('Fulano Sem Cadastro'));
+  ['42156', '505881', 'valorMensal'].forEach((t) => { assert.ok(!promptEnviado.includes(t)); assert.ok(!r.drp.includes(t)); });
+});
+
+test('contatos do DRP: falha ao ler os contratos nao derruba o DRP (segue sem gestores) e a secao de SLAs avisa', async () => {
+  const s = seedContatos();
+  const db = makeDb(s);
+  const original = db.collection;
+  db.collection = (col) => {
+    if (col === 'contratos') return { get: async () => { throw new Error('sem permissao'); } };
+    return original(col);
+  };
+  const orig = global.fetch;
+  let promptEnviado = '';
+  const erro = console.error;
+  console.error = () => {};
+  global.fetch = async (_u, o) => {
+    promptEnviado = JSON.parse(o.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<h2>9. Dependências</h2><p>b</p>' }] } }] }) };
+  };
+  try {
+    const r = await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.ok(!promptEnviado.includes('Gestor do contrato CT-0001'));
+    assert.ok(promptEnviado.includes('Bruno Lima'), 'pessoas relacionadas continuam');
+    assert.match(r.drp, /Não foi possível consultar os contratos/);
+  } finally { global.fetch = orig; console.error = erro; }
+});

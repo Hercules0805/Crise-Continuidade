@@ -9,7 +9,7 @@ const { criarPaginacao } = require('../public/util.js');
 const PUB = path.join(__dirname, '..', 'public');
 const APP = fs.readFileSync(path.join(PUB, 'app.js'), 'utf8');
 const SCRIPTS = ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js',
-  'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'sanitizar-pcn.js', 'app.js'];
+  'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'sanitizar-pcn.js', 'contrato-ciclo.js', 'app.js'];
 
 function carregar(dados, perfis = ['admin']) {
   const dom = new JSDOM('<body><div id="app"></div><div id="toast"></div></body>', { runScripts: 'outside-only', url: 'https://x.test/' });
@@ -62,10 +62,13 @@ test('rodape de paginacao unico: "Mostrando X–Y de Z", botoes so com mais de u
   w.close();
 });
 
-const forn = Array.from({ length: 27 }, (_, i) => ({ id: 'f' + i, categoria: 'Fornecedores', nome: 'Forn ' + String(i).padStart(2, '0'), setor: i % 2 ? 'TI' : 'Financeiro' }));
+const forn = Array.from({ length: 27 }, (_, i) => ({ id: 'f' + i, categoria: 'Fornecedores', nome: 'Forn ' + String(i).padStart(2, '0') }));
+// A area do fornecedor vem do contrato vigente (19/10/2026).
+const STATUS_VIGENTE = [{ id: 's-vig', nome: 'Vigente', situacao: 'vigente', ativo: true }];
+const contratosForn = forn.map((f, i) => ({ id: 'c' + i, codigo: 'CT-' + i, fornecedorId: f.id, statusId: 's-vig', gestor: null, area: i % 2 ? 'TI' : 'Financeiro' }));
 
 test('Fornecedores: grade paginada (20 por pagina), larguras em px e filtro volta para a 1a pagina', async () => {
-  const w = carregar({ getDependencias: forn, getAreas: [{ nome: 'TI' }, { nome: 'Financeiro' }] });
+  const w = carregar({ getDependencias: forn, getAreas: [{ nome: 'TI' }, { nome: 'Financeiro' }], getContratos: contratosForn, getStatusContrato: STATUS_VIGENTE });
   await w.fornecedores();
   await espera();
   const doc = w.document;

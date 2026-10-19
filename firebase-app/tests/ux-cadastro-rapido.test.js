@@ -77,7 +77,7 @@ test('desistir do cadastro rápido volta para a origem sem selecionar nada', asy
   w.close();
 });
 
-test('Fornecedor -> + Nova área: grava, volta com o setor selecionado e não mexe em grade de outra tela', async () => {
+test('Fornecedor -> + Nova área: grava, volta com a área já adicionada como relacionada e não mexe em grade de outra tela', async () => {
   const w = carregar({ getAreas: [{ nome: 'TI' }], getDependencias: [{ id: 'f1', categoria: 'Fornecedores', nome: 'Forn' }] });
   await w.fornecedores();
   await espera();
@@ -88,7 +88,26 @@ test('Fornecedor -> + Nova área: grava, volta com o setor selecionado e não me
   await w.salvarArea();
   await espera();
   assert.ok(aberto(w, 'drawerFornecedorCadastro'), 'voltou para o fornecedor');
-  assert.strictEqual(w.document.getElementById('fornCadSetor').value, 'Jurídico');
+  assert.deepStrictEqual([...w._fornAreasRel], ['Jurídico']);
+  assert.match(w.document.getElementById('fornAreasRelChips').textContent, /Jurídico/);
+  w.close();
+});
+
+test('Fornecedor -> + Nova pessoa: cadastra por cima e volta com a pessoa como relacionada (papel escolhido ou "Outro")', async () => {
+  const w = carregar({ getAreas: [{ nome: 'TI' }], getDependencias: [{ id: 'f1', categoria: 'Fornecedores', nome: 'Forn' }] });
+  await w.fornecedores();
+  await espera();
+  w.abrirDrawerFornecedorCadastro();
+  await w.novaPessoaDeFornecedor();
+  assert.ok(aberto(w, 'drawerPessoa'), 'cadastro de Pessoa aberto por cima');
+  w.document.getElementById('pessoaNome').value = 'Ana Souza';
+  await w.salvarPessoaCadastro();
+  await espera();
+  assert.ok(aberto(w, 'drawerFornecedorCadastro'), 'voltou para o fornecedor');
+  assert.strictEqual(w._fornPessoasRel.length, 1);
+  assert.strictEqual(w._fornPessoasRel[0].nome, 'Ana Souza');
+  assert.strictEqual(w._fornPessoasRel[0].papel, 'Outro', 'sem papel escolhido antes, entra como "Outro" (ajustavel na lista)');
+  assert.match(w.document.getElementById('fornPessoasRelTabela').textContent, /Ana Souza/);
   w.close();
 });
 

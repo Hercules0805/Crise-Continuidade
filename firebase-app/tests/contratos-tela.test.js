@@ -13,7 +13,7 @@ const HOJE = CC.hojeIso();
 const DEPS = [
   { id: 'p1', categoria: 'Pessoas', nome: 'Ana Souza', setor: 'TI' },
   { id: 'p2', categoria: 'Pessoas', nome: 'Bruno Lima', setor: 'RH' },
-  { id: 'f1', categoria: 'Fornecedores', nome: 'Alfa Cloud', tic: true, gestoresContrato: [{ id: 'p2', nome: 'Bruno Lima' }] },
+  { id: 'f1', categoria: 'Fornecedores', nome: 'Alfa Cloud', tic: true, pessoasRelacionadas: [{ id: 'p2', nome: 'Bruno Lima', papel: 'Usuário-chave' }] },
   { id: 'f2', categoria: 'Fornecedores', nome: 'Beta Telecom', tic: true },
 ];
 const STATUS = [
@@ -131,12 +131,12 @@ test('novo contrato: valida obrigatorios e grava com codigo sequencial, sem fech
   assert.ok(doc.getElementById('drawerContrato').classList.contains('open'));
 });
 
-test('gestor do fornecedor aparece primeiro no seletor de gestor do contrato', async () => {
+test('pessoas relacionadas ao fornecedor aparecem primeiro no seletor de gestor do contrato', async () => {
   const { w, doc } = await carregar(['admin']);
   await w.contratos();
   w.abrirDrawerContrato('c1');
   const grupos = [...doc.querySelectorAll('#contratoGestor optgroup')].map((g) => g.label);
-  assert.deepStrictEqual(grupos, ['Gestores informados no fornecedor', 'Demais pessoas']);
+  assert.deepStrictEqual(grupos, ['Pessoas relacionadas ao fornecedor', 'Demais pessoas']);
   assert.match(doc.querySelector('#contratoGestor optgroup').textContent, /Bruno Lima/);
   assert.strictEqual(doc.getElementById('contratoGestor').value, 'p1', 'mantem o gestor gravado');
 });

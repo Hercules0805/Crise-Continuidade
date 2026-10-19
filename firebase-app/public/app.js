@@ -1486,7 +1486,7 @@ function _htmlDrawerPessoa() {
 async function pessoas() {
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Pessoas</h2><p class="page-sub">Usadas como Gestor do Contrato (Fornecedores) e Responsável (Áreas)</p></div>
+      <div><h2>Pessoas</h2><p class="page-sub">Usadas como gestor de contrato, pessoa relacionada a fornecedores e Responsável (Áreas)</p></div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-ghost" onclick="abrirModalOrganograma()" style="color:#d60014;border-color:#d60014;">🗂️ Gerar organograma</button>
         ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button class="btn btn-primary" onclick="abrirModalPessoa()">+ Nova Pessoa</button>' : ''}
@@ -1965,14 +1965,18 @@ window.gerarRelatorioPessoa = async (pessoaDireta) => {
   win.document.write('<p style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#d60014;">⏳ Gerando relatório...</p>');
 
   try {
-    const [processos, deps, riscos, indicadores, backups, perfis, areas, produtos] = await Promise.all([
+    const [processos, deps, riscos, indicadores, backups, perfis, areas, produtos, contratos, statusContratos] = await Promise.all([
       API.getProcessos(), API.getDependencias(), API.getRiscos(),
       API.getIndicadoresSeguranca(), API.getBackups(), API.getPerfis(), API.getAreas(),
       // Só dá nome aos produtos da liderança; se falhar, o relatório ainda sai
       // (os ids aparecem como "produto removido").
       API.getProdutosSoftware().catch((e) => { console.error('Relatório de vínculos: produtos não carregaram', e); return []; }),
+      // Gestor de contrato vem dos contratos vigentes. Quem não lê contratos (ex.: TI)
+      // fica só com as relações por "pessoa relacionada", e o relatório avisa.
+      API.getContratos().catch((e) => { console.error('Relatório de vínculos: contratos não carregaram', e); return null; }),
+      API.getStatusContrato().catch(() => null),
     ]);
-    const html = _buildRelatorioPessoaPage(pessoa, { processos, deps, riscos, indicadores, backups, perfis, areas, produtos });
+    const html = _buildRelatorioPessoaPage(pessoa, { processos, deps, riscos, indicadores, backups, perfis, areas, produtos, contratos, statusContratos });
     win.document.open();
     win.document.write(html);
     win.document.close();
@@ -2022,8 +2026,22 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
   const riscosDaPessoa = riscos.filter((r) => (r.responsavel || '').trim() === nome);
   const indicadoresDaPessoa = indicadores.filter((i) => (i.responsavel || '').trim() === nome);
 
-  // Fornecedores onde é Gestor do Contrato (só vínculo com id confiável).
-  const fornecedoresDaPessoa = fornecedores.filter((f) => (f.gestoresContrato || []).some((g) => g.id && String(g.id) === String(pessoa.id)));
+  // Fornecedores: gestora de contrato VIGENTE (id do contrato) ou pessoa relacionada
+  // (com o papel). Só vínculo por id: nome solto dá falso-positivo.
+  const contratosCarregados = Array.isArray(dados.contratos) && Array.isArray(dados.statusContratos);
+  const relacoesPorFornecedor = new Map();
+  const relacionar = (f, texto) => {
+    if (!relacoesPorFornecedor.has(f.id)) relacoesPorFornecedor.set(f.id, { f, relacoes: [] });
+    relacoesPorFornecedor.get(f.id).relacoes.push(texto);
+  };
+  if (contratosCarregados) {
+    dados.contratos.filter((c) => c.gestor && c.gestor.id != null && String(c.gestor.id) === String(pessoa.id)
+      && ContratoCiclo.situacaoDoStatus(c.statusId, dados.statusContratos) === ContratoCiclo.SITUACAO.VIGENTE)
+      .forEach((c) => { const f = fornecedores.find((x) => String(x.id) === String(c.fornecedorId)); if (f) relacionar(f, 'Gestor do contrato ' + (c.codigo || '')); });
+  }
+  fornecedores.forEach((f) => (f.pessoasRelacionadas || []).filter((r) => r.id != null && String(r.id) === String(pessoa.id))
+    .forEach((r) => relacionar(f, 'Pessoa relacionada' + (r.papel ? ' — ' + r.papel : ''))));
+  const fornecedoresDaPessoa = [...relacoesPorFornecedor.values()].sort((a, b) => (a.f.nome || '').localeCompare(b.f.nome || '', 'pt-BR'));
 
   // Backups onde é Stakeholder.
   const backupsDaPessoa = backups.filter((b) => b.stakeholderId && String(b.stakeholderId) === String(pessoa.id));
@@ -2122,9 +2140,10 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
         + '</table>';
     }
     if (fornecedoresDaPessoa.length) {
-      html += '<h2>Fornecedores (Gestor do Contrato)</h2><table><tr><th>Fornecedor</th></tr>'
-        + linhaOuVazio(fornecedoresDaPessoa, (f) => '<tr><td><b>' + esc(f.nome) + '</b></td></tr>')
-        + '</table>';
+      html += '<h2>Fornecedores</h2><table><tr><th>Fornecedor</th><th>Relação</th></tr>'
+        + linhaOuVazio(fornecedoresDaPessoa, (x) => '<tr><td><b>' + esc(x.f.nome) + '</b></td><td>' + esc(x.relacoes.join('; ')) + '</td></tr>')
+        + '</table>'
+        + (contratosCarregados ? '' : '<p style="font-size:0.8em;color:#888;">Os contratos não puderam ser lidos com o seu perfil: a gestão de contratos não aparece aqui.</p>');
     }
     if (backupsDaPessoa.length) {
       html += '<h2>Backups (Stakeholder)</h2><table><tr><th>Backup</th></tr>'
@@ -2391,7 +2410,19 @@ window.salvarPessoaCadastro = async () => {
 window.excluirPessoaCadastro = async (id) => {
   const p = pessoasData.find((x) => String(x.id) === String(id));
   if (!p) return;
-  const aviso = `Excluir "${p.nome}"?\n\nSe essa pessoa estiver marcada como Gestor do Contrato de algum fornecedor ou Responsável de alguma área, o nome continua lá como texto (não é apagado em cascata), mas deixa de aparecer nas listas de seleção. Continuar?`;
+  // Quantos contratos (gestora) e fornecedores (relacionada) apontam para esta pessoa.
+  // Best-effort: quem não lê contratos (ex.: TI) só vê a contagem de fornecedores.
+  const [contratos, deps] = await Promise.all([
+    API.getContratos().catch(() => []),
+    API.getDependencias().catch(() => []),
+  ]);
+  const nContratos = (contratos || []).filter((c) => c.gestor && c.gestor.id != null && String(c.gestor.id) === String(id)).length;
+  const nFornecedores = (deps || []).filter((d) => Perfis.categoriaDeFornecedor(d.categoria)
+    && (d.pessoasRelacionadas || []).some((r) => r.id != null && String(r.id) === String(id))).length;
+  const usos = [];
+  if (nContratos) usos.push(`é gestora de ${nContratos} contrato${nContratos > 1 ? 's' : ''}`);
+  if (nFornecedores) usos.push(`está relacionada a ${nFornecedores} fornecedor${nFornecedores > 1 ? 'es' : ''}`);
+  const aviso = `Excluir "${p.nome}"?\n\n${usos.length ? `Esta pessoa ${usos.join(' e ')}. ` : ''}Onde ela está marcada como gestora de contrato, pessoa relacionada ou Responsável de alguma área, o nome continua lá (não é apagado em cascata), mas ela deixa de aparecer nas listas de seleção e perde o contato. Continuar?`;
   if (!await confirmarAcao(aviso)) return;
 
   try {
@@ -4462,7 +4493,7 @@ window.selecionarEstrategiaDep = (valor) => {
   renderEstrategiaChips();
 };
 
-/** Mesma ideia de _popularSelectAreasFornecedor, pro Área Responsável da Dependência. */
+/** Mesma ideia do select de áreas do fornecedor, pro Área Responsável da Dependência. */
 function _popularSelectAreaResponsavelDep(valorAtual) {
   const sel = document.getElementById('depResponsavel');
   if (!sel) return;
@@ -6959,17 +6990,16 @@ window.novaPessoaDePerfil = () => _cadastroRapidoPessoa('modalPerfil', null, (p)
   aoEscolherPessoaPerfil();
 });
 window.novaPessoaDeFornecedor = () => _cadastroRapidoPessoa('drawerFornecedorCadastro', 'drawerOverlayFornecedorCadastro', (p) => {
-  _popularSelectBuscaGestor();
-  document.getElementById('gestorContratoBusca').value = String(p.id);
-  adicionarGestorContrato();
+  // A pessoa nova entra como relacionada, com o papel já escolhido ou "Outro" (ajustável na lista).
+  _popularSelectPessoaRel();
+  document.getElementById('fornPessoaRelAdd').value = String(p.id);
+  if (!document.getElementById('fornPessoaRelPapel').value) document.getElementById('fornPessoaRelPapel').value = 'Outro';
+  adicionarPessoaRelFornecedor();
 });
-window.editarGestorDeFornecedor = (idPessoa) => _cadastroRapidoPessoa('drawerFornecedorCadastro', 'drawerOverlayFornecedorCadastro', (p) => {
-  // O gestor guarda uma cópia (snapshot) da pessoa: atualiza com o que foi editado.
-  const lista = window._fornecedorGestores || [];
-  const i = lista.findIndex((g) => String(g.id) === String(p.id));
-  if (i >= 0) lista[i] = _snapshotGestorDaPessoa(p);
-  renderGestoresContrato();
-  _popularSelectBuscaGestor();
+window.editarPessoaRelFornecedor = (idPessoa) => _cadastroRapidoPessoa('drawerFornecedorCadastro', 'drawerOverlayFornecedorCadastro', () => {
+  // Cargo e área são lidos do cadastro: basta redesenhar com o que foi editado.
+  renderPessoasRelFornecedor();
+  _popularSelectPessoaRel();
 }, idPessoa);
 
 // ---- Área ----
@@ -6977,7 +7007,11 @@ window.novaAreaDeFornecedor = () => _abrirCadastroRapido({
   pai: 'drawerFornecedorCadastro', overlay: 'drawerOverlayFornecedorCadastro',
   preparar: async () => { _garantirHtmlCadastro('modal', _htmlModalArea); },
   abrir: () => abrirModalArea(),
-  aoSalvar: (a) => _popularSelectAreasFornecedor(a.nome),
+  aoSalvar: (a) => {
+    _popularSelectAreaRel();
+    document.getElementById('fornAreaRelAdd').value = a.nome;
+    adicionarAreaRelFornecedor();
+  },
 });
 
 // ---- Dependência ----
@@ -15954,17 +15988,44 @@ function _resumoPessoasFornecedor(f) {
   return `${esc(pessoas[0].nome)}${extra > 0 ? ` <span style="color:#999;">+${extra}</span>` : ''}`;
 }
 
-// ---- Filtro por Gestor do Contrato (16/10/2026) ----
+// ---- Gestão do fornecedor vem dos CONTRATOS (19/10/2026) ----
+// O gestor do contrato e a área responsável não são mais digitados no
+// fornecedor: vêm dos contratos VIGENTES dele (contratos.gestor / contratos.area).
+// Sem contrato vigente, o fornecedor fica sem gestor e sem área.
 const GESTOR_FORN_SEM = '__sem_gestor__';
 
-/** Gestores de um fornecedor como [{chave, nome}]: a lista nova (por id, ou por nome se sem id) e, sem ela, o texto legado. */
-function _gestoresDoFornecedor(f) {
-  const lista = Array.isArray(f.gestoresContrato) ? f.gestoresContrato : [];
+/**
+ * Gestores e áreas dos contratos vigentes do fornecedor, sem repetir, cada um
+ * com os códigos dos contratos de origem. `contratos` traz o contrato inteiro
+ * (a aba Dados mostra uma linha por contrato).
+ */
+function _gestaoDoFornecedor(fornecedorId) {
   const norm = (t) => String(t || '').trim().toLowerCase();
-  const doCadastro = lista.filter((g) => g && (g.id != null || g.nome))
-    .map((g) => ({ chave: g.id != null ? `id:${g.id}` : `nome:${norm(g.nome)}`, nome: g.nome || '' }));
-  if (doCadastro.length) return doCadastro;
-  return f.gestorContrato ? [{ chave: `nome:${norm(f.gestorContrato)}`, nome: f.gestorContrato }] : [];
+  const contratos = _contratosVigentesDoFornecedor(fornecedorId);
+  const gestores = new Map();
+  const areas = new Map();
+  contratos.forEach((c) => {
+    if (c.gestor && (c.gestor.id != null || c.gestor.nome)) {
+      const chave = c.gestor.id != null ? `id:${c.gestor.id}` : `nome:${norm(c.gestor.nome)}`;
+      if (!gestores.has(chave)) gestores.set(chave, { chave, id: c.gestor.id != null ? c.gestor.id : null, nome: c.gestor.nome || '', contratos: [] });
+      gestores.get(chave).contratos.push(c.codigo);
+    }
+    if (c.area) {
+      if (!areas.has(c.area)) areas.set(c.area, { nome: c.area, contratos: [] });
+      areas.get(c.area).contratos.push(c.codigo);
+    }
+  });
+  return { temVigente: contratos.length > 0, contratos, gestores: [...gestores.values()], areas: [...areas.values()] };
+}
+
+/** Gestores do fornecedor como [{chave, nome}] -- os dos contratos vigentes. */
+function _gestoresDoFornecedor(f) {
+  return _gestaoDoFornecedor(f.id).gestores.map((g) => ({ chave: g.chave, nome: g.nome }));
+}
+
+/** Nomes das áreas responsáveis nos contratos vigentes do fornecedor. */
+function _areasDoFornecedor(f) {
+  return _gestaoDoFornecedor(f.id).areas.map((a) => a.nome);
 }
 
 /**
@@ -15990,16 +16051,22 @@ function _popularFiltroGestorFornecedor() {
   sel.value = [...sel.options].some((o) => o.value === atual) ? atual : '';
 }
 
-/** Resumo do(s) Gestor(es) do Contrato na grade: 1º nome + "+N". Cai no
- *  gestorContrato (string legado) quando ainda não há a lista nova. */
+/** 1º nome + "+N" (o resto no title). `itens` = [{nome}]; vazio = "–". */
+function _resumoLista(itens) {
+  if (!itens.length) return '<span style="color:#999;">–</span>';
+  const extra = itens.length - 1;
+  const todos = itens.map((i) => i.nome).join(', ');
+  return `<span title="${esc(todos)}">${esc(itens[0].nome)}${extra > 0 ? ` <span style="color:#999;">+${extra}</span>` : ''}</span>`;
+}
+
+/** Gestor(es) do Contrato na grade: os dos contratos vigentes. */
 function _resumoGestoresFornecedor(f) {
-  const gestores = Array.isArray(f.gestoresContrato) ? f.gestoresContrato : [];
-  if (gestores.length) {
-    const extra = gestores.length - 1;
-    return `${esc(gestores[0].nome || '')}${extra > 0 ? ` <span style="color:#999;">+${extra}</span>` : ''}`;
-  }
-  if (f.gestorContrato) return esc(f.gestorContrato);
-  return '<span style="color:#999;">–</span>';
+  return _resumoLista(_gestaoDoFornecedor(f.id).gestores);
+}
+
+/** Área(s) responsável(is) na grade: as dos contratos vigentes. */
+function _resumoAreasFornecedor(f) {
+  return _resumoLista(_gestaoDoFornecedor(f.id).areas);
 }
 
 async function fornecedores() {
@@ -16021,7 +16088,7 @@ async function fornecedores() {
         </select>
       </div>
       <div class="field">
-        <label class="field-label">Setor</label>
+        <label class="field-label">Área do contrato</label>
         <select id="filtroFornCadastroSetor" onchange="filtrarFornecedores()" class="field-control">
           <option value="">Todos os setores</option>
         </select>
@@ -16172,9 +16239,10 @@ function renderizarFornecedores() {
   let data = fornecedoresData.filter((f) => !busca
     || (f.nome || '').toLowerCase().includes(busca)
     || (f.nomeFantasia || '').toLowerCase().includes(busca)
-    || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)))
+    || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca))
+    || (f.pessoasRelacionadas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)))
     .filter((f) => !filtroCategoria || f.categoriaFornecedor === filtroCategoria)
-    .filter((f) => !filtroSetor || f.setor === filtroSetor)
+    .filter((f) => !filtroSetor || _areasDoFornecedor(f).includes(filtroSetor))
     .filter(porGestor)
     .filter(porResumo)
     .filter(porTic);
@@ -16192,7 +16260,7 @@ function renderizarFornecedores() {
   };
   data = fornecedoresOrdenacao.aplicar(data, {
     categoria: (a, b, dir) => dir * (a.categoriaFornecedor || '').localeCompare(b.categoriaFornecedor || '', 'pt-BR'),
-    setor: (a, b, dir) => dir * (a.setor || '').localeCompare(b.setor || '', 'pt-BR'),
+    setor: (a, b, dir) => dir * (_areasDoFornecedor(a).join(', ')).localeCompare(_areasDoFornecedor(b).join(', '), 'pt-BR'),
     nota: comparadorNulavel((av) => (av && av.nota !== null ? av.nota : null)),
     criticidade: comparadorNulavel((av) => (av && av.completaCriticidade ? av.scoreCriticidade : null)),
     avaliadoEm: comparadorNulavel((av) => (av && av.avaliadoEm ? av.avaliadoEm : null)),
@@ -16213,9 +16281,9 @@ function renderizarFornecedores() {
           <tr>
             ${th('nome', 'Empresa')}
             ${th('categoria', 'Categoria')}
-            ${th('setor', 'Setor')}
+            ${th('setor', 'Área (contrato)')}
             <th>Contatos</th>
-            <th title="Gestor do Contrato">Gestor</th>
+            <th title="Gestor dos contratos vigentes">Gestor</th>
             ${th('nota', 'Nota', 'col-c', 'Nota de Conformidade (0 a 100)')}
             ${th('criticidade', 'Criticidade', 'col-c')}
             <th>Situação</th>
@@ -16231,7 +16299,7 @@ function renderizarFornecedores() {
             <tr style="cursor:pointer;" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')">
               <td class="title">${esc(f.nome)}${_htmlContratosVigentesFornecedor(f.id)}</td>
               <td class="muted">${esc(f.categoriaFornecedor || '–')}</td>
-              <td class="muted">${esc(f.setor || '–')}</td>
+              <td class="muted">${_resumoAreasFornecedor(f)}</td>
               <td class="muted">${_resumoPessoasFornecedor(f)}</td>
               <td class="muted">${_resumoGestoresFornecedor(f)}</td>
               <td class="col-c">
@@ -17151,29 +17219,37 @@ function _htmlDrawerFornecedorCadastro() {
         </div>
       </div>
 
-      <label style="${lbl}margin-bottom:10px;border-top:1px solid #eee;padding-top:14px;">Dados do contratante</label>
+      <label style="${lbl}margin-bottom:10px;border-top:1px solid #eee;padding-top:14px;">Gestão pelos contratos vigentes</label>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">O gestor e a área responsável deste fornecedor vêm dos contratos vigentes. Para mudar, edite o contrato.</span>
+      <div id="fornGestaoContratos" style="margin-bottom:16px;"></div>
 
-      <label style="${lbl}">Gestor do Contrato</label>
-      <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Escolha uma ou mais pessoas cadastradas. Cargo, área, telefone e e-mail vêm do cadastro da Pessoa.</span>
-      <div id="gestoresContratoTabela"></div>
-      <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;margin-bottom:16px;">
+      <label style="${lbl}margin-bottom:10px;border-top:1px solid #eee;padding-top:14px;">Áreas e pessoas relacionadas</label>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:-3px;margin-bottom:8px;">Quem, dentro da empresa, se relaciona com este fornecedor, além do gestor do contrato. Cargo e área vêm do cadastro da Pessoa.</span>
+
+      <label style="${lbl}">Áreas relacionadas</label>
+      <div id="fornAreasRelChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
+      <div class="forn-rel-adicionar" style="margin-bottom:16px;">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <select id="gestorContratoBusca" style="${inp}flex:1;min-width:180px;"><option value="">Buscar pessoa...</option></select>
-          <button type="button" class="btn btn-ghost" id="btnAdicionarGestorContrato" onclick="adicionarGestorContrato()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+          <select id="fornAreaRelAdd" style="${inp}flex:1;min-width:180px;"><option value="">Adicionar área...</option></select>
+          <button type="button" class="btn btn-ghost" onclick="adicionarAreaRelFornecedor()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+          <button type="button" class="btn-icon" onclick="_recarregarAreasFornecedor()" title="Atualizar lista de áreas">🔄</button>
+        </div>
+        ${Perfis.podeMexerNaArea(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaAreaDeFornecedor()">+ Nova área</button>' : ''}
+      </div>
+
+      <label style="${lbl}">Pessoas relacionadas</label>
+      <div id="fornPessoasRelTabela"></div>
+      <div class="forn-rel-adicionar" style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;margin-bottom:16px;">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <select id="fornPessoaRelAdd" style="${inp}flex:2;min-width:180px;"><option value="">Buscar pessoa...</option></select>
+          <select id="fornPessoaRelPapel" style="${inp}flex:1;min-width:160px;">
+            <option value="">Papel...</option>
+            ${PAPEIS_RELACAO_FORNECEDOR.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('')}
+          </select>
+          <button type="button" class="btn btn-ghost" onclick="adicionarPessoaRelFornecedor()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
           <button type="button" class="btn-icon" onclick="_recarregarPessoasFornecedor()" title="Atualizar lista de pessoas">🔄</button>
         </div>
         ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaPessoaDeFornecedor()">+ Nova pessoa</button>' : ''}
-      </div>
-
-      <div style="display:grid;grid-template-columns:1fr;gap:16px;">
-        <div>
-          <label style="${lbl}">Setor responsável pelo contrato</label>
-          <div style="display:flex;gap:6px;align-items:center;">
-            <select id="fornCadSetor" style="${inp}flex:1;"><option value="">Selecione...</option></select>
-            <button type="button" class="btn-icon" onclick="_recarregarAreasFornecedor()" title="Atualizar lista de áreas">🔄</button>
-          </div>
-          ${Perfis.podeMexerNaArea(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaAreaDeFornecedor()">+ Nova área</button>' : ''}
-        </div>
       </div>
       </div>
 
@@ -17406,107 +17482,169 @@ window.removerCanalFornecedor = (idx) => {
 };
 
 // ============================================================
-// Gestor do Contrato -- lista de Pessoas (snapshots), estilo "Pessoas
-// associadas". Cada item guarda {id,nome,cargo,telefone,email,area} vindo do
-// cadastro da Pessoa. gestorContrato (string legado) é espelhado no 1º item.
+// Gestão pelos contratos + Áreas e pessoas relacionadas (19/10/2026)
+// ------------------------------------------------------------
+// O gestor do contrato e a área responsável do fornecedor vêm dos contratos
+// vigentes (_gestaoDoFornecedor) e aparecem aqui só para leitura. O que se
+// cadastra no fornecedor são as áreas e as pessoas (internas) que se
+// relacionam com ele: areasRelacionadas = [nome da área] e
+// pessoasRelacionadas = [{id, nome, papel}]. Cargo e área da pessoa vêm do
+// cadastro de Pessoas, sempre atuais; `nome` fica só como cópia de segurança.
 // ============================================================
-window._fornecedorGestores = [];
+const PAPEIS_RELACAO_FORNECEDOR = [
+  'Usuário-chave', 'Responsável técnico', 'Aprovador/Patrocinador', 'Financeiro/Compras',
+  'Gestor (anterior ao contrato)', 'Outro',
+];
+window._fornAreasRel = [];
+window._fornPessoasRel = [];
 
-/** Snapshot dos campos de uma Pessoa (de pessoasData) para o gestor do contrato. */
-function _snapshotGestorDaPessoa(p) {
-  return { id: p.id != null ? p.id : null, nome: p.nome || '', cargo: p.detalhes || '', telefone: p.telefone || '', email: p.email || '', area: p.setor || '' };
+/** Bloco somente leitura: uma linha por contrato vigente, com gestor e área. */
+function renderGestaoFornecedor() {
+  const cont = document.getElementById('fornGestaoContratos');
+  if (!cont) return;
+  const id = document.getElementById('fornCadId').value;
+  if (!id) { cont.innerHTML = '<p class="vazio-inline">Salve o fornecedor para vincular contratos.</p>'; return; }
+  if (!window._fornContratosCarregados) {
+    cont.innerHTML = '<p class="vazio-inline">Não foi possível carregar os contratos. Recarregue a tela.</p>';
+    return;
+  }
+  const g = _gestaoDoFornecedor(id);
+  if (!g.temVigente) {
+    cont.innerHTML = '<p class="vazio-inline">Nenhum contrato vigente: o gestor e o setor vêm do contrato.</p>'
+      + (Perfis.podeEditarContratos(window.USER_PERFIS) ? '<button type="button" class="btn btn-ghost" onclick="novoContratoDoFornecedor()" style="padding:6px 12px;">+ Novo contrato</button>' : '');
+    return;
+  }
+  cont.innerHTML = `<table class="data-table" style="box-shadow:none;"><thead><tr><th>Contrato</th><th>Gestor</th><th>Área responsável</th></tr></thead><tbody>`
+    + g.contratos.map((c) => `<tr style="cursor:pointer;" onclick="abrirContratoDoFornecedor('${escJs(c.id)}')" title="Abrir o contrato">
+        <td class="title col-nw">${esc(c.codigo)}</td>
+        <td>${c.gestor && c.gestor.nome ? esc(c.gestor.nome) : _chipAlertaContrato({ nivel: 'aviso', rotulo: 'Sem gestor' })}</td>
+        <td>${c.area ? esc(c.area) : '<span style="color:#999;">–</span>'}</td>
+      </tr>`).join('') + '</tbody></table>';
 }
 
-/** Resolve um gestor legado (string com o nome) para um snapshot, buscando a Pessoa por nome. */
-function _gestorLegadoParaSnapshot(nome) {
-  const p = (pessoasData || []).find((x) => x.nome === nome);
-  return p ? _snapshotGestorDaPessoa(p) : { id: null, nome, cargo: '', telefone: '', email: '', area: '' };
+// ---- Áreas relacionadas (chips) ----
+function renderAreasRelFornecedor() {
+  const cont = document.getElementById('fornAreasRelChips');
+  if (!cont) return;
+  const podeMexer = window._fornPodeMexer !== false;
+  const lista = window._fornAreasRel || [];
+  const catalogo = new Set((window.areasData || []).map((a) => a.nome));
+  cont.innerHTML = lista.length ? lista.map((nome, i) => {
+    const removida = (window.areasData || []).length && !catalogo.has(nome);
+    return `<span class="forn-rel-chip" style="display:inline-flex;align-items:center;gap:6px;background:${removida ? '#999' : '#d60014'};color:#fff;padding:4px ${podeMexer ? 8 : 12}px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(nome)}${removida ? ' (removida)' : ''}${podeMexer ? `<button type="button" onclick="removerAreaRelFornecedor(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button>` : ''}</span>`;
+  }).join('') : '<p class="vazio-inline">Nenhuma área relacionada.</p>';
 }
 
-function renderGestoresContrato() {
-  const container = document.getElementById('gestoresContratoTabela');
-  if (!container) return;
-  const itens = window._fornecedorGestores || [];
-  if (!itens.length) { container.innerHTML = '<p class="vazio-inline">Nenhum gestor do contrato adicionado.</p>'; return; }
-  container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
-    itens.map((g, i) => `<tr>
-        <td style="font-weight:600;color:#222;">${esc(g.nome)}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(g.cargo || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(g.area || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(g.telefone || '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(g.email || '-')}</td>
-        <td style="text-align:center;white-space:nowrap;">
-          ${g.id && Perfis.podeEditarPessoas(window.USER_PERFIS) ? `<button type="button" class="btn-icon" onclick="editarGestorDeFornecedor('${escJs(g.id)}')" title="Editar esta pessoa">${SVG_EDITAR}</button>` : ''}
-          <button class="btn-icon" onclick="removerGestorContrato(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
-        </td>
-      </tr>`).join('') + `</tbody></table>`;
-}
-
-/** Popula o <select> de busca com as Pessoas ainda não adicionadas como gestor. */
-function _popularSelectBuscaGestor() {
-  const sel = document.getElementById('gestorContratoBusca');
+function _popularSelectAreaRel() {
+  const sel = document.getElementById('fornAreaRelAdd');
   if (!sel) return;
-  const jaIds = new Set((window._fornecedorGestores || []).filter((g) => g.id).map((g) => String(g.id)));
-  const disponiveis = (pessoasData || []).filter((p) => !jaIds.has(String(p.id)));
-  sel.innerHTML = '<option value="">Buscar pessoa...</option>' +
-    disponiveis.map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}${p.setor ? ' — ' + esc(p.setor) : ''}</option>`).join('');
+  const ja = new Set(window._fornAreasRel || []);
+  sel.innerHTML = '<option value="">Adicionar área...</option>' +
+    [...(window.areasData || [])].filter((a) => !ja.has(a.nome)).sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+      .map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
   sel.value = '';
 }
 
-window.adicionarGestorContrato = () => {
-  const sel = document.getElementById('gestorContratoBusca');
-  const id = sel ? sel.value : '';
-  if (!id) return showToast('Selecione uma pessoa cadastrada.', '#e65100');
-  const p = (pessoasData || []).find((x) => String(x.id) === String(id));
-  if (!p) return showToast('Pessoa não encontrada.', '#c62828');
-  window._fornecedorGestores = window._fornecedorGestores || [];
-  if (window._fornecedorGestores.some((g) => g.id && String(g.id) === String(id))) {
-    return showToast('Essa pessoa já é gestor do contrato.', '#e65100');
-  }
-  window._fornecedorGestores.push(_snapshotGestorDaPessoa(p));
-  renderGestoresContrato();
-  _popularSelectBuscaGestor();
+window.adicionarAreaRelFornecedor = () => {
+  const nome = (document.getElementById('fornAreaRelAdd') || {}).value || '';
+  if (!nome) return showToast('Escolha uma área.', '#e65100');
+  if ((window._fornAreasRel || []).includes(nome)) return showToast('Essa área já está relacionada.', '#e65100');
+  window._fornAreasRel.push(nome);
+  renderAreasRelFornecedor();
+  _popularSelectAreaRel();
 };
 
-window.removerGestorContrato = (idx) => {
-  window._fornecedorGestores.splice(idx, 1);
-  renderGestoresContrato();
-  _popularSelectBuscaGestor();
+window.removerAreaRelFornecedor = (i) => {
+  window._fornAreasRel.splice(i, 1);
+  renderAreasRelFornecedor();
+  _popularSelectAreaRel();
 };
 
-/** Popula o <select> "Setor responsável" (Area) do fornecedor; preserva valor legado fora da lista. */
-function _popularSelectAreasFornecedor(valorAtual) {
-  const sel = document.getElementById('fornCadSetor');
-  if (!sel) return;
-  const lista = window.areasData || [];
-  const temNaLista = lista.some((a) => a.nome === valorAtual);
-  sel.innerHTML = '<option value="">Selecione...</option>' +
-    lista.map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('') +
-    (valorAtual && !temNaLista ? `<option value="${esc(valorAtual)}">${esc(valorAtual)} (não cadastrada como área)</option>` : '');
-  sel.value = valorAtual || '';
+// ---- Pessoas relacionadas (tabela com papel) ----
+function renderPessoasRelFornecedor() {
+  const cont = document.getElementById('fornPessoasRelTabela');
+  if (!cont) return;
+  const podeMexer = window._fornPodeMexer !== false;
+  const lista = window._fornPessoasRel || [];
+  if (!lista.length) { cont.innerHTML = '<p class="vazio-inline">Nenhuma pessoa relacionada.</p>'; return; }
+  cont.innerHTML = '<table class="data-table" style="box-shadow:none;"><thead><tr><th>Pessoa</th><th>Cargo</th><th>Área</th><th>Papel</th><th></th></tr></thead><tbody>'
+    + lista.map((r, i) => {
+      const p = r.id != null ? (pessoasData || []).find((x) => String(x.id) === String(r.id)) : null;
+      const nome = p ? p.nome : r.nome;
+      const marca = r.id == null ? ' (sem cadastro)' : (!p && (pessoasData || []).length ? ' (removida)' : '');
+      const papelNaLista = !r.papel || PAPEIS_RELACAO_FORNECEDOR.includes(r.papel);
+      const papel = podeMexer
+        ? `<select onchange="mudarPapelPessoaRelFornecedor(${i}, this.value)" style="padding:6px 8px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.88em;max-width:200px;">
+            <option value="">Papel...</option>
+            ${PAPEIS_RELACAO_FORNECEDOR.map((x) => `<option value="${esc(x)}"${x === r.papel ? ' selected' : ''}>${esc(x)}</option>`).join('')}
+            ${papelNaLista ? '' : `<option value="${esc(r.papel)}" selected>${esc(r.papel)}</option>`}
+          </select>`
+        : esc(r.papel || '–');
+      return `<tr>
+        <td style="font-weight:600;color:#222;">${esc(nome)}<span style="color:#999;font-weight:400;">${marca}</span></td>
+        <td style="font-size:0.85em;color:#555;">${esc((p && p.detalhes) || '–')}</td>
+        <td style="font-size:0.85em;color:#555;">${esc(p ? (_areasDaPessoa(p).join(', ') || '–') : '–')}</td>
+        <td>${papel}</td>
+        <td style="text-align:center;white-space:nowrap;">${podeMexer ? `${p && Perfis.podeEditarPessoas(window.USER_PERFIS) ? `<button type="button" class="btn-icon" onclick="editarPessoaRelFornecedor('${escJs(p.id)}')" title="Editar esta pessoa">${SVG_EDITAR}</button>` : ''}<button type="button" class="btn-icon" onclick="removerPessoaRelFornecedor(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}</td>
+      </tr>`;
+    }).join('') + '</tbody></table>';
 }
 
+/** Pessoas ainda não relacionadas. */
+function _popularSelectPessoaRel() {
+  const sel = document.getElementById('fornPessoaRelAdd');
+  if (!sel) return;
+  const ja = new Set((window._fornPessoasRel || []).filter((r) => r.id != null).map((r) => String(r.id)));
+  sel.innerHTML = '<option value="">Buscar pessoa...</option>' +
+    (pessoasData || []).filter((p) => !ja.has(String(p.id))).sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
+      .map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}${_areasDaPessoa(p).length ? ' — ' + esc(_areasDaPessoa(p)[0]) : ''}</option>`).join('');
+  sel.value = '';
+}
+
+window.adicionarPessoaRelFornecedor = () => {
+  const id = (document.getElementById('fornPessoaRelAdd') || {}).value || '';
+  const papel = (document.getElementById('fornPessoaRelPapel') || {}).value || '';
+  if (!id) return showToast('Selecione uma pessoa cadastrada.', '#e65100');
+  if (!papel) return showToast('Escolha o papel da pessoa em relação ao fornecedor.', '#e65100');
+  const p = (pessoasData || []).find((x) => String(x.id) === String(id));
+  if (!p) return showToast('Pessoa não encontrada.', '#c62828');
+  if ((window._fornPessoasRel || []).some((r) => r.id != null && String(r.id) === String(id))) {
+    return showToast('Essa pessoa já está relacionada; troque o papel na lista.', '#e65100');
+  }
+  window._fornPessoasRel.push({ id: p.id, nome: p.nome || '', papel });
+  document.getElementById('fornPessoaRelPapel').value = '';
+  renderPessoasRelFornecedor();
+  _popularSelectPessoaRel();
+};
+
+window.mudarPapelPessoaRelFornecedor = (i, papel) => {
+  if (window._fornPessoasRel[i]) window._fornPessoasRel[i].papel = papel;
+};
+
+window.removerPessoaRelFornecedor = (i) => {
+  window._fornPessoasRel.splice(i, 1);
+  renderPessoasRelFornecedor();
+  _popularSelectPessoaRel();
+};
+
 /**
- * Recarrega as listas de Pessoas/Areas sem fechar o modal de fornecedor.
- *
- * Existem porque "+ Cadastrar nova pessoa/área" abre em aba nova (pra nao
- * perder a edicao em andamento) -- criar o registro la nao atualiza sozinho
- * a lista desta aba.
+ * Recarrega as listas de Pessoas/Areas sem fechar o drawer do fornecedor
+ * (depois de cadastrar uma pessoa ou área em outro lugar).
  */
 window._recarregarPessoasFornecedor = async () => {
   API.invalidate('getDependencias');
   const deps = await API.getDependencias();
   pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
-  _popularSelectBuscaGestor();
-  renderGestoresContrato();
+  _popularSelectPessoaRel();
+  renderPessoasRelFornecedor();
   showToast('Lista de pessoas atualizada.', '#2e7d32');
 };
 
 window._recarregarAreasFornecedor = async () => {
-  const atual = document.getElementById('fornCadSetor').value;
   API.invalidate('getAreas');
   window.areasData = await API.getAreas();
-  _popularSelectAreasFornecedor(atual);
+  _popularSelectAreaRel();
+  renderAreasRelFornecedor();
   showToast('Lista de áreas atualizada.', '#2e7d32');
 };
 
@@ -17564,16 +17702,17 @@ window.abrirDrawerFornecedorCadastro = (id, abaInicial) => {
     (categoriaAtual && !temNaLista ? `<option value="${esc(categoriaAtual)}">${esc(categoriaAtual)} (inativa)</option>` : '');
   document.getElementById('fornCadCategoria').value = categoriaAtual || '';
   _popularSelectSubcategoriaFornecedor(categoriaAtual, f ? (f.subcategoriaFornecedor || '') : '');
-  // Gestores do Contrato: usa a lista nova; se só houver o legado (string),
-  // hidrata com um item resolvido por nome em pessoasData.
-  window._fornecedorGestores = f && Array.isArray(f.gestoresContrato) && f.gestoresContrato.length
-    ? f.gestoresContrato.map((g) => ({ id: g.id != null ? g.id : null, nome: g.nome || '', cargo: g.cargo || '', telefone: g.telefone || '', email: g.email || '', area: g.area || '' }))
-    : (f && f.gestorContrato ? [_gestorLegadoParaSnapshot(f.gestorContrato)] : []);
-  renderGestoresContrato();
-  _popularSelectBuscaGestor();
+  // Gestor e área responsável vêm dos contratos (leitura); o que se edita são
+  // as áreas e pessoas relacionadas.
+  window._fornAreasRel = f && Array.isArray(f.areasRelacionadas) ? [...f.areasRelacionadas] : [];
+  window._fornPessoasRel = f && Array.isArray(f.pessoasRelacionadas) ? f.pessoasRelacionadas.map((r) => ({ ...r })) : [];
+  renderGestaoFornecedor();
+  renderAreasRelFornecedor();
+  _popularSelectAreaRel();
+  renderPessoasRelFornecedor();
+  _popularSelectPessoaRel();
   document.getElementById('fornCadTic').checked = f ? (f.tic !== false) : true;
   document.getElementById('fornCadDetalhes').value = f ? (f.detalhes || '') : '';
-  _popularSelectAreasFornecedor(f ? (f.setor || '') : '');
   document.getElementById('fornCadEndereco').value = f ? (f.endereco || '') : '';
   window._fornecedorPessoas = f && Array.isArray(f.pessoas) ? [...f.pessoas] : [];
   window.cancelarEdicaoPessoaFornecedor();
@@ -17589,6 +17728,7 @@ window.abrirDrawerFornecedorCadastro = (id, abaInicial) => {
 
   // Gating de perfil: desabilita campos de Dados E das abas de avaliação.
   document.querySelectorAll('#drawerFornecedorCadastro input, #drawerFornecedorCadastro select, #drawerFornecedorCadastro textarea').forEach((el) => { el.disabled = !podeMexer; });
+  document.querySelectorAll('#drawerFornecedorCadastro .forn-rel-adicionar').forEach((el) => { el.style.display = podeMexer ? 'block' : 'none'; });
   document.getElementById('btnAdicionarPessoaForn').style.display = podeMexer ? 'inline-block' : 'none';
   document.getElementById('btnAdicionarCanalForn').style.display = podeMexer ? 'inline-block' : 'none';
   // Depois de _fornPodeMexer: a lista só mostra editar/remover pra quem pode mexer.
@@ -17733,11 +17873,11 @@ function _coletarFormularioFornecedor() {
     cnpj: document.getElementById('fornCadCnpj').value.trim(),
     categoriaFornecedor: document.getElementById('fornCadCategoria').value,
     subcategoriaFornecedor: document.getElementById('fornCadSubcategoria').value,
-    // Lista de gestores (snapshots de Pessoa).
-    gestoresContrato: window._fornecedorGestores || [],
+    // Gestor e setor NAO vão: vêm dos contratos (19/10/2026).
+    areasRelacionadas: window._fornAreasRel || [],
+    pessoasRelacionadas: window._fornPessoasRel || [],
     tic: document.getElementById('fornCadTic').checked,
     detalhes: document.getElementById('fornCadDetalhes').value.trim(),
-    setor: document.getElementById('fornCadSetor').value.trim(),
     endereco: document.getElementById('fornCadEndereco').value.trim(),
     pessoas: window._fornecedorPessoas || [],
     canaisSuporte: window._fornecedorCanais || [],
@@ -17757,14 +17897,12 @@ window.salvarFornecedorCadastro = async () => {
       // fornecedor no mesmo catalogo de que os processos dependem, e o que a
       // regra do banco exige para este perfil poder gravar.
       categoria: CATEGORIA_FORNECEDOR_PADRAO,
-      // gestorContrato (string) segue gravado espelhando o 1º gestor, por
-      // compat com quem ainda lê o campo antigo.
-      gestorContrato: (dados.gestoresContrato[0] ? dados.gestoresContrato[0].nome : ''),
-      // Setor, endereco e canais existem no catalogo e sao gravados por esta
-      // tela. Sem eles no formulario, salvar aqui apagaria o que estava
-      // preenchido: a gravacao regrava a linha inteira, e campo ausente vira
-      // vazio. empresa/email/telefone soltos ficam de fora: uma empresa agora
-      // pode ter N pessoas, cada uma com seu proprio contato.
+      // Endereco e canais existem no catalogo e sao gravados por esta tela.
+      // Sem eles no formulario, salvar aqui apagaria o que estava preenchido:
+      // a gravacao regrava a linha inteira, e campo ausente vira vazio. Gestor
+      // e setor ficam de fora de proposito (vêm dos contratos) e a api.js nao
+      // os zera quando nao vêm no payload. empresa/email/telefone soltos
+      // tambem: uma empresa agora pode ter N pessoas, cada uma com seu contato.
     });
     _edFornecedor.marcar({ ...dados, id: id || r.id });
     if (!id) {
@@ -18622,7 +18760,7 @@ window._popularSelectGestorContrato = (atual) => {
     atual = v ? { id: v.startsWith('nome:') ? null : v, nome: sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].dataset.nome : '' } : null;
   }
   const fornecedor = _contratoFornecedores.find((f) => String(f.id) === String(document.getElementById('contratoFornecedor').value));
-  const idsDoFornecedor = new Set(((fornecedor && fornecedor.gestoresContrato) || []).map((g) => String(g.id)).filter(Boolean));
+  const idsDoFornecedor = new Set(((fornecedor && fornecedor.pessoasRelacionadas) || []).map((r) => String(r.id)).filter((x) => x && x !== 'null'));
   const pessoas = [...(pessoasData || [])].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
   const opt = (p) => `<option value="${esc(p.id)}" data-nome="${esc(p.nome)}">${esc(p.nome)}${p.setor ? ' — ' + esc(p.setor) : ''}</option>`;
   const doFornecedor = pessoas.filter((p) => idsDoFornecedor.has(String(p.id)));
@@ -18630,7 +18768,7 @@ window._popularSelectGestorContrato = (atual) => {
   const atualValor = atual ? (atual.id ? String(atual.id) : 'nome:' + atual.nome) : '';
   const temAtual = !atualValor || pessoas.some((p) => String(p.id) === atualValor);
   sel.innerHTML = '<option value="">Selecione...</option>' +
-    (doFornecedor.length ? `<optgroup label="Gestores informados no fornecedor">${doFornecedor.map(opt).join('')}</optgroup><optgroup label="Demais pessoas">${outras.map(opt).join('')}</optgroup>` : outras.map(opt).join('')) +
+    (doFornecedor.length ? `<optgroup label="Pessoas relacionadas ao fornecedor">${doFornecedor.map(opt).join('')}</optgroup><optgroup label="Demais pessoas">${outras.map(opt).join('')}</optgroup>` : outras.map(opt).join('')) +
     (!temAtual ? `<option value="${esc(atualValor)}" data-nome="${esc(atual.nome)}">${esc(atual.nome)}</option>` : '');
   sel.value = atualValor;
 };
@@ -19280,7 +19418,7 @@ function _renderVinculosContrato() {
   const blocoForn = forn
     ? `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px 14px;border:1px solid #e0e0e0;border-radius:8px;">
         <div style="flex:1;min-width:200px;"><div style="font-weight:700;">${esc(forn.nome)}</div>
-          <div class="muted" style="font-size:0.85em;">${esc([forn.categoriaFornecedor, forn.setor].filter(Boolean).join(' · ') || '–')}${forn.tic !== false ? ' · TIC' : ''}</div></div>
+          <div class="muted" style="font-size:0.85em;">${esc([forn.categoriaFornecedor, (forn.areasRelacionadas || []).join(', ')].filter(Boolean).join(' · ') || '–')}${forn.tic !== false ? ' · TIC' : ''}</div></div>
         <div style="text-align:center;"><div class="muted" style="font-size:0.75em;">Criticidade</div>${_badgeCriticidadeFornecedor(av)}</div>
         <div style="text-align:center;"><div class="muted" style="font-size:0.75em;">Conformidade</div>${_htmlBadge(_nivelSituacaoFornecedor(sit), av && av.nota !== null ? `${av.nota} · ${sit.rotulo}` : sit.rotulo)}</div>
         ${Perfis.podeVerTela(window.USER_PERFIS, 'fornecedores') ? `<a href="#fornecedores" onclick="window._abrirFornecedorAoCarregar='${escJs(forn.id)}'" class="btn btn-ghost" style="padding:6px 12px;font-size:0.85em;">Abrir fornecedor</a>` : ''}

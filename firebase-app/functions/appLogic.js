@@ -540,38 +540,66 @@ function _dataBRServidor(iso) {
  * comparacao do que o fornecedor garante com o RTO/RPO exigido (da propria
  * dependencia e dos processos do BIA que dependem dela).
  */
-async function _slasDaDependencia(db, depId, dep, catalogo, processosLigados) {
+/** Contratos VIGENTES (a situacao do status define), com o documento inteiro. Uma leitura por geracao. */
+async function _contratosVigentes(db) {
   const [contSnap, statusSnap] = await Promise.all([
     db.collection(COLLECTION.contratos).get(),
     db.collection(COLLECTION.statusContrato).get(),
   ]);
   const listaStatus = statusSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-  const acharDep = (item) => {
-    if (item && item.id) { const byId = (catalogo || []).find((d) => String(d.id) === String(item.id)); if (byId) return byId; }
-    return (catalogo || []).find((d) => (d.nome || '') === (item && item.nome));
+  return contSnap.docs
+    .map((d) => ({ id: d.id, ...(d.data() || {}) }))
+    .filter((c) => contratoCiclo.situacaoDoStatus(c.statusId, listaStatus) === contratoCiclo.SITUACAO.VIGENTE);
+}
+
+/** Acha uma dependencia do catalogo por id (ou, sem id, por nome). */
+function _acharNoCatalogo(catalogo, item) {
+  if (item && item.id) { const byId = (catalogo || []).find((d) => String(d.id) === String(item.id)); if (byId) return byId; }
+  return (catalogo || []).find((d) => (d.nome || '') === (item && item.nome));
+}
+
+/**
+ * Fornecedores ligados a esta dependencia: ela mesma (se for fornecedor) e os
+ * que estao em drpDependencias. Devolve [{ id, ...fornecedor }] sem repetir.
+ */
+function _fornecedoresDaDependencia(depId, dep, catalogo) {
+  const lista = [];
+  const ja = new Set();
+  const add = (d, id) => {
+    if (!d || !CATEGORIAS_FORNECEDOR_DRP.includes(d.categoria) || ja.has(String(id))) return;
+    ja.add(String(id));
+    lista.push({ ...d, id });
   };
-  const fornecedoresIds = new Set();
-  if (CATEGORIAS_FORNECEDOR_DRP.includes(dep.categoria)) fornecedoresIds.add(String(depId));
+  add(dep, depId);
   (Array.isArray(dep.drpDependencias) ? dep.drpDependencias : []).forEach((item) => {
-    const d = acharDep(item);
-    if (d && CATEGORIAS_FORNECEDOR_DRP.includes(d.categoria)) fornecedoresIds.add(String(d.id));
+    const d = _acharNoCatalogo(catalogo, item);
+    if (d) add(d, d.id);
   });
+  return lista;
+}
+
+/** Contratos vigentes que cobrem a dependencia, ou que sao de um fornecedor ligado a ela. [{ c, cobre }] */
+function _contratosDaDependencia(vigentes, depId, dep, catalogo) {
+  const fornecedoresIds = new Set(_fornecedoresDaDependencia(depId, dep, catalogo).map((f) => String(f.id)));
+  return (vigentes || [])
+    .map((c) => ({
+      c,
+      cobre: (Array.isArray(c.dependenciasCobertasIds) ? c.dependenciasCobertasIds : []).map(String).includes(String(depId)),
+      viaFornecedor: fornecedoresIds.has(String(c.fornecedorId || '')),
+    }))
+    .filter((x) => x.cobre || x.viaFornecedor)
+    .sort((a, b) => String(a.c.codigo || '').localeCompare(String(b.c.codigo || '')));
+}
+
+async function _slasDaDependencia(db, depId, dep, catalogo, processosLigados, vigentes) {
+  const lista = vigentes || await _contratosVigentes(db);
 
   const alvos = [{ origem: `Dependência ${dep.nome || ''}`.trim(), tipo: 'dependencia', rto: dep.rto, rpo: dep.rpo }]
     .concat((processosLigados || []).map((p) => ({
       origem: `Processo ${p.processo || ''}${p.area ? ' (' + p.area + ')' : ''}`.trim(), tipo: 'processo', rto: p.rto, rpo: p.rpo,
     })));
 
-  const contratos = contSnap.docs
-    .map((d) => ({ id: d.id, ...(d.data() || {}) }))
-    .filter((c) => contratoCiclo.situacaoDoStatus(c.statusId, listaStatus) === contratoCiclo.SITUACAO.VIGENTE)
-    .map((c) => {
-      const cobre = (Array.isArray(c.dependenciasCobertasIds) ? c.dependenciasCobertasIds : []).map(String).includes(String(depId));
-      const viaFornecedor = fornecedoresIds.has(String(c.fornecedorId || ''));
-      return { c, cobre, viaFornecedor };
-    })
-    .filter((x) => x.cobre || x.viaFornecedor)
-    .sort((a, b) => String(a.c.codigo || '').localeCompare(String(b.c.codigo || '')))
+  const contratos = _contratosDaDependencia(lista, depId, dep, catalogo)
     .map(({ c, cobre }) => {
       const sla = contratoCiclo.normalizarSla(c.sla);
       const temSla = contratoCiclo.temSla(sla);
@@ -748,8 +776,6 @@ async function gerarDRP(db, data, ctx) {
   _pushContato({ nome: dep.nome, origem: dep.categoria, finalidade: 'Contato direto desta dependência', telefone: dep.telefone, email: dep.email });
   (Array.isArray(dep.pessoas) ? dep.pessoas : []).forEach((p) =>
     _pushContato({ nome: p.nome, origem: dep.nome, finalidade: p.cargo || 'Contato', telefone: p.telefone, email: p.email }));
-  (Array.isArray(dep.gestoresContrato) ? dep.gestoresContrato : []).forEach((g) =>
-    _pushContato({ nome: g.nome, origem: g.area || dep.nome, finalidade: 'Gestor do Contrato' + (g.cargo ? ' — ' + g.cargo : ''), telefone: g.telefone, email: g.email }));
 
   // Área responsável -> email/telefone (que vêm da Pessoa responsável).
   if (dep.responsavel) {
@@ -767,8 +793,38 @@ async function gerarDRP(db, data, ctx) {
     _pushContato({ nome: d.nome, origem: d.categoria, finalidade: 'Dependência vinculada', telefone: d.telefone, email: d.email });
     (Array.isArray(d.pessoas) ? d.pessoas : []).forEach((p) =>
       _pushContato({ nome: p.nome, origem: d.nome, finalidade: p.cargo || 'Contato', telefone: p.telefone, email: p.email }));
-    (Array.isArray(d.gestoresContrato) ? d.gestoresContrato : []).forEach((g) =>
-      _pushContato({ nome: g.nome, origem: g.area || d.nome, finalidade: 'Gestor do Contrato' + (g.cargo ? ' — ' + g.cargo : ''), telefone: g.telefone, email: g.email }));
+  });
+
+  // Gestores dos contratos VIGENTES e pessoas relacionadas ao fornecedor
+  // (19/10/2026). O gestor do contrato nao e mais digitado no fornecedor: vem do
+  // contrato, e telefone/e-mail/cargo vem do cadastro da Pessoa. So contrato
+  // vigente (o encerrado nao tem gestor a acionar). So contato -- nunca valor.
+  let contratosVigentes;
+  try {
+    contratosVigentes = await _contratosVigentes(db);
+  } catch (e) {
+    console.error('gerarDRP: contratos nao carregaram; DRP segue sem os gestores dos contratos', e);
+  }
+  const pessoaDoCadastro = (pid) => (pid != null ? catalogo.find((x) => String(x.id) === String(pid) && x.categoria === 'Pessoas') : null);
+  _contratosDaDependencia(contratosVigentes, String(id), dep, catalogo).forEach(({ c }) => {
+    const p = pessoaDoCadastro(c.gestor && c.gestor.id);
+    if (!p) return;
+    _pushContato({
+      nome: p.nome, origem: c.area || c.fornecedorNome || dep.nome,
+      finalidade: `Gestor do contrato ${c.codigo || ''}`.trim() + (p.detalhes ? ' — ' + p.detalhes : ''),
+      telefone: p.telefone, email: p.email,
+    });
+  });
+  _fornecedoresDaDependencia(String(id), dep, catalogo).forEach((f) => {
+    (Array.isArray(f.pessoasRelacionadas) ? f.pessoasRelacionadas : []).forEach((r) => {
+      const p = pessoaDoCadastro(r.id);
+      if (!p) return;
+      _pushContato({
+        nome: p.nome, origem: f.nome,
+        finalidade: (r.papel || 'Pessoa relacionada') + (p.detalhes ? ' — ' + p.detalhes : ''),
+        telefone: p.telefone, email: p.email,
+      });
+    });
   });
 
   // Deduplica por nome+telefone+email.
@@ -826,7 +882,7 @@ async function gerarDRP(db, data, ctx) {
   // na leitura nao derruba o DRP: a secao diz que nao deu para consultar.
   let slas = null;
   try {
-    slas = await _slasDaDependencia(db, String(id), dep, catalogo, processosLigados);
+    slas = await _slasDaDependencia(db, String(id), dep, catalogo, processosLigados, contratosVigentes);
   } catch (e) {
     console.error('gerarDRP: falha ao ler os SLAs dos contratos', e);
   }

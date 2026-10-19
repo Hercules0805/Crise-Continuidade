@@ -351,8 +351,18 @@ async function _lerDependencias() {
     // Subcategoria (catalogo subcategorias_fornecedor, filha da Categoria
     // acima) -- mesma convencao de guardar o NOME, nao o id.
     subcategoriaFornecedor: d.subcategoriaFornecedor || '',
+    // LEGADO (19/10/2026): o gestor e o setor do fornecedor passaram a vir dos
+    // contratos vigentes. Estes campos ficam no banco so ate a migracao
+    // (scripts/migrar-gestores-fornecedor-relacionados.js) e nao sao mais
+    // editados pela tela.
     gestorContrato: d.gestorContrato || '',
     gestoresContrato: Array.isArray(d.gestoresContrato) ? d.gestoresContrato : [],
+    // Areas e pessoas internas que se relacionam com o fornecedor:
+    // areasRelacionadas = [nome da area]; pessoasRelacionadas = [{id, nome, papel}].
+    areasRelacionadas: Array.isArray(d.areasRelacionadas) ? d.areasRelacionadas.filter(Boolean) : [],
+    pessoasRelacionadas: Array.isArray(d.pessoasRelacionadas)
+      ? d.pessoasRelacionadas.map((p) => ({ id: p.id != null ? p.id : null, nome: p.nome || '', papel: p.papel || '' }))
+      : [],
     cnpj: d.cnpj || '',
     // Quais controles do catalogo de conformidade valem para este fornecedor.
     // null = nunca customizado (ausencia, nao "nenhum") — a tela comeca sem
@@ -1455,6 +1465,25 @@ async function _salvarDependencia(d) {
     data.techLeadProdutos = data.techLead && Array.isArray(d.techLeadProdutos) ? [...new Set(d.techLeadProdutos.map(String).filter(Boolean))] : [];
     data.teamLead = d.teamLead === true;
     data.teamLeadProdutos = data.teamLead && Array.isArray(d.teamLeadProdutos) ? [...new Set(d.teamLeadProdutos.map(String).filter(Boolean))] : [];
+  }
+  // Gestor e setor do FORNECEDOR vem dos contratos (19/10/2026): a tela de
+  // fornecedor nao envia mais esses campos, e o que nao vem no payload nao pode
+  // ser zerado -- senao salvar o fornecedor apagaria o dado antigo antes da
+  // migracao. gestorContrato/gestoresContrato so existem em fornecedor; o setor
+  // tambem e da Pessoa (area principal) e das outras categorias, que seguem
+  // gravando como antes.
+  if (d.gestorContrato === undefined && d.gestoresContrato === undefined) {
+    delete data.gestorContrato;
+    delete data.gestoresContrato;
+  }
+  if (d.setor === undefined && ['Fornecedores', 'Fornecedor'].includes(d.categoria)) delete data.setor;
+  if (Array.isArray(d.areasRelacionadas)) {
+    data.areasRelacionadas = [...new Set(d.areasRelacionadas.map((a) => String(a || '').trim()).filter(Boolean))];
+  }
+  if (Array.isArray(d.pessoasRelacionadas)) {
+    data.pessoasRelacionadas = d.pessoasRelacionadas
+      .filter((p) => p && (p.id != null || String(p.nome || '').trim()))
+      .map((p) => ({ id: p.id != null ? p.id : null, nome: String(p.nome || '').trim(), papel: String(p.papel || '').trim() }));
   }
   if (Array.isArray(d.canaisSuporte)) {
     data.canaisSuporte = d.canaisSuporte.map((c) => ({
