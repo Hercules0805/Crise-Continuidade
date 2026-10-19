@@ -407,17 +407,22 @@ describe('Security Rules — fornecedores, perfis e dependências', () => {
     const SIAREA = { email: 'si-com-area@fortestecnologia.com.br' };
     await seedPerfil(SIAREA.email, { perfis: ['seguranca'], area: 'RH' });
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc('riscos/r-rh-priv').set({ area: 'RH', titulo: 'Folha' });
-      await ctx.firestore().doc('processos/rh__x').set({ area: 'RH', processo: 'X' });
+      // Uma instância só: chamar ctx.firestore() de novo reconfigura uma já iniciada e falha.
+      const f = ctx.firestore();
+      await f.doc('riscos/r-rh-priv').set({ area: 'RH', titulo: 'Folha' });
+      await f.doc('processos/rh__x').set({ area: 'RH', processo: 'X' });
     });
     // SI já lê qualquer risco por permissão própria — isso continua valendo.
     await assertSucceeds(db(SIAREA).doc('riscos/r-rh-priv').get());
     // Mas NÃO ganha a escrita de processo pela rota de gestor da área RH
     // (SI não escreve processos; só admin ou o gestor DAQUELA área).
     await assertFails(db(SIAREA).doc('processos/rh__x').set({ area: 'RH', processo: 'X2' }, { merge: true }));
-    // E a consulta de riscos filtrando a "sua" área NÃO passa como gestor:
-    // ele não é gestor, então não vale a regra por documento de gestor.
-    await assertFails(db(SIAREA).collection('riscos').where('area', '==', 'RH').get());
+    // E a consulta de riscos filtrando a "sua" área NÃO passa como gestor. Com
+    // SI isso não dá para ver (SI já lê todo risco, ver acima); com um TI que tem
+    // área -- TI não lê riscos -- a consulta só passaria se a área desse poder de gestor.
+    const TIAREA = { email: 'ti-com-area@fortestecnologia.com.br' };
+    await seedPerfil(TIAREA.email, { perfis: ['ti'], area: 'RH' });
+    await assertFails(db(TIAREA).collection('riscos').where('area', '==', 'RH').get());
   });
 
   test('gestor com área continua sendo gestor da própria área (não quebrou)', async () => {
@@ -515,8 +520,10 @@ describe('Security Rules — fornecedores, perfis e dependências', () => {
     const OP = { email: 'operador@fortestecnologia.com.br' };
     await seedPerfil(OP.email, { perfis: ['operador'] });
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc('dependencias/d-pessoa').set({ categoria: 'Pessoas', nome: 'Ana' });
-      await ctx.firestore().doc('dependencias/d-forn2').set({ categoria: 'Fornecedores', nome: 'Beta' });
+      // Uma instância só: chamar ctx.firestore() de novo reconfigura uma já iniciada e falha.
+      const f = ctx.firestore();
+      await f.doc('dependencias/d-pessoa').set({ categoria: 'Pessoas', nome: 'Ana' });
+      await f.doc('dependencias/d-forn2').set({ categoria: 'Fornecedores', nome: 'Beta' });
     });
     await assertSucceeds(db(OP).doc('dependencias/d-novo').set({ categoria: 'Fornecedores', nome: 'Alfa' }));
     await assertSucceeds(db(OP).doc('dependencias/d-forn2').set({ nome: 'Beta S.A.' }, { merge: true }));
