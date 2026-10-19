@@ -449,12 +449,16 @@ Tela nova usa estes componentes; tela antiga que for tocada migra para eles. Tes
 | Validação de campo | `return _avisarCampo('idDoCampo', 'Informe X.')` (troca para a aba do campo, foca, marca `.campo-invalido`) + `<span class="req" aria-hidden="true">*</span>` no rótulo | `return showToast('Informe X.', '#e65100')` sozinho |
 | Confirmação | `if (!await confirmarAcao('Excluir X?')) return;` (modal do sistema; botão com o verbo; Esc = Cancelar) | `confirm()` nativo, `esc()` dentro da mensagem |
 | Erro de carga | `_htmlErroCarga('Não foi possível carregar X.', 'nomeDaTela')` | `catch → []` (vira "Nenhum X cadastrado") |
+| Mensagem de erro (aviso) | `showToast('❌ ' + _mensagemErro(e, 'Não foi possível X. Tente de novo.'), '#c62828')` -- frase clara para permissão/rede/sessão/tempo; mensagem do servidor em português passa | `'Erro: ' + e.message` (texto técnico do SDK para o usuário) |
+| Pedido de texto curto | `const v = await pedirTexto('Rótulo', { valor, tipo: 'email' })` (modal; `null` se cancelar) | `prompt()` nativo |
+| Estado vazio | tela/lista: `_htmlVazio('Nenhum X cadastrado.')` (`.vazio`, caixa tracejada); linha de grade: `<td colspan="N" class="vazio">`; nota em formulário: `class="vazio-inline"` | `<p style="text-align:center;color:#999...">`, emoji gigante |
+| Card que filtra a lista | `_htmlMetricCardFiltro({ label, value, cor, ativo, onclick, titulo })` (rótulo em cima; ativo por classe; `<button>`) | `<div class="bia-metric" style="outline...">` montado na tela |
 | Atalho para outra tela | `_seVeTela('pagina', html)` | link sem checar perfil |
 | Grade larga | `<colgroup>` em px + `min-width` inline; o `min-width:1400px` legado só vale para 9+ colunas | `width:%` somando ≠ 100 |
 
 **Acessibilidade (Fase 4)** — feita num ponto só em `app.js` (bloco "ACESSIBILIDADE DE DRAWERS E MODAIS"), sem precisar marcar cada drawer: ao ganhar `.open`, todo `.drawer`/`.modal-overlay` recebe `role="dialog"`, `aria-modal` e o `<h3>` como `aria-labelledby`, foca o 1º campo e guarda quem abriu; ao fechar, o foco volta. Tab fica preso no diálogo aberto mais recente. Botão só de ícone ganha `aria-label` (do `title`; o `×` vira "Fechar"). `#toast` é `role="status" aria-live="polite"`. Por isso: **todo drawer/modal precisa de um `<h3>` de título** e **todo botão só de ícone precisa de `title`**.
 
-**Ainda não unificado** (decisão pendente, não copiar como padrão): cadastro rápido por link "Gerenciar X" em nova aba + 🔄 (o padrão é o drawer empilhado, `_esconderDrawerPaiTemporariamente`); questionário BIA em duas interfaces (drawer "Avaliar Processo" e aba Avaliação do Processo); mensagens de erro que mostram `e.message` técnico.
+**Ainda não unificado** (decisão pendente, não copiar como padrão): cadastro rápido por link "Gerenciar X" em nova aba + 🔄 (o padrão é o drawer empilhado, `_esconderDrawerPaiTemporariamente`); questionário BIA em duas interfaces (drawer "Avaliar Processo" e aba Avaliação do Processo). Nas janelas de documento (PCN, DRP, Roteiro), que abrem separadas e não têm o modal do sistema, o `alert()` continua -- só com frase clara.
 
 ## 5. Divergências conhecidas (não corrigidas nesta rodada — cuidado ao copiar o "padrão errado")
 
