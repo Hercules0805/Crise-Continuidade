@@ -389,6 +389,52 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // ---- Contratos (15/10/2026) ----
+    // Mesma posse de Fornecedores (Admin, SI, Operador). Gestor SO LE, e so os
+    // contratos da propria area -- contrato tem valor, e valor nao e para o
+    // dominio inteiro. Mesma armadilha dos riscos: com regra por documento, a
+    // consulta do gestor tem que filtrar por area, senao falha inteira.
+    match /contratos/{id} {
+      allow read: if podeGerenciarFornecedores() || isGestorDaArea(resource.data.area);
+      allow write: if podeGerenciarFornecedores();
+    }
+
+    // Eventos do contrato (linha do tempo). Guardam copia da `area` do contrato
+    // (api.js regrava quando a area do contrato muda) para o gestor poder ler
+    // pelo mesmo recorte, sem get() por documento.
+    match /eventos_contrato/{id} {
+      allow read: if podeGerenciarFornecedores() || isGestorDaArea(resource.data.area);
+      allow write: if podeGerenciarFornecedores();
+    }
+
+    // Listas configuraveis do contrato. Leitura para o dominio (o gestor
+    // precisa dos nomes para ler os proprios contratos).
+    match /tipos_contrato/{id} {
+      allow read: if isCorpUser();
+      allow write: if podeGerenciarFornecedores();
+    }
+    match /indexadores_reajuste/{id} {
+      allow read: if isCorpUser();
+      allow write: if podeGerenciarFornecedores();
+    }
+    match /status_contrato/{id} {
+      allow read: if isCorpUser();
+      allow write: if podeGerenciarFornecedores();
+    }
+
+    // ---- Alertas por e-mail (16/10/2026) ----
+    // Configuracao (modo desligado/simulacao/ativo, grupos, destinatarios):
+    // so o Admin. A fila de saida guarda destinatario e conteudo de cada
+    // e-mail: so o Admin le, e ninguem grava pelo cliente -- quem enfileira e
+    // envia sao as Cloud Functions (Admin SDK).
+    match /config_notificacoes/{id} {
+      allow read, write: if isAdmin();
+    }
+    match /notificacoes_email/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     match /medicoes/{id} {
       allow read: if isAdmin() || isGestorDaArea(resource.data.area);
       allow write: if false;

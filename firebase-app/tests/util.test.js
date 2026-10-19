@@ -134,3 +134,41 @@ test('rastreador: coletor que falha conta como sujo, nunca como limpo', () => {
   falha = true;
   assert.strictEqual(r.sujo(), true);
 });
+
+// ---- Moeda (15/10/2026): mascara dos campos de valor do contrato ----
+const { formatarMoedaBR, mascararMoedaBR, lerMoedaBR } = require('../public/util.js');
+
+test('formatarMoedaBR: 2 casas, milhar com ponto, vazio e invalido viram vazio', () => {
+  assert.strictEqual(formatarMoedaBR(1234.5), '1.234,50');
+  assert.strictEqual(formatarMoedaBR(505881.12), '505.881,12');
+  assert.strictEqual(formatarMoedaBR(0), '0,00');
+  assert.strictEqual(formatarMoedaBR(''), '');
+  assert.strictEqual(formatarMoedaBR(null), '');
+  assert.strictEqual(formatarMoedaBR(undefined), '');
+  assert.strictEqual(formatarMoedaBR('abc'), '');
+  assert.strictEqual(formatarMoedaBR('42.156,76'), '42.156,76', 'texto ja mascarado volta igual');
+});
+
+test('mascararMoedaBR: os digitos viram centavos', () => {
+  assert.strictEqual(mascararMoedaBR('4215676'), '42.156,76');
+  assert.strictEqual(mascararMoedaBR('abc12345'), '123,45');
+  assert.strictEqual(mascararMoedaBR('5'), '0,05');
+  assert.strictEqual(mascararMoedaBR('0'), '');
+  assert.strictEqual(mascararMoedaBR(''), '');
+  assert.strictEqual(mascararMoedaBR('1.234,56'), '1.234,56', 'redigitar sobre o texto mascarado nao muda o valor');
+});
+
+test('lerMoedaBR: texto mascarado vira o numero que vai para o banco', () => {
+  assert.strictEqual(lerMoedaBR('1.234,56'), 1234.56);
+  assert.strictEqual(lerMoedaBR('R$ 42.156,76'), 42156.76);
+  assert.strictEqual(lerMoedaBR('0,05'), 0.05);
+  assert.strictEqual(lerMoedaBR(''), null);
+  assert.strictEqual(lerMoedaBR('abc'), null);
+  assert.strictEqual(lerMoedaBR(null), null);
+});
+
+test('moeda: ida e volta sem perder centavo', () => {
+  [0.01, 1, 12.5, 42156.76, 505881.12, 1234567.89].forEach((x) => {
+    assert.strictEqual(lerMoedaBR(formatarMoedaBR(x)), x);
+  });
+});

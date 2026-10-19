@@ -114,4 +114,31 @@ function secoesBloqueadas(html, bloqueadas) {
     .map((sec) => ({ chave: sec.chave, html: sec.html.replace(/<button[\s\S]*?<\/button>/gi, '').trim() }));
 }
 
-module.exports = { chaveDaSecao, dividirSecoes, mesclarBloqueadas, secoesBloqueadas };
+/**
+ * Secao montada pelo SISTEMA (nao pela IA), ex.: "SLAs Contratados com
+ * Fornecedores" (15/10/2026). Ela e sempre regravada com o dado atual -- se
+ * ja existe no HTML (mesmo travada pelo cadeado), e substituida; senao, entra
+ * logo depois da ultima secao que `ancora(secao)` reconhecer; sem ancora, no
+ * fim. Copias repetidas da mesma chave (a IA inventou uma) sao removidas.
+ */
+function substituirOuInserirSecao(html, chave, htmlSecao, ancora) {
+  const doc = dividirSecoes(html);
+  const nova = { chave, html: String(htmlSecao || '') };
+  const idxExistente = doc.secoes.findIndex((s) => s.chave === chave);
+  let secoes;
+  if (idxExistente !== -1) {
+    secoes = doc.secoes.filter((s, i) => s.chave !== chave || i === idxExistente)
+      .map((s) => (s.chave === chave ? nova : s));
+  } else {
+    secoes = doc.secoes.slice();
+    let pos = -1;
+    if (typeof ancora === 'function') {
+      secoes.forEach((s, i) => { if (ancora(s)) pos = i; });
+    }
+    if (pos === -1) secoes.push(nova);
+    else secoes.splice(pos + 1, 0, nova);
+  }
+  return doc.cabecalho + secoes.map((s) => s.html).join('');
+}
+
+module.exports = { chaveDaSecao, dividirSecoes, mesclarBloqueadas, secoesBloqueadas, substituirOuInserirSecao };

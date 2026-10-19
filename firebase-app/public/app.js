@@ -18,6 +18,11 @@ const pages = {
   'fornecedores-criticidade': fornecedoresCriticidadePerguntas,
   'catalogo-backup': catalogoBackup,
   'produtos-software': produtosSoftware,
+  contratos,
+  'contratos-tipos': contratosTipos,
+  'contratos-indexadores': contratosIndexadores,
+  'contratos-status': contratosStatus,
+  'notificacoes-email': notificacoesEmail,
   perfis,
 };
 
@@ -4411,7 +4416,57 @@ window.trocarAbaDependencia = (aba) => {
   });
   // Ao entrar na aba Plano, re-renderiza o preview do DRP salvo.
   if (aba === 'plano') renderDrpResumo();
+  if (aba === 'drp') _carregarSlasDependencia();
 };
+
+/**
+ * SLAs contratados (15/10/2026): os contratos vigentes que cobrem esta
+ * dependência, os mesmos que entram no DRP gerado. Vem do servidor
+ * (obterSlasDependencia) -- quem opera DRP pode não ler `contratos` direto, e
+ * o servidor só devolve os campos de SLA. Quem não opera DRP não vê o bloco.
+ */
+async function _carregarSlasDependencia() {
+  const cont = document.getElementById('depSlasContratados');
+  if (!cont) return;
+  const id = (document.getElementById('depId') || {}).value || '';
+  if (!id || !Perfis.podeOperarDRP(window.USER_PERFIS)) { cont.innerHTML = ''; return; }
+  cont.innerHTML = '<div style="font-size:0.85em;color:#888;margin-bottom:14px;">⏳ Carregando SLAs contratados...</div>';
+  let r;
+  try {
+    r = await API.getSlasDependencia(id);
+  } catch (e) {
+    console.error('Dependência: SLAs contratados não carregaram', e);
+    cont.innerHTML = '';
+    return;
+  }
+  if ((document.getElementById('depId') || {}).value !== String(id)) return;
+  const fmt = ContratoCiclo.formatarDuracao;
+  const contratos = (r && r.contratos) || [];
+  const corpo = contratos.length
+    ? contratos.map((c) => {
+        const s = ContratoCiclo.normalizarSla(c.sla);
+        const partes = c.temSla ? [
+          s.cobertura ? `Atendimento ${s.cobertura === 'Outro' ? (s.coberturaDetalhe || 'outro') : s.cobertura}` : '',
+          `RTO garantido ${fmt(s.rtoMin) || '—'}`,
+          `RPO garantido ${fmt(s.rpoMin) || '—'}`,
+          s.disponibilidadePct !== null ? `Disponibilidade ${String(s.disponibilidadePct).replace('.', ',')}%` : '',
+        ].filter(Boolean) : ['SLA não cadastrado no contrato'];
+        const chips = (c.incompatibilidades || []).map((i) => {
+          const k = { perigo: ['#c62828', '#ffebee'], aviso: ['#f57c00', '#fff3e0'] }[i.nivel] || ['#1565c0', '#e3f2fd'];
+          return `<span style="display:inline-block;margin:4px 4px 0 0;padding:2px 9px;border-radius:10px;font-size:0.74em;font-weight:700;color:${k[0]};background:${k[1]};">${esc(i.rotulo)}</span>`;
+        }).join('');
+        return `<div style="padding:8px 0;border-bottom:1px solid #eee;">
+          <div style="font-weight:600;">${esc(c.codigo)} — ${esc(c.objeto)} <span style="color:#888;font-weight:400;">· ${esc(c.fornecedorNome || '')}${c.viaCobertura ? '' : ' · pelo fornecedor'}</span></div>
+          <div style="font-size:0.85em;color:#555;">${esc(partes.join(' · '))}</div>${chips}
+        </div>`;
+      }).join('')
+    : '<div style="font-size:0.88em;color:#888;">Nenhum contrato vigente cobre esta dependência. Para vincular, marque-a em "O que este contrato cobre", na aba Dados do contrato.</div>';
+  cont.innerHTML = `<div style="margin-bottom:18px;padding:12px 14px;border:1px solid #d8d2cd;border-left:3px solid #d60014;border-radius:8px;background:#fffafa;">
+    <div style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">SLAs contratados</div>
+    <div style="font-size:0.74em;color:#888;margin-bottom:6px;">Vêm dos contratos vigentes e entram no DRP gerado, na seção "SLAs Contratados com Fornecedores". A comparação usa o RTO/RPO já salvo desta dependência.</div>
+    ${corpo}
+  </div>`;
+}
 
 /**
  * Cartão único selecionável (nunca lista) -- clicar destaca/desmarca um valor
@@ -5169,6 +5224,7 @@ function _htmlDrawerDependencia() {
           </div>
 
           <div id="painel-dep-drp" style="display:none;">
+            <div id="depSlasContratados"></div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
               <div>
                 <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
@@ -15784,6 +15840,25 @@ window.irParaPaginaFornecedores = (delta) => {
   renderizarFornecedores();
 };
 
+/**
+ * Linha sob o nome do fornecedor (só se os contratos carregaram): "N contratos
+ * vigentes"; sem nenhum vigente, "Vigência expirada" quando algum contrato dele
+ * está nessa situação (a vigência acabou sem renovação -- a pessoa precisa
+ * saber que e isso, e nao que nunca houve contrato); senão "Sem contrato vigente".
+ */
+function _htmlContratosVigentesFornecedor(id) {
+  if (!window._fornContratosCarregados) return '';
+  const n = _contratosVigentesDoFornecedor(id).length;
+  const expirados = n ? [] : _contratosExpiradosDoFornecedor(id);
+  const estilo = (cor) => `font-size:0.78em;font-weight:${expirados.length ? 600 : 400};color:${cor};margin-top:2px;`;
+  if (n) return `<div style="${estilo('#2e7d32')}">📄 ${n} contrato${n > 1 ? 's' : ''} vigente${n > 1 ? 's' : ''}</div>`;
+  if (expirados.length) {
+    const codigos = expirados.map((c) => c.codigo).filter(Boolean).join(', ');
+    return `<div class="forn-vigencia-expirada" title="${esc(`Vigência expirada${codigos ? ': ' + codigos : ''}`)}" style="${estilo('#e65100')}">⏳ Vigência expirada</div>`;
+  }
+  return `<div style="${estilo('#888')}">Sem contrato vigente</div>`;
+}
+
 function _avaliacaoDoFornecedor(id) {
   return avaliacoesFornecedorData.find((a) => a.fornecedorId === String(id)) || null;
 }
@@ -15833,6 +15908,42 @@ function _resumoPessoasFornecedor(f) {
   return `${esc(pessoas[0].nome)}${extra > 0 ? ` <span style="color:#999;">+${extra}</span>` : ''}`;
 }
 
+// ---- Filtro por Gestor do Contrato (16/10/2026) ----
+const GESTOR_FORN_SEM = '__sem_gestor__';
+
+/** Gestores de um fornecedor como [{chave, nome}]: a lista nova (por id, ou por nome se sem id) e, sem ela, o texto legado. */
+function _gestoresDoFornecedor(f) {
+  const lista = Array.isArray(f.gestoresContrato) ? f.gestoresContrato : [];
+  const norm = (t) => String(t || '').trim().toLowerCase();
+  const doCadastro = lista.filter((g) => g && (g.id != null || g.nome))
+    .map((g) => ({ chave: g.id != null ? `id:${g.id}` : `nome:${norm(g.nome)}`, nome: g.nome || '' }));
+  if (doCadastro.length) return doCadastro;
+  return f.gestorContrato ? [{ chave: `nome:${norm(f.gestorContrato)}`, nome: f.gestorContrato }] : [];
+}
+
+/**
+ * Opcoes do filtro: todos os gestores que aparecem em ALGUM fornecedor (nao o
+ * catalogo inteiro de Pessoas), em ordem alfabetica, mais "Sem gestor". So
+ * remonta quando o conjunto muda -- a grade renderiza a cada tecla da busca e
+ * remontar apagaria a escolha.
+ */
+function _popularFiltroGestorFornecedor() {
+  const sel = document.getElementById('filtroFornCadastroGestor');
+  if (!sel) return;
+  const porChave = new Map();
+  fornecedoresData.forEach((f) => _gestoresDoFornecedor(f).forEach((g) => { if (!porChave.has(g.chave)) porChave.set(g.chave, g.nome); }));
+  const itens = [...porChave].sort((a, b) => a[1].localeCompare(b[1], 'pt-BR'));
+  const assinatura = itens.map(([c, n]) => `${c}=${n}`).join('|');
+  if (sel.dataset.assinatura === assinatura) return;
+  const atual = sel.value;
+  sel.innerHTML = '<option value="">Todos os gestores</option>' +
+    `<option value="${GESTOR_FORN_SEM}">Sem gestor</option>` +
+    itens.map(([chave, nome]) => `<option value="${esc(chave)}">${esc(nome)}</option>`).join('');
+  sel.dataset.assinatura = assinatura;
+  // Escolha que sumiu da lista (gestor removido) volta para "Todos".
+  sel.value = [...sel.options].some((o) => o.value === atual) ? atual : '';
+}
+
 /** Resumo do(s) Gestor(es) do Contrato na grade: 1º nome + "+N". Cai no
  *  gestorContrato (string legado) quando ainda não há a lista nova. */
 function _resumoGestoresFornecedor(f) {
@@ -15870,6 +15981,12 @@ async function fornecedores() {
         </select>
       </div>
       <div class="field">
+        <label class="field-label">Gestor do Contrato</label>
+        <select id="filtroFornCadastroGestor" onchange="filtrarFornecedores()" class="field-control">
+          <option value="">Todos os gestores</option>
+        </select>
+      </div>
+      <div class="field">
         <label class="field-label">&nbsp;</label>
         <input type="search" id="buscaFornecedor" placeholder="Buscar fornecedor…" aria-label="Buscar fornecedor" oninput="filtrarFornecedores()" class="field-control field-control--busca">
       </div>
@@ -15882,10 +15999,16 @@ async function fornecedores() {
   document.getElementById('btnNovoFornecedor').style.display = podeMexer ? 'inline-block' : 'none';
 
   try {
-    const [deps, crits, avals, cfg, cats, subcats, critPerguntas, areasFornecedor] = await Promise.all([
+    const [deps, crits, avals, cfg, cats, subcats, critPerguntas, areasFornecedor, contratosList, statusContratoList] = await Promise.all([
       API.getDependencias(), API.getCriteriosFornecedor(), API.getAvaliacoesFornecedor(), API.getConfigFornecedor(),
       API.getCategoriasFornecedor(), API.getSubcategoriasFornecedor(), API.getCriticidadeFornecedorPerguntas(), API.getAreas(),
+      // Contratos (15/10/2026): só enriquecem a tela (aba Contratos, "sem contrato vigente").
+      API.getContratos().catch((e) => { console.error('Fornecedores: contratos não carregaram', e); return null; }),
+      API.getStatusContrato().catch(() => null),
     ]);
+    window._fornContratosCarregados = !!(contratosList && statusContratoList);
+    if (contratosList) contratosData = contratosList;
+    if (statusContratoList) statusContratoData = statusContratoList;
     fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
     // Gestor do Contrato (select) e Setor responsavel (select), no modal de
     // fornecedor -- mesmo catalogo que as telas de Pessoas e Areas usam.
@@ -15916,6 +16039,12 @@ async function fornecedores() {
     return;
   }
   document.getElementById('loadingFornecedores').style.display = 'none';
+  // Veio do card "fornecedores TIC sem contrato vigente" da tela de Contratos.
+  if (window._fornFiltroInicial) {
+    fornecedoresFiltroResumo = window._fornFiltroInicial;
+    if (window._fornFiltroInicial === 'semContrato') fornecedoresFiltroTic = 'tic';
+    window._fornFiltroInicial = null;
+  }
   renderizarFornecedores();
   // Veio de um clique numa linha de fornecedor no Catálogo de Dependências
   // (irParaFornecedor guardou o id): abre o cadastro direto. So agora, com
@@ -15946,6 +16075,10 @@ function renderizarFornecedores() {
     const abaixo = comNota.filter((f) => FornecedorScore.abreRisco(_avaliacaoDoFornecedor(f.id).nota, configFornecedor.limiarRisco)).length;
     const qtdTic = fornecedoresData.filter((f) => f.tic !== false).length;
     const qtdNaoTic = fornecedoresData.length - qtdTic;
+    const semContratoCard = () => {
+      const n = fornecedoresData.filter((f) => !_contratosVigentesDoFornecedor(f.id).length).length;
+      return { n, t: 'sem contrato vigente', c: n ? '#e65100' : '#999', titulo: 'Filtrar fornecedores sem contrato vigente', ativo: fornecedoresFiltroResumo === 'semContrato', onclick: "filtrarFornecedoresResumo('semContrato')" };
+    };
 
     // Cartão de métrica no padrão GRC360 (bia-metric), com clique/aro de
     // filtro ativo por cima -- o componente oficial não tem esses dois
@@ -15967,6 +16100,7 @@ function renderizarFornecedores() {
              { n: semAvaliacao, t: 'sem avaliação', c: semAvaliacao ? '#e65100' : '#999', titulo: 'Filtrar sem avaliação', ativo: fornecedoresFiltroResumo === 'semAvaliacao', onclick: "filtrarFornecedoresResumo('semAvaliacao')" },
              { n: vencidas, t: 'com avaliação vencida', c: vencidas ? '#e65100' : '#999', titulo: 'Filtrar avaliação vencida', ativo: fornecedoresFiltroResumo === 'vencida', onclick: "filtrarFornecedoresResumo('vencida')" },
              { n: abaixo, t: `abaixo de ${configFornecedor.limiarRisco}`, c: abaixo ? '#c62828' : '#2e7d32', titulo: `Filtrar nota abaixo de ${configFornecedor.limiarRisco}`, ativo: fornecedoresFiltroResumo === 'abaixoLimiar', onclick: "filtrarFornecedoresResumo('abaixoLimiar')" },
+             ...(window._fornContratosCarregados ? [semContratoCard()] : []),
              { n: qtdTic, t: 'TIC', c: '#d60014', titulo: 'Filtrar fornecedores de TIC', ativo: fornecedoresFiltroTic === 'tic', onclick: "filtrarFornecedoresTic('tic')" },
              { n: qtdNaoTic, t: 'Não TIC', c: '#555', titulo: 'Filtrar fornecedores que não são de TIC', ativo: fornecedoresFiltroTic === 'naoTic', onclick: "filtrarFornecedoresTic('naoTic')" },
            ].map(card).join('')}
@@ -15976,11 +16110,20 @@ function renderizarFornecedores() {
   const busca = (document.getElementById('buscaFornecedor')?.value || '').toLowerCase();
   const filtroCategoria = document.getElementById('filtroFornCadastroCategoria')?.value || '';
   const filtroSetor = document.getElementById('filtroFornCadastroSetor')?.value || '';
+  _popularFiltroGestorFornecedor();
+  const filtroGestor = document.getElementById('filtroFornCadastroGestor')?.value || '';
+  const porGestor = (f) => {
+    if (!filtroGestor) return true;
+    const gestores = _gestoresDoFornecedor(f);
+    if (filtroGestor === GESTOR_FORN_SEM) return !gestores.length;
+    return gestores.some((g) => g.chave === filtroGestor);
+  };
   const porResumo = (f) => {
     const av = _avaliacaoDoFornecedor(f.id);
     if (fornecedoresFiltroResumo === 'semAvaliacao') return !av || av.nota === null;
     if (fornecedoresFiltroResumo === 'vencida') return !!(av && av.nota !== null && FornecedorScore.vencida(av.avaliadoEm));
     if (fornecedoresFiltroResumo === 'abaixoLimiar') return !!(av && FornecedorScore.abreRisco(av.nota, configFornecedor.limiarRisco));
+    if (fornecedoresFiltroResumo === 'semContrato') return !_contratosVigentesDoFornecedor(f.id).length;
     return true;
   };
   const porTic = (f) => {
@@ -15994,6 +16137,7 @@ function renderizarFornecedores() {
     || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca)))
     .filter((f) => !filtroCategoria || f.categoriaFornecedor === filtroCategoria)
     .filter((f) => !filtroSetor || f.setor === filtroSetor)
+    .filter(porGestor)
     .filter(porResumo)
     .filter(porTic);
 
@@ -16047,7 +16191,7 @@ function renderizarFornecedores() {
             const sit = _situacaoFornecedor(av);
             return `
             <tr style="cursor:pointer;" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')">
-              <td class="title">${esc(f.nome)}</td>
+              <td class="title">${esc(f.nome)}${_htmlContratosVigentesFornecedor(f.id)}</td>
               <td class="muted">${esc(f.categoriaFornecedor || '–')}</td>
               <td class="muted">${esc(f.setor || '–')}</td>
               <td class="muted">${_resumoPessoasFornecedor(f)}</td>
@@ -16871,6 +17015,7 @@ function _htmlDrawerFornecedorCadastro() {
           <button id="tab-forn-dados" onclick="trocarAbaFornecedor('dados')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Dados</button>
           <button id="tab-forn-criticidade" onclick="trocarAbaFornecedor('criticidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Criticidade</button>
           <button id="tab-forn-conformidade" onclick="trocarAbaFornecedor('conformidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Conformidade</button>
+          <button id="tab-forn-contratos" onclick="trocarAbaFornecedor('contratos')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Contratos</button>
         </div>
         <div style="flex:1;overflow-y:auto;padding:20px 24px;">
 
@@ -16994,6 +17139,14 @@ function _htmlDrawerFornecedorCadastro() {
         </div>
       </div>
 
+      <div id="painel-forn-contratos" style="display:none;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:10px;">
+          <div style="font-size:0.85em;color:#666;">Contratos com este fornecedor. O cadastro e os eventos ficam na tela de Contratos.</div>
+          <button type="button" class="btn btn-primary" id="btnNovoContratoForn" onclick="novoContratoDoFornecedor()" style="display:none;">+ Novo contrato</button>
+        </div>
+        <div id="fornContratosLista"></div>
+      </div>
+
       </div>
       <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharDrawerFornecedorCadastro()">Fechar</button>
@@ -17005,7 +17158,7 @@ function _htmlDrawerFornecedorCadastro() {
 
 /** Alterna as três abas do drawer unificado de fornecedor e o botão de salvar de cada uma. */
 window.trocarAbaFornecedor = (aba) => {
-  ['dados', 'criticidade', 'conformidade'].forEach((a) => {
+  ['dados', 'criticidade', 'conformidade', 'contratos'].forEach((a) => {
     document.getElementById('painel-forn-' + a).style.display = a === aba ? 'block' : 'none';
     _marcarAba(document.getElementById('tab-forn-' + a), a === aba);
   });
@@ -17017,7 +17170,9 @@ window.trocarAbaFornecedor = (aba) => {
   const btnCad = document.getElementById('btnSalvarFornecedorCadastro');
   const btnAval = document.getElementById('btnSalvarAvaliacaoForn');
   if (btnCad) btnCad.style.display = (naDados && podeMexer) ? 'inline-block' : 'none';
-  if (btnAval) btnAval.style.display = (!naDados && podeMexer && window._fornTemCriterios) ? 'inline-block' : 'none';
+  const naAvaliacao = aba === 'criticidade' || aba === 'conformidade';
+  if (btnAval) btnAval.style.display = (naAvaliacao && podeMexer && window._fornTemCriterios) ? 'inline-block' : 'none';
+  if (aba === 'contratos') _renderContratosDoFornecedor(document.getElementById('fornCadId').value);
 };
 
 /** Título do drawer de fornecedor com a razão social como subtítulo -- espelha _atualizarTituloDrawerRisco. */
@@ -17618,4 +17773,2179 @@ window.excluirFornecedorCadastro = async (id) => {
   } catch (e) {
     showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
   }
+};
+
+// ============================================================
+// PÁGINA: CONTRATOS (ciclo de vida, 15/10/2026)
+// ------------------------------------------------------------
+// Contrato vinculado a um fornecedor (/dependencias). Tipo, indexador e status
+// vêm de listas configuráveis (telas contratos-tipos/indexadores/status); o
+// que diz se o contrato está vigente é a SITUAÇÃO do status, nunca o nome.
+// Prazos e alertas: contrato-ciclo.js (a mesma regra que a varredura diária
+// varreduraDiariaContratos usa no servidor). Posse: a mesma de Fornecedores;
+// o Gestor só consulta os contratos da própria área (api.js filtra).
+// ============================================================
+let contratosData = [];
+let contratosOrdenacao = criarOrdenacao('codigo', 'desc');
+let contratosPaginaAtual = 1;
+const CONTRATOS_POR_PAGINA = 20;
+let contratosFiltroPainel = ''; // '' | vigentes | vencimento | janela | reajuste
+let tiposContratoData = [];
+let indexadoresReajusteData = [];
+let statusContratoData = [];
+let _contratoFornecedores = [];
+let _contratoProcessos = [];
+let _contratoRiscos = [];
+// SLA (15/10/2026): dependências técnicas que um contrato pode cobrir (mesmo
+// recorte das "Dependências afetadas" da Vulnerabilidade) e o catálogo inteiro,
+// de onde vem o RTO/RPO exigido das cobertas.
+let _contratoDepsCatalogo = [];
+let _contratoDependenciasTodas = [];
+window._contratoDependencias = [];
+window._contratoDocumentos = [];
+window._contratoEventos = [];
+
+const CONTRATO_TIPOS_EVENTO = [
+  'Assinatura', 'Renovação', 'Reajuste aplicado', 'Aditivo', 'Notificação de cancelamento',
+  'Cancelamento/Encerramento', 'Multa/Penalidade', 'Descumprimento de SLA', 'Reunião/Revisão', 'Outro',
+];
+
+const CONTRATO_CORES_ALERTA = {
+  perigo: { cor: '#c62828', fundo: '#ffebee' },
+  aviso: { cor: '#f57c00', fundo: '#fff3e0' },
+  info: { cor: '#1565c0', fundo: '#e3f2fd' },
+};
+
+function _nomeNaLista(lista, id) {
+  if (!id) return '';
+  const item = (lista || []).find((x) => String(x.id) === String(id));
+  return item ? item.nome : '(removido)';
+}
+
+function _dataBR(iso) {
+  if (!iso) return '–';
+  const d = new Date(String(iso).slice(0, 10) + 'T00:00:00');
+  return isNaN(d.getTime()) ? '–' : d.toLocaleDateString('pt-BR');
+}
+
+function _situacaoContrato(c) {
+  return ContratoCiclo.situacaoDoStatus(c.statusId, statusContratoData);
+}
+
+function _alertasContrato(c) {
+  const situacao = _situacaoContrato(c);
+  const alertas = ContratoCiclo.calcularAlertas(c, { situacao });
+  // SLA x RTO: so contrato vigente e com algum SLA cadastrado (sem SLA, todo
+  // contrato acusaria "sem RTO garantido" e o alerta perderia o sentido).
+  if (situacao !== ContratoCiclo.SITUACAO.VIGENTE || !ContratoCiclo.temSla(c.sla)) return alertas;
+  return alertas.concat(ContratoCiclo.resumirComparacaoSla(_comparacaoSlaContrato(c)));
+}
+
+/**
+ * O que o negocio exige deste contrato: o RTO/RPO de cada dependencia coberta
+ * e dos processos do BIA que dependem dela ou do proprio fornecedor.
+ */
+function _alvosSlaContrato(c) {
+  const cobertas = (c.dependenciasCobertas || [])
+    .map((d) => (_contratoDependenciasTodas || []).find((x) => String(x.id) === String(d.id)))
+    .filter(Boolean);
+  const alvos = cobertas.map((d) => ({ origem: `Dependência ${d.nome}`, tipo: 'dependencia', rto: d.rto, rpo: d.rpo }));
+  const fornecedor = (_contratoFornecedores || []).find((f) => String(f.id) === String(c.fornecedorId));
+  const processos = new Map();
+  cobertas.concat(fornecedor ? [fornecedor] : []).forEach((d) => {
+    _processosVinculadosADependencia(d, _contratoProcessos).forEach((p) => processos.set(String(p.id || (p.area + '|' + p.processo)), p));
+  });
+  processos.forEach((p) => alvos.push({ origem: `Processo ${p.processo || ''}${p.area ? ' (' + p.area + ')' : ''}`, tipo: 'processo', rto: p.rto, rpo: p.rpo }));
+  return alvos;
+}
+
+function _comparacaoSlaContrato(c) {
+  return ContratoCiclo.compararSlaComRto(c.sla, _alvosSlaContrato(c));
+}
+
+function _chipAlertaContrato(a) {
+  const k = CONTRATO_CORES_ALERTA[a.nivel] || CONTRATO_CORES_ALERTA.info;
+  return `<span ${a.titulo ? `title="${esc(a.titulo)}"` : ''} style="display:inline-block;margin:0 4px 3px 0;padding:2px 9px;border-radius:10px;font-size:0.74em;font-weight:700;color:${k.cor};background:${k.fundo};white-space:nowrap;">${esc(a.rotulo)}</span>`;
+}
+
+/** Pill de status (workflow, não severidade): cor pela situação do status configurável. */
+function _pillStatusContrato(c) {
+  const nome = _nomeNaLista(statusContratoData, c.statusId);
+  if (!nome) return '<span class="muted">–</span>';
+  const cores = {
+    pre: { cor: '#1565c0', fundo: '#e3f2fd' },
+    vigente: { cor: '#2e7d32', fundo: '#e8f5e9' },
+    expirada: { cor: '#e65100', fundo: '#fff3e0' },
+    encerrado: { cor: '#757575', fundo: '#f5f5f5' },
+  }[_situacaoContrato(c)] || { cor: '#757575', fundo: '#f5f5f5' };
+  // A pill fica DENTRO da celula: nome longo quebra em duas linhas em vez de
+  // invadir a coluna vizinha (16/10/2026). A coluna mostra so o nome do status;
+  // a Situacao fica no cadastro de Status e na coluna "Situacao" do CSV.
+  return `<span class="contrato-status-pill" title="${esc(nome)}" style="display:inline-block;max-width:100%;box-sizing:border-box;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;line-height:1.25;color:${cores.cor};background:${cores.fundo};white-space:normal;overflow-wrap:anywhere;">${esc(nome)}</span>`;
+}
+
+function _proximoCodigoContrato() {
+  const maior = (contratosData || [])
+    .map((c) => c.codigo || '')
+    .filter((c) => c.startsWith('CT-'))
+    .map((c) => parseInt(c.slice(3), 10))
+    .filter((n) => Number.isFinite(n))
+    .reduce((m, n) => Math.max(m, n), 0);
+  return 'CT-' + String(maior + 1).padStart(4, '0');
+}
+
+/** Contratos vigentes de um fornecedor (usado também na tela de Fornecedores). */
+function _contratosVigentesDoFornecedor(fornecedorId) {
+  return (contratosData || []).filter((c) => String(c.fornecedorId) === String(fornecedorId)
+    && ContratoCiclo.situacaoDoStatus(c.statusId, statusContratoData) === ContratoCiclo.SITUACAO.VIGENTE);
+}
+
+/** Contratos do fornecedor cujo status tem a situação "Vigência expirada". */
+function _contratosExpiradosDoFornecedor(fornecedorId) {
+  return (contratosData || []).filter((c) => String(c.fornecedorId) === String(fornecedorId)
+    && ContratoCiclo.situacaoDoStatus(c.statusId, statusContratoData) === ContratoCiclo.SITUACAO.EXPIRADA);
+}
+
+function _optionsListaContrato(lista, atual, placeholder) {
+  const ativos = (lista || []).filter((x) => x.ativo);
+  const temAtual = !atual || ativos.some((x) => String(x.id) === String(atual));
+  const inativo = !temAtual ? (lista || []).find((x) => String(x.id) === String(atual)) : null;
+  return `<option value="">${esc(placeholder || 'Selecione...')}</option>` +
+    ativos.map((x) => `<option value="${esc(x.id)}">${esc(x.nome)}</option>`).join('') +
+    (!temAtual ? `<option value="${esc(atual)}">${esc(inativo ? inativo.nome + ' (inativo)' : '(removido)')}</option>` : '');
+}
+
+async function contratos() {
+  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Contratos</h2><p class="page-sub">Vigência, renovação, reajuste, prazos de aviso e eventos dos contratos com fornecedores</p></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="exportarContratosCSV()">📤 Exportar CSV</button>
+        ${podeEditar ? '<button class="btn btn-primary" onclick="abrirDrawerContrato()">+ Novo Contrato</button>' : ''}
+      </div>
+    </div>
+    <div id="contratosPainel" style="margin-bottom:12px;"></div>
+    <!-- Filtros em 1 linha (15/10/2026): os de uso diario a vista, o resto em "Mais filtros". -->
+    <div class="filtros-linha">
+      <input type="search" id="buscaContrato" placeholder="Buscar contrato…" aria-label="Buscar contrato" oninput="contratosPaginaAtual = 1; renderizarContratos()" class="field-control field-control--busca filtros-linha__busca">
+      <select id="filtroContratoFornecedor" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Fornecedor" title="Fornecedor"><option value="">Fornecedor: todos</option></select>
+      <select id="filtroContratoStatus" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Status" title="Status"><option value="">Status: todos</option></select>
+      <select id="filtroContratoAlerta" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Alerta" title="Alerta">
+        <option value="">Alerta: todos</option>
+        <option value="__qualquer__">Com algum alerta</option>
+        <option value="vencido">Vencido</option>
+        <option value="vence_em">Vence em até 90 dias</option>
+        <option value="janela_cancelamento">Janela de aviso de cancelamento</option>
+        <option value="aviso_perdido">Prazo de aviso encerrado</option>
+        <option value="reajuste_proximo">Reajuste próximo</option>
+        <option value="sem_gestor">Sem gestor</option>
+        <option value="valores_divergentes">Valores divergentes</option>
+        <option value="__sla__">SLA incompatível com RTO/RPO</option>
+      </select>
+      <button type="button" class="btn btn-ghost filtros-linha__mais" id="btnMaisFiltrosContratos" onclick="alternarMaisFiltrosContratos()">⚙ Mais filtros</button>
+      <a href="#" id="limparFiltrosContratos" onclick="limparFiltrosContratos();return false;" style="display:none;font-size:0.85em;color:#d60014;font-weight:600;white-space:nowrap;">Limpar filtros</a>
+      <span id="contadorContratos" class="filtros-linha__contador"></span>
+    </div>
+    <div id="maisFiltrosContratos" class="filtros-linha filtros-linha--extra" style="display:none;">
+      <select id="filtroContratoTipo" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Tipo" title="Tipo"><option value="">Tipo: todos</option></select>
+      <select id="filtroContratoArea" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Área" title="Área"><option value="">Área: todas</option></select>
+      <select id="filtroContratoRenovacao" onchange="contratosPaginaAtual = 1; renderizarContratos()" class="field-control" aria-label="Renovação automática" title="Renovação automática">
+        <option value="">Renovação automática: todas</option><option value="sim">Renovação automática: sim</option><option value="nao">Renovação automática: não</option>
+      </select>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div class="data-table" id="listaContratos" style="display:none;">
+      <table style="min-width:1575px;">
+        <colgroup>
+          <col style="width:100px"><col style="width:210px"><col style="width:260px"><col style="width:175px"><col style="width:170px">
+          <col style="width:140px"><col style="width:110px"><col style="width:140px"><col style="width:170px"><col style="width:100px">
+        </colgroup>
+        <thead>
+          <tr>
+            <th onclick="ordenarContratos('codigo')" style="cursor:pointer;">Código <span id="sort-contrato-codigo"></span></th>
+            <th onclick="ordenarContratos('fornecedorNome')" style="cursor:pointer;">Fornecedor <span id="sort-contrato-fornecedorNome"></span></th>
+            <th onclick="ordenarContratos('objeto')" style="cursor:pointer;">Objeto <span id="sort-contrato-objeto"></span></th>
+            <th onclick="ordenarContratos('status')" style="cursor:pointer;">Status <span id="sort-contrato-status"></span></th>
+            <th onclick="ordenarContratos('tipo')" style="cursor:pointer;">Tipo <span id="sort-contrato-tipo"></span></th>
+            <th onclick="ordenarContratos('area')" style="cursor:pointer;">Área <span id="sort-contrato-area"></span></th>
+            <th onclick="ordenarContratos('dataFim')" style="cursor:pointer;" class="col-nw">Fim <span id="sort-contrato-dataFim"></span></th>
+            <th onclick="ordenarContratos('valorMensal')" style="cursor:pointer;" class="col-r">Valor mensal <span id="sort-contrato-valorMensal"></span></th>
+            <th>Alertas</th>
+            <th class="col-c col-sticky">Ações</th>
+          </tr>
+        </thead>
+        <tbody id="contratoRows"></tbody>
+      </table>
+      <div id="contratosPaginacao" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:0 4px;font-size:0.85em;color:#666;"></div>
+    </div>
+    ${_htmlDrawerContrato()}`;
+
+  try {
+    const [lista, tipos, indexadores, status, deps, areasList, avals, processosList, riscosList] = await Promise.all([
+      API.getContratos(),
+      API.getTiposContrato(),
+      API.getIndexadoresReajuste(),
+      API.getStatusContrato(),
+      // Abaixo: só enriquecem a tela (seletores e aba Vínculos). Se falharem,
+      // a lista abre igual.
+      API.getDependencias().catch((e) => { console.error('Contratos: fornecedores/pessoas não carregaram', e); return null; }),
+      API.getAreas().catch((e) => { console.error('Contratos: áreas não carregaram', e); return null; }),
+      API.getAvaliacoesFornecedor().catch(() => null),
+      API.getProcessos().catch(() => null),
+      API.getRiscos().catch(() => null),
+    ]);
+    contratosData = lista;
+    tiposContratoData = tipos;
+    indexadoresReajusteData = indexadores;
+    statusContratoData = status;
+    if (deps) {
+      _contratoFornecedores = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria))
+        .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+      _contratoDependenciasTodas = deps;
+      _contratoDepsCatalogo = deps.filter((d) => VULN_CATEGORIAS_DEPENDENCIA.includes(d.categoria));
+      pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+    }
+    if (areasList) window.areasData = areasList;
+    if (avals) avaliacoesFornecedorData = avals;
+    _contratoProcessos = processosList || [];
+    _contratoRiscos = riscosList || [];
+  } catch (e) {
+    console.error('Contratos: falha ao carregar', e);
+    document.querySelector('.loading').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
+      Não foi possível carregar os contratos.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="contratos()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+
+  const opcoes = (lista) => lista.map((x) => `<option value="${esc(x.id)}">${esc(x.nome)}</option>`).join('');
+  const fornecedoresNaLista = [...new Map(contratosData.filter((c) => c.fornecedorId)
+    .map((c) => [c.fornecedorId, c.fornecedorNome || _nomeNaLista(_contratoFornecedores, c.fornecedorId)])).entries()]
+    .sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'pt-BR'));
+  document.getElementById('filtroContratoFornecedor').innerHTML = '<option value="">Fornecedor: todos</option>' +
+    fornecedoresNaLista.map(([id, nome]) => `<option value="${esc(id)}">${esc(nome)}</option>`).join('');
+  document.getElementById('filtroContratoTipo').innerHTML = '<option value="">Tipo: todos</option>' + opcoes(tiposContratoData);
+  document.getElementById('filtroContratoStatus').innerHTML = '<option value="">Status: todos</option>' +
+    '<option value="__vigentes__">Somente vigentes</option>' + opcoes(statusContratoData);
+  const areasNaLista = [...new Set(contratosData.map((c) => c.area).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  document.getElementById('filtroContratoArea').innerHTML = '<option value="">Área: todas</option>' +
+    areasNaLista.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('listaContratos').style.display = 'block';
+  contratosPaginaAtual = 1;
+  contratosFiltroPainel = '';
+  renderizarContratos();
+
+  // Deep links: #contratos?contrato=<id> (abrir) e #contratos?novo=1&fornecedor=<id>
+  // (vindo da aba Contratos do fornecedor).
+  const params = new URLSearchParams((window.location.hash.split('?')[1]) || '');
+  if (params.get('contrato')) {
+    const c = contratosData.find((x) => String(x.id) === String(params.get('contrato')));
+    if (c) abrirDrawerContrato(c.id);
+  } else if (params.get('novo') && podeEditar) {
+    abrirDrawerContrato({ fornecedorId: params.get('fornecedor') || '' });
+  }
+}
+
+window.ordenarContratos = (coluna) => { contratosOrdenacao.ordenar(coluna); renderizarContratos(); };
+window.irParaPaginaContratos = (delta) => { contratosPaginaAtual += delta; renderizarContratos(); };
+window.filtrarContratosPainel = (modo) => {
+  contratosFiltroPainel = contratosFiltroPainel === modo ? '' : modo;
+  contratosPaginaAtual = 1;
+  renderizarContratos();
+};
+window.irParaFornecedoresSemContrato = () => {
+  window._fornFiltroInicial = 'semContrato';
+  window.location.hash = 'fornecedores';
+};
+
+function _renderPainelContratos() {
+  const painel = document.getElementById('contratosPainel');
+  if (!painel) return;
+  const vigentes = contratosData.filter((c) => _situacaoContrato(c) === ContratoCiclo.SITUACAO.VIGENTE);
+  const comAlerta = (codigos) => vigentes.filter((c) => _alertasContrato(c).some((a) => codigos.includes(a.codigo))).length;
+  const custoMensal = vigentes.reduce((s, c) => s + (Number(c.valorMensal) || 0), 0);
+  const vencimento = comAlerta(['vence_em', 'vencido']);
+  const janela = comAlerta(['janela_cancelamento']);
+  const reajuste = comAlerta(['reajuste_proximo']);
+  const slaIncompativel = comAlerta(['sla_rto_incompativel', 'sla_rpo_incompativel']);
+  // Faixa compacta (15/10/2026): numero + rotulo lado a lado numa barra so,
+  // no lugar dos cards altos -- a grade e o que a pessoa veio ver.
+  const card = (x) => `<${x.onclick ? 'button type="button"' : 'div'} class="kpi-chip${x.onclick ? ' kpi-chip--acao' : ''}${x.ativo ? ' kpi-chip--ativo' : ''}" ${x.onclick ? `onclick="${x.onclick}"` : ''} title="${esc(x.titulo)}">
+      <span class="kpi-chip__valor" style="color:${x.c};">${esc(String(x.n))}</span>
+      <span class="kpi-chip__rotulo">${esc(x.t)}</span>
+    </${x.onclick ? 'button' : 'div'}>`;
+  const cards = [
+    { n: vigentes.length, t: 'vigentes', c: '#d60014', titulo: 'Filtrar vigentes', ativo: contratosFiltroPainel === 'vigentes', onclick: "filtrarContratosPainel('vigentes')" },
+    { n: _formatarReais(Math.round(custoMensal * 100) / 100), t: 'por mês (vigentes)', c: '#2a2623', titulo: 'Soma do valor mensal dos contratos vigentes' },
+    { n: vencimento, t: 'vencem em 90 dias ou vencidos', c: vencimento ? '#c62828' : '#999', titulo: 'Filtrar vencimento próximo', ativo: contratosFiltroPainel === 'vencimento', onclick: "filtrarContratosPainel('vencimento')" },
+    { n: janela, t: 'na janela de aviso', c: janela ? '#f57c00' : '#999', titulo: 'Decidir agora se cancela: o prazo de aviso termina em até 30 dias', ativo: contratosFiltroPainel === 'janela', onclick: "filtrarContratosPainel('janela')" },
+    { n: reajuste, t: 'reajustes próximos', c: reajuste ? '#1565c0' : '#999', titulo: 'Filtrar reajustes próximos', ativo: contratosFiltroPainel === 'reajuste', onclick: "filtrarContratosPainel('reajuste')" },
+    { n: slaIncompativel, t: 'SLA abaixo do RTO/RPO', c: slaIncompativel ? '#c62828' : '#999', titulo: 'O fornecedor garante menos do que o BIA ou a dependência exige', ativo: contratosFiltroPainel === 'sla', onclick: "filtrarContratosPainel('sla')" },
+  ];
+  // Só quem gerencia vê o catálogo inteiro de fornecedores (o gestor só tem
+  // os contratos da área -- a conta sairia errada).
+  if (Perfis.podeEditarContratos(window.USER_PERFIS) && _contratoFornecedores.length) {
+    const semContrato = _contratoFornecedores.filter((f) => f.tic !== false && !_contratosVigentesDoFornecedor(f.id).length).length;
+    cards.push({ n: semContrato, t: 'fornecedores TIC sem contrato vigente', c: semContrato ? '#f57c00' : '#999', titulo: 'Abrir a lista desses fornecedores', onclick: 'irParaFornecedoresSemContrato()' });
+  }
+  painel.innerHTML = `<div class="kpi-strip">${cards.map(card).join('')}</div>`;
+}
+
+// ---- Filtros: "Mais filtros" recolhido e "Limpar filtros" ----
+const _FILTROS_EXTRA_CONTRATOS = ['filtroContratoTipo', 'filtroContratoArea', 'filtroContratoRenovacao'];
+const _FILTROS_CONTRATOS = ['buscaContrato', 'filtroContratoFornecedor', 'filtroContratoStatus', 'filtroContratoAlerta', ..._FILTROS_EXTRA_CONTRATOS];
+
+window.alternarMaisFiltrosContratos = () => {
+  const bloco = document.getElementById('maisFiltrosContratos');
+  bloco.style.display = bloco.style.display === 'none' ? 'flex' : 'none';
+  _atualizarControlesFiltrosContratos();
+};
+
+window.limparFiltrosContratos = () => {
+  _FILTROS_CONTRATOS.forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+  contratosFiltroPainel = '';
+  contratosPaginaAtual = 1;
+  renderizarContratos();
+};
+
+/** Botao "Mais filtros (n)", abre sozinho com filtro escondido ativo, e "Limpar filtros" so quando ha o que limpar. */
+function _atualizarControlesFiltrosContratos() {
+  const valor = (id) => (document.getElementById(id) || {}).value || '';
+  const extrasAtivos = _FILTROS_EXTRA_CONTRATOS.filter((id) => valor(id)).length;
+  const bloco = document.getElementById('maisFiltrosContratos');
+  const btn = document.getElementById('btnMaisFiltrosContratos');
+  if (!bloco || !btn) return;
+  if (extrasAtivos && bloco.style.display === 'none') bloco.style.display = 'flex';
+  btn.textContent = `⚙ Mais filtros${extrasAtivos ? ` (${extrasAtivos})` : ''}`;
+  btn.classList.toggle('filtros-linha__mais--ativo', bloco.style.display !== 'none');
+  const algum = !!contratosFiltroPainel || _FILTROS_CONTRATOS.some((id) => valor(id).trim());
+  document.getElementById('limparFiltrosContratos').style.display = algum ? 'inline' : 'none';
+}
+
+function renderizarContratos() {
+  _renderPainelContratos();
+  _atualizarControlesFiltrosContratos();
+  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  let data = contratosData.map((c) => ({ ...c, _alertas: _alertasContrato(c) }));
+
+  const valor = (id) => (document.getElementById(id) || {}).value || '';
+  const busca = valor('buscaContrato').trim().toLowerCase();
+  if (busca) {
+    data = data.filter((c) => [c.codigo, c.numero, c.objeto, c.fornecedorNome, c.area, c.gestor && c.gestor.nome,
+      _nomeNaLista(tiposContratoData, c.tipoId)].some((t) => String(t || '').toLowerCase().includes(busca)));
+  }
+  const fFornecedor = valor('filtroContratoFornecedor');
+  if (fFornecedor) data = data.filter((c) => String(c.fornecedorId) === fFornecedor);
+  const fTipo = valor('filtroContratoTipo');
+  if (fTipo) data = data.filter((c) => String(c.tipoId) === fTipo);
+  const fStatus = valor('filtroContratoStatus');
+  if (fStatus === '__vigentes__') data = data.filter((c) => _situacaoContrato(c) === 'vigente');
+  else if (fStatus) data = data.filter((c) => String(c.statusId) === fStatus);
+  const fArea = valor('filtroContratoArea');
+  if (fArea) data = data.filter((c) => c.area === fArea);
+  const fAlerta = valor('filtroContratoAlerta');
+  if (fAlerta === '__qualquer__') data = data.filter((c) => c._alertas.length);
+  else if (fAlerta === '__sla__') data = data.filter((c) => c._alertas.some((a) => String(a.codigo).startsWith('sla_')));
+  else if (fAlerta) data = data.filter((c) => c._alertas.some((a) => a.codigo === fAlerta));
+  const fRenov = valor('filtroContratoRenovacao');
+  if (fRenov) data = data.filter((c) => c.renovacaoAutomatica === (fRenov === 'sim'));
+  const porPainel = {
+    vigentes: (c) => _situacaoContrato(c) === 'vigente',
+    vencimento: (c) => c._alertas.some((a) => a.codigo === 'vence_em' || a.codigo === 'vencido'),
+    janela: (c) => c._alertas.some((a) => a.codigo === 'janela_cancelamento'),
+    reajuste: (c) => c._alertas.some((a) => a.codigo === 'reajuste_proximo'),
+    sla: (c) => c._alertas.some((a) => a.codigo === 'sla_rto_incompativel' || a.codigo === 'sla_rpo_incompativel'),
+  }[contratosFiltroPainel];
+  if (porPainel) data = data.filter(porPainel);
+
+  // Vazio sempre por último, nas duas direções (mesma regra de Fornecedores).
+  const nulavel = (valorDe) => (a, b, dir) => {
+    const vA = valorDe(a), vB = valorDe(b);
+    if ((vA === null || vA === '') && (vB === null || vB === '')) return 0;
+    if (vA === null || vA === '') return 1;
+    if (vB === null || vB === '') return -1;
+    return dir * (vA > vB ? 1 : vA < vB ? -1 : 0);
+  };
+  data = contratosOrdenacao.aplicar(data, {
+    tipo: (a, b, dir) => dir * _nomeNaLista(tiposContratoData, a.tipoId).localeCompare(_nomeNaLista(tiposContratoData, b.tipoId), 'pt-BR'),
+    status: (a, b, dir) => dir * (_nomeNaLista(statusContratoData, a.statusId).localeCompare(_nomeNaLista(statusContratoData, b.statusId), 'pt-BR')
+      || ContratoCiclo.SITUACOES.indexOf(_situacaoContrato(a)) - ContratoCiclo.SITUACOES.indexOf(_situacaoContrato(b))),
+    dataFim: nulavel((c) => c.dataFim || null),
+    valorMensal: nulavel((c) => (c.valorMensal != null ? Number(c.valorMensal) : null)),
+  });
+  contratosOrdenacao.atualizarSetas('sort-contrato-', ['codigo', 'objeto', 'fornecedorNome', 'tipo', 'area', 'dataFim', 'valorMensal', 'status']);
+
+  const contador = document.getElementById('contadorContratos');
+  if (contador) {
+    const total = contratosData.length;
+    contador.textContent = data.length === total ? `${total} contrato${total !== 1 ? 's' : ''}` : `${data.length} de ${total} contrato${total !== 1 ? 's' : ''}`;
+  }
+
+  const totalFiltrado = data.length;
+  const totalPaginas = Math.max(1, Math.ceil(totalFiltrado / CONTRATOS_POR_PAGINA));
+  if (contratosPaginaAtual > totalPaginas) contratosPaginaAtual = totalPaginas;
+  if (contratosPaginaAtual < 1) contratosPaginaAtual = 1;
+  const inicio = (contratosPaginaAtual - 1) * CONTRATOS_POR_PAGINA;
+  const pagina = data.slice(inicio, inicio + CONTRATOS_POR_PAGINA);
+
+  const vazio = !contratosData.length
+    ? `Nenhum contrato cadastrado ainda.${podeEditar && !statusContratoData.length ? '<br><span style="font-size:0.9em;">Comece cadastrando os <a href="#contratos-status" style="color:#d60014;font-weight:600;">status de contrato</a> — sem eles nenhum contrato conta como vigente.</span>' : ''}`
+    : 'Nenhum contrato encontrado com esses filtros.';
+  document.getElementById('contratoRows').innerHTML = pagina.length
+    ? pagina.map((c) => `
+      <tr style="cursor:pointer;" onclick="abrirDrawerContrato('${esc(c.id)}')">
+        <td class="title col-nw">${esc(c.codigo || '–')}</td>
+        <td>${esc(c.fornecedorNome || _nomeNaLista(_contratoFornecedores, c.fornecedorId) || '–')}</td>
+        <td><div class="title">${esc(c.objeto || '–')}</div>${c.numero ? `<div class="muted" style="font-size:0.82em;">Nº ${esc(c.numero)}</div>` : ''}</td>
+        <td>${_pillStatusContrato(c)}</td>
+        <td class="muted">${esc(_nomeNaLista(tiposContratoData, c.tipoId) || '–')}</td>
+        <td>${c.area ? `<span class="chip-area">${esc(c.area)}</span>` : '<span class="muted">–</span>'}${c.rateado ? '<div class="muted" style="font-size:0.78em;margin-top:3px;">Rateado</div>' : ''}</td>
+        <td class="col-nw">${esc(_dataBR(c.dataFim))}${c.renovacaoAutomatica ? '<div class="muted" style="font-size:0.78em;" title="Renovação automática">🔁 automática</div>' : ''}</td>
+        <td class="num col-r col-nw">${c.valorMensal != null ? esc(_formatarReais(c.valorMensal)) : '<span class="muted">–</span>'}</td>
+        <td>${c._alertas.map(_chipAlertaContrato).join('') || '<span class="muted">–</span>'}</td>
+        <td class="col-c col-sticky col-nw" onclick="event.stopPropagation();">
+          <button class="btn-icon" onclick="abrirDrawerContrato('${esc(c.id)}')" title="${podeEditar ? 'Editar' : 'Ver'}">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          ${podeEditar ? `<button class="btn-icon" onclick="clonarContrato('${esc(c.id)}')" title="Clonar">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d60014" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
+          <button class="btn-icon" onclick="excluirContrato('${esc(c.id)}')" title="Excluir">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>` : ''}
+        </td>
+      </tr>`).join('')
+    : `<tr><td colspan="10" style="text-align:center;color:#999;padding:40px;">${vazio}</td></tr>`;
+
+  const paginacao = document.getElementById('contratosPaginacao');
+  if (paginacao) {
+    paginacao.innerHTML = `
+      <span>${totalFiltrado ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${totalFiltrado}` : ''}</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-ghost" onclick="irParaPaginaContratos(-1)" ${contratosPaginaAtual <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
+        <span style="padding:6px 4px;">Página ${contratosPaginaAtual} de ${totalPaginas}</span>
+        <button class="btn btn-ghost" onclick="irParaPaginaContratos(1)" ${contratosPaginaAtual >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
+      </div>`;
+  }
+}
+
+window.exportarContratosCSV = () => {
+  const cel = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const num = (v) => (v == null || v === '' ? '' : String(v).replace('.', ','));
+  const simNao = (b) => (b ? 'Sim' : 'Não');
+  const cab = ['Código', 'Número', 'Objeto', 'Fornecedor', 'Tipo', 'Área', 'Gestor', 'Status', 'Situação', 'Início', 'Última renovação', 'Fim',
+    'Vigência (meses)', 'Renovação automática', 'Cancelamento a qualquer momento', 'Aviso de cancelamento (dias)', 'Data-limite do aviso',
+    'Mês de reajuste', 'Indexador', 'Rateado', 'Valor global', 'Valor mensal', 'Alertas'];
+  const linhas = contratosData.map((c) => [
+    c.codigo, c.numero, c.objeto, c.fornecedorNome, _nomeNaLista(tiposContratoData, c.tipoId), c.area, c.gestor ? c.gestor.nome : '',
+    _nomeNaLista(statusContratoData, c.statusId), ROTULO_SITUACAO_CONTRATO[_situacaoContrato(c)] || '', c.dataInicio, c.dataUltimaRenovacao, c.dataFim, c.vigenciaMeses,
+    simNao(c.renovacaoAutomatica), simNao(c.cancelamentoQualquerMomento), c.avisoCancelamentoDias, ContratoCiclo.dataLimiteAviso(c),
+    c.mesReajuste ? ContratoCiclo.MESES[c.mesReajuste - 1] : '', _nomeNaLista(indexadoresReajusteData, c.indexadorId), simNao(c.rateado),
+    num(c.valorGlobal), num(c.valorMensal), _alertasContrato(c).map((a) => a.rotulo).join(' | '),
+  ]);
+  // BOM + ';' -> abre direto no Excel em pt-BR com acentos certos.
+  const csv = '﻿' + [cab, ...linhas].map((l) => l.map(cel).join(';')).join('\r\n');
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `contratos-${ContratoCiclo.hojeIso()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+
+// ------------------------------------------------------------
+// Drawer do contrato
+// ------------------------------------------------------------
+const CONTRATO_ABAS = ['dados', 'vigencia', 'eventos', 'documentos', 'vinculos'];
+
+function _htmlDrawerContrato() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  const req = '<span class="req" aria-hidden="true">*</span>';
+  const dica = (t, id) => `<div ${id ? `id="${id}"` : ''} style="font-size:0.74em;color:#888;margin-top:4px;">${t}</div>`;
+  const simNao = (id, onchange) => `<select id="${id}" style="${inp}" ${onchange ? `onchange="${onchange}"` : ''}><option value="nao">Não</option><option value="sim">Sim</option></select>`;
+  const aba = (id, rotulo, ativa) => `<button id="tab-contrato-${id}" onclick="trocarAbaContrato('${id}')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:${ativa ? '#d60014' : '#999'};border-bottom:3px solid ${ativa ? '#d60014' : 'transparent'};cursor:pointer;">${rotulo}</button>`;
+  const grid = (cols) => `display:grid;grid-template-columns:${cols};gap:16px;margin-bottom:14px;`;
+  // Aba Vigência e valores: colunas que quebram sozinhas em tela estreita.
+  const grid4 = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:16px;margin-bottom:6px;';
+  const secao = (titulo, primeira) => `<div style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;padding-bottom:6px;border-bottom:1px solid #eee;margin:${primeira ? 0 : 26}px 0 14px;">${titulo}</div>`;
+  // Subtítulo dentro de uma seção (ex.: Atendimento, Disponibilidade).
+  const subt = 'font-size:0.82em;font-weight:700;color:#d60014;margin-bottom:8px;';
+  // Tempo de SLA: número + unidade (min/h/dias). Gravado em minutos (_lerDuracaoContrato).
+  const duracao = (id) => `<div style="display:flex;gap:6px;">
+      <input type="number" min="0" step="any" id="${id}" style="${inp}flex:1;min-width:0;" oninput="_atualizarAlertasDrawerContrato()">
+      <select id="${id}Un" style="${inp}width:auto;flex:0 0 auto;" onchange="_atualizarAlertasDrawerContrato()">
+        <option value="1">min</option><option value="60" selected>h</option><option value="1440">dias</option>
+      </select>
+    </div>`;
+  // Campo de valor em reais: texto com máscara (mascararMoedaBR), prefixo "R$" fixo. O valor vai ao banco como número (lerMoedaBR).
+  const moeda = (id, o) => {
+    o = o || {};
+    const base = `${inp}padding-left:${o.destaque ? 48 : 38}px;text-align:right;`;
+    const destaque = o.destaque ? 'font-size:1.3em;font-weight:700;padding-top:11px;padding-bottom:11px;' : '';
+    // Somente leitura (valor calculado): fundo cinza e cursor bloqueado; em destaque, o texto fica escuro, nao apagado.
+    const estilo = o.somenteLeitura
+      ? `${base}${destaque}background:#f5f5f5;color:${o.destaque ? '#2a2623' : '#666'};cursor:not-allowed;`
+      : `${base}${destaque}`;
+    return `<div style="position:relative;">
+      <span style="position:absolute;left:14px;top:50%;transform:translateY(-50%);color:${o.destaque ? '#d60014' : '#666'};font-weight:${o.destaque ? 700 : 400};font-size:${o.destaque ? '1.05em' : '0.93em'};pointer-events:none;">R$</span>
+      <input type="text" inputmode="numeric" autocomplete="off" id="${id}" placeholder="0,00" ${o.somenteLeitura ? 'readonly tabindex="-1"' : ''} style="${estilo}"
+        ${o.somenteLeitura ? '' : `oninput="this.value=mascararMoedaBR(this.value);${o.oninput || ''}"`}>
+    </div>`;
+  };
+  return `
+    <div class="drawer-overlay" id="drawerOverlayContrato" onclick="fecharDrawerContrato()"></div>
+    <div class="drawer" id="drawerContrato">
+      <div class="drawer-header">
+        <div style="min-width:0;">
+          <h3 id="contratoDrawerTitulo">Novo Contrato</h3>
+          <div id="contratoAlertasHeader" style="margin-top:6px;"></div>
+        </div>
+        <button onclick="fecharDrawerContrato()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
+        <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
+          ${aba('dados', 'Dados', true)}${aba('vigencia', 'Vigência e valores')}${aba('eventos', 'Eventos')}${aba('documentos', 'Documentos')}${aba('vinculos', 'Vínculos')}
+        </div>
+        <div style="flex:1;overflow-y:auto;padding:20px 24px;">
+          <input type="hidden" id="contratoId">
+
+          <div id="painel-contrato-dados">
+            <div style="${grid('1fr 1fr')}">
+              <div><label style="${lbl}">Código</label>
+                <input type="text" id="contratoCodigo" readonly placeholder="Gerado ao salvar" style="${inp}background:#f5f5f5;color:#666;cursor:not-allowed;"></div>
+              <div><label style="${lbl}">Número do contrato</label>
+                <input type="text" id="contratoNumero" placeholder="Número no jurídico / no fornecedor" style="${inp}"></div>
+            </div>
+            <div style="margin-bottom:14px;"><label style="${lbl}">Objeto ${req}</label>
+              <input type="text" id="contratoObjeto" placeholder="Ex.: Link de internet dedicado 500 Mbps — matriz" style="${inp}"></div>
+            <div style="${grid('1fr 1fr')}">
+              <div><label style="${lbl}">Fornecedor ${req}</label>
+                <select id="contratoFornecedor" style="${inp}" onchange="_popularSelectGestorContrato()"></select>
+                ${_seVeTela('fornecedores', `<a href="#fornecedores" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">🗂️ Gerenciar Fornecedores</a>`)}</div>
+              <div><label style="${lbl}">Tipo do contrato ${req}</label>
+                <select id="contratoTipo" style="${inp}"></select>
+                ${_seVeTela('contratos-tipos', `<a href="#contratos-tipos" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">🗂️ Gerenciar Tipos</a>`)}</div>
+            </div>
+            <div style="${grid('1fr 1fr')}">
+              <div><label style="${lbl}">Status do contrato ${req}</label>
+                <select id="contratoStatus" style="${inp}" onchange="_atualizarAlertasDrawerContrato()"></select>
+                ${_seVeTela('contratos-status', `<a href="#contratos-status" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">🗂️ Gerenciar Status</a>`)}</div>
+              <div><label style="${lbl}">Área responsável ${req}</label>
+                <select id="contratoArea" style="${inp}"></select></div>
+            </div>
+            <div style="${grid('1fr 1fr')}">
+              <div><label style="${lbl}">Gestor do contrato</label>
+                <select id="contratoGestor" style="${inp}" onchange="_atualizarAlertasDrawerContrato()"></select>
+                ${dica('Pessoas cadastradas. Os gestores informados no fornecedor aparecem primeiro.')}</div>
+              <div><label style="${lbl}">Contrato rateado entre áreas</label>
+                ${simNao('contratoRateado')}</div>
+            </div>
+            ${secao('SLAs do contrato')}
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">O que este contrato cobre</label>
+              <div id="contratoDepPicker" style="display:grid;grid-template-columns:1fr 1.4fr auto;gap:8px;align-items:center;">
+                <select id="contratoDepCategoria" style="${inp}" onchange="_popularItensDependenciaContrato()">
+                  <option value="">Categoria...</option>
+                  ${VULN_CATEGORIAS_DEPENDENCIA.map((c) => `<option value="${esc(c)}">${DEPENDENCIA_CAT_ICONES[c] || '📦'} ${esc(c)}</option>`).join('')}
+                </select>
+                <select id="contratoDepItem" style="${inp}" disabled><option value="">Escolha a categoria primeiro</option></select>
+                <button type="button" class="btn btn-ghost" onclick="adicionarDependenciaContrato()" style="white-space:nowrap;">Adicionar</button>
+              </div>
+              <div id="contratoDepChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
+              ${dica('Sistemas, servidores, links... O DRP de cada dependência marcada traz os SLAs deste contrato.')}
+            </div>
+            <div style="${subt}">Atendimento</div>
+            <div style="${grid('1fr 1fr')}">
+              <div><label style="${lbl}">Cobertura do atendimento</label>
+                <select id="contratoSlaCobertura" style="${inp}" onchange="_aplicarCoberturaSlaContrato()">
+                  <option value="">Não informada</option>
+                  ${ContratoCiclo.COBERTURAS_SLA.map((c) => `<option value="${c}">${c === 'Outro' ? 'Outra' : c}</option>`).join('')}
+                </select></div>
+              <div id="contratoSlaCoberturaDetalheWrap" style="display:none;"><label style="${lbl}">Qual cobertura?</label>
+                <input type="text" id="contratoSlaCoberturaDetalhe" placeholder="Ex.: 7h às 22h, inclusive sábados" style="${inp}"></div>
+            </div>
+            <table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
+              <thead><tr>
+                <th style="${lbl}display:table-cell;text-align:left;padding:4px 6px 6px 0;width:110px;">Severidade</th>
+                <th style="${lbl}display:table-cell;text-align:left;padding:4px 0 6px 6px;">Primeira resposta</th>
+              </tr></thead>
+              <tbody>
+                ${ContratoCiclo.SEVERIDADES_SLA.map((sev, i) => `<tr>
+                  <td style="padding:4px 6px 4px 0;font-weight:600;font-size:0.9em;">${sev}</td>
+                  <td style="padding:4px 0 4px 6px;max-width:260px;">${duracao('contratoSlaResp' + i)}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+            ${dica('Tempo máximo, garantido pelo fornecedor, para dar a primeira resposta a um chamado de cada severidade.')}
+            <div style="${subt}margin-top:18px;">Disponibilidade</div>
+            <div style="${grid('1fr 1fr 2fr')}">
+              <div><label style="${lbl}">Disponibilidade (%)</label>
+                <input type="number" min="0" max="100" step="0.001" id="contratoSlaDisponibilidade" placeholder="Ex.: 99,9" style="${inp}" oninput="_atualizarAlertasDrawerContrato()"></div>
+              <div><label style="${lbl}">Período de medição</label>
+                <select id="contratoSlaPeriodo" style="${inp}" onchange="_atualizarAlertasDrawerContrato()">
+                  <option value="mensal">Mensal</option><option value="trimestral">Trimestral</option><option value="anual">Anual</option>
+                </select></div>
+              <div><label style="${lbl}">Janela de manutenção</label>
+                <input type="text" id="contratoSlaJanela" placeholder="Ex.: domingos, 02h às 06h" style="${inp}"></div>
+            </div>
+            ${dica('', 'contratoSlaDispDica')}
+            <div style="${subt}margin-top:18px;">Recuperação em desastre</div>
+            <div style="${grid('1fr 1fr')}">
+              <div><label style="${lbl}">RTO garantido</label>${duracao('contratoSlaRto')}</div>
+              <div><label style="${lbl}">RPO garantido</label>${duracao('contratoSlaRpo')}</div>
+            </div>
+            ${dica('O que o fornecedor garante para restabelecer o serviço (RTO) e a perda máxima de dados (RPO). É comparado com o RTO/RPO exigido no BIA e nas dependências.')}
+            <div style="margin:14px 0 18px;"><label style="${lbl}">Penalidade / crédito por descumprimento</label>
+              <textarea id="contratoSlaPenalidade" rows="2" placeholder="Ex.: 10% de crédito na fatura por hora de indisponibilidade acima do SLA" style="${inp}resize:vertical;font-family:inherit;"></textarea></div>
+            <div><label style="${lbl}">Observações</label>
+              <textarea id="contratoObservacoes" rows="3" style="${inp}resize:vertical;font-family:inherit;"></textarea></div>
+          </div>
+
+          <div id="painel-contrato-vigencia" style="display:none;">
+            <div>${secao('Prazos', true)}
+              <div style="${grid4}">
+                <div><label style="${lbl}">Início do contrato ${req}</label>
+                  <input type="date" id="contratoDataInicio" style="${inp}" onchange="_onDatasContratoChange('inicio')"></div>
+                <div><label style="${lbl}">Última renovação</label>
+                  <input type="date" id="contratoDataUltimaRenovacao" style="${inp}" onchange="_onDatasContratoChange('renovacao')"></div>
+                <div><label style="${lbl}">Fim do contrato</label>
+                  <input type="date" id="contratoDataFim" style="${inp}" onchange="_onDatasContratoChange('fim')"></div>
+                <div><label style="${lbl}">Vigência (meses)</label>
+                  <input type="number" min="1" step="1" id="contratoVigencia" style="${inp}" oninput="_atualizarAlertasDrawerContrato()" onchange="_onDatasContratoChange('vigencia')"></div>
+              </div>
+              ${dica('A vigência é calculada pelas datas. Sem o fim, o fim é sugerido pela vigência.')}
+            </div>
+
+            <div>${secao('Reajuste')}
+              <div style="${grid4}">
+                <div><label style="${lbl}">Mês de correção</label>
+                  <select id="contratoMesReajuste" style="${inp}" onchange="_atualizarAlertasDrawerContrato()">
+                    <option value="">Sem mês definido</option>
+                    ${ContratoCiclo.MESES.map((m, i) => `<option value="${i + 1}">${m}</option>`).join('')}
+                  </select></div>
+                <div><label style="${lbl}">Indexador de reajuste</label>
+                  <select id="contratoIndexador" style="${inp}"></select>
+                  ${_seVeTela('contratos-indexadores', `<a href="#contratos-indexadores" target="_blank" style="font-size:0.74em;color:#d60014;font-weight:600;display:inline-block;margin-top:4px;">🗂️ Gerenciar Indexadores</a>`)}</div>
+              </div>
+            </div>
+
+            <div>${secao('Renovação e cancelamento')}
+              <div style="${grid4}">
+                <div><label style="${lbl}">Renovação automática</label>
+                  ${simNao('contratoRenovacaoAutomatica', '_atualizarAlertasDrawerContrato()')}</div>
+                <div><label style="${lbl}">Cancelamento a qualquer momento</label>
+                  ${simNao('contratoCancelamentoQualquerMomento', '_atualizarAlertasDrawerContrato()')}</div>
+                <div><label style="${lbl}">Antecedência do aviso (dias)</label>
+                  <input type="number" min="0" step="1" id="contratoAvisoDias" style="${inp}" oninput="_atualizarAlertasDrawerContrato()"></div>
+              </div>
+              ${dica('', 'contratoDataLimiteAviso')}
+            </div>
+
+            <div>${secao('Valores')}
+              <div style="max-width:360px;margin-bottom:18px;">
+                <label style="${lbl}">Valor mensal do contrato ${req}</label>
+                ${moeda('contratoValorMensal', { oninput: '_atualizarAlertasDrawerContrato()' })}
+                ${dica('Informe o valor mensal do contrato.')}
+              </div>
+              <div style="padding:16px 18px;border:1.5px solid #d60014;background:#fffafa;border-radius:10px;">
+                <label style="${lbl}font-size:0.85em;color:#d60014;">Valor global do contrato</label>
+                ${moeda('contratoValorGlobal', { destaque: true, somenteLeitura: true })}
+                ${dica('Calculado automaticamente: valor mensal × vigência (meses).')}
+              </div>
+            </div>
+          </div>
+
+          <div id="painel-contrato-eventos" style="display:none;">
+            <div id="contratoEventosSemId" style="display:none;padding:18px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">Salve o contrato para registrar eventos.</div>
+            <div id="contratoEventosConteudo">
+              <div id="contratoEventoForm" style="padding:14px 16px;border:1px solid #d8d2cd;border-radius:10px;margin-bottom:18px;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                  <button type="button" class="btn btn-ghost" onclick="prepararEventoContrato('Renovação')" style="padding:6px 12px;font-size:0.85em;">🔄 Renovar</button>
+                  <button type="button" class="btn btn-ghost" onclick="prepararEventoContrato('Reajuste aplicado')" style="padding:6px 12px;font-size:0.85em;">📈 Aplicar reajuste</button>
+                  <button type="button" class="btn btn-ghost" onclick="prepararEventoContrato('Cancelamento/Encerramento')" style="padding:6px 12px;font-size:0.85em;color:#c62828;border-color:#c62828;">⛔ Encerrar</button>
+                </div>
+                <div style="${grid('160px 1fr')}">
+                  <div><label style="${lbl}">Data ${req}</label><input type="date" id="contratoEventoData" style="${inp}"></div>
+                  <div><label style="${lbl}">Tipo de evento ${req}</label>
+                    <select id="contratoEventoTipo" style="${inp}" onchange="_aplicarCamposEventoContrato()">
+                      <option value="">Selecione...</option>
+                      ${CONTRATO_TIPOS_EVENTO.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+                    </select></div>
+                </div>
+                <div id="contratoEventoCamposRenovacao" style="display:none;${grid('1fr 1fr')}">
+                  <div><label style="${lbl}">Novo início (renovação)</label><input type="date" id="contratoEventoNovoInicio" style="${inp}"></div>
+                  <div><label style="${lbl}">Novo fim</label><input type="date" id="contratoEventoNovoFim" style="${inp}"></div>
+                </div>
+                <div id="contratoEventoCamposReajuste" style="display:none;${grid('1fr 1fr')}">
+                  <div><label style="${lbl}">Valor mensal anterior</label>${moeda('contratoEventoValorAnterior', { oninput: '_atualizarPercentualReajusteContrato()' })}</div>
+                  <div><label style="${lbl}">Novo valor mensal</label>${moeda('contratoEventoValorNovo', { oninput: '_atualizarPercentualReajusteContrato()' })}
+                    ${dica('', 'contratoEventoPercentual')}</div>
+                </div>
+                <div id="contratoEventoCamposEncerramento" style="display:none;margin-bottom:14px;">
+                  <label style="${lbl}">Mudar o status do contrato para</label>
+                  <select id="contratoEventoNovoStatus" style="${inp}"></select>
+                </div>
+                <label class="check-label" id="contratoEventoAplicarWrap" style="display:none;margin-bottom:12px;font-size:0.88em;">
+                  <input type="checkbox" id="contratoEventoAplicar" checked> <span id="contratoEventoAplicarRotulo">Atualizar o contrato com estes dados</span>
+                </label>
+                <div style="margin-bottom:12px;"><label style="${lbl}">Descrição</label>
+                  <textarea id="contratoEventoDescricao" rows="2" style="${inp}resize:vertical;font-family:inherit;" placeholder="O que aconteceu, quem decidiu, nº do aditivo..."></textarea></div>
+                <div style="display:flex;justify-content:flex-end;gap:8px;">
+                  <button type="button" class="btn btn-ghost" onclick="limparEventoContrato()">Limpar</button>
+                  <button type="button" class="btn btn-primary" id="btnRegistrarEventoContrato" onclick="registrarEventoContrato()">+ Registrar evento</button>
+                </div>
+              </div>
+              <div id="contratoEventosLista"></div>
+            </div>
+          </div>
+
+          <div id="painel-contrato-documentos" style="display:none;">
+            <div id="contratoDocumentoForm" style="display:grid;grid-template-columns:1fr 2fr auto;gap:10px;align-items:end;margin-bottom:16px;">
+              <div><label style="${lbl}">Título</label><input type="text" id="contratoDocTitulo" placeholder="Ex.: Contrato assinado, 1º aditivo" style="${inp}"></div>
+              <div><label style="${lbl}">Link</label><input type="url" id="contratoDocUrl" placeholder="https://… (SharePoint, Drive, portal)" style="${inp}"></div>
+              <button type="button" class="btn btn-ghost" id="btnAdicionarDocumentoContrato" onclick="adicionarDocumentoContrato()">+ Adicionar</button>
+            </div>
+            <div id="contratoDocEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin:-8px 0 10px;">
+              ✎ Editando documento — <a href="#" onclick="cancelarEdicaoDocumentoContrato();return false;" style="color:#1565c0;">cancelar edição</a>
+            </div>
+            ${dica('O documento fica onde já está (SharePoint, Drive...); aqui guardamos só o link. Os links são gravados ao Salvar o contrato.')}
+            <div id="contratoDocumentosLista" style="margin-top:14px;"></div>
+          </div>
+
+          <div id="painel-contrato-vinculos" style="display:none;">
+            <div id="contratoVinculos"></div>
+          </div>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerContrato()">Fechar</button>
+        <button class="btn btn-primary" id="btnSalvarContrato" onclick="salvarContrato()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+window.trocarAbaContrato = (aba) => {
+  CONTRATO_ABAS.forEach((a) => {
+    document.getElementById('painel-contrato-' + a).style.display = a === aba ? 'block' : 'none';
+    _marcarAba(document.getElementById('tab-contrato-' + a), a === aba);
+  });
+  if (aba === 'vinculos') _renderVinculosContrato();
+};
+
+function _popularSelectFornecedorContrato(atualId, atualNome) {
+  const sel = document.getElementById('contratoFornecedor');
+  const tem = !atualId || _contratoFornecedores.some((f) => String(f.id) === String(atualId));
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    _contratoFornecedores.map((f) => `<option value="${esc(f.id)}">${esc(f.nome)}${f.nomeFantasia ? ' — ' + esc(f.nomeFantasia) : ''}</option>`).join('') +
+    (!tem ? `<option value="${esc(atualId)}">${esc(atualNome || '(fornecedor removido)')}</option>` : '');
+  sel.value = atualId || '';
+}
+
+function _popularSelectAreaContrato(atual) {
+  const areas = [...(window.areasData || [])].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  const tem = !atual || areas.some((a) => a.nome === atual);
+  const sel = document.getElementById('contratoArea');
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    areas.map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('') +
+    (!tem ? `<option value="${esc(atual)}">${esc(atual)}</option>` : '');
+  sel.value = atual || '';
+}
+
+/** Gestor: Pessoas cadastradas; os gestores declarados no fornecedor vêm primeiro. Valor = id da pessoa (ou "nome:" p/ legado). */
+window._popularSelectGestorContrato = (atual) => {
+  const sel = document.getElementById('contratoGestor');
+  if (atual === undefined) {
+    const v = sel.value;
+    atual = v ? { id: v.startsWith('nome:') ? null : v, nome: sel.options[sel.selectedIndex] ? sel.options[sel.selectedIndex].dataset.nome : '' } : null;
+  }
+  const fornecedor = _contratoFornecedores.find((f) => String(f.id) === String(document.getElementById('contratoFornecedor').value));
+  const idsDoFornecedor = new Set(((fornecedor && fornecedor.gestoresContrato) || []).map((g) => String(g.id)).filter(Boolean));
+  const pessoas = [...(pessoasData || [])].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  const opt = (p) => `<option value="${esc(p.id)}" data-nome="${esc(p.nome)}">${esc(p.nome)}${p.setor ? ' — ' + esc(p.setor) : ''}</option>`;
+  const doFornecedor = pessoas.filter((p) => idsDoFornecedor.has(String(p.id)));
+  const outras = pessoas.filter((p) => !idsDoFornecedor.has(String(p.id)));
+  const atualValor = atual ? (atual.id ? String(atual.id) : 'nome:' + atual.nome) : '';
+  const temAtual = !atualValor || pessoas.some((p) => String(p.id) === atualValor);
+  sel.innerHTML = '<option value="">Selecione...</option>' +
+    (doFornecedor.length ? `<optgroup label="Gestores informados no fornecedor">${doFornecedor.map(opt).join('')}</optgroup><optgroup label="Demais pessoas">${outras.map(opt).join('')}</optgroup>` : outras.map(opt).join('')) +
+    (!temAtual ? `<option value="${esc(atualValor)}" data-nome="${esc(atual.nome)}">${esc(atual.nome)}</option>` : '');
+  sel.value = atualValor;
+};
+
+function _gestorSelecionadoContrato() {
+  const sel = document.getElementById('contratoGestor');
+  if (!sel.value) return null;
+  const opt = sel.options[sel.selectedIndex];
+  return { id: sel.value.startsWith('nome:') ? null : sel.value, nome: (opt && opt.dataset.nome) || '' };
+}
+
+const _boolDoSelect = (id) => document.getElementById(id).value === 'sim';
+const _setBoolSelect = (id, v) => { document.getElementById(id).value = v ? 'sim' : 'nao'; };
+const _numDoInput = (id) => { const v = document.getElementById(id).value; return v === '' ? null : Number(v); };
+/** Campo de valor em reais (com máscara) -> número, ou null se vazio. */
+const _moedaDoInput = (id) => lerMoedaBR(document.getElementById(id).value);
+/**
+ * Valor global do contrato = valor mensal × vigência (meses), 2 casas. É sempre
+ * derivado -- ninguém digita o global. Sem mensal ou sem vigência, null.
+ * Única fórmula: a tela, a gravação e os eventos usam esta função.
+ */
+function _valorGlobalContrato(mensal, vigenciaMeses) {
+  const m = Number(mensal), v = Number(vigenciaMeses);
+  if (!(m > 0) || !(v > 0)) return null;
+  return Math.round(m * v * 100) / 100;
+}
+
+/** Tempo de SLA na tela (número + unidade) -> minutos, ou null. */
+function _lerDuracaoContrato(id) {
+  const v = document.getElementById(id).value;
+  if (v === '') return null;
+  const n = Number(v) * Number(document.getElementById(id + 'Un').value || 60);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+}
+
+/** Minutos -> número + a maior unidade exata (2880 -> 2 dias; 90 -> 90 min). */
+function _setDuracaoContrato(id, min) {
+  const un = document.getElementById(id + 'Un');
+  if (min === null || min === undefined) { document.getElementById(id).value = ''; un.value = '60'; return; }
+  const fator = min > 0 && min % 1440 === 0 ? 1440 : (min % 60 === 0 ? 60 : 1);
+  un.value = String(fator);
+  document.getElementById(id).value = min / fator;
+}
+
+function _coletarSlaContrato() {
+  const pct = document.getElementById('contratoSlaDisponibilidade').value;
+  return ContratoCiclo.normalizarSla({
+    cobertura: document.getElementById('contratoSlaCobertura').value,
+    coberturaDetalhe: document.getElementById('contratoSlaCoberturaDetalhe').value,
+    atendimento: ContratoCiclo.SEVERIDADES_SLA.map((sev, i) => ({
+      severidade: sev,
+      respostaMin: _lerDuracaoContrato('contratoSlaResp' + i),
+    })),
+    disponibilidadePct: pct === '' ? null : Number(pct),
+    disponibilidadePeriodo: document.getElementById('contratoSlaPeriodo').value,
+    rtoMin: _lerDuracaoContrato('contratoSlaRto'),
+    rpoMin: _lerDuracaoContrato('contratoSlaRpo'),
+    janelaManutencao: document.getElementById('contratoSlaJanela').value,
+    penalidade: document.getElementById('contratoSlaPenalidade').value,
+  });
+}
+
+function _popularSlaContrato(slaBruto) {
+  const sla = ContratoCiclo.normalizarSla(slaBruto);
+  document.getElementById('contratoSlaCobertura').value = sla.cobertura;
+  document.getElementById('contratoSlaCoberturaDetalhe').value = sla.coberturaDetalhe;
+  sla.atendimento.forEach((a, i) => {
+    _setDuracaoContrato('contratoSlaResp' + i, a.respostaMin);
+  });
+  document.getElementById('contratoSlaDisponibilidade').value = sla.disponibilidadePct !== null ? sla.disponibilidadePct : '';
+  document.getElementById('contratoSlaPeriodo').value = sla.disponibilidadePeriodo;
+  _setDuracaoContrato('contratoSlaRto', sla.rtoMin);
+  _setDuracaoContrato('contratoSlaRpo', sla.rpoMin);
+  document.getElementById('contratoSlaJanela').value = sla.janelaManutencao;
+  document.getElementById('contratoSlaPenalidade').value = sla.penalidade;
+  _aplicarCoberturaSlaContrato();
+}
+
+window._aplicarCoberturaSlaContrato = () => {
+  document.getElementById('contratoSlaCoberturaDetalheWrap').style.display =
+    document.getElementById('contratoSlaCobertura').value === 'Outro' ? 'block' : 'none';
+};
+
+// ---- O que o contrato cobre (mesmo molde de "Dependências afetadas" da Vulnerabilidade) ----
+function _popularDependenciasContrato(c) {
+  window._contratoDependencias = (Array.isArray(c && c.dependenciasCobertas) ? c.dependenciasCobertas : [])
+    .map((d) => ({ id: d.id || null, categoria: d.categoria || '', nome: d.nome || '' }));
+  document.getElementById('contratoDepCategoria').value = '';
+  _popularItensDependenciaContrato();
+  _renderChipsDependenciaContrato();
+}
+
+window._popularItensDependenciaContrato = () => {
+  const cat = document.getElementById('contratoDepCategoria').value;
+  const sel = document.getElementById('contratoDepItem');
+  if (!cat) {
+    sel.innerHTML = '<option value="">Escolha a categoria primeiro</option>';
+    sel.disabled = true;
+    return;
+  }
+  const ja = new Set((window._contratoDependencias || []).map((d) => String(d.id || '')));
+  const itens = _contratoDepsCatalogo.filter((d) => d.categoria === cat && !ja.has(String(d.id)))
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  sel.innerHTML = itens.length
+    ? '<option value="">Selecione...</option>' + itens.map((d) => `<option value="${esc(d.id)}">${esc(d.nome)}</option>`).join('')
+    : '<option value="">Nenhum item disponível nesta categoria</option>';
+  sel.disabled = !itens.length || !Perfis.podeEditarContratos(window.USER_PERFIS);
+};
+
+window.adicionarDependenciaContrato = () => {
+  const id = document.getElementById('contratoDepItem').value;
+  if (!id) return showToast('Escolha a categoria e a dependência.', '#e65100');
+  const d = _contratoDepsCatalogo.find((x) => String(x.id) === String(id));
+  if (!d) return;
+  window._contratoDependencias.push({ id: d.id, categoria: d.categoria, nome: d.nome });
+  _popularItensDependenciaContrato();
+  _renderChipsDependenciaContrato();
+  _atualizarAlertasDrawerContrato();
+};
+
+window.removerDependenciaContrato = (idx) => {
+  window._contratoDependencias.splice(idx, 1);
+  _popularItensDependenciaContrato();
+  _renderChipsDependenciaContrato();
+  _atualizarAlertasDrawerContrato();
+};
+
+/** Chips "icone Categoria: Nome x"; vínculo que sumiu do catálogo fica, marcado "(removida)". Sem "x" para quem só lê. */
+function _renderChipsDependenciaContrato() {
+  const cont = document.getElementById('contratoDepChips');
+  if (!cont) return;
+  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const lista = window._contratoDependencias || [];
+  cont.innerHTML = lista.length ? lista.map((item, i) => {
+    const existe = !item.id || !_contratoDependenciasTodas.length || _contratoDependenciasTodas.some((d) => String(d.id) === String(item.id));
+    const rotulo = `${DEPENDENCIA_CAT_ICONES[item.categoria] || '📦'} ${item.categoria}: ${item.nome}${existe ? '' : ' (removida)'}`;
+    return `<span class="contrato-dep-chip" style="display:inline-flex;align-items:center;gap:6px;background:${existe ? '#d60014' : '#999'};color:#fff;padding:4px ${podeEditar ? 8 : 12}px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(rotulo)}${podeEditar ? `<button type="button" onclick="removerDependenciaContrato(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button>` : ''}</span>`;
+  }).join('') : '<span style="font-size:0.85em;color:#888;">Nenhuma dependência marcada.</span>';
+}
+
+/** Datas e vigência se completam: datas -> vigência; vigência sem fim -> fim sugerido. */
+window._onDatasContratoChange = (origem) => {
+  const inicio = document.getElementById('contratoDataUltimaRenovacao').value || document.getElementById('contratoDataInicio').value;
+  const fimEl = document.getElementById('contratoDataFim');
+  const vigEl = document.getElementById('contratoVigencia');
+  if (origem === 'vigencia') {
+    if (inicio && !fimEl.value && Number(vigEl.value) > 0) fimEl.value = ContratoCiclo.fimPelaVigencia(inicio, Number(vigEl.value));
+  } else if (inicio && fimEl.value) {
+    const meses = ContratoCiclo.vigenciaEmMeses(inicio, fimEl.value);
+    // Só a renovação muda a base: a vigência é a do período, não a do contrato desde o início.
+    if (meses) vigEl.value = meses;
+  } else if (inicio && !fimEl.value && Number(vigEl.value) > 0) {
+    fimEl.value = ContratoCiclo.fimPelaVigencia(inicio, Number(vigEl.value));
+  }
+  _atualizarAlertasDrawerContrato();
+};
+
+/** Recalcula, com o formulário como está, a data-limite do aviso, o valor global e os chips do cabeçalho. */
+window._atualizarAlertasDrawerContrato = () => {
+  const c = _coletarFormularioContrato();
+  const limite = ContratoCiclo.dataLimiteAviso(c);
+  const dl = document.getElementById('contratoDataLimiteAviso');
+  if (dl) {
+    dl.textContent = c.cancelamentoQualquerMomento
+      ? 'Pode cancelar a qualquer momento, respeitando o aviso.'
+      : (c.dataFim && c.avisoCancelamentoDias > 0
+        ? `Data-limite para avisar: ${_dataBR(limite)}${c.renovacaoAutomatica ? ' (depois disso, renova)' : ''}`
+        : 'Informe o fim e a antecedência para ver a data-limite.');
+  }
+  const dd = document.getElementById('contratoSlaDispDica');
+  if (dd) {
+    const parada = ContratoCiclo.indisponibilidadePermitida(c.sla.disponibilidadePct, c.sla.disponibilidadePeriodo);
+    const periodo = { mensal: 'mês', trimestral: 'trimestre', anual: 'ano' }[c.sla.disponibilidadePeriodo] || 'mês';
+    dd.textContent = parada !== null ? `Permite até ${ContratoCiclo.formatarDuracao(parada) || '0 min'} de parada por ${periodo}.` : '';
+  }
+  // c.valorGlobal já vem calculado (_coletarFormularioContrato): só espelha no campo.
+  const vg = document.getElementById('contratoValorGlobal');
+  if (vg) vg.value = formatarMoedaBR(c.valorGlobal);
+  const hdr = document.getElementById('contratoAlertasHeader');
+  if (hdr) hdr.innerHTML = _alertasContrato(c).map(_chipAlertaContrato).join('');
+};
+
+window.abrirDrawerContrato = (idOuRascunho) => {
+  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const rascunho = idOuRascunho && typeof idOuRascunho === 'object' && !idOuRascunho.id ? idOuRascunho : null;
+  const c = rascunho || (idOuRascunho ? contratosData.find((x) => String(x.id) === String(idOuRascunho)) : null);
+  const salvo = !!(c && c.id);
+  document.getElementById('contratoId').value = salvo ? c.id : '';
+  document.getElementById('contratoDrawerTitulo').textContent = salvo ? (podeEditar ? 'Editar Contrato' : 'Contrato') : 'Novo Contrato';
+  document.getElementById('contratoCodigo').value = salvo ? c.codigo : _proximoCodigoContrato();
+  document.getElementById('contratoNumero').value = c ? (c.numero || '') : '';
+  document.getElementById('contratoObjeto').value = c ? (c.objeto || '') : '';
+  _popularSelectFornecedorContrato(c ? c.fornecedorId : '', c ? c.fornecedorNome : '');
+  document.getElementById('contratoTipo').innerHTML = _optionsListaContrato(tiposContratoData, c ? c.tipoId : '');
+  document.getElementById('contratoTipo').value = c ? (c.tipoId || '') : '';
+  // Contrato novo nasce no primeiro status "pre" (Em elaboração), se houver.
+  const statusPadrao = !c || !c.statusId ? ((statusContratoData.find((s) => s.ativo && s.situacao === 'pre') || {}).id || '') : c.statusId;
+  document.getElementById('contratoStatus').innerHTML = _optionsListaContrato(statusContratoData, statusPadrao);
+  document.getElementById('contratoStatus').value = statusPadrao;
+  _popularSelectAreaContrato(c ? c.area : '');
+  _popularSelectGestorContrato(c && c.gestor ? c.gestor : null);
+  _setBoolSelect('contratoRateado', c && c.rateado);
+  document.getElementById('contratoObservacoes').value = c ? (c.observacoes || '') : '';
+  document.getElementById('contratoDataInicio').value = c ? (c.dataInicio || '') : '';
+  document.getElementById('contratoDataUltimaRenovacao').value = c ? (c.dataUltimaRenovacao || '') : '';
+  document.getElementById('contratoDataFim').value = c ? (c.dataFim || '') : '';
+  document.getElementById('contratoVigencia').value = c && c.vigenciaMeses != null ? c.vigenciaMeses : '';
+  document.getElementById('contratoMesReajuste').value = c && c.mesReajuste ? String(c.mesReajuste) : '';
+  document.getElementById('contratoIndexador').innerHTML = _optionsListaContrato(indexadoresReajusteData, c ? c.indexadorId : '', 'Sem indexador');
+  document.getElementById('contratoIndexador').value = c ? (c.indexadorId || '') : '';
+  _setBoolSelect('contratoRenovacaoAutomatica', c && c.renovacaoAutomatica);
+  _setBoolSelect('contratoCancelamentoQualquerMomento', c && c.cancelamentoQualquerMomento);
+  document.getElementById('contratoAvisoDias').value = c && c.avisoCancelamentoDias != null ? c.avisoCancelamentoDias : '';
+  // O global exibido é sempre o calculado (mensal × vigência), mesmo em contrato antigo que tinha outro valor gravado.
+  document.getElementById('contratoValorMensal').value = formatarMoedaBR(c ? c.valorMensal : null);
+  document.getElementById('contratoValorGlobal').value = '';
+  _popularSlaContrato(c ? c.sla : null);
+  _popularDependenciasContrato(c);
+  window._contratoDocumentos = c && Array.isArray(c.documentos) ? c.documentos.map((d) => ({ ...d })) : [];
+  // Estado de edicao nao vaza de um contrato para outro.
+  cancelarEdicaoDocumentoContrato();
+
+  // Somente leitura (gestor): esconde os controles em vez de desabilitar o botão.
+  document.querySelectorAll('#drawerContrato input, #drawerContrato select, #drawerContrato textarea').forEach((el) => {
+    if (el.id !== 'contratoCodigo') el.disabled = !podeEditar;
+  });
+  document.getElementById('btnSalvarContrato').style.display = podeEditar ? 'inline-block' : 'none';
+  document.getElementById('contratoDocumentoForm').style.display = podeEditar ? 'grid' : 'none';
+  document.getElementById('contratoDepPicker').style.display = podeEditar ? 'grid' : 'none';
+  document.getElementById('contratoEventoForm').style.display = podeEditar ? 'block' : 'none';
+  limparEventoContrato();
+  _carregarEventosContrato(salvo ? c.id : '');
+
+  _atualizarAlertasDrawerContrato();
+  trocarAbaContrato('dados');
+  document.getElementById('drawerContrato').classList.add('open');
+  document.getElementById('drawerOverlayContrato').classList.add('open');
+  // Cópia (clonar) ainda não existe no banco: Fechar tem que gravar. Contrato
+  // novo em branco (ou só com o fornecedor pré-escolhido) fecha sem gravar.
+  if (rascunho && rascunho._clone) _edContrato.esquecer(); else _edContrato.marcar();
+};
+
+function _fecharDrawerContratoSemSalvar() {
+  document.getElementById('drawerContrato').classList.remove('open');
+  document.getElementById('drawerOverlayContrato').classList.remove('open');
+}
+window._fecharDrawerContratoSemSalvar = _fecharDrawerContratoSemSalvar;
+
+// Fechar/×/clique fora/Esc: sem mudança fecha; com mudança pergunta Salvar/Descartar/Continuar (DECISÃO 16/10/2026, _fecharComRastreador).
+window.fecharDrawerContrato = () => _fecharComRastreador({
+  idDrawer: 'drawerContrato',
+  sujo: () => Perfis.podeEditarContratos(window.USER_PERFIS) && _edContrato.sujo(),
+  salvar: () => salvarContrato(),
+  fecharSemSalvar: _fecharDrawerContratoSemSalvar,
+});
+
+const _edContrato = criarRastreadorEdicao(() => _coletarFormularioContrato());
+
+function _coletarFormularioContrato() {
+  const id = document.getElementById('contratoId').value || null;
+  const fornecedorId = document.getElementById('contratoFornecedor').value || '';
+  const forn = _contratoFornecedores.find((f) => String(f.id) === String(fornecedorId));
+  const selForn = document.getElementById('contratoFornecedor');
+  return {
+    id,
+    codigo: document.getElementById('contratoCodigo').value.trim(),
+    numero: document.getElementById('contratoNumero').value.trim(),
+    objeto: document.getElementById('contratoObjeto').value.trim(),
+    fornecedorId,
+    fornecedorNome: forn ? forn.nome : (selForn.selectedIndex > 0 ? selForn.options[selForn.selectedIndex].text : ''),
+    tipoId: document.getElementById('contratoTipo').value || '',
+    statusId: document.getElementById('contratoStatus').value || '',
+    area: document.getElementById('contratoArea').value || '',
+    gestor: _gestorSelecionadoContrato(),
+    rateado: _boolDoSelect('contratoRateado'),
+    observacoes: document.getElementById('contratoObservacoes').value.trim(),
+    dataInicio: document.getElementById('contratoDataInicio').value,
+    dataUltimaRenovacao: document.getElementById('contratoDataUltimaRenovacao').value,
+    dataFim: document.getElementById('contratoDataFim').value,
+    vigenciaMeses: _numDoInput('contratoVigencia'),
+    mesReajuste: _numDoInput('contratoMesReajuste'),
+    indexadorId: document.getElementById('contratoIndexador').value || '',
+    renovacaoAutomatica: _boolDoSelect('contratoRenovacaoAutomatica'),
+    cancelamentoQualquerMomento: _boolDoSelect('contratoCancelamentoQualquerMomento'),
+    avisoCancelamentoDias: _numDoInput('contratoAvisoDias'),
+    valorGlobal: _valorGlobalContrato(_moedaDoInput('contratoValorMensal'), _numDoInput('contratoVigencia')),
+    valorMensal: _moedaDoInput('contratoValorMensal'),
+    documentos: (window._contratoDocumentos || []).map((d) => ({ titulo: d.titulo || '', url: d.url })),
+    sla: _coletarSlaContrato(),
+    dependenciasCobertas: (window._contratoDependencias || []).map((d) => ({ id: d.id || null, categoria: d.categoria, nome: d.nome })),
+  };
+}
+
+window.salvarContrato = async () => {
+  const c = _coletarFormularioContrato();
+  const id = c.id;
+  const falta = (aba, msg) => { trocarAbaContrato(aba); showToast(msg, '#e65100'); return false; };
+  if (!c.objeto) return falta('dados', 'Informe o objeto do contrato.');
+  if (!c.fornecedorId) return falta('dados', 'Selecione o fornecedor.');
+  if (!c.tipoId) return falta('dados', 'Selecione o tipo do contrato.');
+  if (!c.statusId) return falta('dados', 'Selecione o status do contrato.');
+  if (!c.area) return falta('dados', 'Selecione a área responsável.');
+  if (!c.dataInicio) return falta('vigencia', 'Informe a data de início do contrato.');
+  if (c.dataFim && c.dataFim < (c.dataUltimaRenovacao || c.dataInicio)) return falta('vigencia', 'O fim do contrato não pode ser antes do início (ou da última renovação).');
+  if (c.dataUltimaRenovacao && c.dataUltimaRenovacao < c.dataInicio) return falta('vigencia', 'A última renovação não pode ser antes do início.');
+  // Novo contrato: código recalculado agora, com a lista mais atual.
+  if (!id) c.codigo = _proximoCodigoContrato();
+
+  return await comBotaoCarregando('btnSalvarContrato', async () => {
+    try {
+      const result = await API.salvarContrato(c);
+      const salvoId = id || result.id;
+      const registro = { ...c, id: salvoId, alertas: [] };
+      const idx = contratosData.findIndex((x) => String(x.id) === String(salvoId));
+      if (idx !== -1) contratosData[idx] = { ...contratosData[idx], ...registro };
+      else contratosData.push(registro);
+      if (!id) {
+        // Sem fechar o drawer, o próximo "Salvar" grava no MESMO contrato.
+        document.getElementById('contratoId').value = salvoId;
+        document.getElementById('contratoCodigo').value = c.codigo;
+        document.getElementById('contratoDrawerTitulo').textContent = 'Editar Contrato';
+        _carregarEventosContrato(salvoId);
+      }
+      _edContrato.marcar({ ...c, id: salvoId });
+      renderizarContratos();
+      showToast('✅ Contrato salvo!', '#2e7d32');
+      return true;
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      return false;
+    }
+  });
+};
+
+/**
+ * Clona a partir da grade (16/10/2026): abre um rascunho com os dados do
+ * contrato da linha, sem gravar nada. O código novo e gerado ao salvar; o
+ * numero (do juridico/fornecedor) nao vale para a copia; alertas sao da varredura
+ * e os eventos pertencem ao contrato original. O resto vai como esta, para a
+ * pessoa ajustar (status, datas, valores).
+ */
+window.clonarContrato = (id) => {
+  if (!Perfis.podeEditarContratos(window.USER_PERFIS)) return;
+  const c = contratosData.find((x) => String(x.id) === String(id));
+  if (!c) return;
+  const copia = JSON.parse(JSON.stringify(c));
+  ['id', 'codigo', 'numero', 'alertas', 'alertasAtualizadosEm', 'criadoEm', 'atualizadoEm'].forEach((k) => { delete copia[k]; });
+  copia.objeto = (c.objeto || '') + ' (cópia)';
+  copia._clone = true;
+  abrirDrawerContrato(copia);
+  showToast('📋 Cópia aberta — revise e salve.', '#1565c0');
+};
+
+window.excluirContrato = async (id) => {
+  const c = contratosData.find((x) => String(x.id) === String(id));
+  if (!c) return;
+  if (!await confirmarAcao(`Excluir o contrato ${c.codigo} "${c.objeto}"?\n\nA linha do tempo de eventos dele também é apagada. Se o contrato só terminou, prefira registrar o evento "Cancelamento/Encerramento" — assim o histórico fica.`)) return;
+  try {
+    await API.excluirContrato(id);
+    contratosData = contratosData.filter((x) => String(x.id) !== String(id));
+    if (document.getElementById('contratoId').value === String(id)) _fecharDrawerContratoSemSalvar();
+    renderizarContratos();
+    showToast('🗑️ Contrato excluído.', '#555');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ---- Documentos (links) ----
+window.renderDocumentosContrato = () => {
+  const cont = document.getElementById('contratoDocumentosLista');
+  if (!cont) return;
+  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const docs = window._contratoDocumentos || [];
+  cont.innerHTML = docs.length
+    ? docs.map((d, i) => `
+      <div class="contrato-doc${window._contratoDocEditandoIndex === i ? ' editando' : ''}" style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid ${window._contratoDocEditandoIndex === i ? '#1565c0' : '#e0e0e0'};border-radius:8px;margin-bottom:8px;">
+        <span>📄</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-weight:600;">${esc(d.titulo || 'Documento')}</div>
+          <a href="${esc(d.url)}" target="_blank" rel="noopener noreferrer" style="font-size:0.82em;color:#1565c0;word-break:break-all;">${esc(d.url)}</a>
+        </div>
+        ${podeEditar ? `<button class="btn-icon" onclick="editarDocumentoContrato(${i})" title="Editar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+        <button class="btn-icon" onclick="removerDocumentoContrato(${i})" title="Remover">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>` : ''}
+      </div>`).join('')
+    : '<div style="padding:18px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">Nenhum documento vinculado.</div>';
+};
+
+window.adicionarDocumentoContrato = () => {
+  const titulo = document.getElementById('contratoDocTitulo').value.trim();
+  const url = document.getElementById('contratoDocUrl').value.trim();
+  if (!/^https?:\/\//i.test(url)) return showToast('Informe um link começando com http:// ou https://', '#e65100');
+  const i = window._contratoDocEditandoIndex;
+  if (i != null && window._contratoDocumentos[i]) {
+    // Edicao: troca so este item (os demais e a ordem ficam intactos).
+    window._contratoDocumentos[i] = { ...window._contratoDocumentos[i], titulo, url };
+  } else {
+    window._contratoDocumentos.push({ titulo, url });
+  }
+  cancelarEdicaoDocumentoContrato();
+};
+
+// Editar um documento ja inserido: preenche o formulario de cima (mesmo padrao
+// de Plano de Acao e KRIs do Risco) e o botao vira "Salvar alteracao".
+window._contratoDocEditandoIndex = null;
+window.editarDocumentoContrato = (i) => {
+  const d = (window._contratoDocumentos || [])[i];
+  if (!d || !Perfis.podeEditarContratos(window.USER_PERFIS)) return;
+  window._contratoDocEditandoIndex = i;
+  document.getElementById('contratoDocTitulo').value = d.titulo || '';
+  document.getElementById('contratoDocUrl').value = d.url || '';
+  document.getElementById('contratoDocEdicaoAviso').style.display = 'block';
+  document.getElementById('btnAdicionarDocumentoContrato').textContent = 'Salvar alteração';
+  renderDocumentosContrato();
+  document.getElementById('contratoDocTitulo').focus();
+};
+
+window.cancelarEdicaoDocumentoContrato = () => {
+  window._contratoDocEditandoIndex = null;
+  document.getElementById('contratoDocTitulo').value = '';
+  document.getElementById('contratoDocUrl').value = '';
+  document.getElementById('contratoDocEdicaoAviso').style.display = 'none';
+  document.getElementById('btnAdicionarDocumentoContrato').textContent = '+ Adicionar';
+  renderDocumentosContrato();
+};
+
+window.removerDocumentoContrato = (i) => {
+  window._contratoDocumentos.splice(i, 1);
+  // Remover mexe nos indices: a edicao em andamento (deste ou de outro item) e descartada.
+  cancelarEdicaoDocumentoContrato();
+};
+
+// ---- Eventos (linha do tempo) ----
+async function _carregarEventosContrato(contratoId) {
+  document.getElementById('contratoEventosSemId').style.display = contratoId ? 'none' : 'block';
+  document.getElementById('contratoEventosConteudo').style.display = contratoId ? 'block' : 'none';
+  window._contratoEventos = [];
+  const lista = document.getElementById('contratoEventosLista');
+  if (!contratoId) { lista.innerHTML = ''; return; }
+  lista.innerHTML = '<div class="loading">⏳ Carregando...</div>';
+  try {
+    window._contratoEventos = await API.getEventosContrato(contratoId);
+  } catch (e) {
+    console.error('Contratos: eventos não carregaram', e);
+    lista.innerHTML = `<div style="color:#c62828;padding:12px;">Não foi possível carregar os eventos: ${esc(e.message || '')}</div>`;
+    return;
+  }
+  // O drawer pode ter trocado de contrato enquanto carregava.
+  if (document.getElementById('contratoId').value !== String(contratoId)) return;
+  renderEventosContrato();
+}
+
+window.renderEventosContrato = () => {
+  const lista = document.getElementById('contratoEventosLista');
+  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const evs = window._contratoEventos || [];
+  if (!evs.length) {
+    lista.innerHTML = '<div style="padding:18px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">Nenhum evento registrado.</div>';
+    return;
+  }
+  lista.innerHTML = `<div style="border-left:2px solid #fce8ea;margin-left:6px;padding-left:18px;">
+    ${evs.map((e) => {
+      const detalhes = [];
+      if (e.valorMensalAnterior != null || e.valorMensalNovo != null) {
+        const pct = e.valorMensalAnterior > 0 && e.valorMensalNovo != null ? ((e.valorMensalNovo / e.valorMensalAnterior - 1) * 100) : null;
+        detalhes.push(`${esc(_formatarReais(e.valorMensalAnterior || 0))} → ${esc(_formatarReais(e.valorMensalNovo || 0))}${pct !== null ? ` (${pct >= 0 ? '+' : ''}${pct.toFixed(2).replace('.', ',')}%)` : ''}`);
+      }
+      if (e.dataFimNova) detalhes.push(`novo fim ${esc(_dataBR(e.dataFimNova))}`);
+      return `<div style="position:relative;margin-bottom:16px;">
+        <span style="position:absolute;left:-25px;top:4px;width:10px;height:10px;border-radius:50%;background:${e.automatico ? '#1565c0' : '#d60014'};"></span>
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
+          <div>
+            <div style="font-size:0.8em;color:#888;">${esc(_dataBR(e.data))}${e.automatico ? ' · 🤖 automático' : (e.registradoPor ? ' · ' + esc(e.registradoPor) : '')}</div>
+            <div style="font-weight:700;">${esc(e.tipo)}</div>
+            ${detalhes.length ? `<div style="font-size:0.85em;color:#555;">${detalhes.join(' · ')}</div>` : ''}
+            ${e.descricao ? `<div style="font-size:0.88em;color:#444;white-space:pre-wrap;margin-top:2px;">${esc(e.descricao)}</div>` : ''}
+          </div>
+          ${podeEditar && !e.automatico ? `<button class="btn-icon" onclick="excluirEventoContrato('${esc(e.id)}')" title="Excluir evento">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>` : ''}
+        </div>
+      </div>`;
+    }).join('')}
+  </div>`;
+};
+
+window.limparEventoContrato = () => {
+  document.getElementById('contratoEventoData').value = ContratoCiclo.hojeIso();
+  document.getElementById('contratoEventoTipo').value = '';
+  document.getElementById('contratoEventoDescricao').value = '';
+  ['contratoEventoNovoInicio', 'contratoEventoNovoFim', 'contratoEventoValorAnterior', 'contratoEventoValorNovo'].forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('contratoEventoAplicar').checked = true;
+  _aplicarCamposEventoContrato();
+};
+
+/** Mostra os campos que o tipo de evento usa e o "atualizar o contrato" correspondente. */
+window._aplicarCamposEventoContrato = () => {
+  const tipo = document.getElementById('contratoEventoTipo').value;
+  const mostrar = (id, sim) => { document.getElementById(id).style.display = sim ? (id === 'contratoEventoCamposEncerramento' ? 'block' : 'grid') : 'none'; };
+  mostrar('contratoEventoCamposRenovacao', tipo === 'Renovação');
+  mostrar('contratoEventoCamposReajuste', tipo === 'Reajuste aplicado');
+  mostrar('contratoEventoCamposEncerramento', tipo === 'Cancelamento/Encerramento');
+  const rotulo = { 'Renovação': 'Atualizar as datas do contrato (última renovação e fim)', 'Reajuste aplicado': 'Atualizar o valor mensal do contrato', 'Cancelamento/Encerramento': 'Mudar o status do contrato' }[tipo];
+  document.getElementById('contratoEventoAplicarWrap').style.display = rotulo ? 'flex' : 'none';
+  if (rotulo) document.getElementById('contratoEventoAplicarRotulo').textContent = rotulo;
+  if (tipo === 'Cancelamento/Encerramento') {
+    const encerrados = statusContratoData.filter((s) => s.ativo && s.situacao === 'encerrado');
+    document.getElementById('contratoEventoNovoStatus').innerHTML = encerrados.length
+      ? encerrados.map((s) => `<option value="${esc(s.id)}">${esc(s.nome)}</option>`).join('')
+      : '<option value="">Nenhum status com situação "encerrado" cadastrado</option>';
+  }
+};
+
+window._atualizarPercentualReajusteContrato = () => {
+  const a = _moedaDoInput('contratoEventoValorAnterior');
+  const n = _moedaDoInput('contratoEventoValorNovo');
+  document.getElementById('contratoEventoPercentual').textContent = a > 0 && n != null
+    ? `Reajuste de ${((n / a - 1) * 100).toFixed(2).replace('.', ',')}%` : '';
+};
+
+/** Botões rápidos: pré-preenchem o evento a partir do contrato. */
+window.prepararEventoContrato = (tipo) => {
+  limparEventoContrato();
+  document.getElementById('contratoEventoTipo').value = tipo;
+  _aplicarCamposEventoContrato();
+  const c = _coletarFormularioContrato();
+  if (tipo === 'Renovação') {
+    const p = ContratoCiclo.proximaRenovacao(c);
+    if (p) {
+      document.getElementById('contratoEventoNovoInicio').value = p.dataUltimaRenovacao;
+      document.getElementById('contratoEventoNovoFim').value = p.dataFim;
+    }
+  } else if (tipo === 'Reajuste aplicado') {
+    if (c.valorMensal != null) document.getElementById('contratoEventoValorAnterior').value = formatarMoedaBR(c.valorMensal);
+    const idx = _nomeNaLista(indexadoresReajusteData, c.indexadorId);
+    if (idx) document.getElementById('contratoEventoDescricao').value = `Reajuste pelo ${idx}`;
+    document.getElementById('contratoEventoValorNovo').focus();
+  }
+};
+
+window.registrarEventoContrato = async () => {
+  const contratoId = document.getElementById('contratoId').value;
+  if (!contratoId) return showToast('Salve o contrato antes de registrar eventos.', '#e65100');
+  const data = document.getElementById('contratoEventoData').value;
+  const tipo = document.getElementById('contratoEventoTipo').value;
+  if (!data || !tipo) return showToast('Informe a data e o tipo do evento.', '#e65100');
+  // O evento pode mudar o contrato: grava antes o que está pendente no
+  // formulário, senão o patch do evento e a edição na tela se atropelam.
+  if (_edContrato.sujo()) {
+    const ok = await salvarContrato();
+    if (!ok) return;
+  }
+  const c = _coletarFormularioContrato();
+  const aplicar = document.getElementById('contratoEventoAplicar').checked;
+  const evento = { contratoId, area: c.area, data, tipo, descricao: document.getElementById('contratoEventoDescricao').value.trim() };
+  let atualizar = null;
+  if (tipo === 'Renovação') {
+    const novoInicio = document.getElementById('contratoEventoNovoInicio').value;
+    const novoFim = document.getElementById('contratoEventoNovoFim').value;
+    if (novoFim) evento.dataFimNova = novoFim;
+    if (aplicar && novoFim) {
+      if (novoInicio && novoFim < novoInicio) return showToast('O novo fim não pode ser antes do novo início.', '#e65100');
+      atualizar = { dataFim: novoFim };
+      if (novoInicio) {
+        atualizar.dataUltimaRenovacao = novoInicio;
+        const meses = ContratoCiclo.vigenciaEmMeses(novoInicio, novoFim);
+        if (meses) {
+          atualizar.vigenciaMeses = meses;
+          // Vigência nova muda o global (mensal × vigência).
+          const global = _valorGlobalContrato(c.valorMensal, meses);
+          if (global != null) atualizar.valorGlobal = global;
+        }
+      }
+    }
+  } else if (tipo === 'Reajuste aplicado') {
+    const anterior = _moedaDoInput('contratoEventoValorAnterior');
+    const novo = _moedaDoInput('contratoEventoValorNovo');
+    if (novo == null) return showToast('Informe o novo valor mensal.', '#e65100');
+    evento.valorMensalAnterior = anterior;
+    evento.valorMensalNovo = novo;
+    // O global acompanha: mensal novo × vigência do contrato.
+    if (aplicar) {
+      atualizar = { valorMensal: novo };
+      const global = _valorGlobalContrato(novo, c.vigenciaMeses);
+      if (global != null) atualizar.valorGlobal = global;
+    }
+  } else if (tipo === 'Cancelamento/Encerramento') {
+    const novoStatus = document.getElementById('contratoEventoNovoStatus').value;
+    if (aplicar && novoStatus) atualizar = { statusId: novoStatus };
+  }
+  if (atualizar) evento.atualizarContrato = atualizar;
+
+  await comBotaoCarregando('btnRegistrarEventoContrato', async () => {
+    try {
+      await API.salvarEventoContrato(evento);
+      if (atualizar) {
+        const idx = contratosData.findIndex((x) => String(x.id) === String(contratoId));
+        if (idx !== -1) contratosData[idx] = { ...contratosData[idx], ...atualizar };
+        if (atualizar.dataFim) document.getElementById('contratoDataFim').value = atualizar.dataFim;
+        if (atualizar.dataUltimaRenovacao) document.getElementById('contratoDataUltimaRenovacao').value = atualizar.dataUltimaRenovacao;
+        if (atualizar.vigenciaMeses) document.getElementById('contratoVigencia').value = atualizar.vigenciaMeses;
+        if (atualizar.valorMensal != null) document.getElementById('contratoValorMensal').value = formatarMoedaBR(atualizar.valorMensal);
+        if (atualizar.statusId) document.getElementById('contratoStatus').value = atualizar.statusId;
+        _edContrato.marcar();
+        _atualizarAlertasDrawerContrato();
+        renderizarContratos();
+      }
+      limparEventoContrato();
+      await _carregarEventosContrato(contratoId);
+      showToast(atualizar ? '✅ Evento registrado e contrato atualizado.' : '✅ Evento registrado.', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível registrar o evento.'), '#c62828');
+    }
+  });
+};
+
+window.excluirEventoContrato = async (id) => {
+  const e = (window._contratoEventos || []).find((x) => String(x.id) === String(id));
+  if (!e) return;
+  if (!await confirmarAcao(`Excluir o evento "${e.tipo}" de ${_dataBR(e.data)}?\n\nIsto não desfaz o que o evento mudou no contrato (datas, valor ou status).`)) return;
+  try {
+    await API.excluirEventoContrato(id);
+    window._contratoEventos = window._contratoEventos.filter((x) => String(x.id) !== String(id));
+    renderEventosContrato();
+    showToast('🗑️ Evento excluído.', '#555');
+  } catch (err) {
+    showToast('❌ ' + (err.message || 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ---- Vínculos (somente leitura): fornecedor, processos BIA, riscos, outros contratos ----
+function _renderVinculosContrato() {
+  const cont = document.getElementById('contratoVinculos');
+  if (!cont) return;
+  const c = _coletarFormularioContrato();
+  const forn = _contratoFornecedores.find((f) => String(f.id) === String(c.fornecedorId));
+  if (!c.fornecedorId) {
+    cont.innerHTML = '<div style="padding:18px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">Selecione o fornecedor para ver os vínculos.</div>';
+    return;
+  }
+  const secao = (titulo, corpo) => `<div style="margin-bottom:22px;"><div style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">${titulo}</div>${corpo}</div>`;
+  const vazio = (t) => `<div style="color:#888;font-size:0.9em;">${t}</div>`;
+
+  const av = forn ? _avaliacaoDoFornecedor(forn.id) : null;
+  const sit = _situacaoFornecedor(av);
+  const blocoForn = forn
+    ? `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px 14px;border:1px solid #e0e0e0;border-radius:8px;">
+        <div style="flex:1;min-width:200px;"><div style="font-weight:700;">${esc(forn.nome)}</div>
+          <div class="muted" style="font-size:0.85em;">${esc([forn.categoriaFornecedor, forn.setor].filter(Boolean).join(' · ') || '–')}${forn.tic !== false ? ' · TIC' : ''}</div></div>
+        <div style="text-align:center;"><div class="muted" style="font-size:0.75em;">Criticidade</div>${_badgeCriticidadeFornecedor(av)}</div>
+        <div style="text-align:center;"><div class="muted" style="font-size:0.75em;">Conformidade</div>${_htmlBadge(_nivelSituacaoFornecedor(sit), av && av.nota !== null ? `${av.nota} · ${sit.rotulo}` : sit.rotulo)}</div>
+        ${Perfis.podeVerTela(window.USER_PERFIS, 'fornecedores') ? `<a href="#fornecedores" onclick="window._abrirFornecedorAoCarregar='${escJs(forn.id)}'" class="btn btn-ghost" style="padding:6px 12px;font-size:0.85em;">Abrir fornecedor</a>` : ''}
+      </div>`
+    : vazio(esc(c.fornecedorNome || 'Fornecedor não encontrado no catálogo.'));
+
+  const processos = forn ? _processosVinculadosADependencia(forn, _contratoProcessos) : [];
+  const ordemTier = { 'Tier 1 (Crítico)': 1, 'Tier 2 (Essencial)': 2, 'Tier 3 (Suporte)': 3 };
+  const blocoProc = processos.length
+    ? `<div class="data-table"><table><thead><tr><th>Processo</th><th>Área</th><th>Criticidade (BIA)</th></tr></thead><tbody>
+        ${processos.map((p) => ({ p, tier: Criticidade.tierDoProcesso(p) }))
+          .sort((a, b) => (ordemTier[a.tier] || 9) - (ordemTier[b.tier] || 9))
+          .map(({ p, tier }) => `<tr><td class="title">${esc(p.processo || p.nome || '')}</td><td>${p.area ? `<span class="chip-area">${esc(p.area)}</span>` : '–'}</td><td>${_htmlBadge(_nivelTierProcesso(tier), tier)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <div style="font-size:0.74em;color:#888;margin-top:6px;">Interromper este contrato afeta estes processos. Um contrato de fornecedor que sustenta processo Tier 1 merece atenção redobrada na renovação.</div>`
+    : vazio('Nenhum processo do BIA declara depender deste fornecedor.');
+
+  const riscos = (_contratoRiscos || []).filter((r) => String(r.fornecedor || '') === String(c.fornecedorId) && r.status !== 'Encerrado');
+  const blocoRiscos = riscos.length
+    ? riscos.map((r) => `<div style="padding:8px 0;border-bottom:1px solid #eee;"><a href="#riscos?risco=${esc(r.id)}" style="color:#c62828;font-weight:600;">⚠️ ${esc(r.titulo || 'Risco')}</a> <span class="muted" style="font-size:0.85em;">· ${esc(r.status)}</span></div>`).join('')
+    : vazio('Nenhum risco aberto para este fornecedor (ou o seu perfil não lê o registro de riscos).');
+
+  const outros = contratosData.filter((x) => String(x.fornecedorId) === String(c.fornecedorId) && String(x.id) !== String(c.id || ''));
+  const blocoOutros = outros.length
+    ? outros.map((x) => `<div style="padding:8px 0;border-bottom:1px solid #eee;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <a href="javascript:void(0)" onclick="abrirOutroContrato('${escJs(x.id)}')" style="font-weight:600;color:#2a2623;">${esc(x.codigo)} — ${esc(x.objeto)}</a>${_pillStatusContrato(x)}
+        <span class="muted" style="font-size:0.85em;">fim ${esc(_dataBR(x.dataFim))}${x.valorMensal != null ? ' · ' + esc(_formatarReais(x.valorMensal)) + '/mês' : ''}</span></div>`).join('')
+    : vazio('Nenhum outro contrato com este fornecedor.');
+
+  let blocoSla;
+  if (!ContratoCiclo.temSla(c.sla)) {
+    blocoSla = vazio('SLA não cadastrado neste contrato (aba Dados ▸ SLAs do contrato).');
+  } else {
+    const alvos = _alvosSlaContrato(c);
+    const itens = ContratoCiclo.compararSlaComRto(c.sla, alvos);
+    const fmt = (m) => (m === null || m === undefined ? '—' : ContratoCiclo.formatarDuracao(m));
+    blocoSla = !alvos.length
+      ? vazio('Nenhuma dependência coberta nem processo do BIA ligado a este contrato para comparar.')
+      : (itens.length
+        ? `<div class="data-table"><table><thead><tr><th>Exigido por</th><th>Exigido</th><th>Garantido</th><th>Situação</th></tr></thead><tbody>
+            ${itens.map((i) => `<tr><td>${esc(i.origem)}</td><td class="col-nw">${esc(fmt(i.exigidoMin))}</td><td class="col-nw">${esc(fmt(i.garantidoMin))}</td><td>${_chipAlertaContrato({ nivel: i.nivel, rotulo: { sla_rto_incompativel: 'RTO incompatível', sla_rpo_incompativel: 'RPO incompatível', sla_sem_rto: 'Sem RTO garantido' }[i.codigo] || i.codigo })}</td></tr>`).join('')}
+          </tbody></table></div>`
+        : `<div style="color:#2e7d32;font-size:0.9em;">✅ O SLA atende ao RTO/RPO de ${alvos.length} item(ns) comparado(s): ${esc(alvos.map((a) => a.origem).join(', '))}.</div>`);
+  }
+
+  cont.innerHTML = secao('Fornecedor', blocoForn) + secao('SLA × RTO/RPO exigido', blocoSla) + secao('Processos do BIA que dependem deste fornecedor', blocoProc)
+    + secao('Riscos abertos do fornecedor', blocoRiscos) + secao('Outros contratos com o fornecedor', blocoOutros);
+}
+
+window.abrirOutroContrato = async (id) => {
+  if (Perfis.podeEditarContratos(window.USER_PERFIS) && _edContrato.sujo()) {
+    const ok = await salvarContrato();
+    if (!ok) return;
+  }
+  abrirDrawerContrato(id);
+};
+
+// ============================================================
+// PÁGINAS: LISTAS CONFIGURÁVEIS DO CONTRATO (tipos, indexadores, status)
+// ------------------------------------------------------------
+// As três têm o mesmo formato ({nome, ativo, ordem} + situação no status),
+// então são uma fábrica só em vez de três cópias do molde de Categorias de
+// Fornecedor. Item em uso não é excluído: desativa (tira das opções novas e
+// mantém o nome nos contratos que já usam).
+// ============================================================
+const LISTAS_CONTRATO = {
+  tipos: {
+    titulo: 'Tipos de Contrato', sub: 'A natureza de cada contrato (prestação de serviços, SaaS, licenciamento...)',
+    rotulo: 'Tipo', novo: '+ Novo Tipo', placeholder: 'Ex.: Assinatura de software (SaaS)', campoContrato: 'tipoId',
+    get: () => API.getTiposContrato(), salvar: (x) => API.salvarTipoContrato(x), excluir: (id) => API.excluirTipoContrato(id),
+    padroes: () => ContratoCiclo.PADROES.tipos, tela: 'contratos-tipos',
+  },
+  indexadores: {
+    titulo: 'Indexadores de Reajuste', sub: 'Os índices de mercado usados na correção anual dos contratos',
+    rotulo: 'Indexador', novo: '+ Novo Indexador', placeholder: 'Ex.: IPCA', campoContrato: 'indexadorId',
+    get: () => API.getIndexadoresReajuste(), salvar: (x) => API.salvarIndexadorReajuste(x), excluir: (id) => API.excluirIndexadorReajuste(id),
+    padroes: () => ContratoCiclo.PADROES.indexadores, tela: 'contratos-indexadores',
+  },
+  status: {
+    titulo: 'Status de Contrato', sub: 'As etapas do ciclo de vida. A situação de cada status diz se o contrato conta como vigente (e gera alertas de prazo)',
+    rotulo: 'Status', novo: '+ Novo Status', placeholder: 'Ex.: Vigente', campoContrato: 'statusId', situacao: true,
+    get: () => API.getStatusContrato(), salvar: (x) => API.salvarStatusContrato(x), excluir: (id) => API.excluirStatusContrato(id),
+    padroes: () => ContratoCiclo.PADROES.status, tela: 'contratos-status',
+  },
+};
+const ROTULO_SITUACAO_CONTRATO = { pre: 'Antes da vigência', vigente: 'Vigente', expirada: 'Vigência expirada', encerrado: 'Encerrado' };
+
+let _listaContratoChave = 'tipos';
+let _listaContratoItens = [];
+let _listaContratoUso = {};
+let _listaContratoOrdenacao = criarOrdenacao('nome', 'asc');
+
+// Declaracoes de funcao (nao const): o mapa `pages` no topo do arquivo as
+// referencia antes desta linha ser executada.
+function contratosTipos() { return _telaListaSimples('tipos'); }
+function contratosIndexadores() { return _telaListaSimples('indexadores'); }
+function contratosStatus() { return _telaListaSimples('status'); }
+
+async function _telaListaSimples(chave) {
+  const cfg = LISTAS_CONTRATO[chave];
+  _listaContratoChave = chave;
+  _listaContratoOrdenacao = criarOrdenacao('nome', 'asc');
+  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>${esc(cfg.titulo)}</h2><p class="page-sub">${esc(cfg.sub)}</p></div>
+      <div style="display:flex;gap:8px;">
+        <a href="#contratos" class="btn btn-ghost">← Contratos</a>
+        ${podeEditar ? `<button class="btn btn-primary" onclick="abrirDrawerListaContrato()">${esc(cfg.novo)}</button>` : ''}
+      </div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="listaContratoItens"></div>
+    <div class="drawer-overlay" id="drawerOverlayListaContrato" onclick="fecharDrawerListaContrato()"></div>
+    <div class="drawer" id="drawerListaContrato">
+      <div class="drawer-header">
+        <h3 id="listaContratoDrawerTitulo">Novo</h3>
+        <button onclick="fecharDrawerListaContrato()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" style="padding:20px 24px;">
+        <input type="hidden" id="listaContratoId">
+        <div style="margin-bottom:14px;"><label style="${lbl}">${esc(cfg.rotulo)} <span class="req" aria-hidden="true">*</span></label>
+          <input type="text" id="listaContratoNome" placeholder="${esc(cfg.placeholder)}" style="${inp}"></div>
+        ${cfg.situacao ? `<div style="margin-bottom:14px;"><label style="${lbl}">Situação <span class="req" aria-hidden="true">*</span></label>
+          <select id="listaContratoSituacao" style="${inp}">
+            ${ContratoCiclo.SITUACOES.map((s) => `<option value="${s}">${ROTULO_SITUACAO_CONTRATO[s]}</option>`).join('')}
+          </select>
+          <div style="font-size:0.74em;color:#888;margin-top:4px;">Só contratos em status de situação "Vigente" contam no custo, vencem e geram alertas. A renovação automática também só acontece para eles. "Vigência expirada" é para o contrato cujo prazo acabou sem renovação: deixa de contar e de alertar, mas ainda não foi encerrado formalmente.</div></div>` : ''}
+        <label class="check-label"><input type="checkbox" id="listaContratoAtivo" checked> Ativo</label>
+        <div style="font-size:0.74em;color:#888;margin-top:4px;">Inativo sai das opções de contratos novos; os contratos que já usam continuam mostrando o nome.</div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerListaContrato()">Fechar</button>
+        <button class="btn btn-primary" id="btnSalvarListaContrato" onclick="salvarItemListaContrato()">Salvar</button>
+      </div>
+    </div>`;
+  try {
+    const [itens, contratosList] = await Promise.all([cfg.get(), API.getContratos().catch(() => [])]);
+    _listaContratoItens = itens;
+    contratosData = contratosList;
+    _listaContratoUso = {};
+    contratosList.forEach((c) => {
+      const id = c[cfg.campoContrato];
+      if (id) _listaContratoUso[id] = (_listaContratoUso[id] || 0) + 1;
+    });
+  } catch (e) {
+    document.querySelector('.loading').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">Não foi possível carregar a lista.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="_telaListaSimples('${chave}')" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+  document.querySelector('.loading').style.display = 'none';
+  renderizarListaContrato();
+}
+
+window.ordenarListaContrato = (coluna) => { _listaContratoOrdenacao.ordenar(coluna); renderizarListaContrato(); };
+
+function renderizarListaContrato() {
+  const cfg = LISTAS_CONTRATO[_listaContratoChave];
+  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const cont = document.getElementById('listaContratoItens');
+  if (!cont) return;
+  if (!_listaContratoItens.length) {
+    cont.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
+      Nenhum item cadastrado ainda.
+      ${podeEditar ? `<br><button class="btn btn-ghost" id="btnPadroesListaContrato" onclick="cadastrarPadroesListaContrato()" style="margin-top:12px;">Cadastrar valores padrão (${cfg.padroes().length})</button>
+      <div style="font-size:0.85em;margin-top:6px;">${esc(cfg.padroes().map((p) => p.nome).join(', '))}</div>` : ''}</div>`;
+    return;
+  }
+  const data = _listaContratoOrdenacao.aplicar(_listaContratoItens, {
+    status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
+    uso: (a, b, dir) => dir * ((_listaContratoUso[a.id] || 0) - (_listaContratoUso[b.id] || 0)),
+    situacao: (a, b, dir) => dir * (ContratoCiclo.SITUACOES.indexOf(a.situacao) - ContratoCiclo.SITUACOES.indexOf(b.situacao)),
+  });
+  const th = (coluna, rotulo, cls) => `<th onclick="ordenarListaContrato('${coluna}')" style="cursor:pointer;" class="${cls || ''}">${rotulo} <span id="sort-listacontrato-${coluna}"></span></th>`;
+  const pillSit = (s) => {
+    const k = { pre: ['#1565c0', '#e3f2fd'], vigente: ['#2e7d32', '#e8f5e9'], expirada: ['#e65100', '#fff3e0'], encerrado: ['#757575', '#f5f5f5'] }[s] || ['#e65100', '#fff3e0'];
+    return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:${k[0]};background:${k[1]};">${esc(ROTULO_SITUACAO_CONTRATO[s] || 'Sem situação')}</span>`;
+  };
+  cont.innerHTML = `
+    <div class="data-table"><table>
+      <thead><tr>
+        ${th('nome', esc(cfg.rotulo))}
+        ${cfg.situacao ? th('situacao', 'Situação') : ''}
+        ${th('uso', 'Contratos', 'col-c')}
+        ${th('status', 'Ativo', 'col-c')}
+        <th class="col-c">Ações</th>
+      </tr></thead>
+      <tbody>
+        ${data.map((x) => `
+          <tr style="cursor:pointer;${x.ativo ? '' : 'opacity:0.5;'}" onclick="abrirDrawerListaContrato('${esc(x.id)}')">
+            <td class="title">${esc(x.nome)}</td>
+            ${cfg.situacao ? `<td>${pillSit(x.situacao)}</td>` : ''}
+            <td class="col-c num">${_listaContratoUso[x.id] || 0}</td>
+            <td class="col-c">${x.ativo ? '<span class="badge badge-green">Ativo</span>' : '<span class="badge badge-gray">Inativo</span>'}</td>
+            <td class="col-c col-nw" onclick="event.stopPropagation();">${podeEditar ? `
+              <button class="btn-icon" onclick="abrirDrawerListaContrato('${esc(x.id)}')" title="Editar">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
+              <button class="btn-icon" onclick="excluirItemListaContrato('${esc(x.id)}')" title="Excluir">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>` : '–'}
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table></div>`;
+  _listaContratoOrdenacao.atualizarSetas('sort-listacontrato-', ['nome', 'situacao', 'uso', 'status']);
+}
+
+const _edListaContrato = criarRastreadorEdicao(() => _coletarItemListaContrato());
+
+function _coletarItemListaContrato() {
+  const cfg = LISTAS_CONTRATO[_listaContratoChave];
+  const item = {
+    id: document.getElementById('listaContratoId').value || null,
+    nome: document.getElementById('listaContratoNome').value.trim(),
+    ativo: document.getElementById('listaContratoAtivo').checked,
+  };
+  if (cfg.situacao) item.situacao = document.getElementById('listaContratoSituacao').value;
+  return item;
+}
+
+window.abrirDrawerListaContrato = (id) => {
+  const cfg = LISTAS_CONTRATO[_listaContratoChave];
+  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const x = id ? _listaContratoItens.find((i) => String(i.id) === String(id)) : null;
+  document.getElementById('listaContratoDrawerTitulo').textContent = (x ? 'Editar ' : 'Novo ') + cfg.rotulo;
+  document.getElementById('listaContratoId').value = x ? x.id : '';
+  document.getElementById('listaContratoNome').value = x ? x.nome : '';
+  document.getElementById('listaContratoAtivo').checked = x ? x.ativo : true;
+  if (cfg.situacao) document.getElementById('listaContratoSituacao').value = x && x.situacao ? x.situacao : 'vigente';
+  document.querySelectorAll('#drawerListaContrato input, #drawerListaContrato select').forEach((el) => { el.disabled = !podeEditar; });
+  document.getElementById('btnSalvarListaContrato').style.display = podeEditar ? 'inline-block' : 'none';
+  document.getElementById('drawerListaContrato').classList.add('open');
+  document.getElementById('drawerOverlayListaContrato').classList.add('open');
+  if (x) _edListaContrato.marcar(); else _edListaContrato.esquecer();
+  setTimeout(() => document.getElementById('listaContratoNome').focus(), 50);
+};
+
+function _fecharDrawerListaContratoSemSalvar() {
+  document.getElementById('drawerListaContrato').classList.remove('open');
+  document.getElementById('drawerOverlayListaContrato').classList.remove('open');
+}
+window._fecharDrawerListaContratoSemSalvar = _fecharDrawerListaContratoSemSalvar;
+
+window.fecharDrawerListaContrato = () => _fecharComRastreador({
+  idDrawer: 'drawerListaContrato',
+  sujo: () => {
+    const item = _coletarItemListaContrato();
+    // Rascunho novo e vazio: nada a gravar.
+    return Perfis.podeEditarContratos(window.USER_PERFIS) && _edListaContrato.sujo() && !!(item.id || item.nome);
+  },
+  salvar: () => salvarItemListaContrato(),
+  fecharSemSalvar: _fecharDrawerListaContratoSemSalvar,
+});
+
+window.salvarItemListaContrato = async () => {
+  const cfg = LISTAS_CONTRATO[_listaContratoChave];
+  const item = _coletarItemListaContrato();
+  if (!item.nome) { showToast(`Informe o ${cfg.rotulo.toLowerCase()}.`, '#e65100'); return false; }
+  return await comBotaoCarregando('btnSalvarListaContrato', async () => {
+    try {
+      const r = await cfg.salvar(item);
+      const salvoId = item.id || r.id;
+      if (!item.id) {
+        document.getElementById('listaContratoId').value = salvoId;
+        document.getElementById('listaContratoDrawerTitulo').textContent = 'Editar ' + cfg.rotulo;
+      }
+      _edListaContrato.marcar({ ...item, id: salvoId });
+      _listaContratoItens = await cfg.get();
+      renderizarListaContrato();
+      showToast('✅ Salvo!', '#2e7d32');
+      return true;
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+      return false;
+    }
+  });
+};
+
+window.excluirItemListaContrato = async (id) => {
+  const cfg = LISTAS_CONTRATO[_listaContratoChave];
+  const x = _listaContratoItens.find((i) => String(i.id) === String(id));
+  if (!x) return;
+  const uso = _listaContratoUso[id] || 0;
+  if (uso) {
+    return showToast(`"${x.nome}" está em ${uso} contrato(s). Desative em vez de excluir — assim ele sai das opções novas sem apagar o nome dos contratos.`, '#e65100');
+  }
+  if (!await confirmarAcao(`Excluir "${x.nome}"?`)) return;
+  try {
+    await cfg.excluir(id);
+    _listaContratoItens = await cfg.get();
+    renderizarListaContrato();
+    showToast('🗑️ Excluído.', '#555');
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+window.cadastrarPadroesListaContrato = async () => {
+  const cfg = LISTAS_CONTRATO[_listaContratoChave];
+  await comBotaoCarregando('btnPadroesListaContrato', async () => {
+    try {
+      const padroes = cfg.padroes();
+      for (let i = 0; i < padroes.length; i++) {
+        await cfg.salvar({ ...padroes[i], ativo: true, ordem: Date.now() + i });
+      }
+      _listaContratoItens = await cfg.get();
+      renderizarListaContrato();
+      showToast(`✅ ${padroes.length} itens cadastrados.`, '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível cadastrar.'), '#c62828');
+      _listaContratoItens = await cfg.get().catch(() => _listaContratoItens);
+      renderizarListaContrato();
+    }
+  });
+};
+
+// ---- Integração com Fornecedores: aba "Contratos" do drawer do fornecedor ----
+function _renderContratosDoFornecedor(fornecedorId) {
+  const cont = document.getElementById('fornContratosLista');
+  if (!cont) return;
+  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const btnNovo = document.getElementById('btnNovoContratoForn');
+  if (btnNovo) btnNovo.style.display = podeEditar && fornecedorId ? 'inline-block' : 'none';
+  if (!fornecedorId) {
+    cont.innerHTML = '<div style="padding:18px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">Salve o fornecedor para vincular contratos.</div>';
+    return;
+  }
+  const lista = (contratosData || []).filter((c) => String(c.fornecedorId) === String(fornecedorId))
+    .sort((a, b) => String(b.dataFim || '').localeCompare(String(a.dataFim || '')));
+  if (!lista.length) {
+    cont.innerHTML = '<div style="padding:18px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">Nenhum contrato com este fornecedor.</div>';
+    return;
+  }
+  cont.innerHTML = `<div class="data-table"><table>
+    <thead><tr><th>Código</th><th>Objeto</th><th>Fim</th><th class="col-r">Valor mensal</th><th>Status</th><th>Alertas</th></tr></thead>
+    <tbody>${lista.map((c) => `
+      <tr style="cursor:pointer;" onclick="abrirContratoDoFornecedor('${escJs(c.id)}')">
+        <td class="title col-nw">${esc(c.codigo)}</td>
+        <td>${esc(c.objeto)}</td>
+        <td class="col-nw">${esc(_dataBR(c.dataFim))}</td>
+        <td class="num col-r col-nw">${c.valorMensal != null ? esc(_formatarReais(c.valorMensal)) : '–'}</td>
+        <td>${_pillStatusContrato(c)}</td>
+        <td>${_alertasContrato(c).map(_chipAlertaContrato).join('') || '<span class="muted">–</span>'}</td>
+      </tr>`).join('')}</tbody></table></div>`;
+}
+
+/** Sai do drawer do fornecedor (salvando se mudou) e abre o contrato na tela de Contratos. */
+async function _irParaContratoSaindoDoFornecedor(hash) {
+  if (typeof fecharDrawerFornecedorCadastro === 'function') await fecharDrawerFornecedorCadastro();
+  if (document.getElementById('drawerFornecedorCadastro') && document.getElementById('drawerFornecedorCadastro').classList.contains('open')) return;
+  window.location.hash = hash;
+}
+window.abrirContratoDoFornecedor = (id) => _irParaContratoSaindoDoFornecedor('contratos?contrato=' + encodeURIComponent(id));
+window.novoContratoDoFornecedor = () => {
+  const id = document.getElementById('fornCadId').value;
+  if (id) _irParaContratoSaindoDoFornecedor('contratos?novo=1&fornecedor=' + encodeURIComponent(id));
+};
+
+// ============================================================
+// PÁGINA: NOTIFICAÇÕES POR E-MAIL (16/10/2026) -- só o Admin
+// ------------------------------------------------------------
+// Configuração dos alertas de contratos por e-mail e o log da fila de saída
+// (notificacoes_email). Quem decide e envia são as Cloud Functions
+// (functions/notificacoes.js, varreduraDiariaContratos, resumoMensalContratos,
+// envioDeNotificacaoEmail); esta tela só configura, mostra o que saiu (ou
+// sairia, em simulação) e manda um e-mail de teste.
+// ============================================================
+let notificacoesEmailData = [];
+let configNotificacoesData = null;
+let notificacoesEmailPagina = 1;
+const NOTIFICACOES_POR_PAGINA = 20;
+
+const NOTIF_STATUS = {
+  pendente: { rotulo: 'Pendente', cor: '#757575', fundo: '#f5f5f5' },
+  enviado: { rotulo: 'Enviado', cor: '#2e7d32', fundo: '#e8f5e9' },
+  simulado: { rotulo: 'Simulado', cor: '#1565c0', fundo: '#e3f2fd' },
+  erro: { rotulo: 'Erro', cor: '#c62828', fundo: '#ffebee' },
+  sem_destinatario: { rotulo: 'Sem destinatário', cor: '#f57c00', fundo: '#fff3e0' },
+  ignorado: { rotulo: 'Ignorado', cor: '#757575', fundo: '#f5f5f5' },
+};
+const NOTIF_EVENTO = {
+  vence30: 'Vence em 30 dias', vencido: 'Vencido', janela: 'Janela de aviso aberta', janela7: 'Últimos dias para avisar',
+  avisoPerdido: 'Prazo de aviso encerrado', renovado: 'Renovação automática', resumoMensal: 'Resumo mensal',
+};
+const NOTIF_MODOS = [
+  { valor: 'desligado', rotulo: 'Desligado', descricao: 'Nada é enfileirado nem enviado.', cor: '#757575', fundo: '#f5f5f5' },
+  { valor: 'simulacao', rotulo: 'Simulação', descricao: 'Os e-mails são montados e ficam no log como "Simulado", sem sair. Use para conferir antes de ligar.', cor: '#1565c0', fundo: '#e3f2fd' },
+  { valor: 'ativo', rotulo: 'Ativo', descricao: 'Os e-mails são enviados pela conta SMTP configurada.', cor: '#2e7d32', fundo: '#e8f5e9' },
+];
+
+function _pillStatusNotificacao(status) {
+  const k = NOTIF_STATUS[status] || { rotulo: status || '–', cor: '#757575', fundo: '#f5f5f5' };
+  return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:${k.cor};background:${k.fundo};white-space:nowrap;">${esc(k.rotulo)}</span>`;
+}
+
+function _dataHoraBR(iso) {
+  if (!iso) return '–';
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? '–' : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+async function notificacoesEmail() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  const caixa = 'border:1px solid var(--border, #d8d2cd);border-radius:10px;padding:20px;margin-bottom:20px;background:#fff;';
+  const chk = (id, rotulo, dica) => `<label class="check-label" style="margin-bottom:8px;"><input type="checkbox" id="${id}"> <span><strong style="font-weight:600;">${rotulo}</strong>${dica ? `<span style="display:block;font-size:0.8em;color:#888;">${dica}</span>` : ''}</span></label>`;
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Notificações por e-mail</h2><p class="page-sub">Alertas de contratos enviados pela conta SMTP do Google Workspace: prazos, renovação automática e resumo mensal</p></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" id="btnEmailTeste" onclick="enviarEmailTesteNotificacoes()">✉️ Enviar e-mail de teste</button>
+        <button class="btn btn-primary" id="btnSalvarConfigNotificacoes" onclick="salvarConfigNotificacoesTela()">Salvar configuração</button>
+      </div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="notifConteudo" style="display:none;">
+      <div style="${caixa}">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;">
+          <div>
+            <label style="${lbl}">Modo de envio</label>
+            <select id="notifModo" style="${inp}" onchange="_renderModoNotificacoes()">
+              ${NOTIF_MODOS.map((m) => `<option value="${m.valor}">${m.rotulo}</option>`).join('')}
+            </select>
+            <div id="notifModoDica" style="margin-top:8px;"></div>
+          </div>
+          <div>
+            <label style="${lbl}">Nome do remetente</label>
+            <input type="text" id="notifRemetente" style="${inp}" placeholder="GRC360 · Contratos">
+            <div style="font-size:0.74em;color:#888;margin-top:4px;">Nome exibido na caixa de entrada. O endereço é o do campo "E-mail do remetente", em Servidor de envio.</div>
+            <label style="${lbl}margin-top:12px;">Responder para (opcional)</label>
+            <input type="email" id="notifResponderPara" style="${inp}" placeholder="contratos@fortestecnologia.com.br">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-top:20px;">
+          <div>
+            <div style="${lbl}">O que envia</div>
+            ${chk('notifGrupoPrazos', 'Prazos (na hora)', 'Vence em 30 dias, vencido, janela de aviso de cancelamento, últimos 7 dias e prazo de aviso encerrado.')}
+            ${chk('notifGrupoRenovacao', 'Renovação e reajuste', 'Renovação automática executada (na hora) e reajustes no resumo mensal.')}
+            ${chk('notifGrupoResumo', 'Resumo mensal (dia 1)', 'Um e-mail por destinatário com os contratos dele que pedem atenção.')}
+          </div>
+          <div>
+            <div style="${lbl}">Para quem</div>
+            ${chk('notifDestGestor', 'Gestor do contrato', 'E-mail do cadastro de Pessoas. Gestor digitado sem cadastro não recebe.')}
+            ${chk('notifDestArea', 'Responsável da área', 'E-mail cadastrado na Área responsável do contrato.')}
+            ${chk('notifDestOperadores', 'Operadores Administrativos', 'Todos os usuários com esse perfil.')}
+            <div style="font-size:0.74em;color:#888;">Só endereços @fortestecnologia.com.br. Os e-mails não levam valores do contrato.</div>
+          </div>
+        </div>
+        <div style="${lbl}margin-top:22px;padding-top:16px;border-top:1px solid #eee;">Servidor de envio</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;">
+          <div>
+            <label style="${lbl}">Provedor</label>
+            <select id="notifProvedor" style="${inp}" onchange="_renderServidorNotificacoes()">
+              <option value="sendgrid">SendGrid</option>
+              <option value="gmail">Google Workspace (Gmail)</option>
+              <option value="outro">Outro servidor SMTP</option>
+            </select>
+          </div>
+          <div>
+            <label style="${lbl}">E-mail do remetente <span id="notifRemetenteObrig" style="color:#d60014;">*</span></label>
+            <input type="email" id="notifRemetenteEmail" style="${inp}" placeholder="alertas@fortestecnologia.com.br">
+            <div id="notifRemetenteDica" style="font-size:0.74em;color:#888;margin-top:4px;"></div>
+          </div>
+          <div id="notifHostWrap" style="display:none;">
+            <label style="${lbl}">Host SMTP</label>
+            <input type="text" id="notifHost" style="${inp}" placeholder="smtp.empresa.com.br">
+          </div>
+          <div id="notifPortaWrap" style="display:none;">
+            <label style="${lbl}">Porta</label>
+            <input type="number" min="1" max="65535" id="notifPorta" style="${inp}" placeholder="587">
+          </div>
+        </div>
+        <div id="notifSegredosDica" style="font-size:0.78em;color:#5c5550;margin-top:10px;padding:8px 12px;background:#f6f4f2;border-radius:7px;"></div>
+        <div id="notifAtualizado" style="font-size:0.78em;color:#888;margin-top:14px;"></div>
+      </div>
+
+      <div class="filters">
+        <div class="field">
+          <label class="field-label">&nbsp;</label>
+          <input type="search" id="buscaNotificacoes" placeholder="Buscar por contrato, destinatário ou assunto…" aria-label="Buscar notificação" oninput="notificacoesEmailPagina = 1; renderizarNotificacoesEmail()" class="field-control field-control--busca">
+        </div>
+        <div class="field">
+          <label class="field-label">Status</label>
+          <select id="filtroNotificacaoStatus" onchange="notificacoesEmailPagina = 1; renderizarNotificacoesEmail()" class="field-control">
+            <option value="">Todos</option>
+            ${Object.entries(NOTIF_STATUS).map(([k, v]) => `<option value="${k}">${v.rotulo}</option>`).join('')}
+          </select>
+        </div>
+        <div class="field">
+          <label class="field-label">&nbsp;</label>
+          <button class="btn btn-ghost" onclick="recarregarNotificacoesEmail()" style="height:40px;">🔄 Atualizar log</button>
+        </div>
+        <span id="contadorNotificacoes" style="font-size:0.82em;color:#888;padding:10px 0;"></span>
+      </div>
+      <div class="data-table">
+        <table style="min-width:1080px;">
+          <colgroup><col style="width:140px"><col style="width:190px"><col style="width:120px"><col style="width:230px"><col style="width:300px"><col style="width:140px"></colgroup>
+          <thead><tr><th>Data</th><th>Tipo</th><th>Contrato</th><th>Para</th><th>Assunto</th><th>Status</th></tr></thead>
+          <tbody id="notificacoesRows"></tbody>
+        </table>
+        <div id="notificacoesPaginacao" style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:0 4px;font-size:0.85em;color:#666;"></div>
+      </div>
+    </div>
+
+    <div class="drawer-overlay" id="drawerOverlayNotificacao" onclick="fecharDrawerNotificacao()"></div>
+    <div class="drawer" id="drawerNotificacao">
+      <div class="drawer-header">
+        <h3 id="notificacaoDrawerTitulo">E-mail</h3>
+        <button onclick="fecharDrawerNotificacao()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" style="padding:20px 24px;display:flex;flex-direction:column;gap:14px;">
+        <div id="notificacaoDetalhes"></div>
+        <iframe id="notificacaoPrevia" sandbox="" title="Prévia do e-mail" style="width:100%;flex:1;min-height:420px;border:1px solid #e0e0e0;border-radius:8px;background:#f6f4f2;"></iframe>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerNotificacao()">Fechar</button>
+      </div>
+    </div>`;
+
+  try {
+    const [cfg, lista] = await Promise.all([API.getConfigNotificacoes(), API.getNotificacoesEmail()]);
+    configNotificacoesData = cfg;
+    notificacoesEmailData = lista;
+  } catch (e) {
+    document.querySelector('.loading').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">Não foi possível carregar as notificações.<br>
+      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
+      <button class="btn btn-ghost" onclick="notificacoesEmail()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    return;
+  }
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('notifConteudo').style.display = 'block';
+  _popularConfigNotificacoes(configNotificacoesData);
+  notificacoesEmailPagina = 1;
+  renderizarNotificacoesEmail();
+}
+
+function _popularConfigNotificacoes(c) {
+  document.getElementById('notifModo').value = c.modo;
+  document.getElementById('notifRemetente').value = c.remetenteNome || '';
+  document.getElementById('notifResponderPara').value = c.responderPara || '';
+  document.getElementById('notifGrupoPrazos').checked = !!c.grupos.prazos;
+  document.getElementById('notifGrupoRenovacao').checked = !!c.grupos.renovacaoReajuste;
+  document.getElementById('notifGrupoResumo').checked = !!c.grupos.resumoMensal;
+  document.getElementById('notifDestGestor').checked = !!c.destinatarios.gestor;
+  document.getElementById('notifDestArea').checked = !!c.destinatarios.area;
+  document.getElementById('notifDestOperadores').checked = !!c.destinatarios.operadores;
+  const sv = c.servidor || { provedor: 'sendgrid' };
+  document.getElementById('notifProvedor').value = sv.provedor || 'sendgrid';
+  document.getElementById('notifRemetenteEmail').value = sv.remetenteEmail || '';
+  document.getElementById('notifHost').value = sv.host || '';
+  document.getElementById('notifPorta').value = sv.porta || '';
+  _renderServidorNotificacoes();
+  document.getElementById('notifAtualizado').textContent = c.atualizadoEm
+    ? `Última alteração: ${_dataHoraBR(c.atualizadoEm)}${c.atualizadoPor ? ' por ' + c.atualizadoPor : ''}` : 'Configuração ainda não salva (padrão: desligado).';
+  _renderModoNotificacoes();
+}
+
+/** Campos e dicas do servidor conforme o provedor escolhido. */
+window._renderServidorNotificacoes = () => {
+  const prov = document.getElementById('notifProvedor').value;
+  const outro = prov === 'outro';
+  document.getElementById('notifHostWrap').style.display = outro ? 'block' : 'none';
+  document.getElementById('notifPortaWrap').style.display = outro ? 'block' : 'none';
+  document.getElementById('notifRemetenteObrig').style.display = prov === 'sendgrid' ? 'inline' : 'none';
+  document.getElementById('notifRemetenteDica').textContent = {
+    sendgrid: 'Precisa estar verificado no SendGrid (Settings ▸ Sender Authentication): Single Sender ou domínio autenticado.',
+    gmail: 'Opcional: sem ele, o remetente é a própria conta do Workspace.',
+    outro: 'O endereço que o servidor permite usar como remetente.',
+  }[prov];
+  document.getElementById('notifSegredosDica').innerHTML = {
+    sendgrid: '🔑 Usuário e senha ficam nos segredos do Firebase: <strong>SMTP_USUARIO</strong> = <code>apikey</code> (literal) e <strong>SMTP_SENHA</strong> = a API Key do SendGrid (permissão Mail Send). Servidor: smtp.sendgrid.net, porta 587 (STARTTLS).',
+    gmail: '🔑 Usuário e senha ficam nos segredos do Firebase: <strong>SMTP_USUARIO</strong> = a conta e <strong>SMTP_SENHA</strong> = a senha de app. Servidor: smtp.gmail.com, porta 465.',
+    outro: '🔑 Usuário e senha ficam nos segredos do Firebase: <strong>SMTP_USUARIO</strong> e <strong>SMTP_SENHA</strong>. Porta 465 usa TLS direto; as demais, STARTTLS.',
+  }[prov];
+};
+
+window._renderModoNotificacoes = () => {
+  const m = NOTIF_MODOS.find((x) => x.valor === document.getElementById('notifModo').value) || NOTIF_MODOS[0];
+  document.getElementById('notifModoDica').innerHTML = `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:700;color:${m.cor};background:${m.fundo};">${esc(m.rotulo)}</span>
+    <span style="font-size:0.82em;color:#666;margin-left:6px;">${esc(m.descricao)}</span>`;
+};
+
+function _coletarConfigNotificacoes() {
+  return {
+    modo: document.getElementById('notifModo').value,
+    remetenteNome: document.getElementById('notifRemetente').value.trim(),
+    responderPara: document.getElementById('notifResponderPara').value.trim(),
+    grupos: {
+      prazos: document.getElementById('notifGrupoPrazos').checked,
+      renovacaoReajuste: document.getElementById('notifGrupoRenovacao').checked,
+      resumoMensal: document.getElementById('notifGrupoResumo').checked,
+    },
+    destinatarios: {
+      gestor: document.getElementById('notifDestGestor').checked,
+      area: document.getElementById('notifDestArea').checked,
+      operadores: document.getElementById('notifDestOperadores').checked,
+    },
+    servidor: {
+      provedor: document.getElementById('notifProvedor').value,
+      remetenteEmail: document.getElementById('notifRemetenteEmail').value.trim(),
+      host: document.getElementById('notifHost').value.trim(),
+      porta: document.getElementById('notifPorta').value ? Number(document.getElementById('notifPorta').value) : null,
+    },
+  };
+}
+
+window.salvarConfigNotificacoesTela = async () => {
+  const c = _coletarConfigNotificacoes();
+  if (c.responderPara && !c.responderPara.toLowerCase().endsWith('@fortestecnologia.com.br')) {
+    return showToast('"Responder para" precisa ser um e-mail @fortestecnologia.com.br.', '#e65100');
+  }
+  const sv = c.servidor;
+  if (sv.remetenteEmail && !sv.remetenteEmail.toLowerCase().endsWith('@fortestecnologia.com.br')) {
+    return showToast('O e-mail do remetente precisa ser @fortestecnologia.com.br.', '#e65100');
+  }
+  if (sv.provedor === 'sendgrid' && !sv.remetenteEmail) {
+    return showToast('Informe o e-mail do remetente verificado no SendGrid.', '#e65100');
+  }
+  if (sv.provedor === 'outro' && !sv.host) return showToast('Informe o host do servidor SMTP.', '#e65100');
+  if (c.modo === 'ativo' && configNotificacoesData && configNotificacoesData.modo !== 'ativo'
+      && !await confirmarAcao('Ligar o envio de verdade?\n\nA partir da próxima varredura (05:00), os alertas de contrato saem por e-mail para os destinatários marcados. Recomendado: enviar antes um e-mail de teste e conferir o log em simulação.')) return;
+  await comBotaoCarregando('btnSalvarConfigNotificacoes', async () => {
+    try {
+      await API.salvarConfigNotificacoes(c);
+      configNotificacoesData = await API.getConfigNotificacoes();
+      _popularConfigNotificacoes(configNotificacoesData);
+      showToast('✅ Configuração salva.', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível salvar.'), '#c62828');
+    }
+  });
+};
+
+window.enviarEmailTesteNotificacoes = async () => {
+  await comBotaoCarregando('btnEmailTeste', async () => {
+    try {
+      const r = await API.enviarEmailTeste();
+      if (r && r.error) throw new Error(r.error);
+      showToast(`✅ E-mail de teste enviado para ${(r && r.para) || 'você'}. Confira a caixa de entrada (e o spam).`, '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + (e.message || 'Não foi possível enviar o e-mail de teste.'), '#c62828');
+    }
+  });
+};
+
+window.recarregarNotificacoesEmail = async () => {
+  try {
+    notificacoesEmailData = await API.getNotificacoesEmail();
+    renderizarNotificacoesEmail();
+  } catch (e) {
+    showToast('❌ ' + (e.message || 'Não foi possível atualizar o log.'), '#c62828');
+  }
+};
+
+window.irParaPaginaNotificacoes = (delta) => { notificacoesEmailPagina += delta; renderizarNotificacoesEmail(); };
+
+function renderizarNotificacoesEmail() {
+  let data = [...notificacoesEmailData];
+  const busca = ((document.getElementById('buscaNotificacoes') || {}).value || '').trim().toLowerCase();
+  if (busca) data = data.filter((n) => [n.contratoCodigo, n.para, n.assunto].some((t) => String(t || '').toLowerCase().includes(busca)));
+  const status = (document.getElementById('filtroNotificacaoStatus') || {}).value || '';
+  if (status) data = data.filter((n) => n.status === status);
+
+  const contador = document.getElementById('contadorNotificacoes');
+  if (contador) contador.textContent = `${data.length} de ${notificacoesEmailData.length} e-mail(s) recente(s)`;
+
+  const totalPaginas = Math.max(1, Math.ceil(data.length / NOTIFICACOES_POR_PAGINA));
+  notificacoesEmailPagina = Math.min(Math.max(1, notificacoesEmailPagina), totalPaginas);
+  const inicio = (notificacoesEmailPagina - 1) * NOTIFICACOES_POR_PAGINA;
+  const pagina = data.slice(inicio, inicio + NOTIFICACOES_POR_PAGINA);
+
+  document.getElementById('notificacoesRows').innerHTML = pagina.length
+    ? pagina.map((n) => `
+      <tr style="cursor:pointer;" onclick="abrirDrawerNotificacao('${escJs(n.id)}')">
+        <td class="col-nw muted">${esc(_dataHoraBR(n.criadoEm))}</td>
+        <td>${esc(NOTIF_EVENTO[n.evento] || n.evento || '–')}</td>
+        <td class="title col-nw">${esc(n.contratoCodigo || '–')}</td>
+        <td title="${esc(n.para)}">${n.para ? esc(n.para) : '<span class="muted">—</span>'}</td>
+        <td title="${esc(n.assunto)}" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(n.assunto)}</td>
+        <td>${_pillStatusNotificacao(n.status)}${n.status === 'erro' ? `<div class="muted" style="font-size:0.75em;">${n.tentativas} tentativa(s)</div>` : ''}</td>
+      </tr>`).join('')
+    : `<tr><td colspan="6" style="text-align:center;color:#999;padding:40px;">${notificacoesEmailData.length ? 'Nenhum e-mail com esses filtros.' : 'Nenhum e-mail na fila ainda. Com o modo em Simulação ou Ativo, a varredura diária (05:00) começa a registrar aqui.'}</td></tr>`;
+
+  const pag = document.getElementById('notificacoesPaginacao');
+  if (pag) {
+    pag.innerHTML = `
+      <span>${data.length ? `Mostrando ${inicio + 1}–${inicio + pagina.length} de ${data.length}` : ''}</span>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn btn-ghost" onclick="irParaPaginaNotificacoes(-1)" ${notificacoesEmailPagina <= 1 ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">‹ Anterior</button>
+        <span style="padding:6px 4px;">Página ${notificacoesEmailPagina} de ${totalPaginas}</span>
+        <button class="btn btn-ghost" onclick="irParaPaginaNotificacoes(1)" ${notificacoesEmailPagina >= totalPaginas ? 'disabled' : ''} style="padding:6px 14px;font-size:0.9em;">Próxima ›</button>
+      </div>`;
+  }
+}
+
+/** Prévia do e-mail como o destinatário vê. iframe com sandbox vazio: o HTML roda sem script nem formulário. */
+window.abrirDrawerNotificacao = (id) => {
+  const n = notificacoesEmailData.find((x) => String(x.id) === String(id));
+  if (!n) return;
+  const motivo = { gestor: 'Gestor do contrato', area: 'Responsável da área', operador: 'Operador Administrativo' };
+  const linha = (k, v) => (v ? `<div style="margin-bottom:4px;"><span style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;">${esc(k)}:</span> ${v}</div>` : '');
+  document.getElementById('notificacaoDrawerTitulo').textContent = n.assunto || 'E-mail';
+  document.getElementById('notificacaoDetalhes').innerHTML =
+    linha('Status', _pillStatusNotificacao(n.status))
+    + linha('Para', esc(n.para || 'sem destinatário (cadastre o gestor ou o e-mail da área)'))
+    + linha('Motivo', esc((n.motivos || []).map((m) => motivo[m] || m).join(', ')))
+    + linha('Tipo', esc(NOTIF_EVENTO[n.evento] || n.evento))
+    + (n.contratoId ? linha('Contrato', `<a href="#contratos?contrato=${encodeURIComponent(n.contratoId)}" onclick="fecharDrawerNotificacao()" style="color:#d60014;font-weight:600;">${esc(n.contratoCodigo || n.contratoId)}</a>`) : '')
+    + linha('Criado em', esc(_dataHoraBR(n.criadoEm)))
+    + linha('Enviado em', n.enviadoEm ? esc(_dataHoraBR(n.enviadoEm)) : '')
+    + (n.erro ? `<div style="margin-top:6px;padding:8px 10px;border-radius:7px;background:#ffebee;color:#c62828;font-size:0.85em;">${esc(n.erro)}${n.tentativas ? ` (${n.tentativas} tentativa(s))` : ''}</div>` : '');
+  document.getElementById('notificacaoPrevia').srcdoc = n.html || `<pre style="font-family:Arial;white-space:pre-wrap;padding:16px;">${esc(n.texto || '')}</pre>`;
+  document.getElementById('drawerNotificacao').classList.add('open');
+  document.getElementById('drawerOverlayNotificacao').classList.add('open');
+};
+
+window.fecharDrawerNotificacao = () => {
+  document.getElementById('drawerNotificacao').classList.remove('open');
+  document.getElementById('drawerOverlayNotificacao').classList.remove('open');
 };

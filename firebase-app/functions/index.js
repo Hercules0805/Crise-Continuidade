@@ -23,6 +23,9 @@ const fornecedorRisco = require('./fornecedorRisco');
 const vulnerabilidadeRisco = require('./vulnerabilidadeRisco');
 const vulnerabilidadeContexto = require('./vulnerabilidadeContexto');
 const retratoRisco = require('./retratoRisco');
+const contratoCiclo = require('./contratoCiclo');
+const notificacoes = require('./notificacoes');
+const { criarEnviador } = require('./transporteEmail');
 const {
   READ_ACTIONS: APP_READ,
   WRITE_ACTIONS: APP_WRITE,
@@ -35,6 +38,13 @@ const db = admin.firestore();
 // Chave do Gemini, usada por appLogic.gerarPCN. Valor definido fora do
 // codigo com `firebase functions:secrets:set GEMINI_API_KEY`.
 const GEMINI_API_KEY = defineSecret('GEMINI_API_KEY');
+
+// Conta SMTP do Google Workspace que envia os alertas por e-mail (16/10/2026).
+// `firebase functions:secrets:set SMTP_USUARIO` (o endereco) e `SMTP_SENHA`
+// (senha de app). Precisam existir antes do deploy; enquanto a conta nao
+// existir, grave "pendente" -- os modos desligado/simulacao nao usam.
+const SMTP_USUARIO = defineSecret('SMTP_USUARIO');
+const SMTP_SENHA = defineSecret('SMTP_SENHA');
 
 // Origens permitidas (hosting do projeto). '*' também é aceitável aqui porque
 // não há credenciais/cookies envolvidos e a autorização vem da posse do token.
@@ -159,13 +169,14 @@ async function autenticar(req) {
     baseUrl: BASE_URL,
     novoUuid: () => crypto.randomUUID(),
     geminiApiKey: GEMINI_API_KEY.value(),
+    smtp: { usuario: SMTP_USUARIO.value(), senha: SMTP_SENHA.value() },
   };
 }
 
 // timeoutSeconds: gerar DRP/PCN/Roteiro pela IA passa de 60 s (padrao) em
 // documento grande -- a plataforma cortava a conexao e o navegador so dizia
 // "Failed to fetch". A chamada a IA tem limite proprio de 4 min (appLogic.js).
-exports.appApi = onRequest({ region: 'us-central1', cors: false, secrets: [GEMINI_API_KEY], timeoutSeconds: 300 }, async (req, res) => {
+exports.appApi = onRequest({ region: 'us-central1', cors: false, secrets: [GEMINI_API_KEY, SMTP_USUARIO, SMTP_SENHA], timeoutSeconds: 300 }, async (req, res) => {
   aplicarCors(req, res);
   // Este endpoint le o cabecalho Authorization, entao precisa declara-lo.
   res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -454,6 +465,246 @@ exports.varreduraDiariaVulnerabilidades = onSchedule(
       }
     }
     logger.info('varreduraDiariaVulnerabilidades: concluida', contagem);
+  }
+);
+
+// ============================================================
+// Alertas de contrato por e-mail (16/10/2026) -- ver notificacoes.js.
+// Fila de saida: `notificacoes_email`, um documento por e-mail. Quem decide
+// (varredura diaria, resumo mensal) so grava na fila; quem envia e o gatilho
+// envioDeNotificacaoEmail, que grava o resultado no proprio documento.
+// ============================================================
+
+/** Configuracao + o que e preciso para resolver destinatarios (lido uma vez por execucao). */
+async function _contextoNotificacao() {
+  const cfgSnap = await db.collection('config_notificacoes').doc('contratos').get();
+  const config = notificacoes.normalizarConfig(cfgSnap.exists ? cfgSnap.data() : null);
+  if (config.modo === notificacoes.MODO.DESLIGADO) return { config };
+  const [pessoasSnap, areasSnap, perfisSnap, tiposSnap, indexSnap] = await Promise.all([
+    db.collection('dependencias').where('categoria', '==', 'Pessoas').get(),
+    db.collection('areas').get(),
+    db.collection('config_perfis').get(),
+    db.collection('tipos_contrato').get(),
+    db.collection('indexadores_reajuste').get(),
+  ]);
+  const nomes = (snap) => Object.fromEntries(snap.docs.map((d) => [d.id, (d.data() || {}).nome || '']));
+  return {
+    config,
+    pessoas: pessoasSnap.docs.map((d) => ({ id: d.id, email: (d.data() || {}).email || '' })),
+    areas: areasSnap.docs.map((d) => ({ nome: (d.data() || {}).nome || '', email: (d.data() || {}).email || '' })),
+    operadores: notificacoes.emailsDeOperadores(perfisSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }))),
+    nomesTipo: nomes(tiposSnap),
+    nomesIndexador: nomes(indexSnap),
+  };
+}
+
+/** Grava na fila com create(): o mesmo evento para o mesmo destinatario nunca entra duas vezes. */
+async function _enfileirarEmail(registro) {
+  const id = notificacoes.idNaFila(registro.chave, registro.para || '');
+  try {
+    await db.collection(notificacoes.COLECAO_FILA).doc(id).create(Object.assign({}, registro, {
+      status: notificacoes.STATUS.PENDENTE,
+      tentativas: 0,
+      criadoEm: new Date().toISOString(),
+    }));
+    return true;
+  } catch (err) {
+    if (err && (err.code === 6 || /already exists/i.test(String(err.message)))) return false;
+    throw err;
+  }
+}
+
+/** Enfileira os e-mails urgentes de um contrato (um por evento por destinatario). */
+async function _enfileirarUrgentes(contrato, eventos, ctxN) {
+  let n = 0;
+  const destinatarios = notificacoes.resolverDestinatarios(contrato, ctxN);
+  const nomes = { tipo: ctxN.nomesTipo[contrato.tipoId] || '' };
+  for (const ev of eventos) {
+    const base = { tipo: 'urgente', evento: ev.evento, grupo: ev.grupo, chave: ev.chave, contratoId: contrato.id, contratoCodigo: contrato.codigo || '' };
+    if (!destinatarios.length) {
+      // Fica registrado (status sem_destinatario no gatilho): alguem precisa cadastrar o gestor ou o e-mail da area.
+      const m = notificacoes.montarEmailUrgente(contrato, ev, { baseUrl: BASE_URL, nomes });
+      if (await _enfileirarEmail(Object.assign({}, base, { para: '', motivos: [], assunto: m.assunto, html: m.html, texto: m.texto }))) n++;
+      continue;
+    }
+    for (const dest of destinatarios) {
+      const m = notificacoes.montarEmailUrgente(contrato, ev, { baseUrl: BASE_URL, motivos: dest.motivos, nomes });
+      if (await _enfileirarEmail(Object.assign({}, base, { para: dest.email, motivos: dest.motivos, assunto: m.assunto, html: m.html, texto: m.texto }))) n++;
+    }
+  }
+  return n;
+}
+
+// Varredura diaria dos contratos (05:00, 15/10/2026). Tres coisas que mudam so
+// com o passar do tempo, sem ninguem editar o contrato:
+//   1. Renovacao automatica: contrato vigente, com renovacao automatica, cujo
+//      fim ja passou ganha o proximo periodo (mesma vigencia) e um evento
+//      "Renovação automática" na linha do tempo.
+//   2. Alertas (vence em, janela de aviso, reajuste...): recalculados e
+//      gravados no contrato, so quando mudaram. A tela calcula os mesmos
+//      alertas ao vivo (contrato-ciclo.js).
+//   3. E-mails urgentes (16/10/2026): prazos e renovacao executada vao para a
+//      fila notificacoes_email -- inclusive em dia em que o contrato nao mudou
+//      (a janela de 7 dias, por exemplo, chega sem nada mudar no documento).
+//      No fim, falhas de envio com menos de 3 tentativas voltam para a fila.
+exports.varreduraDiariaContratos = onSchedule(
+  { region: 'us-central1', schedule: '0 5 * * *', timeZone: 'America/Sao_Paulo' },
+  async () => {
+    const hoje = contratoCiclo.hojeIso();
+    const [contratosSnap, statusSnap, ctxN] = await Promise.all([
+      db.collection('contratos').get(),
+      db.collection('status_contrato').get(),
+      _contextoNotificacao().catch((err) => {
+        logger.error('varreduraDiariaContratos: configuracao de e-mail nao carregou; segue sem e-mail', { erro: err.message });
+        return { config: notificacoes.normalizarConfig({ modo: notificacoes.MODO.DESLIGADO }) };
+      }),
+    ]);
+    const emailLigado = ctxN.config.modo !== notificacoes.MODO.DESLIGADO;
+    const listaStatus = statusSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const contagem = { renovados: 0, alertasAtualizados: 0, nada: 0, emails: 0, reenvios: 0, erro: 0 };
+    for (const d of contratosSnap.docs) {
+      try {
+        const c = d.data() || {};
+        const situacao = contratoCiclo.situacaoDoStatus(c.statusId, listaStatus);
+        const patch = {};
+        const lote = db.batch();
+        const renovacao = contratoCiclo.renovacaoAutomaticaDevida(c, { hoje, situacao });
+        if (renovacao) {
+          patch.dataUltimaRenovacao = renovacao.dataUltimaRenovacao;
+          patch.dataFim = renovacao.dataFim;
+          lote.set(db.collection('eventos_contrato').doc(), {
+            contratoId: d.id,
+            area: c.area || '',
+            data: renovacao.dataUltimaRenovacao,
+            tipo: 'Renovação automática',
+            descricao: `Renovado automaticamente até ${renovacao.dataFim}` +
+              (renovacao.ciclos > 1 ? ` (${renovacao.ciclos} períodos aplicados de uma vez).` : '.'),
+            dataFimNova: renovacao.dataFim,
+            automatico: true,
+            registradoPor: 'automacao:contratos',
+            registradoEm: new Date().toISOString(),
+          });
+          contagem.renovados++;
+        }
+        const atual = Object.assign({ id: d.id }, c, patch);
+        const alertas = contratoCiclo.calcularAlertas(atual, { hoje, situacao });
+        if (!contratoCiclo.alertasIguais(alertas, c.alertas)) {
+          patch.alertas = alertas;
+          contagem.alertasAtualizados++;
+        }
+        if (Object.keys(patch).length) {
+          patch.alertasAtualizadosEm = new Date().toISOString();
+          patch.atualizadoPor = 'automacao:contratos';
+          lote.set(d.ref, patch, { merge: true });
+          await lote.commit();
+        } else {
+          contagem.nada++;
+        }
+        // Depois do commit: e-mail de renovacao so sai se a renovacao foi gravada.
+        if (emailLigado) {
+          const eventos = notificacoes.decidirUrgentes(atual, { hoje, situacao, renovacao })
+            .filter((ev) => ctxN.config.grupos[ev.grupo]);
+          if (eventos.length) contagem.emails += await _enfileirarUrgentes(atual, eventos, ctxN);
+        }
+      } catch (err) {
+        contagem.erro++;
+        logger.error('varreduraDiariaContratos: falha', { contratoId: d.id, erro: err.message });
+      }
+    }
+    if (emailLigado) {
+      try {
+        const erros = await db.collection(notificacoes.COLECAO_FILA).where('status', '==', notificacoes.STATUS.ERRO).get();
+        for (const e of erros.docs) {
+          if (!notificacoes.podeReenviar(e.data())) continue;
+          await e.ref.set({ status: notificacoes.STATUS.PENDENTE }, { merge: true });
+          contagem.reenvios++;
+        }
+      } catch (err) {
+        logger.error('varreduraDiariaContratos: falha ao reenfileirar e-mails com erro', { erro: err.message });
+      }
+    }
+    logger.info('varreduraDiariaContratos: concluida', contagem);
+  }
+);
+
+// Resumo mensal dos contratos (dia 1, 07:00). Por destinatario, so com os
+// contratos dele (gestor, area) -- o operador recebe o geral. Contrato sem
+// nada a informar fica de fora; destinatario sem nada nao recebe e-mail.
+exports.resumoMensalContratos = onSchedule(
+  { region: 'us-central1', schedule: '0 7 1 * *', timeZone: 'America/Sao_Paulo' },
+  async () => {
+    const ctxN = await _contextoNotificacao();
+    if (ctxN.config.modo === notificacoes.MODO.DESLIGADO || !ctxN.config.grupos.resumoMensal) {
+      logger.info('resumoMensalContratos: desligado na configuracao');
+      return;
+    }
+    const hoje = contratoCiclo.hojeIso();
+    const anoMes = hoje.slice(0, 7);
+    const anterior = notificacoes.mesAnterior(hoje);
+    const [contratosSnap, statusSnap, renovSnap] = await Promise.all([
+      db.collection('contratos').get(),
+      db.collection('status_contrato').get(),
+      db.collection('eventos_contrato').where('tipo', '==', 'Renovação automática').get(),
+    ]);
+    const listaStatus = statusSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const renovacoes = {};
+    renovSnap.docs.forEach((e) => {
+      const ev = e.data() || {};
+      if (ev.data >= anterior.inicio && ev.data <= anterior.fim) (renovacoes[ev.contratoId] = renovacoes[ev.contratoId] || []).push(ev.data);
+    });
+    const porDestinatario = new Map();
+    contratosSnap.docs.forEach((d) => {
+      const c = Object.assign({ id: d.id }, d.data() || {});
+      const situacao = contratoCiclo.situacaoDoStatus(c.statusId, listaStatus);
+      const itens = notificacoes.itensDoResumo(c, {
+        hoje, situacao, config: ctxN.config,
+        nomes: { indexador: ctxN.nomesIndexador[c.indexadorId] || '' },
+        renovacoesMesAnterior: renovacoes[d.id] || [],
+      });
+      if (!itens.length) return;
+      notificacoes.resolverDestinatarios(c, ctxN).forEach((dest) => {
+        if (!porDestinatario.has(dest.email)) porDestinatario.set(dest.email, { motivos: new Set(), entradas: [] });
+        const x = porDestinatario.get(dest.email);
+        dest.motivos.forEach((m) => x.motivos.add(m));
+        x.entradas.push({ contrato: c, itens });
+      });
+    });
+    let n = 0;
+    for (const [email, x] of porDestinatario) {
+      const motivos = [...x.motivos];
+      const m = notificacoes.montarResumoMensal(x.entradas, { mesAno: notificacoes.mesPorExtenso(anoMes), baseUrl: BASE_URL, motivos });
+      if (await _enfileirarEmail({
+        tipo: 'resumo', evento: 'resumoMensal', grupo: notificacoes.GRUPO.RESUMO, chave: `resumo:${anoMes}`,
+        contratoId: '', contratoCodigo: `${x.entradas.length} contrato(s)`, para: email, motivos,
+        assunto: m.assunto, html: m.html, texto: m.texto,
+      })) n++;
+    }
+    logger.info('resumoMensalContratos: concluido', { destinatarios: porDestinatario.size, enfileirados: n });
+  }
+);
+
+// Envio: todo documento da fila em status "pendente" (novo, ou reenfileirado
+// pela varredura) passa pelo transporte. Simulacao grava "simulado" sem
+// enviar. O resultado vai no proprio documento -- o gatilho dispara de novo
+// com o status ja resolvido e para ai (sem laco).
+exports.envioDeNotificacaoEmail = onDocumentWritten(
+  { region: 'us-central1', document: 'notificacoes_email/{id}', secrets: [SMTP_USUARIO, SMTP_SENHA] },
+  async (event) => {
+    const depois = event.data && event.data.after && event.data.after.exists ? event.data.after.data() : null;
+    if (!depois || depois.status !== notificacoes.STATUS.PENDENTE) return;
+    try {
+      const cfgSnap = await db.collection('config_notificacoes').doc('contratos').get();
+      const config = cfgSnap.exists ? cfgSnap.data() : null;
+      const servidor = notificacoes.normalizarConfig(config).servidor;
+      const enviar = criarEnviador({ usuario: SMTP_USUARIO.value(), senha: SMTP_SENHA.value(), servidor });
+      const patch = await notificacoes.processarEnvio(depois, config, enviar);
+      if (patch) await event.data.after.ref.set(patch, { merge: true });
+      if (patch && patch.status === notificacoes.STATUS.ERRO) {
+        logger.warn('envioDeNotificacaoEmail: falha no envio', { id: event.params.id, erro: patch.erro, tentativas: patch.tentativas });
+      }
+    } catch (err) {
+      logger.error('envioDeNotificacaoEmail: erro inesperado', { id: event.params.id, erro: err.message });
+    }
   }
 );
 

@@ -64,7 +64,8 @@
   // proprias do Admin (perfis, perguntas, config de respostas/regua). TI opera
   // o DRP (ve DRP e o Catalogo de Dependencias, que e onde os parametros DRP
   // sao editados). GESTOR mantem o de sempre.
-  var TELAS_ADMIN_EXCLUSIVAS = ['perfis', 'perguntas'];
+  // 'notificacoes-email' (16/10/2026): configuracao e log dos alertas por e-mail.
+  var TELAS_ADMIN_EXCLUSIVAS = ['perfis', 'perguntas', 'notificacoes-email'];
   var TELAS = {};
   TELAS[PERFIL.ADMIN] = '*';
   TELAS[PERFIL.SEGURANCA] = [
@@ -72,6 +73,7 @@
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
     'dependencias', 'areas', 'pessoas', 'relatorios', 'servicos', 'catalogo-backup', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
+    'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
     'admin',
   ];
   // DECISAO 02/10/2026: Servicos sai da posse de TI -- quem gerencia agora e so
@@ -90,10 +92,14 @@
   TELAS[PERFIL.OPERADOR] = [
     'processos', 'pessoas', 'areas', 'relatorios',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
+    'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
   ];
+  // DECISAO 15/10/2026: Contratos tem a mesma posse de Fornecedores (Admin, SI,
+  // Operador). O Gestor so CONSULTA os contratos da propria area.
   TELAS[PERFIL.GESTOR] = [
     'processos', 'pcns', 'drp', 'riscos',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
+    'contratos',
     'admin',
   ];
 
@@ -293,6 +299,14 @@
   }
 
   /**
+   * Contratos (cadastrar, editar, eventos, listas de tipo/indexador/status):
+   * mesma posse de Fornecedores. Gestor ve os da propria area, sem editar.
+   */
+  function podeEditarContratos(valor) {
+    return podeGerenciarFornecedores(valor);
+  }
+
+  /**
    * Mostrar os controles de edicao de Processos (novo, editar, excluir, enviar
    * questionario): Admin, Seguranca ou Gestor (por area). Operador so consulta.
    */
@@ -365,6 +379,7 @@
     podeMexerNaArea: podeMexerNaArea,
     podeGerenciarProdutosSoftware: podeGerenciarProdutosSoftware,
     podeGerenciarFornecedores: podeGerenciarFornecedores,
+    podeEditarContratos: podeEditarContratos,
     podeEditarProcessos: podeEditarProcessos,
     podeEditarPessoas: podeEditarPessoas,
     podeGerenciarPerfis: podeGerenciarPerfis,

@@ -253,6 +253,7 @@ const TODAS_AS_TELAS = [
   'dependencias', 'componentes', 'perguntas', 'relatorios', 'servicos', 'catalogo-backup',
   'admin', 'perfis', 'produtos-software',
   'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
+  'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status', 'notificacoes-email',
 ];
 
 test('admin ve todas as telas', () => {
@@ -264,10 +265,11 @@ test('admin ve todas as telas', () => {
 test('SI ve quase tudo, menos as tres telas proprias do Admin', () => {
   ['processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades', 'areas', 'pessoas', 'dependencias', 'relatorios', 'servicos', 'catalogo-backup', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
+    'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
     'indicadores-dashboard', 'admin'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.SEGURANCA, t), true, `SI deveria ver ${t}`);
   });
-  ['perfis', 'perguntas', 'componentes'].forEach((t) => {
+  ['perfis', 'perguntas', 'componentes', 'notificacoes-email'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.SEGURANCA, t), false, `SI nao deveria ver ${t}`);
   });
 });
@@ -354,11 +356,11 @@ test('categoriaDeFornecedor aceita as duas grafias em uso e recusa o resto', () 
 // ============================================================
 
 const TELAS_DO_OPERADOR = [
-  'areas', 'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
+  'areas', 'contratos', 'contratos-indexadores', 'contratos-status', 'contratos-tipos', 'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
   'fornecedores-criticidade', 'fornecedores-subcategorias', 'pessoas', 'processos', 'relatorios',
 ];
 
-test('operador ve exatamente as 9 telas combinadas, e nenhuma outra', () => {
+test('operador ve exatamente as 13 telas combinadas, e nenhuma outra', () => {
   const vistas = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela(Perfis.PERFIL.OPERADOR, t));
   assert.deepStrictEqual(vistas.sort(), TELAS_DO_OPERADOR);
 });
@@ -386,6 +388,23 @@ test('operador gerencia fornecedores e nada alem disso', () => {
     Perfis.podeEditarRegua, Perfis.podeEditarProcessos, Perfis.podeEditarPessoas].forEach((fn) => {
     assert.strictEqual(fn(o), false, `${fn.name} deveria ser false para o operador`);
   });
+});
+
+// ============================================================
+// CONTRATOS (15/10/2026): mesma posse de Fornecedores; Gestor so consulta.
+// ============================================================
+
+test('contratos: Admin, SI e Operador editam; Gestor e TI nao', () => {
+  ['admin', 'seguranca', 'operador'].forEach((p) => assert.strictEqual(Perfis.podeEditarContratos(p), true, p));
+  ['gestor', 'ti'].forEach((p) => assert.strictEqual(Perfis.podeEditarContratos(p), false, p));
+});
+
+test('gestor ve a tela de contratos, mas nao as listas de configuracao', () => {
+  assert.strictEqual(Perfis.podeVerTela('gestor', 'contratos'), true);
+  ['contratos-tipos', 'contratos-indexadores', 'contratos-status'].forEach((t) => {
+    assert.strictEqual(Perfis.podeVerTela('gestor', t), false, t);
+  });
+  assert.strictEqual(Perfis.podeVerTela('ti', 'contratos'), false);
 });
 
 test('quem ja editava processos e pessoas continua editando', () => {

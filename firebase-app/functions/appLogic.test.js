@@ -2,6 +2,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert');
 const { READ_ACTIONS, WRITE_ACTIONS, AppError, processoKey } = require('./appLogic');
+const drpSecoes = require('./drpSecoes');
 
 function makeDb(seed) {
   const store = JSON.parse(JSON.stringify(seed || {}));
@@ -552,7 +553,10 @@ test('gerarDRP preserva a secao bloqueada da ultima versao e devolve o cadeado',
   };
   try {
     const r = await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
-    assert.strictEqual(r.drp, '<h2>2. Estratégia</h2><p>RTO 2h</p><h2>6. Runbook</h2><p>passo humano</p>');
+    // A secao de SLAs (montada pelo sistema, 15/10/2026) entra depois; o cadeado nao muda.
+    const [antesDosSlas, secaoSlas] = r.drp.split('<h2>SLAs Contratados com Fornecedores</h2>');
+    assert.strictEqual(antesDosSlas, '<h2>2. Estratégia</h2><p>RTO 2h</p><h2>6. Runbook</h2><p>passo humano</p>');
+    assert.match(secaoSlas, /Nenhum contrato vigente/);
     assert.deepStrictEqual(r.bloqueadas, ['6']);
     // Contexto: a secao travada vai no prompt, e a nao travada nao.
     assert.ok(promptEnviado.includes('SEÇÕES JÁ REVISADAS POR UMA PESSOA'));
@@ -570,7 +574,10 @@ test('gerarDRP troca o "(seção mantida)" devolvido pela IA pela secao revisada
   global.fetch = async () => ({ ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<h2>2. Estratégia</h2><p>RTO 2h</p><h2>6. Runbook</h2><p>(seção mantida)</p>' }] } }] }) });
   try {
     const r = await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
-    assert.strictEqual(r.drp, '<h2>2. Estratégia</h2><p>RTO 2h</p><h2>6. Runbook</h2><p>passo humano</p>');
+    // A secao de SLAs (montada pelo sistema, 15/10/2026) entra depois; o cadeado nao muda.
+    const [antesDosSlas, secaoSlas] = r.drp.split('<h2>SLAs Contratados com Fornecedores</h2>');
+    assert.strictEqual(antesDosSlas, '<h2>2. Estratégia</h2><p>RTO 2h</p><h2>6. Runbook</h2><p>passo humano</p>');
+    assert.match(secaoSlas, /Nenhum contrato vigente/);
   } finally { global.fetch = original; }
 });
 
@@ -874,4 +881,141 @@ test('exportarRiscoDocumento aceita o payload do DRP (sem area/processo, com des
   assert.match(riscoDoc.descricao, /Internet - Fortes/);
   assert.strictEqual(riscoDoc.area, '');
   assert.strictEqual(riscoDoc.processo, '');
+});
+
+// ============================================================
+// SLAs CONTRATADOS NO DRP (15/10/2026)
+// ============================================================
+
+function seedSla() {
+  const s = seedAdmin(seed());
+  s.dependencias = {
+    d1: { nome: 'Qualys Cloud', categoria: 'Sistemas', rto: '4 horas', rpo: '1 hora',
+      drpDependencias: [{ id: 'f2', nome: 'Operadora Y', categoria: 'Fornecedores' }] },
+    f1: { nome: 'ICTS', categoria: 'Fornecedores' },
+    f2: { nome: 'Operadora Y', categoria: 'Fornecedores' },
+  };
+  s.processos = { ti__scan: { area: 'TI', processo: 'Varredura', rto: '< 4 horas', rpo: '< 1 hora', dependenciaItens: [{ id: 'd1', nome: 'Qualys Cloud' }] } };
+  s.status_contrato = { vig: { nome: 'Vigente', situacao: 'vigente' }, enc: { nome: 'Encerrado', situacao: 'encerrado' } };
+  s.contratos = {
+    c1: { codigo: 'CT-0001', objeto: 'Qualys VMDR', fornecedorId: 'f1', fornecedorNome: 'ICTS', statusId: 'vig', dataFim: '2027-05-14',
+      dependenciasCobertasIds: ['d1'], valorMensal: 42156.76, valorGlobal: 505881.12,
+      sla: { cobertura: '24x7', disponibilidadePct: 99.9, disponibilidadePeriodo: 'mensal', rtoMin: 480, rpoMin: 60,
+        atendimento: [{ severidade: 'Crítica', respostaMin: 30 }], janelaManutencao: 'Domingo 02h-06h', penalidade: '10% de crédito por hora' } },
+    c2: { codigo: 'CT-0002', objeto: 'Link dedicado', fornecedorId: 'f2', fornecedorNome: 'Operadora Y', statusId: 'vig', dataFim: '2027-01-31',
+      valorMensal: 9999, sla: { rtoMin: 120 } },
+    c3: { codigo: 'CT-0003', objeto: 'Contrato antigo', fornecedorId: 'f1', fornecedorNome: 'ICTS', statusId: 'enc',
+      dependenciasCobertasIds: ['d1'], sla: { rtoMin: 60 } },
+    c4: { codigo: 'CT-0004', objeto: 'Outro sistema', fornecedorId: 'f1', fornecedorNome: 'ICTS', statusId: 'vig',
+      dependenciasCobertasIds: ['outra'], sla: { rtoMin: 60 } },
+  };
+  return s;
+}
+
+async function gerarDrpCapturando(s, respostaIa) {
+  const db = makeDb(s);
+  const original = global.fetch;
+  let promptEnviado = '';
+  global.fetch = async (_url, opts) => {
+    promptEnviado = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: respostaIa }] } }] }) };
+  };
+  try {
+    const r = await WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'chave-teste' }));
+    return { r, promptEnviado };
+  } finally { global.fetch = original; }
+}
+
+test('gerarDRP manda ao prompt os SLAs do contrato que cobre a dependencia e do fornecedor vinculado', async () => {
+  const { promptEnviado } = await gerarDrpCapturando(seedSla(), '<h2>1. Objetivo</h2><p>x</p>');
+  assert.ok(promptEnviado.includes('### SLAs contratados com fornecedores'));
+  assert.ok(promptEnviado.includes('CT-0001 — Qualys VMDR | Fornecedor: ICTS | Vigente até 14/05/2027'));
+  assert.ok(promptEnviado.includes('RTO garantido: 8 h'));
+  assert.ok(promptEnviado.includes('Disponibilidade: 99,9% por mês (até 43 min de parada por mês)'));
+  assert.ok(promptEnviado.includes('Crítica: primeira resposta em 30 min'));
+  assert.ok(promptEnviado.includes('CT-0002 — Link dedicado'), 'fornecedor em drpDependencias tambem entra');
+  assert.ok(!promptEnviado.includes('CT-0003'), 'contrato encerrado nao entra');
+  assert.ok(!promptEnviado.includes('CT-0004'), 'contrato que cobre outra dependencia nao entra');
+});
+
+test('gerarDRP nunca leva o valor do contrato (TI opera DRP e nao le contratos)', async () => {
+  const { r, promptEnviado } = await gerarDrpCapturando(seedSla(), '<h2>1. Objetivo</h2><p>x</p>');
+  ['42156', '42.156', '505881', '505.881', '9999', 'valorMensal', 'valorGlobal'].forEach((t) => {
+    assert.ok(!promptEnviado.includes(t), `prompt nao pode conter ${t}`);
+    assert.ok(!r.drp.includes(t), `DRP nao pode conter ${t}`);
+  });
+});
+
+test('gerarDRP insere a secao de SLAs depois de Dependencias, com as incompatibilidades SLA x RTO', async () => {
+  const ia = '<h1>DRP</h1><h2>8. Limitações</h2><p>a</p><h2>9. Dependências</h2><p>b</p><h2>10. Testes</h2><p>c</p>';
+  const { r, promptEnviado } = await gerarDrpCapturando(seedSla(), ia);
+  const ordem = drpSecoes.dividirSecoes(r.drp).secoes.map((x) => x.chave);
+  assert.deepStrictEqual(ordem, ['8', '9', 'slas contratados com fornecedores', '10']);
+  assert.match(r.drp, /RTO garantido 8 h &gt; exigido 4 h \(Processo Varredura \(TI\)\)/);
+  assert.match(r.drp, /RTO garantido 8 h &gt; exigido 4 h \(Dependência Qualys Cloud\)/);
+  assert.match(r.drp, /10% de crédito por hora/);
+  assert.ok(promptEnviado.includes('Incompatibilidades SLA × RTO: RTO garantido 8 h > exigido 4 h'));
+  assert.ok(promptEnviado.includes('NÃO crie uma seção chamada "SLAs Contratados com Fornecedores"'));
+});
+
+test('gerarDRP regrava a secao de SLAs mesmo travada, e tira o cadeado dela', async () => {
+  const s = seedSla();
+  s.drp_conteudo = { d1: { versoes: [{ versao: 1,
+    html: '<h2>9. Dependências</h2><p>b</p><h2>SLAs Contratados com Fornecedores</h2><p>dado velho</p>',
+    bloqueadas: ['slas contratados com fornecedores'] }] } };
+  const { r } = await gerarDrpCapturando(s, '<h2>9. Dependências</h2><p>b</p>');
+  assert.ok(!r.drp.includes('dado velho'));
+  assert.ok(r.drp.includes('CT-0001'));
+  assert.deepStrictEqual(r.bloqueadas, []);
+});
+
+test('obterSlasDependencia devolve os mesmos SLAs, sem valores, e recusa quem nao opera DRP', async () => {
+  const db = makeDb(seedSla());
+  const r = await READ_ACTIONS.obterSlasDependencia(db, { id: 'd1' }, ctx());
+  assert.deepStrictEqual(r.contratos.map((c) => c.codigo), ['CT-0001', 'CT-0002']);
+  assert.strictEqual(r.contratos[0].viaCobertura, true);
+  assert.strictEqual(r.contratos[1].viaCobertura, false);
+  assert.ok(!JSON.stringify(r).includes('valor'));
+  assert.ok(r.contratos[0].incompatibilidades.some((i) => i.codigo === 'sla_rto_incompativel'));
+
+  const s = seedSla();
+  s.config_perfis = { 'analista@fortestecnologia.com.br': { perfis: ['gestor'] } };
+  await assert.rejects(() => READ_ACTIONS.obterSlasDependencia(makeDb(s), { id: 'd1' }, ctx()), AppError);
+});
+
+// ============================================================
+// E-MAIL DE TESTE (16/10/2026)
+// ============================================================
+
+test('enviarEmailTeste: so o Admin, vai para o proprio usuario, com o nome de remetente configurado', async () => {
+  const s = seedAdmin(seed());
+  s.config_notificacoes = { contratos: { modo: 'simulacao', remetenteNome: 'Contratos GRC360',
+    servidor: { provedor: 'sendgrid', remetenteEmail: 'alertas@fortestecnologia.com.br' } } };
+  const enviados = [];
+  let opcoesTransporte = null;
+  const c = ctx({ smtp: { usuario: 'apikey', senha: 'SG.x' }, criarEnviador: (o) => { opcoesTransporte = o; return async (m) => { enviados.push(m); }; } });
+  const r = await WRITE_ACTIONS.enviarEmailTeste(makeDb(s), {}, c);
+  assert.strictEqual(r.para, 'analista@fortestecnologia.com.br');
+  assert.strictEqual(enviados.length, 1);
+  assert.strictEqual(enviados[0].para, 'analista@fortestecnologia.com.br');
+  assert.strictEqual(enviados[0].de, 'Contratos GRC360');
+  assert.match(enviados[0].texto, /Modo atual: simulacao/);
+  assert.match(enviados[0].html, /#contratos"/);
+  // O transporte recebe o segredo E o servidor da configuracao (SendGrid + remetente verificado).
+  assert.deepStrictEqual(opcoesTransporte, { usuario: 'apikey', senha: 'SG.x',
+    servidor: { provedor: 'sendgrid', host: '', porta: null, remetenteEmail: 'alertas@fortestecnologia.com.br' } });
+
+  const op = seed();
+  op.config_perfis = { 'analista@fortestecnologia.com.br': { perfis: ['operador'] } };
+  await assert.rejects(() => WRITE_ACTIONS.enviarEmailTeste(makeDb(op), {}, c), /Só o Administrador/);
+});
+
+test('enviarEmailTeste: falha do SMTP vira mensagem para a tela', async () => {
+  const c = ctx({ criarEnviador: () => async () => { throw new Error('535 Username and Password not accepted'); } });
+  await assert.rejects(() => WRITE_ACTIONS.enviarEmailTeste(makeDb(seedAdmin(seed())), {}, c), /Falha no envio: 535/);
+});
+
+test('enviarEmailTeste: sem segredo configurado o transporte real avisa o que falta', async () => {
+  await assert.rejects(() => WRITE_ACTIONS.enviarEmailTeste(makeDb(seedAdmin(seed())), {}, ctx({ smtp: { usuario: 'pendente', senha: 'pendente' } })),
+    /SMTP não configurado/);
 });

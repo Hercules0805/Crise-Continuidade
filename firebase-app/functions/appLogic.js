@@ -19,6 +19,9 @@ const { calcularTier, calcularRTO } = require('./tokenLogic');
 const vulnerabilidadeRisco = require('./vulnerabilidadeRisco');
 const vulnerabilidadeContexto = require('./vulnerabilidadeContexto');
 const drpSecoes = require('./drpSecoes');
+const contratoCiclo = require('./contratoCiclo');
+const notificacoes = require('./notificacoes');
+const transporteEmail = require('./transporteEmail');
 
 const COLLECTION = {
   processos: 'processos',
@@ -30,6 +33,8 @@ const COLLECTION = {
   roteiroConteudo: 'roteiro_conteudo',
   riscos: 'riscos',
   vulnerabilidades: 'vulnerabilidades',
+  contratos: 'contratos',
+  statusContrato: 'status_contrato',
 };
 
 /**
@@ -504,6 +509,193 @@ const TEMPLATE_DRP_PADRAO = `# PLANO DE RECUPERAÇÃO DE DESASTRES (DRP): [Nome 
  * UMA dependencia. Espelha gerarPCN (mesmo boilerplate/contrato de saida HTML),
  * so muda a entidade de origem e o prompt.
  */
+// ============================================================
+// SLAs CONTRATADOS (15/10/2026)
+// ------------------------------------------------------------
+// O DRP de uma dependencia passa a trazer os SLAs dos contratos VIGENTES que
+// a cobrem -- o contrato declara as "Dependencias cobertas"
+// (dependenciasCobertasIds) -- ou que sao do proprio fornecedor (a dependencia
+// e um Fornecedor, ou um fornecedor esta em drpDependencias).
+//
+// CONFIDENCIAL: quem opera DRP (inclui TI) nao le `contratos` pelas regras,
+// porque contrato tem valor. Daqui so sai o que e SLA -- codigo, objeto,
+// fornecedor, fim e o objeto `sla`. Nunca valorMensal/valorGlobal.
+// ============================================================
+const CATEGORIAS_FORNECEDOR_DRP = ['Fornecedores', 'Fornecedor'];
+const CHAVE_SECAO_SLA = 'slas contratados com fornecedores';
+const ROTULO_PERIODO_SLA = { mensal: 'mês', trimestral: 'trimestre', anual: 'ano' };
+
+function _escHtml(v) {
+  return String(v === null || v === undefined ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function _dataBRServidor(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : 'não informado';
+}
+
+/**
+ * Contratos vigentes ligados a esta dependencia, so com os campos de SLA, e a
+ * comparacao do que o fornecedor garante com o RTO/RPO exigido (da propria
+ * dependencia e dos processos do BIA que dependem dela).
+ */
+async function _slasDaDependencia(db, depId, dep, catalogo, processosLigados) {
+  const [contSnap, statusSnap] = await Promise.all([
+    db.collection(COLLECTION.contratos).get(),
+    db.collection(COLLECTION.statusContrato).get(),
+  ]);
+  const listaStatus = statusSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const acharDep = (item) => {
+    if (item && item.id) { const byId = (catalogo || []).find((d) => String(d.id) === String(item.id)); if (byId) return byId; }
+    return (catalogo || []).find((d) => (d.nome || '') === (item && item.nome));
+  };
+  const fornecedoresIds = new Set();
+  if (CATEGORIAS_FORNECEDOR_DRP.includes(dep.categoria)) fornecedoresIds.add(String(depId));
+  (Array.isArray(dep.drpDependencias) ? dep.drpDependencias : []).forEach((item) => {
+    const d = acharDep(item);
+    if (d && CATEGORIAS_FORNECEDOR_DRP.includes(d.categoria)) fornecedoresIds.add(String(d.id));
+  });
+
+  const alvos = [{ origem: `Dependência ${dep.nome || ''}`.trim(), tipo: 'dependencia', rto: dep.rto, rpo: dep.rpo }]
+    .concat((processosLigados || []).map((p) => ({
+      origem: `Processo ${p.processo || ''}${p.area ? ' (' + p.area + ')' : ''}`.trim(), tipo: 'processo', rto: p.rto, rpo: p.rpo,
+    })));
+
+  const contratos = contSnap.docs
+    .map((d) => ({ id: d.id, ...(d.data() || {}) }))
+    .filter((c) => contratoCiclo.situacaoDoStatus(c.statusId, listaStatus) === contratoCiclo.SITUACAO.VIGENTE)
+    .map((c) => {
+      const cobre = (Array.isArray(c.dependenciasCobertasIds) ? c.dependenciasCobertasIds : []).map(String).includes(String(depId));
+      const viaFornecedor = fornecedoresIds.has(String(c.fornecedorId || ''));
+      return { c, cobre, viaFornecedor };
+    })
+    .filter((x) => x.cobre || x.viaFornecedor)
+    .sort((a, b) => String(a.c.codigo || '').localeCompare(String(b.c.codigo || '')))
+    .map(({ c, cobre }) => {
+      const sla = contratoCiclo.normalizarSla(c.sla);
+      const temSla = contratoCiclo.temSla(sla);
+      return {
+        codigo: c.codigo || '',
+        objeto: c.objeto || '',
+        fornecedorNome: c.fornecedorNome || '',
+        dataFim: c.dataFim || '',
+        viaCobertura: cobre,
+        temSla,
+        sla,
+        incompatibilidades: temSla ? contratoCiclo.compararSlaComRto(sla, alvos) : [],
+      };
+    });
+  return { contratos };
+}
+
+function _resumoAtendimentoSla(sla) {
+  const fmt = contratoCiclo.formatarDuracao;
+  return sla.atendimento
+    .filter((a) => a.respostaMin !== null)
+    .map((a) => `${a.severidade}: primeira resposta em ${fmt(a.respostaMin)}`)
+    .join('; ');
+}
+
+function _disponibilidadeSla(sla) {
+  if (sla.disponibilidadePct === null) return '';
+  const parada = contratoCiclo.indisponibilidadePermitida(sla.disponibilidadePct, sla.disponibilidadePeriodo);
+  const periodo = ROTULO_PERIODO_SLA[sla.disponibilidadePeriodo] || 'mês';
+  return `${String(sla.disponibilidadePct).replace('.', ',')}% por ${periodo}`
+    + (parada !== null ? ` (até ${contratoCiclo.formatarDuracao(parada) || '0 min'} de parada por ${periodo})` : '');
+}
+
+function _coberturaSla(sla) {
+  return sla.cobertura === 'Outro' ? (sla.coberturaDetalhe || 'Outro') : (sla.cobertura || '');
+}
+
+/** Bloco do prompt: os SLAs como dados (a IA cita, nao inventa). */
+function _slasTextoPrompt(slas) {
+  if (!slas) return 'Não foi possível consultar os contratos.';
+  if (!slas.contratos.length) return 'Nenhum contrato vigente cobre esta dependência.';
+  const fmt = contratoCiclo.formatarDuracao;
+  return slas.contratos.map((c) => {
+    const s = c.sla;
+    const partes = [`- ${c.codigo} — ${c.objeto} | Fornecedor: ${c.fornecedorNome || 'não informado'} | Vigente até ${_dataBRServidor(c.dataFim)}`];
+    if (!c.temSla) return partes[0] + ' | SLA não cadastrado no contrato.';
+    if (_coberturaSla(s)) partes.push(`Cobertura do atendimento: ${_coberturaSla(s)}`);
+    const atend = _resumoAtendimentoSla(s);
+    if (atend) partes.push(`Atendimento: ${atend}`);
+    if (_disponibilidadeSla(s)) partes.push(`Disponibilidade: ${_disponibilidadeSla(s)}`);
+    partes.push(`RTO garantido: ${fmt(s.rtoMin) || 'não garantido'}`);
+    partes.push(`RPO garantido: ${fmt(s.rpoMin) || 'não garantido'}`);
+    if (s.janelaManutencao) partes.push(`Janela de manutenção: ${s.janelaManutencao}`);
+    if (s.penalidade) partes.push(`Penalidade/crédito: ${s.penalidade}`);
+    let linha = partes.join(' | ');
+    if (c.incompatibilidades.length) {
+      linha += '\n  Incompatibilidades SLA × RTO: ' + c.incompatibilidades.map((i) => i.rotulo).join('; ');
+    }
+    return linha;
+  }).join('\n');
+}
+
+/** Secao montada pelo sistema (sempre regravada com o dado atual do contrato). */
+function _htmlSecaoSlas(slas) {
+  const fmt = contratoCiclo.formatarDuracao;
+  const th = 'style="border:1px solid #ccc;padding:6px 8px;background:#f5f5f5;text-align:left;"';
+  const td = 'style="border:1px solid #ccc;padding:6px 8px;"';
+  const tabela = 'style="border-collapse:collapse;width:100%;margin:6px 0 12px;"';
+  let corpo;
+  if (!slas) {
+    corpo = '<p>Não foi possível consultar os contratos ao gerar este documento.</p>';
+  } else if (!slas.contratos.length) {
+    corpo = '<p>Nenhum contrato vigente cobre esta dependência. Sem SLA contratado, o tempo de recuperação depende só dos recursos internos.</p>';
+  } else {
+    corpo = slas.contratos.map((c) => {
+      const s = c.sla;
+      const titulo = `<h3>${_escHtml(c.codigo)} — ${_escHtml(c.objeto)}</h3>`
+        + `<p>Fornecedor: <strong>${_escHtml(c.fornecedorNome || 'não informado')}</strong> · Vigente até ${_escHtml(_dataBRServidor(c.dataFim))}`
+        + `${c.viaCobertura ? '' : ' · vinculado pelo fornecedor'}</p>`;
+      if (!c.temSla) return titulo + '<p><em>SLA não cadastrado no contrato.</em></p>';
+      const linhas = [
+        ['Cobertura do atendimento', _coberturaSla(s)],
+        ['Disponibilidade', _disponibilidadeSla(s)],
+        ['RTO garantido', fmt(s.rtoMin) || 'Não garantido'],
+        ['RPO garantido', fmt(s.rpoMin) || 'Não garantido'],
+        ['Janela de manutenção', s.janelaManutencao],
+        ['Penalidade / crédito', s.penalidade],
+      ].filter(([, v]) => v);
+      const resumo = `<table ${tabela}><tbody>${linhas.map(([k, v]) => `<tr><th ${th}>${_escHtml(k)}</th><td ${td}>${_escHtml(v)}</td></tr>`).join('')}</tbody></table>`;
+      const atend = s.atendimento.filter((a) => a.respostaMin !== null);
+      const tabAtend = atend.length
+        ? `<table ${tabela}><thead><tr><th ${th}>Severidade</th><th ${th}>Primeira resposta</th></tr></thead><tbody>`
+          + atend.map((a) => `<tr><td ${td}>${_escHtml(a.severidade)}</td><td ${td}>${_escHtml(fmt(a.respostaMin))}</td></tr>`).join('')
+          + '</tbody></table>'
+        : '';
+      const incomp = c.incompatibilidades.length
+        ? `<p><strong>⚠️ Incompatibilidades com o RTO/RPO exigido:</strong></p><ul>${c.incompatibilidades.map((i) => `<li>${_escHtml(i.rotulo)}</li>`).join('')}</ul>`
+        : '<p>✅ O SLA contratado atende ao RTO/RPO exigido pela dependência e pelos processos ligados a ela.</p>';
+      return titulo + resumo + tabAtend + incomp;
+    }).join('');
+  }
+  return `<h2>SLAs Contratados com Fornecedores</h2>\n`
+    + '<p><em>Seção mantida pelo sistema a partir dos contratos vigentes; é atualizada a cada geração.</em></p>\n'
+    + corpo + '\n';
+}
+
+/** Leitura para a aba DRP da dependencia: os mesmos SLAs que entram no DRP. */
+async function obterSlasDependencia(db, query, ctx) {
+  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode acessar o DRP.');
+  const id = exigir(query.id, 'id');
+  const snap = await db.collection(COLLECTION.dependencias).doc(String(id)).get();
+  if (!snap.exists) throw new AppError('Dependência não encontrada.');
+  const dep = snap.data() || {};
+  const [catSnap, procSnap] = await Promise.all([
+    db.collection(COLLECTION.dependencias).get(),
+    db.collection(COLLECTION.processos).get(),
+  ]);
+  const catalogo = catSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const processos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const ligados = _processosLigadosADependencia(String(id), dep.nome, dep.categoria, processos);
+  const slas = await _slasDaDependencia(db, String(id), dep, catalogo, ligados);
+  return { success: true, ...slas };
+}
+
 async function gerarDRP(db, data, ctx) {
   if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode operar o DRP.');
   const id = exigir(data.id, 'id');
@@ -630,6 +822,16 @@ async function gerarDRP(db, data, ctx) {
     const score = await _scoreDoProcesso(db, p.area, p.processo);
     return { ...p, tier: _tierProcessoServidor(score, p.tierManual) };
   }));
+  // SLAs dos contratos vigentes (secao propria + contexto do prompt). Falha
+  // na leitura nao derruba o DRP: a secao diz que nao deu para consultar.
+  let slas = null;
+  try {
+    slas = await _slasDaDependencia(db, String(id), dep, catalogo, processosLigados);
+  } catch (e) {
+    console.error('gerarDRP: falha ao ler os SLAs dos contratos', e);
+  }
+  const slasTexto = _slasTextoPrompt(slas);
+
   const processosImpactadosTexto = processosComTier.length
     ? processosComTier.map((p) => `- ${p.processo} (${p.area || 'Área não informada'}) — ${p.tier}${p.descricao ? ' | Impacto: ' + p.descricao : ''}`).join('\n')
     : 'Nenhum processo de negócio vinculado a esta dependência na base.';
@@ -729,6 +931,9 @@ ${canaisTexto}
 
 ### Processos de Negócio impactados (dados reais da base)
 ${processosImpactadosTexto}
+
+### SLAs contratados com fornecedores (dados reais dos contratos vigentes)
+${slasTexto}
 ${blocoSecoesTravadas}
 ---
 ## TEMPLATE OBRIGATÓRIO DO DRP (siga esta estrutura exata)
@@ -750,7 +955,8 @@ ${template}
 - Onde a dependência já tiver dados (RTO/RPO/Estratégia/Responsável/listas), use ESSES VALORES EXATOS; onde faltar, infira valores tecnicamente razoáveis a partir da categoria e do contexto.
 - CONTATOS DE CONTINGÊNCIA: se o template tiver uma seção/tabela de contatos (colunas como Contato, Organização/Área, Finalidade, Canal, Informação), preencha com os itens de "Contatos disponíveis (dados reais da base)" acima. A coluna "Canal" deve conter os dados REAIS de contato (telefone e/ou e-mail exatamente como fornecidos), NÃO rótulos genéricos como "Telefone" ou "Portal". NÃO invente contatos, telefones ou e-mails: use somente os que estão na lista. Se a lista disser que não há contatos cadastrados, deixe a tabela com uma única linha indicando "Contato não cadastrado na base" em vez de inventar nomes/canais.
 - CANAIS DE SUPORTE DOS FORNECEDORES: inclua também, na mesma seção/tabela de contatos de contingência, cada item de "Canais de suporte dos fornecedores (dados reais da base)" — fornecedor, tipo do canal e o contato EXATAMENTE como fornecido (número, e-mail ou link), com horário, nível e SLA quando informados. Apresente-os na ordem de escalonamento (N1, N2, N3, Emergência). NÃO invente canais, números ou links que não estejam na lista; se ela disser que não há canal cadastrado, não acrescente nenhum.
-- IMPACTOS OPERACIONAIS NOS PROCESSOS: a seção "Impactos Operacionais nos Processos" (ou equivalente no template) deve usar EXCLUSIVAMENTE os itens de "Processos de Negócio impactados (dados reais da base)" acima — processo, área e tier exatamente como fornecidos, descrevendo o impacto operacional de cada um com base na descrição de impacto fornecida (quando houver) e no tier (quanto mais crítico, mais grave o impacto a destacar). NÃO invente processos que não estejam na lista. Se a lista disser que não há processo vinculado, deixe a seção indicando isso claramente, sem inventar exemplos.${regraSecoesTravadas}`;
+- IMPACTOS OPERACIONAIS NOS PROCESSOS: a seção "Impactos Operacionais nos Processos" (ou equivalente no template) deve usar EXCLUSIVAMENTE os itens de "Processos de Negócio impactados (dados reais da base)" acima — processo, área e tier exatamente como fornecidos, descrevendo o impacto operacional de cada um com base na descrição de impacto fornecida (quando houver) e no tier (quanto mais crítico, mais grave o impacto a destacar). NÃO invente processos que não estejam na lista. Se a lista disser que não há processo vinculado, deixe a seção indicando isso claramente, sem inventar exemplos.
+- SLAs CONTRATADOS: use EXCLUSIVAMENTE os valores de "SLAs contratados com fornecedores" acima, exatamente como fornecidos — não invente SLA, RTO, RPO, disponibilidade ou penalidade. Na seção de Estratégia de Contingência (RTO/RPO), cite o RTO/RPO garantido pelo fornecedor ao lado do RTO/RPO da dependência. Na seção de Limitações, inclua cada item de "Incompatibilidades SLA × RTO", literalmente, como limitação conhecida. NÃO crie uma seção chamada "SLAs Contratados com Fornecedores": o sistema a insere no documento.${regraSecoesTravadas}`;
 
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + ctx.geminiApiKey;
   const payload = {
@@ -796,6 +1002,13 @@ ${template}
     drpHtml = mescla.html;
     bloqueadas = mescla.bloqueadas;
   }
+
+  // Secao dos SLAs: montada pelo sistema e sempre regravada com o contrato
+  // atual (mesmo que alguem a tenha travado) -- o contrato e a fonte da
+  // verdade. Entra logo depois de "Dependencias"; sem ela, no fim.
+  drpHtml = drpSecoes.substituirOuInserirSecao(drpHtml, CHAVE_SECAO_SLA, _htmlSecaoSlas(slas),
+    (sec) => sec.chave === '9' || /depend/.test(sec.chave));
+  bloqueadas = bloqueadas.filter((k) => k !== CHAVE_SECAO_SLA);
 
   return { success: true, drp: drpHtml, bloqueadas, nome: dep.nome || '', categoria: dep.categoria || '' };
 }
@@ -1250,10 +1463,46 @@ async function salvarDrpDependencia(db, data, ctx) {
   return { success: true, dependenciaId, gravados: Object.keys(patch) };
 }
 
+// ============================================================
+// E-mail de teste (16/10/2026): valida a conta SMTP antes de ligar o modo
+// ativo dos alertas de contrato. So o Admin; vai para o proprio usuario
+// logado, independente do modo configurado.
+// ============================================================
+async function enviarEmailTeste(db, data, ctx) {
+  const snap = await db.collection(COLLECTION.configPerfis).doc(String(ctx.email || '').toLowerCase()).get();
+  const d = snap.exists ? snap.data() : null;
+  const perfis = d && Array.isArray(d.perfis) ? d.perfis : (d && d.perfil ? [d.perfil] : []);
+  if (!perfis.some((p) => String(p || '').trim().toLowerCase() === 'admin')) {
+    throw new AppError('Só o Administrador pode enviar o e-mail de teste.');
+  }
+  const cfgSnap = await db.collection('config_notificacoes').doc('contratos').get();
+  const config = notificacoes.normalizarConfig(cfgSnap.exists ? cfgSnap.data() : null);
+  const fabrica = ctx.criarEnviador || transporteEmail.criarEnviador;
+  const enviar = fabrica(Object.assign({}, ctx.smtp || {}, { servidor: config.servidor }));
+  const url = notificacoes.linkContrato('', ctx.baseUrl).replace(/\?contrato=$/, '');
+  try {
+    await enviar({
+      de: config.remetenteNome,
+      para: ctx.email,
+      responderPara: config.responderPara,
+      assunto: '[Contratos] E-mail de teste do GRC360',
+      texto: `Este é um e-mail de teste dos alertas de contratos do GRC360.\n\n`
+        + `Se ele chegou, a conta de envio está configurada. Modo atual: ${config.modo}.\n\n${url}`,
+      html: `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#2a2623;"><p><strong>E-mail de teste dos alertas de contratos do GRC360.</strong></p>`
+        + `<p>Se ele chegou, a conta de envio está configurada. Modo atual: <strong>${config.modo}</strong>.</p>`
+        + `<p><a href="${url}" style="color:#d60014;">Abrir a tela de Contratos</a></p></div>`,
+    });
+  } catch (err) {
+    throw new AppError('Falha no envio: ' + ((err && err.message) || 'erro desconhecido'));
+  }
+  return { success: true, para: ctx.email };
+}
+
 const READ_ACTIONS = {
   getLevantamentoPCN,
   dadosPCN,
   obterDRP,
+  obterSlasDependencia,
   obterRoteiroTeste,
 };
 
@@ -1272,6 +1521,7 @@ const WRITE_ACTIONS = {
   excluirRoteiroTeste,
   importarVulnerabilidadeParaRisco,
   exportarRiscoDocumento,
+  enviarEmailTeste,
 };
 
 module.exports = {

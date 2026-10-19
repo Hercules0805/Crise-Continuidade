@@ -554,3 +554,82 @@ describe('Security Rules — fornecedores, perfis e dependências', () => {
     await assertSucceeds(db(LEGACY).doc('perguntas/p-legacy').set({ pergunta: 'x' }));
   });
 });
+
+describe('Security Rules — contratos', () => {
+  const OP = { email: 'operador@fortestecnologia.com.br' };
+  const TI = { email: 'ti@fortestecnologia.com.br' };
+
+  async function seedContratos() {
+    await seedPerfil(OP.email, { perfis: ['operador'] });
+    await seedPerfil(TI.email, { perfis: ['ti'] });
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const d = ctx.firestore();
+      await d.doc('contratos/c-ti').set({ area: 'TI', objeto: 'Link', valorMensal: 1000 });
+      await d.doc('contratos/c-rh').set({ area: 'RH', objeto: 'Folha', valorMensal: 2000 });
+      await d.doc('eventos_contrato/e-ti').set({ contratoId: 'c-ti', area: 'TI', tipo: 'Assinatura' });
+      await d.doc('eventos_contrato/e-rh').set({ contratoId: 'c-rh', area: 'RH', tipo: 'Assinatura' });
+      await d.doc('tipos_contrato/t1').set({ nome: 'SaaS' });
+    });
+  }
+
+  test('admin e operador cadastram contrato e evento', async () => {
+    await seedContratos();
+    await assertSucceeds(db(ADMIN).doc('contratos/c-novo').set({ area: 'TI', objeto: 'X' }));
+    await assertSucceeds(db(OP).doc('contratos/c-ti').set({ valorMensal: 1100 }, { merge: true }));
+    await assertSucceeds(db(OP).doc('eventos_contrato/e-novo').set({ contratoId: 'c-ti', area: 'TI', tipo: 'Reajuste aplicado' }));
+    await assertSucceeds(db(OP).doc('contratos/c-rh').delete());
+  });
+
+  test('gestor le so os contratos e eventos da propria area, e nao escreve', async () => {
+    await seedContratos();
+    await assertSucceeds(db(GESTOR).doc('contratos/c-ti').get());
+    await assertFails(db(GESTOR).doc('contratos/c-rh').get());
+    await assertSucceeds(db(GESTOR).collection('contratos').where('area', '==', 'TI').get());
+    await assertFails(db(GESTOR).collection('contratos').get());
+    await assertSucceeds(db(GESTOR).collection('eventos_contrato').where('contratoId', '==', 'c-ti').where('area', '==', 'TI').get());
+    await assertFails(db(GESTOR).doc('eventos_contrato/e-rh').get());
+    await assertFails(db(GESTOR).doc('contratos/c-ti').set({ valorMensal: 1 }, { merge: true }));
+    await assertFails(db(GESTOR).doc('eventos_contrato/e-x').set({ contratoId: 'c-ti', area: 'TI' }));
+  });
+
+  test('TI e quem e de fora nao leem contrato', async () => {
+    await seedContratos();
+    await assertFails(db(TI).doc('contratos/c-ti').get());
+    await assertFails(db(FORA).doc('contratos/c-ti').get());
+  });
+
+  test('listas configuraveis: dominio le, so quem gerencia escreve', async () => {
+    await seedContratos();
+    await assertSucceeds(db(GESTOR).doc('tipos_contrato/t1').get());
+    await assertFails(db(FORA).doc('tipos_contrato/t1').get());
+    for (const col of ['tipos_contrato', 'indexadores_reajuste', 'status_contrato']) {
+      await assertSucceeds(db(OP).doc(`${col}/novo`).set({ nome: 'X' }));
+      await assertFails(db(GESTOR).doc(`${col}/novo2`).set({ nome: 'X' }));
+      await assertFails(db(TI).doc(`${col}/novo3`).set({ nome: 'X' }));
+    }
+  });
+});
+
+describe('Security Rules — alertas por e-mail', () => {
+  const OP = { email: 'operador@fortestecnologia.com.br' };
+
+  test('so o admin le e grava a configuracao de e-mail', async () => {
+    await seedPerfil(OP.email, { perfis: ['operador'] });
+    await assertSucceeds(db(ADMIN).doc('config_notificacoes/contratos').set({ modo: 'simulacao' }));
+    await assertSucceeds(db(ADMIN).doc('config_notificacoes/contratos').get());
+    await assertFails(db(OP).doc('config_notificacoes/contratos').get());
+    await assertFails(db(OP).doc('config_notificacoes/contratos').set({ modo: 'ativo' }));
+    await assertFails(db(GESTOR).doc('config_notificacoes/contratos').get());
+  });
+
+  test('a fila de e-mails: admin le, ninguem grava pelo cliente', async () => {
+    await seedPerfil(OP.email, { perfis: ['operador'] });
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('notificacoes_email/n1').set({ para: 'x@fortestecnologia.com.br', status: 'simulado' });
+    });
+    await assertSucceeds(db(ADMIN).doc('notificacoes_email/n1').get());
+    await assertFails(db(OP).doc('notificacoes_email/n1').get());
+    await assertFails(db(ADMIN).doc('notificacoes_email/n2').set({ para: 'x', status: 'pendente' }));
+    await assertFails(db(ADMIN).doc('notificacoes_email/n1').set({ status: 'pendente' }, { merge: true }));
+  });
+});

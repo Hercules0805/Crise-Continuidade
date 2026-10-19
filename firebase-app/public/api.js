@@ -47,6 +47,13 @@ const COLLECTION = {
   servicos: 'servicos',
   backups: 'backups',
   vulnerabilidades: 'vulnerabilidades',
+  contratos: 'contratos',
+  eventosContrato: 'eventos_contrato',
+  tiposContrato: 'tipos_contrato',
+  indexadoresReajuste: 'indexadores_reajuste',
+  statusContrato: 'status_contrato',
+  configNotificacoes: 'config_notificacoes',
+  notificacoesEmail: 'notificacoes_email',
 };
 
 // ------------------------------------------------------------
@@ -1700,6 +1707,360 @@ async function _salvarRespostas(payload) {
 }
 
 // ------------------------------------------------------------
+// Contratos (15/10/2026)
+// ------------------------------------------------------------
+// Contrato vinculado a um fornecedor (/dependencias, por id + nome de copia,
+// mesmo molde de riscos.fornecedor). Tipo, indexador e status apontam por ID
+// para listas configuraveis -- renomear "SaaS" nao orfaniza contrato nenhum.
+// A area e o NOME (como dependencias.setor), porque e por ela que a regra
+// deixa o gestor ler os contratos da propria area.
+//
+// Mesma posse de Fornecedores. Quem nao gerencia (gestor) so le, e so a
+// propria area: a consulta TEM que filtrar por area, senao a regra recusa.
+
+function _gerenciaContratos() {
+  return Perfis.podeEditarContratos(window.USER_PERFIS || window.USER_PERFIL);
+}
+
+function _numOuNull(v) {
+  if (v === '' || v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+async function _lerContratos() {
+  let docs;
+  if (_gerenciaContratos()) {
+    docs = await _getAll(COLLECTION.contratos);
+  } else {
+    const area = window.USER_AREA;
+    if (!area) return [];
+    docs = await _getPorCampo(COLLECTION.contratos, 'area', area);
+  }
+  return docs.map((c) => ({
+    id: c.id,
+    codigo: c.codigo || '',
+    numero: c.numero || '',
+    objeto: c.objeto || '',
+    fornecedorId: c.fornecedorId || '',
+    fornecedorNome: c.fornecedorNome || '',
+    tipoId: c.tipoId || '',
+    indexadorId: c.indexadorId || '',
+    statusId: c.statusId || '',
+    area: c.area || '',
+    gestor: c.gestor && c.gestor.nome ? { id: c.gestor.id || null, nome: c.gestor.nome } : null,
+    mesReajuste: _numOuNull(c.mesReajuste),
+    renovacaoAutomatica: c.renovacaoAutomatica === true,
+    cancelamentoQualquerMomento: c.cancelamentoQualquerMomento === true,
+    avisoCancelamentoDias: _numOuNull(c.avisoCancelamentoDias),
+    dataInicio: c.dataInicio || '',
+    dataUltimaRenovacao: c.dataUltimaRenovacao || '',
+    dataFim: c.dataFim || '',
+    vigenciaMeses: _numOuNull(c.vigenciaMeses),
+    rateado: c.rateado === true,
+    valorGlobal: _numOuNull(c.valorGlobal),
+    valorMensal: _numOuNull(c.valorMensal),
+    documentos: Array.isArray(c.documentos)
+      ? c.documentos.filter((d) => d && d.url).map((d) => ({ titulo: d.titulo || '', url: d.url }))
+      : [],
+    observacoes: c.observacoes || '',
+    // SLA (15/10/2026): tempos em minutos. Sempre o objeto inteiro (normalizado).
+    sla: ContratoCiclo.normalizarSla(c.sla),
+    // O que o contrato cobre: e por aqui que o DRP de cada dependencia acha o SLA.
+    dependenciasCobertas: Array.isArray(c.dependenciasCobertas)
+      ? c.dependenciasCobertas.map((d) => ({ id: d.id || null, categoria: d.categoria || '', nome: d.nome || '' }))
+      : [],
+    // Gravados SO pela varredura diaria (varreduraDiariaContratos).
+    alertas: Array.isArray(c.alertas) ? c.alertas : [],
+    alertasAtualizadosEm: c.alertasAtualizadosEm || '',
+    criadoEm: c.criadoEm || '',
+    atualizadoEm: c.atualizadoEm || '',
+  })).sort((a, b) => b.codigo.localeCompare(a.codigo, 'pt-BR'));
+}
+
+const _CAMPOS_CONTRATO = [
+  'codigo', 'numero', 'objeto', 'fornecedorId', 'fornecedorNome', 'tipoId', 'indexadorId', 'statusId',
+  'area', 'gestor', 'mesReajuste', 'renovacaoAutomatica', 'cancelamentoQualquerMomento', 'avisoCancelamentoDias',
+  'dataInicio', 'dataUltimaRenovacao', 'dataFim', 'vigenciaMeses', 'rateado', 'valorGlobal', 'valorMensal',
+  'documentos', 'observacoes', 'sla', 'dependenciasCobertas', 'dependenciasCobertasIds',
+];
+const _NUMERICOS_CONTRATO = ['mesReajuste', 'avisoCancelamentoDias', 'vigenciaMeses', 'valorGlobal', 'valorMensal'];
+
+async function _salvarContrato(c) {
+  const data = {};
+  _CAMPOS_CONTRATO.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(c, campo) && c[campo] !== undefined) data[campo] = c[campo];
+  });
+  _NUMERICOS_CONTRATO.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(data, campo)) data[campo] = _numOuNull(data[campo]);
+  });
+  if (Object.prototype.hasOwnProperty.call(data, 'sla')) data.sla = ContratoCiclo.normalizarSla(data.sla);
+  // Lista de ids derivada, para o servidor achar o contrato pelo DRP da dependencia.
+  if (Object.prototype.hasOwnProperty.call(data, 'dependenciasCobertas')) {
+    data.dependenciasCobertas = (Array.isArray(data.dependenciasCobertas) ? data.dependenciasCobertas : [])
+      .filter((d) => d && d.id)
+      .map((d) => ({ id: String(d.id), categoria: d.categoria || '', nome: d.nome || '' }));
+    data.dependenciasCobertasIds = data.dependenciasCobertas.map((d) => d.id);
+  }
+  data.atualizadoEm = new Date().toISOString();
+  data.atualizadoPor = (window.USER_EMAIL || '').toLowerCase();
+
+  if (c.id) {
+    const ref = _db.collection(COLLECTION.contratos).doc(String(c.id));
+    const antes = await ref.get();
+    const areaAntes = antes.exists ? (antes.data().area || '') : '';
+    await ref.set(data, { merge: true });
+    // Eventos guardam copia da area (a regra do gestor le por ela). Mudou a
+    // area do contrato, regrava a copia -- senao o gestor novo nao ve a
+    // linha do tempo e o antigo continua vendo.
+    if (Object.prototype.hasOwnProperty.call(data, 'area') && data.area !== areaAntes) {
+      const evs = await _db.collection(COLLECTION.eventosContrato).where('contratoId', '==', String(c.id)).get();
+      if (!evs.empty) {
+        const lote = _db.batch();
+        evs.docs.forEach((d) => lote.set(d.ref, { area: data.area }, { merge: true }));
+        await lote.commit();
+      }
+    }
+    return { success: true, id: c.id };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = data.atualizadoPor;
+  const ref = await _db.collection(COLLECTION.contratos).add(data);
+  return { success: true, id: ref.id };
+}
+
+/** Apaga o contrato E a linha do tempo dele (evento orfao nao aparece em lugar nenhum). */
+async function _excluirContrato(b) {
+  const id = String(b.id);
+  const evs = await _db.collection(COLLECTION.eventosContrato).where('contratoId', '==', id).get();
+  const lote = _db.batch();
+  evs.docs.forEach((d) => lote.delete(d.ref));
+  lote.delete(_db.collection(COLLECTION.contratos).doc(id));
+  await lote.commit();
+  return { success: true, eventosExcluidos: evs.size };
+}
+
+async function _lerEventosContrato(params) {
+  const contratoId = String((params && params.contratoId) || '');
+  if (!contratoId) return [];
+  let q = _db.collection(COLLECTION.eventosContrato).where('contratoId', '==', contratoId);
+  if (!_gerenciaContratos()) {
+    if (!window.USER_AREA) return [];
+    q = q.where('area', '==', window.USER_AREA);
+  }
+  const snap = await q.get();
+  return snap.docs.map((d) => {
+    const e = d.data();
+    return {
+      id: d.id,
+      contratoId: e.contratoId || '',
+      data: e.data || '',
+      tipo: e.tipo || '',
+      descricao: e.descricao || '',
+      valorMensalAnterior: _numOuNull(e.valorMensalAnterior),
+      valorMensalNovo: _numOuNull(e.valorMensalNovo),
+      dataFimNova: e.dataFimNova || '',
+      automatico: e.automatico === true,
+      registradoPor: e.registradoPor || '',
+      registradoEm: e.registradoEm || '',
+    };
+  }).sort((a, b) => (b.data.localeCompare(a.data)) || (b.registradoEm.localeCompare(a.registradoEm)));
+}
+
+const _CAMPOS_EVENTO_CONTRATO = ['contratoId', 'area', 'data', 'tipo', 'descricao', 'valorMensalAnterior', 'valorMensalNovo', 'dataFimNova'];
+// O que um evento pode mudar no contrato (Renovacao -> datas; Reajuste -> valor).
+const _CAMPOS_CONTRATO_POR_EVENTO = ['dataUltimaRenovacao', 'dataFim', 'vigenciaMeses', 'valorMensal', 'valorGlobal', 'statusId'];
+
+/**
+ * Grava o evento e, se vier `atualizarContrato`, aplica no contrato no mesmo
+ * lote -- o evento "Reajuste aplicado" e o novo valor mensal nao podem ficar
+ * um sem o outro.
+ */
+async function _salvarEventoContrato(e) {
+  if (!e.contratoId) throw new Error('Evento sem contrato.');
+  const data = {};
+  _CAMPOS_EVENTO_CONTRATO.forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(e, campo) && e[campo] !== undefined) data[campo] = e[campo];
+  });
+  ['valorMensalAnterior', 'valorMensalNovo'].forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(data, campo)) data[campo] = _numOuNull(data[campo]);
+  });
+  const agora = new Date().toISOString();
+  const email = (window.USER_EMAIL || '').toLowerCase();
+  const lote = _db.batch();
+  const ref = e.id
+    ? _db.collection(COLLECTION.eventosContrato).doc(String(e.id))
+    : _db.collection(COLLECTION.eventosContrato).doc();
+  if (!e.id) {
+    data.registradoEm = agora;
+    data.registradoPor = email;
+    data.automatico = false;
+  }
+  data.atualizadoEm = agora;
+  lote.set(ref, data, { merge: true });
+
+  const patch = {};
+  if (e.atualizarContrato) {
+    _CAMPOS_CONTRATO_POR_EVENTO.forEach((campo) => {
+      if (Object.prototype.hasOwnProperty.call(e.atualizarContrato, campo)) patch[campo] = e.atualizarContrato[campo];
+    });
+    ['vigenciaMeses', 'valorMensal', 'valorGlobal'].forEach((campo) => {
+      if (Object.prototype.hasOwnProperty.call(patch, campo)) patch[campo] = _numOuNull(patch[campo]);
+    });
+  }
+  if (Object.keys(patch).length) {
+    patch.atualizadoEm = agora;
+    patch.atualizadoPor = email;
+    lote.set(_db.collection(COLLECTION.contratos).doc(String(e.contratoId)), patch, { merge: true });
+  }
+  await lote.commit();
+  return { success: true, id: ref.id, contratoAtualizado: Object.keys(patch).length > 0 };
+}
+
+/**
+ * Listas configuraveis do contrato (tipo, indexador, status). Mesmo molde de
+ * Categorias de Fornecedor: {nome, ativo, ordem}, desativar em vez de excluir
+ * quando ja esta em uso. Status tem ainda a `situacao` (pre|vigente|encerrado),
+ * que e o que a regra do ciclo de vida le -- nunca o nome.
+ */
+async function _lerListaContrato(colecao, extras) {
+  const docs = await _getAll(colecao);
+  return docs.map((d) => {
+    const item = {
+      id: d.id,
+      nome: d.nome || '',
+      ativo: d.ativo !== false,
+      ordem: Number(d.ordem) || 0,
+      criadoEm: d.criadoEm || '',
+      atualizadoEm: d.atualizadoEm || '',
+    };
+    (extras || []).forEach((campo) => { item[campo] = d[campo] || ''; });
+    return item;
+  }).sort((a, b) => (a.ordem - b.ordem) || a.nome.localeCompare(b.nome, 'pt-BR'));
+}
+
+async function _salvarListaContrato(colecao, extras, c) {
+  const nome = String(c.nome || '').trim().replace(/\s+/g, ' ');
+  if (!nome) throw new Error('Informe o nome.');
+  const existentes = await _lerListaContrato(colecao, extras);
+  const igual = existentes.find((x) => _nomeComparavel(x.nome) === _nomeComparavel(nome) && String(x.id) !== String(c.id || ''));
+  if (igual) throw new Error(`Já existe "${igual.nome}".`);
+
+  const data = { nome };
+  ['ativo', 'ordem'].concat(extras || []).forEach((campo) => {
+    if (Object.prototype.hasOwnProperty.call(c, campo) && c[campo] !== undefined) data[campo] = c[campo];
+  });
+  data.atualizadoEm = new Date().toISOString();
+  if (c.id) {
+    await _db.collection(colecao).doc(String(c.id)).set(data, { merge: true });
+    return { success: true, id: c.id };
+  }
+  data.criadoEm = data.atualizadoEm;
+  data.criadoPor = (window.USER_EMAIL || '').toLowerCase();
+  if (data.ordem === undefined) data.ordem = Date.now();
+  const ref = await _db.collection(colecao).add(data);
+  return { success: true, id: ref.id };
+}
+
+// ------------------------------------------------------------
+// Alertas por e-mail (16/10/2026) -- so o Admin (firestore.rules)
+// ------------------------------------------------------------
+// A configuracao fica em config_notificacoes/contratos; a fila de saida
+// (notificacoes_email) so o servidor grava -- aqui e so leitura do log.
+// O padrao do modo e "desligado": nada e enfileirado ate o Admin escolher.
+
+const _CONFIG_NOTIFICACOES_PADRAO = {
+  modo: 'desligado',
+  remetenteNome: 'GRC360 · Contratos',
+  responderPara: '',
+  grupos: { prazos: true, renovacaoReajuste: true, resumoMensal: true },
+  destinatarios: { gestor: true, area: true, operadores: true },
+  // SMTP (16/10/2026: SendGrid). Usuario e senha ficam nos segredos do Firebase.
+  servidor: { provedor: 'sendgrid', host: '', porta: null, remetenteEmail: '' },
+};
+const _PROVEDORES_SMTP = ['sendgrid', 'gmail', 'outro'];
+
+/** Mesma normalizacao de functions/notificacoes.js normalizarConfig (servidor). */
+function _servidorNotificacoes(sv) {
+  const s = sv || {};
+  const provedor = _PROVEDORES_SMTP.includes(s.provedor) ? s.provedor : 'sendgrid';
+  const porta = Number(s.porta);
+  const remetente = String(s.remetenteEmail || '').trim().toLowerCase();
+  return {
+    provedor,
+    host: provedor === 'outro' ? String(s.host || '').trim() : '',
+    porta: provedor === 'outro' && Number.isInteger(porta) && porta > 0 && porta < 65536 ? porta : null,
+    remetenteEmail: remetente.endsWith(DOMINIO_CORPORATIVO) ? remetente : '',
+  };
+}
+
+async function _lerConfigNotificacoes() {
+  const snap = await _db.collection(COLLECTION.configNotificacoes).doc('contratos').get();
+  const d = snap.exists ? (snap.data() || {}) : {};
+  const p = _CONFIG_NOTIFICACOES_PADRAO;
+  const bools = (obj, padrao) => Object.fromEntries(Object.keys(padrao).map((k) => [k, typeof (obj || {})[k] === 'boolean' ? obj[k] : padrao[k]]));
+  return {
+    modo: ['desligado', 'simulacao', 'ativo'].includes(d.modo) ? d.modo : p.modo,
+    remetenteNome: d.remetenteNome || p.remetenteNome,
+    responderPara: d.responderPara || '',
+    grupos: bools(d.grupos, p.grupos),
+    destinatarios: bools(d.destinatarios, p.destinatarios),
+    servidor: _servidorNotificacoes(d.servidor),
+    atualizadoEm: d.atualizadoEm || '',
+    atualizadoPor: d.atualizadoPor || '',
+  };
+}
+
+async function _salvarConfigNotificacoes(c) {
+  const resp = String(c.responderPara || '').trim().toLowerCase();
+  if (resp && !resp.endsWith(DOMINIO_CORPORATIVO)) throw new Error('"Responder para" precisa ser um e-mail ' + DOMINIO_CORPORATIVO + '.');
+  const p = _CONFIG_NOTIFICACOES_PADRAO;
+  const sv = c.servidor || {};
+  const remetente = String(sv.remetenteEmail || '').trim().toLowerCase();
+  if (remetente && !remetente.endsWith(DOMINIO_CORPORATIVO)) throw new Error('O e-mail do remetente precisa ser ' + DOMINIO_CORPORATIVO + '.');
+  if (sv.provedor === 'outro' && !String(sv.host || '').trim()) throw new Error('Informe o host do servidor SMTP.');
+  const data = {
+    modo: ['desligado', 'simulacao', 'ativo'].includes(c.modo) ? c.modo : 'desligado',
+    remetenteNome: String(c.remetenteNome || '').trim() || p.remetenteNome,
+    responderPara: resp,
+    grupos: Object.fromEntries(Object.keys(p.grupos).map((k) => [k, !!(c.grupos || {})[k]])),
+    destinatarios: Object.fromEntries(Object.keys(p.destinatarios).map((k) => [k, !!(c.destinatarios || {})[k]])),
+    servidor: _servidorNotificacoes(sv),
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  };
+  await _db.collection(COLLECTION.configNotificacoes).doc('contratos').set(data, { merge: true });
+  return { success: true };
+}
+
+/** Log: os 100 e-mails mais recentes da fila (com o conteudo, para a previa). */
+async function _lerNotificacoesEmail() {
+  const snap = await _db.collection(COLLECTION.notificacoesEmail).orderBy('criadoEm', 'desc').limit(100).get();
+  return snap.docs.map((d) => {
+    const n = d.data() || {};
+    return {
+      id: d.id,
+      tipo: n.tipo || '',
+      evento: n.evento || '',
+      grupo: n.grupo || '',
+      contratoId: n.contratoId || '',
+      contratoCodigo: n.contratoCodigo || '',
+      para: n.para || '',
+      motivos: Array.isArray(n.motivos) ? n.motivos : [],
+      assunto: n.assunto || '',
+      html: n.html || '',
+      texto: n.texto || '',
+      status: n.status || '',
+      tentativas: Number(n.tentativas) || 0,
+      erro: n.erro || '',
+      criadoEm: n.criadoEm || '',
+      enviadoEm: n.enviadoEm || '',
+      processadoEm: n.processadoEm || '',
+    };
+  });
+}
+
+// ------------------------------------------------------------
 // Roteamento de ações
 // ------------------------------------------------------------
 // Ações de LEITURA atendidas pelo Firestore
@@ -1729,6 +2090,13 @@ const _GET_FIRESTORE = {
   getServicos: () => _lerServicos(),
   getBackups: () => _lerBackups(),
   getVulnerabilidades: () => _lerVulnerabilidades(),
+  getContratos: () => _lerContratos(),
+  getEventosContrato: (params) => _lerEventosContrato(params),
+  getTiposContrato: () => _lerListaContrato(COLLECTION.tiposContrato),
+  getIndexadoresReajuste: () => _lerListaContrato(COLLECTION.indexadoresReajuste),
+  getStatusContrato: () => _lerListaContrato(COLLECTION.statusContrato, ['situacao']),
+  getConfigNotificacoes: () => _lerConfigNotificacoes(),
+  getNotificacoesEmail: () => _lerNotificacoesEmail(),
 };
 
 // Ações de ESCRITA atendidas pelo Firestore
@@ -1774,6 +2142,17 @@ const _POST_FIRESTORE = {
   excluirPerfilAcesso: (b) => _db.collection(COLLECTION.configPerfis).doc(String(b.email || '').toLowerCase()).delete()
     .then(() => ({ success: true })),
   excluirIndicadorSeguranca: (b) => _db.collection(COLLECTION.indicadoresSeguranca).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarContrato: (b) => _salvarContrato(b),
+  excluirContrato: (b) => _excluirContrato(b),
+  salvarEventoContrato: (b) => _salvarEventoContrato(b),
+  excluirEventoContrato: (b) => _db.collection(COLLECTION.eventosContrato).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarTipoContrato: (b) => _salvarListaContrato(COLLECTION.tiposContrato, [], b),
+  excluirTipoContrato: (b) => _db.collection(COLLECTION.tiposContrato).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarIndexadorReajuste: (b) => _salvarListaContrato(COLLECTION.indexadoresReajuste, [], b),
+  excluirIndexadorReajuste: (b) => _db.collection(COLLECTION.indexadoresReajuste).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarStatusContrato: (b) => _salvarListaContrato(COLLECTION.statusContrato, ['situacao'], b),
+  excluirStatusContrato: (b) => _db.collection(COLLECTION.statusContrato).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarConfigNotificacoes: (b) => _salvarConfigNotificacoes(b),
 };
 
 // ------------------------------------------------------------
@@ -1867,6 +2246,12 @@ const API = {
     }
     // obterRoteiroTeste: mesmo motivo de obterDRP acima -- sem cache, conteudo
     // muda a cada geracao e o perfil e conferido no servidor.
+    // SLAs dos contratos que cobrem a dependencia (aba DRP). Sem cache e pelo
+    // servidor: quem opera DRP (TI) nao le `contratos` direto, e o servidor
+    // so devolve os campos de SLA.
+    if (action === 'getSlasDependencia') {
+      return _appApi('GET', 'obterSlasDependencia', { id: params.id });
+    }
     if (action === 'obterRoteiroTeste') {
       return _appApi('GET', 'obterRoteiroTeste', { id: params.id });
     }
@@ -1920,6 +2305,10 @@ const API = {
     }
     if (action === 'excluirRoteiroTeste') {
       return _appApi('POST', 'excluirRoteiroTeste', { id: body.id, categoria: body.categoria });
+    }
+    // E-mail de teste pela conta SMTP configurada (so Admin, conferido no servidor).
+    if (action === 'enviarEmailTeste') {
+      return _appApi('POST', 'enviarEmailTeste', {});
     }
     if (action === 'importarVulnerabilidadeParaRisco') {
       return _appApi('POST', 'importarVulnerabilidadeParaRisco', { id: body.id });
@@ -2019,6 +2408,38 @@ const API = {
   removerLancamento: (indicadorId, mes) => _removerLancamento(indicadorId, mes)
     .then((r) => { API.invalidate('getIndicadoresSeguranca'); return r; }),
   excluirIndicadorSeguranca: (id) => API.post('excluirIndicadorSeguranca', { id }),
+  getContratos: () => API.get('getContratos'),
+  getSlasDependencia: (id) => API.get('getSlasDependencia', { id }),
+  getConfigNotificacoes: () => API.get('getConfigNotificacoes'),
+  salvarConfigNotificacoes: (c) => API.post('salvarConfigNotificacoes', c)
+    .then((r) => { API.invalidate('getConfigNotificacoes'); return r; }),
+  // Log sempre fresco: a fila muda pelo servidor, sem passar por esta aba.
+  getNotificacoesEmail: () => { API.invalidate('getNotificacoesEmail'); return API.get('getNotificacoesEmail'); },
+  enviarEmailTeste: () => API.post('enviarEmailTeste', {}),
+  salvarContrato: (c) => API.post('salvarContrato', c)
+    .then((r) => { API.invalidate('getContratos', 'getEventosContrato'); return r; }),
+  excluirContrato: (id) => API.post('excluirContrato', { id })
+    .then((r) => { API.invalidate('getContratos', 'getEventosContrato'); return r; }),
+  getEventosContrato: (contratoId) => API.get('getEventosContrato', { contratoId }),
+  salvarEventoContrato: (e) => API.post('salvarEventoContrato', e)
+    .then((r) => { API.invalidate('getEventosContrato', 'getContratos'); return r; }),
+  excluirEventoContrato: (id) => API.post('excluirEventoContrato', { id })
+    .then((r) => { API.invalidate('getEventosContrato'); return r; }),
+  getTiposContrato: () => API.get('getTiposContrato'),
+  salvarTipoContrato: (t) => API.post('salvarTipoContrato', t)
+    .then((r) => { API.invalidate('getTiposContrato'); return r; }),
+  excluirTipoContrato: (id) => API.post('excluirTipoContrato', { id })
+    .then((r) => { API.invalidate('getTiposContrato'); return r; }),
+  getIndexadoresReajuste: () => API.get('getIndexadoresReajuste'),
+  salvarIndexadorReajuste: (t) => API.post('salvarIndexadorReajuste', t)
+    .then((r) => { API.invalidate('getIndexadoresReajuste'); return r; }),
+  excluirIndexadorReajuste: (id) => API.post('excluirIndexadorReajuste', { id })
+    .then((r) => { API.invalidate('getIndexadoresReajuste'); return r; }),
+  getStatusContrato: () => API.get('getStatusContrato'),
+  salvarStatusContrato: (t) => API.post('salvarStatusContrato', t)
+    .then((r) => { API.invalidate('getStatusContrato'); return r; }),
+  excluirStatusContrato: (id) => API.post('excluirStatusContrato', { id })
+    .then((r) => { API.invalidate('getStatusContrato'); return r; }),
 };
 
 window.API = API;

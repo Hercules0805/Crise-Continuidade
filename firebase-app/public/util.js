@@ -212,10 +212,49 @@
     return out;
   }
 
+  /**
+   * Moeda em reais, sem o "R$" (o prefixo fica na tela). Sempre 2 casas e
+   * separador de milhar: 1234.5 -> '1.234,50'. Vazio ou invalido -> ''.
+   * Texto ja mascarado ('1.234,50') tambem e aceito e volta igual.
+   */
+  function formatarMoedaBR(valor) {
+    if (valor === null || valor === undefined || valor === '') return '';
+    var n = typeof valor === 'number' ? valor : lerMoedaBR(valor);
+    if (n === null || !isFinite(n)) return '';
+    var negativo = n < 0;
+    var centavos = Math.round(Math.abs(n) * 100);
+    var inteiro = String(Math.floor(centavos / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    var dec = String(centavos % 100);
+    return (negativo ? '-' : '') + inteiro + ',' + (dec.length < 2 ? '0' + dec : dec);
+  }
+
+  /**
+   * Mascara de digitacao (oninput): so os digitos contam e sao tratados como
+   * centavos, como em campo de dinheiro de banco -- digitar 4215676 mostra
+   * '42.156,76'. Sem preservacao de cursor no meio do texto (mesma limitacao
+   * das outras mascaras; o valor e digitado do inicio ao fim).
+   */
+  function mascararMoedaBR(texto) {
+    var d = String(texto === null || texto === undefined ? '' : texto).replace(/\D/g, '').replace(/^0+/, '').slice(0, 13);
+    if (!d) return '';
+    return formatarMoedaBR(Number(d) / 100);
+  }
+
+  /** '42.156,76' -> 42156.76 (numero, o que vai para o banco). Vazio ou invalido -> null. */
+  function lerMoedaBR(texto) {
+    var t = String(texto === null || texto === undefined ? '' : texto).trim();
+    if (!t) return null;
+    var negativo = t.charAt(0) === '-';
+    var n = Number(t.replace(/[^\d,]/g, '').replace(',', '.'));
+    if (!isFinite(n) || !/\d/.test(t)) return null;
+    return negativo ? -n : n;
+  }
+
   return {
     esc: esc, escJs: escJs, escScript: escScript,
     comBotaoCarregando: comBotaoCarregando, criarOrdenacao: criarOrdenacao, criarPaginacao: criarPaginacao,
     criarRastreadorEdicao: criarRastreadorEdicao,
     formatarCNPJ: formatarCNPJ, formatarTelefoneBR: formatarTelefoneBR,
+    formatarMoedaBR: formatarMoedaBR, mascararMoedaBR: mascararMoedaBR, lerMoedaBR: lerMoedaBR,
   };
 });
