@@ -263,3 +263,14 @@ test('pedido de texto no modal do sistema (nao o prompt() nativo): confirma o va
   assert.strictEqual(await p2, null);
   w.close();
 });
+
+test('estado vazio em tres formatos de classe (tela, linha de tabela, nota), sem estilo solto', () => {
+  const linhasVazias = APP.split('\n').filter((l) => /<td colspan/.test(l) && /Nenhum|Nenhuma|Ninguém/.test(l));
+  assert.ok(linhasVazias.length >= 12);
+  linhasVazias.forEach((l) => assert.match(l, /<td colspan="[^"]+" class="vazio">/, l.trim().slice(0, 80)));
+  assert.doesNotMatch(APP, /<p style="text-align:center;color:#999;padding:(40px|60px 20px);">Nenhum/);
+  assert.doesNotMatch(APP, /font-size:3em;margin-bottom:16px;">(📄|🛠️)/, 'sem o emoji gigante do vazio de PCN/DRP');
+  const w = carregar({});
+  assert.strictEqual(w._htmlVazio('Nenhum <x>', 'det'), '<div class="vazio">Nenhum &lt;x&gt;<div class="vazio__detalhe">det</div></div>');
+  w.close();
+});

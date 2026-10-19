@@ -421,3 +421,12 @@ a.btn { text-decoration: none; }
 /* Validação: campo obrigatório (.req) e campo com erro (_avisarCampo) */
 .req { color: var(--red); margin-left: 2px; }
 .campo-invalido { border-color: #c62828 !important; box-shadow: 0 0 0 3px rgba(198, 40, 40, 0.15) !important; }
+
+/* ESTADO VAZIO -- um formato por contexto (DECISÃO 16/10/2026) */
+.vazio { text-align: center; padding: 32px 20px; color: var(--ink-muted); border: 1px dashed var(--border-strong); border-radius: var(--r-md); background: var(--surface); }
+.vazio__titulo { display: block; font-weight: 600; color: var(--ink); margin-bottom: 4px; }
+.vazio__detalhe { margin-top: 6px; font-size: 13px; }
+.data-table td.vazio { border: none; border-radius: 0; padding: 40px 12px; background: transparent; }
+.vazio-inline { font-size: 13px; color: var(--ink-muted); margin: 4px 0; padding: 4px 0; }
+.nav-busca-resultados .vazio { border: none; border-radius: 0; background: transparent; text-align: left; }
+.data-table td.vazio, .data-table td.vazio:nth-child(1) { font-weight: 400; color: var(--ink-muted); text-align: center; }

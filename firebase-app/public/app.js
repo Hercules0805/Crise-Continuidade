@@ -626,6 +626,13 @@ function pedirTexto(rotulo, opcoes = {}) {
   });
 }
 
+// Estado vazio de tela/lista (guia: "Estado vazio"): caixa tracejada centralizada.
+// Linha de tabela usa <td colspan="N" class="vazio">; nota pequena dentro de
+// formulário usa class="vazio-inline".
+function _htmlVazio(texto, detalhe) {
+  return `<div class="vazio">${esc(texto)}${detalhe ? `<div class="vazio__detalhe">${esc(detalhe)}</div>` : ''}</div>`;
+}
+
 // Link/atalho para outra tela só para quem pode vê-la -- senão o clique cai em
 // "Esta tela não é do seu perfil" (ex.: Gestor no drawer de Contrato, TI em
 // Dependências). Mesmo critério do route().
@@ -1237,7 +1244,7 @@ function renderizarAreas() {
           </button>
         </td>`}
       </tr>`).join('')
-    : '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">Nenhuma área cadastrada.</td></tr>';
+    : '<tr><td colspan="5" class="vazio">Nenhuma área cadastrada.</td></tr>';
 }
 
 window.ordenarAreas = (coluna) => {
@@ -1613,7 +1620,7 @@ function renderizarPessoas() {
           </button>
         </td>`}
       </tr>`).join('')
-    : '<tr><td colspan="7" style="text-align:center;color:#999;padding:20px;">Nenhuma pessoa cadastrada.</td></tr>';
+    : '<tr><td colspan="7" class="vazio">Nenhuma pessoa cadastrada.</td></tr>';
 }
 
 const pessoasPaginacao = criarPaginacao(20);
@@ -1661,7 +1668,7 @@ function renderLiderancaPessoa() {
         const sel = marcados.has(it.id);
         return `<button type="button" onclick="alternarProdutoLiderancaPessoa('${funcao}','${esc(it.id)}')" style="padding:5px 12px;border-radius:14px;cursor:pointer;font-size:0.82em;font-weight:600;border:1.5px solid ${sel ? '#d60014' : '#c5cae9'};background:${sel ? '#fce8ea' : '#fff'};color:${sel ? '#d60014' : '#555'};">${esc(it.nome)}${esc(it.sufixo)}${sel ? ' ✓' : ''}</button>`;
       }).join('')}</div>`
-      : '<div style="font-size:0.8em;color:#999;">Nenhum produto cadastrado ainda.</div>';
+      : '<div class="vazio-inline">Nenhum produto cadastrado ainda.</div>';
   });
 }
 
@@ -1726,7 +1733,7 @@ function renderPessoaAreas() {
   const cont = document.getElementById('pessoaAreasTabela');
   if (!cont) return;
   const itens = window._pessoaAreas || [];
-  if (!itens.length) { cont.innerHTML = '<p style="font-size:0.83em;color:#999;margin:4px 0;">Nenhuma área vinculada.</p>'; _popularSelectAreaPessoaAdd(); return; }
+  if (!itens.length) { cont.innerHTML = '<p class="vazio-inline">Nenhuma área vinculada.</p>'; _popularSelectAreaPessoaAdd(); return; }
   cont.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;">` +
     itens.map((a, i) => `<span style="display:inline-flex;align-items:center;gap:6px;background:${i === 0 ? '#d60014' : '#fce8ea'};color:${i === 0 ? '#fff' : '#d60014'};padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(a)}${i === 0 ? ' <span style="opacity:0.8;font-size:0.85em;">(principal)</span>' : ''}<button onclick="removerPessoaArea(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:${i === 0 ? 'rgba(255,255,255,0.75)' : '#c62828'};line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`).join('') +
     `</div>`;
@@ -2935,7 +2942,7 @@ function renderizarProcessos() {
         </td>`}
       </tr>`;
       }).join('')
-    : `<tr><td colspan="10" style="text-align:center;color:#999;padding:40px;">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
+    : `<tr><td colspan="10" class="vazio">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
 
   // Coerência da seleção com a lista filtrada: linhas escondidas por filtro
   // continuam marcadas em processosSelecionados (não perde seleção ao trocar
@@ -3305,7 +3312,7 @@ function renderDependenciaTabela() {
   const categorias = [...categoriasSet].sort();
 
   if (!categorias.length) {
-    tabelaContainer.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhuma dependência cadastrada no catálogo.</p>';
+    tabelaContainer.innerHTML = '<p class="vazio-inline">Nenhuma dependência cadastrada no catálogo.</p>';
     return;
   }
 
@@ -3569,7 +3576,7 @@ window._bcpRiscos = [];
 function renderRiscosBcp() {
   const container = document.getElementById('bcpRiscosTabela');
   if (!window._bcpRiscos.length) {
-    container.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhum evento de risco cadastrado.</p>';
+    container.innerHTML = '<p class="vazio-inline">Nenhum evento de risco cadastrado.</p>';
     return;
   }
 
@@ -3637,7 +3644,7 @@ window._bcpPreventivas = [];
 function renderPreventivasBcp() {
   const container = document.getElementById('bcpPreventivasTabela');
   if (!window._bcpPreventivas.length) {
-    container.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhuma medida preventiva cadastrada.</p>';
+    container.innerHTML = '<p class="vazio-inline">Nenhuma medida preventiva cadastrada.</p>';
     return;
   }
 
@@ -4367,7 +4374,7 @@ function renderizarDependencias() {
         </td>
       </tr>`;
       }).join('')
-    : '<tr><td colspan="4" style="text-align:center;color:#999;padding:40px;">Nenhuma dependência cadastrada.</td></tr>';
+    : '<tr><td colspan="4" class="vazio">Nenhuma dependência cadastrada.</td></tr>';
 }
 
 /** Fornecedor é linha de /dependencias, mas editado/avaliado na tela Fornecedores.
@@ -4430,7 +4437,7 @@ function renderDrpLista(campo) {
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
       </button>
       <button class="btn-icon" onclick="removerDrpItem('${campo}', ${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
-    </div>`).join('') : '<p style="font-size:0.82em;color:#999;">Nenhum item adicionado ainda.</p>';
+    </div>`).join('') : '<p class="vazio-inline">Nenhum item adicionado ainda.</p>';
 }
 
 window.adicionarDrpItem = (campo) => {
@@ -4745,7 +4752,7 @@ function renderDrpEstrategiasTeste() {
   const cont = document.getElementById('drpEstrategiasTabela');
   if (!cont) return;
   const itens = window._depDrpEstrategias || [];
-  if (!itens.length) { cont.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhuma estratégia de teste cadastrada.</p>'; return; }
+  if (!itens.length) { cont.innerHTML = '<p class="vazio-inline">Nenhuma estratégia de teste cadastrada.</p>'; return; }
   cont.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((e, i) => `<tr>
         <td style="font-weight:600;color:#222;">${esc(e.cenario || '-')}</td>
@@ -4813,7 +4820,7 @@ function renderDrpRoteirosTeste() {
   const cont = document.getElementById('drpRoteirosTabela');
   if (!cont) return;
   const itens = _roteirosTesteMaisRecentesPorCategoria();
-  if (!itens.length) { cont.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum roteiro de teste gerado ainda.</p>'; return; }
+  if (!itens.length) { cont.innerHTML = '<p class="vazio-inline">Nenhum roteiro de teste gerado ainda.</p>'; return; }
   cont.innerHTML = `<table class="data-table" style="box-shadow:none;">
     <thead><tr>
       <th style="font-size:0.78em;">Categoria</th>
@@ -5075,7 +5082,7 @@ function renderDrpRegistrosTeste() {
   const cont = document.getElementById('drpRegistrosTabela');
   if (!cont) return;
   const ordenados = _registrosTesteOrdenados();
-  if (!ordenados.length) { cont.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum registro de teste ainda.</p>'; return; }
+  if (!ordenados.length) { cont.innerHTML = '<p class="vazio-inline">Nenhum registro de teste ainda.</p>'; return; }
   cont.innerHTML = `<table class="data-table" style="box-shadow:none;">
     <thead><tr>
       <th style="font-size:0.78em;">Data</th>
@@ -5206,11 +5213,11 @@ function renderDrpResumo() {
   if (btnAbrir) btnAbrir.style.display = versoes.length ? 'inline-block' : 'none';
 
   if (!id) {
-    container.innerHTML = '<div style="border:1px dashed #ddd;border-radius:8px;padding:16px;text-align:center;color:#888;background:#fafafa;">Salve a dependência antes de gerar o DRP.</div>';
+    container.innerHTML = '<div class="vazio">Salve a dependência antes de gerar o DRP.</div>';
     return;
   }
   if (!versoes.length) {
-    container.innerHTML = '<div style="border:1px dashed #ddd;border-radius:8px;padding:16px;text-align:center;color:#888;background:#fafafa;">Nenhum DRP gerado ainda para esta dependência.</div>';
+    container.innerHTML = '<div class="vazio">Nenhum DRP gerado ainda para esta dependência.</div>';
     return;
   }
 
@@ -5452,7 +5459,7 @@ async function _renderProcessosDaDependencia(d) {
   }
   const vinculados = _processosVinculadosADependencia(d, processos);
   if (!vinculados.length) {
-    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhum processo vinculado a esta dependência.</p>';
+    cont.innerHTML = '<p class="vazio-inline">Nenhum processo vinculado a esta dependência.</p>';
     return;
   }
   cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
@@ -5796,7 +5803,7 @@ function _renderRelatorioDepsChecklist() {
     .filter((g) => g.itens.length);
 
   if (!grupos.length) {
-    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhuma dependência cadastrada no catálogo.</p>';
+    cont.innerHTML = '<p class="vazio-inline">Nenhuma dependência cadastrada no catálogo.</p>';
     return;
   }
 
@@ -5874,7 +5881,7 @@ function _renderRelatorioAreasChecklist() {
   if (!cont) return;
   const grupos = window._relatorioAreasGrupos || [];
   if (!grupos.length) {
-    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhuma área cadastrada.</p>';
+    cont.innerHTML = '<p class="vazio-inline">Nenhuma área cadastrada.</p>';
     return;
   }
   const selecionadas = window._relatorioAreasSelecionadas || new Set();
@@ -5987,7 +5994,7 @@ td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
   </div>
   <button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button>
 </div>
-${corpo || '<p style="text-align:center;color:#999;padding:60px 20px;">Nenhuma área selecionada.</p>'}
+${corpo || '<p class="vazio">Nenhuma área selecionada.</p>'}
 <div class="footer">Relatório gerado a partir do cadastro de Áreas e de Processos. Dono = responsável da área.</div>
 </body>
 </html>`;
@@ -6129,7 +6136,7 @@ td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
   </div>
   <button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button>
 </div>
-${corpo || '<p style="text-align:center;color:#999;padding:60px 20px;">Nenhuma dependência cadastrada no catálogo.</p>'}
+${corpo || '<p class="vazio">Nenhuma dependência cadastrada no catálogo.</p>'}
 <div class="footer">Relatório gerado a partir do catálogo de Dependências e dos vínculos em Dependências Críticas de cada Processo.</div>
 </body>
 </html>`;
@@ -6226,7 +6233,7 @@ function renderizarServicos() {
           </button>
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">Nenhum serviço cadastrado.</td></tr>';
+    : '<tr><td colspan="5" class="vazio">Nenhum serviço cadastrado.</td></tr>';
 }
 
 window.ordenarServicos = (coluna) => { servicosOrdenacao.ordenar(coluna); renderizarServicos(); };
@@ -6342,7 +6349,7 @@ function _renderServicoBackupsTab(servicoId) {
   acao.innerHTML = `<button class="btn btn-primary" onclick="${irParaCatalogo}">+ Novo Backup</button>`;
   const vinculados = (backupsData || []).filter((b) => b.servicoId === servicoId);
   if (!vinculados.length) {
-    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:4px 0;">Nenhum backup cadastrado ainda.</p>';
+    cont.innerHTML = '<p class="vazio-inline">Nenhum backup cadastrado ainda.</p>';
     return;
   }
   cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
@@ -6516,7 +6523,7 @@ function _renderServicoProcessosImpactados() {
   const vinculados = [...vistos.values()];
 
   if (!vinculados.length) {
-    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:4px 0;">Nenhum processo vinculado a estas dependências.</p>';
+    cont.innerHTML = '<p class="vazio-inline">Nenhum processo vinculado a estas dependências.</p>';
     return;
   }
   cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.88em;">
@@ -6707,7 +6714,7 @@ function renderizarCatalogoBackup() {
           </button>
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="6" style="text-align:center;color:#999;padding:20px;">Nenhum backup cadastrado.</td></tr>';
+    : '<tr><td colspan="6" class="vazio">Nenhum backup cadastrado.</td></tr>';
 }
 
 window.ordenarCatalogoBackup = (coluna) => { backupsOrdenacao.ordenar(coluna); renderizarCatalogoBackup(); };
@@ -7155,7 +7162,7 @@ function _renderBackupJobsTabela() {
   if (!cont) return;
   const jobs = window._backupJobs || [];
   if (!jobs.length) {
-    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:4px 0;">Nenhum job cadastrado ainda.</p>';
+    cont.innerHTML = '<p class="vazio-inline">Nenhum job cadastrado ainda.</p>';
     return;
   }
   cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.88em;">
@@ -7713,7 +7720,7 @@ function renderizarVulnerabilidades() {
         </td>
       </tr>`;
       }).join('')
-    : `<tr><td colspan="10" style="text-align:center;color:#999;padding:40px;">Nenhuma vulnerabilidade encontrada.</td></tr>`;
+    : `<tr><td colspan="10" class="vazio">Nenhuma vulnerabilidade encontrada.</td></tr>`;
   _sincronizarSelecaoVulnerabilidades();
 
   const paginacao = document.getElementById('vulnPaginacao');
@@ -9784,7 +9791,7 @@ function _renderPainelRiscoConsolidado() {
         <span style="font-size:2.8em;font-weight:800;line-height:1;color:#d60014;">${semNada ? '–' : emp.carga}</span>
         ${semNada ? '' : '<span style="font-size:0.85em;color:#aaa;">pontos</span>'}
       </div>
-      <div>${badgesComposicao(emp.composicao, false) || '<span style="font-size:0.8em;color:#999;">Nenhum risco na conta</span>'}</div>
+      <div>${badgesComposicao(emp.composicao, false) || '<span class="vazio-inline">Nenhum risco na conta</span>'}</div>
       <div style="font-size:0.76em;color:#777;margin-top:10px;">
         ${emp.contados} risco${emp.contados === 1 ? '' : 's'} somado${emp.contados === 1 ? '' : 's'}${emp.piorScore !== null ? ` · pior caso ${emp.piorScore} de 25 (${esc(emp.piorFaixa.rotulo)})` : ''}
       </div>
@@ -9813,7 +9820,7 @@ function _renderPainelRiscoConsolidado() {
       <div style="font-size:0.72em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;padding:0 10px 6px;">Carga por área</div>
       ${r.areas.length
         ? `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">${linhasAreas}</table>`
-        : '<div style="padding:10px;color:#999;font-size:0.88em;">Nenhum risco registrado.</div>'}
+        : '<div class="vazio-inline">Nenhum risco registrado.</div>'}
     </div>`;
 
   painel.innerHTML = `
@@ -10145,7 +10152,7 @@ async function monitor() {
       <div style="border:1px solid #e0e0e0;border-radius:10px;padding:20px 22px;background:#fff;">
         <div style="font-size:0.74em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.6px;">Carga da Empresa Hoje</div>
         <div style="font-size:3.2em;font-weight:800;line-height:1;margin:10px 0 12px;color:#d60014;">${ultimo.empresa.carga}</div>
-        <div>${badgesComposicao(ultimo.empresa.composicao) || '<span style="font-size:0.8em;color:#999;">Nenhum risco na conta</span>'}</div>
+        <div>${badgesComposicao(ultimo.empresa.composicao) || '<span class="vazio-inline">Nenhum risco na conta</span>'}</div>
         <div style="font-size:0.8em;color:#777;margin-top:12px;">${ultimo.empresa.contados} risco${ultimo.empresa.contados === 1 ? '' : 's'} somado${ultimo.empresa.contados === 1 ? '' : 's'}</div>
       </div>
       <div style="border:1px solid #e0e0e0;border-radius:10px;padding:20px 22px;background:#fff;">
@@ -10190,7 +10197,7 @@ async function monitor() {
             <td style="padding:7px 10px;color:#777;">${badgesComposicao(a.composicao)}</td>
           </tr>`).join('')}
         </tbody>
-      </table>` : '<div style="padding:10px;color:#999;font-size:0.88em;">Nenhum risco registrado.</div>'}
+      </table>` : '<div class="vazio-inline">Nenhum risco registrado.</div>'}
     </div>
     <div style="font-size:0.76em;color:#999;margin-top:14px;">
       Só quem tem perfil de administrador vê esta tela por enquanto — ver a aba Roadmap sobre abrir por área.
@@ -10285,7 +10292,7 @@ function renderizarRiscos() {
           </button>` : ''}
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="17" class="muted" style="text-align:center;padding:40px;">Nenhum risco cadastrado.</td></tr>';
+    : '<tr><td colspan="17" class="vazio">Nenhum risco cadastrado.</td></tr>';
 }
 
 // ------------------------------------------------------------
@@ -11435,7 +11442,7 @@ function renderImpactoFinanceiroRisco() {
       .map((it, i) => ({ ...it, _i: i }))
       .filter((it) => s.categorias.includes(it.categoria));
 
-    if (!itensDaSecao.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum componente adicionado nesta seção.</p>'; return; }
+    if (!itensDaSecao.length) { container.innerHTML = '<p class="vazio-inline">Nenhum componente adicionado nesta seção.</p>'; return; }
     container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
       itensDaSecao.map((it) => `<tr>
           ${s.categorias.length > 1 ? `<td style="font-weight:600;color:#222;">${esc(it.categoria)}</td>` : ''}
@@ -11482,7 +11489,7 @@ function renderPlanoAcaoRisco() {
   if (!container) return;
   const itens = window._riscoPlanoAcao || [];
   const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
-  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhuma ação cadastrada.</p>'; return; }
+  if (!itens.length) { container.innerHTML = '<p class="vazio-inline">Nenhuma ação cadastrada.</p>'; return; }
   // Compatibilidade com itens salvos no formato antigo (acao/responsavel/prazo/status):
   // `quando` cai para `prazo` quando o item nao tem o campo novo.
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
@@ -11574,7 +11581,7 @@ function renderKrisRisco() {
   if (!container) return;
   const itens = window._riscoKris || [];
   const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
-  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum KRI cadastrado.</p>'; return; }
+  if (!itens.length) { container.innerHTML = '<p class="vazio-inline">Nenhum KRI cadastrado.</p>'; return; }
   const corStatus = { 'Fora da meta': '#c62828', 'Atenção': '#e65100', 'Dentro da meta': '#2e7d32' };
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((it, i) => {
@@ -12632,7 +12639,7 @@ function renderizarIndicadoresDashboard() {
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
               </button></td>` : ''}
             </tr>`;
-          }).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" style="text-align:center;color:#999;padding:40px;">${f.modo === 'foraDaMeta' ? 'Nenhum indicador fora da meta 🎉' : 'Nenhum indicador encontrado.'}</td></tr>`}
+          }).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" class="vazio">${f.modo === 'foraDaMeta' ? 'Nenhum indicador fora da meta 🎉' : 'Nenhum indicador encontrado.'}</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -12795,7 +12802,7 @@ function renderizarIndicadoresCadastro() {
                   <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
                 </button>` : ''}
               </td>
-            </tr>`).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" style="text-align:center;color:#999;padding:40px;">Nenhum indicador encontrado.</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" class="vazio">Nenhum indicador encontrado.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -12997,7 +13004,7 @@ function renderizarGradeLancamentos() {
               ${isAdmin ? `<td style="text-align:center;"><button class="btn-icon" onclick="excluirLancamento('${r.indicadorId}','${r.mes}')" title="Excluir lançamento">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
               </button></td>` : ''}
-            </tr>`).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" style="text-align:center;color:#999;padding:30px;">Nenhum lançamento encontrado.</td></tr>`}
+            </tr>`).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" class="vazio">Nenhum lançamento encontrado.</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -13149,7 +13156,7 @@ function renderizarIndicadoresMatriz() {
   const meses = _mesesDisponiveis().slice().sort();
 
   if (!dadosFiltrados.length) {
-    conteudo.innerHTML = '<p style="text-align:center;color:#999;padding:40px;">Nenhum indicador encontrado.</p>';
+    conteudo.innerHTML = '<p class="vazio">Nenhum indicador encontrado.</p>';
     return;
   }
 
@@ -14642,7 +14649,7 @@ function renderFornecedoresBcp() {
   });
   
   if (!fornecedores.length) {
-    container.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Nenhum fornecedor mapeado na BIA.</p>';
+    container.innerHTML = '<p class="vazio-inline">Nenhum fornecedor mapeado na BIA.</p>';
     return;
   }
   
@@ -14723,11 +14730,7 @@ async function pcns() {
 
     if (!comPCN.length) {
       document.getElementById('pcns-lista').innerHTML = `
-        <div style="text-align:center;padding:60px 20px;color:#999;">
-          <div style="font-size:3em;margin-bottom:16px;">📄</div>
-          <h3 style="color:#666;margin-bottom:8px;">Nenhum PCN gerado ainda</h3>
-          <p>Gere PCNs na tela de Processos clicando em "🤖 Gerar PCN".</p>
-        </div>`;
+        <div class="vazio"><span class="vazio__titulo">Nenhum PCN gerado ainda</span>Gere PCNs na tela de Processos clicando em "🤖 Gerar PCN".</div>`;
       return;
     }
 
@@ -14809,7 +14812,7 @@ function renderPCNLista(comPCN) {
     html += `</div></div>`;
   });
 
-  if (!html) html = '<p style="text-align:center;color:#999;padding:40px;">Nenhum PCN encontrado.</p>';
+  if (!html) html = '<p class="vazio">Nenhum PCN encontrado.</p>';
   document.getElementById('pcns-lista').innerHTML = html;
 }
 
@@ -14976,8 +14979,8 @@ function renderDRPLista(lista, tipo) {
 
   if (!html) {
     html = tipo === 'todas'
-      ? '<p style="text-align:center;color:#999;padding:40px;">Nenhuma dependência técnica encontrada.</p>'
-      : '<div style="text-align:center;padding:60px 20px;color:#999;"><div style="font-size:3em;margin-bottom:16px;">🛠️</div><h3 style="color:#666;margin-bottom:8px;">Nenhum DRP gerado ainda</h3><p>Use o filtro "Todas as dependências" para preparar os Parâmetros DRP e gerar o plano.</p></div>';
+      ? '<p class="vazio">Nenhuma dependência técnica encontrada.</p>'
+      : '<div class="vazio"><span class="vazio__titulo">Nenhum DRP gerado ainda</span>Use o filtro "Todas as dependências" para preparar os Parâmetros DRP e gerar o plano.</div>';
   }
   document.getElementById('drp-lista').innerHTML = html;
 }
@@ -15704,7 +15707,7 @@ function renderCriticidadePerguntaOpcoes() {
   const container = document.getElementById('critPergOpcoesTabela');
   if (!container) return;
   const itens = window._criticidadePerguntaOpcoes || [];
-  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhuma opção cadastrada ainda.</p>'; return; }
+  if (!itens.length) { container.innerHTML = '<p class="vazio-inline">Nenhuma opção cadastrada ainda.</p>'; return; }
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((op, i) => `<tr>
         <td style="font-weight:600;color:#222;">${esc(op.rotulo)}</td>
@@ -16274,7 +16277,7 @@ function renderizarFornecedores() {
                 ${podeMexer ? `<button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir">${SVG_EXCLUIR}</button>` : ''}
               </td>
             </tr>`;
-          }).join('') : `<tr><td colspan="10" class="muted" style="padding:40px;text-align:center;">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
+          }).join('') : `<tr><td colspan="10" class="vazio">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -16622,7 +16625,7 @@ function renderizarProdutosSoftware() {
                   <button class="btn-icon" onclick="excluirProdutoSoftware('${esc(p.id)}')" title="Excluir">${SVG_EXCLUIR}</button>` : '–'}
               </td>
             </tr>`;
-          }).join('') : '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">Nenhum produto encontrado.</td></tr>'}
+          }).join('') : '<tr><td colspan="5" class="vazio">Nenhum produto encontrado.</td></tr>'}
         </tbody>
       </table>
     </div>`;
@@ -16862,7 +16865,7 @@ function renderizarPerfis() {
                   ${euMesmo ? '' : `<button class="btn-icon" onclick="excluirPerfilAcesso('${esc(p.email)}')" title="Remover acesso">${SVG_EXCLUIR}</button>`}` : '–'}
               </td>
             </tr>`;
-          }).join('') : `<tr><td colspan="5" style="padding:20px;text-align:center;color:#888;">${houveBusca ? 'Nenhum perfil corresponde à busca.' : 'Ninguém cadastrado. Todo mundo que entrar cai no menor acesso.'}</td></tr>`}
+          }).join('') : `<tr><td colspan="5" class="vazio">${houveBusca ? 'Nenhum perfil corresponde à busca.' : 'Ninguém cadastrado. Todo mundo que entrar cai no menor acesso.'}</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -17250,7 +17253,7 @@ function renderPessoasFornecedor() {
   const container = document.getElementById('pessoasFornecedorTabela');
   if (!container) return;
   const itens = window._fornecedorPessoas || [];
-  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum contato cadastrado.</p>'; return; }
+  if (!itens.length) { container.innerHTML = '<p class="vazio-inline">Nenhum contato cadastrado.</p>'; return; }
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((p, i) => `<tr>
         <td style="font-weight:600;color:#222;">${esc(p.nome)}</td>
@@ -17331,7 +17334,7 @@ function renderCanaisSuporteFornecedor() {
   const container = document.getElementById('canaisSuporteFornecedorTabela');
   if (!container) return;
   const itens = window._fornecedorCanais || [];
-  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum canal de suporte cadastrado.</p>'; return; }
+  if (!itens.length) { container.innerHTML = '<p class="vazio-inline">Nenhum canal de suporte cadastrado.</p>'; return; }
   const podeMexer = window._fornPodeMexer !== false;
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((c, i) => {
@@ -17428,7 +17431,7 @@ function renderGestoresContrato() {
   const container = document.getElementById('gestoresContratoTabela');
   if (!container) return;
   const itens = window._fornecedorGestores || [];
-  if (!itens.length) { container.innerHTML = '<p style="font-size:0.85em;color:#999;">Nenhum gestor do contrato adicionado.</p>'; return; }
+  if (!itens.length) { container.innerHTML = '<p class="vazio-inline">Nenhum gestor do contrato adicionado.</p>'; return; }
   container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
     itens.map((g, i) => `<tr>
         <td style="font-weight:600;color:#222;">${esc(g.nome)}</td>
@@ -19024,7 +19027,7 @@ window.renderDocumentosContrato = () => {
         <button class="btn-icon" onclick="removerDocumentoContrato(${i})" title="Remover">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>` : ''}
       </div>`).join('')
-    : '<div style="padding:18px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">Nenhum documento vinculado.</div>';
+    : '<div class="vazio">Nenhum documento vinculado.</div>';
 };
 
 window.adicionarDocumentoContrato = () => {
@@ -19096,7 +19099,7 @@ window.renderEventosContrato = () => {
   const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
   const evs = window._contratoEventos || [];
   if (!evs.length) {
-    lista.innerHTML = '<div style="padding:18px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">Nenhum evento registrado.</div>';
+    lista.innerHTML = '<div class="vazio">Nenhum evento registrado.</div>';
     return;
   }
   lista.innerHTML = `<div style="border-left:2px solid #fce8ea;margin-left:6px;padding-left:18px;">
@@ -19275,7 +19278,7 @@ function _renderVinculosContrato() {
   const c = _coletarFormularioContrato();
   const forn = _contratoFornecedores.find((f) => String(f.id) === String(c.fornecedorId));
   if (!c.fornecedorId) {
-    cont.innerHTML = '<div style="padding:18px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">Selecione o fornecedor para ver os vínculos.</div>';
+    cont.innerHTML = '<div class="vazio">Selecione o fornecedor para ver os vínculos.</div>';
     return;
   }
   const secao = (titulo, corpo) => `<div style="margin-bottom:22px;"><div style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">${titulo}</div>${corpo}</div>`;
@@ -19613,13 +19616,13 @@ function _renderContratosDoFornecedor(fornecedorId) {
   const btnNovo = document.getElementById('btnNovoContratoForn');
   if (btnNovo) btnNovo.style.display = podeEditar && fornecedorId ? 'inline-block' : 'none';
   if (!fornecedorId) {
-    cont.innerHTML = '<div style="padding:18px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">Salve o fornecedor para vincular contratos.</div>';
+    cont.innerHTML = '<div class="vazio">Salve o fornecedor para vincular contratos.</div>';
     return;
   }
   const lista = (contratosData || []).filter((c) => String(c.fornecedorId) === String(fornecedorId))
     .sort((a, b) => String(b.dataFim || '').localeCompare(String(a.dataFim || '')));
   if (!lista.length) {
-    cont.innerHTML = '<div style="padding:18px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">Nenhum contrato com este fornecedor.</div>';
+    cont.innerHTML = '<div class="vazio">Nenhum contrato com este fornecedor.</div>';
     return;
   }
   cont.innerHTML = `<div class="data-table"><table>
@@ -19970,7 +19973,7 @@ function renderizarNotificacoesEmail() {
         <td title="${esc(n.assunto)}" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(n.assunto)}</td>
         <td>${_pillStatusNotificacao(n.status)}${n.status === 'erro' ? `<div class="muted" style="font-size:0.75em;">${n.tentativas} tentativa(s)</div>` : ''}</td>
       </tr>`).join('')
-    : `<tr><td colspan="6" style="text-align:center;color:#999;padding:40px;">${notificacoesEmailData.length ? 'Nenhum e-mail com esses filtros.' : 'Nenhum e-mail na fila ainda. Com o modo em Simulação ou Ativo, a varredura diária (05:00) começa a registrar aqui.'}</td></tr>`;
+    : `<tr><td colspan="6" class="vazio">${notificacoesEmailData.length ? 'Nenhum e-mail com esses filtros.' : 'Nenhum e-mail na fila ainda. Com o modo em Simulação ou Ativo, a varredura diária (05:00) começa a registrar aqui.'}</td></tr>`;
 
   const pag = document.getElementById('notificacoesPaginacao');
   if (pag) {
