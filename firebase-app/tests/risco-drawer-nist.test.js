@@ -113,7 +113,8 @@ test('declaração de risco monta a frase e vira título com um clique (pergunta
   $('rConsequencia').value = 'parada do faturamento';
   w._atualizarDeclaracaoRisco();
   assert.match($('rDeclaracaoSugerida').textContent, /Se enchente no data center \(fonte ambiental\), explorando sala no subsolo, então parada do faturamento\./);
-  w.usarDeclaracaoRisco('titulo');
+  // Assíncrona desde 16/10/2026: pode perguntar (confirmarAcao) antes de substituir o título.
+  await w.usarDeclaracaoRisco('titulo');
   assert.equal($('rTitulo').value, 'Se enchente no data center (fonte ambiental), explorando sala no subsolo, então parada do faturamento.');
   await w.salvarRisco();
 });

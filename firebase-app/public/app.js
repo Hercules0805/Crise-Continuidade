@@ -435,6 +435,39 @@ function _avisarCampo(idCampo, mensagem) {
   showToast(mensagem, '#e65100');
 }
 
+// Confirmação no padrão do sistema (modal com Cancelar + ação), no lugar do
+// confirm() nativo do navegador -- que tem outra cara, não segue o tema e mostra
+// o domínio do site no título. Esc = Cancelar (handler global de Esc).
+// Se window.confirm foi substituído (ambiente de teste), usa a substituição.
+function confirmarAcao(mensagem, opcoes = {}) {
+  const nativo = /\[native code\]/.test(Function.prototype.toString.call(window.confirm));
+  if (!nativo) return Promise.resolve(!!window.confirm(mensagem));
+  const texto = String(mensagem || '');
+  const verbo = (texto.match(/^(Excluir|Remover|Apagar|Descartar)\b/i) || [])[1];
+  const rotulo = opcoes.rotulo || (verbo ? verbo.charAt(0).toUpperCase() + verbo.slice(1).toLowerCase() : 'Confirmar');
+  return new Promise((resolve) => {
+    const el = document.createElement('div');
+    el.className = 'modal-overlay modal-sobre-drawer open';
+    el.innerHTML = `
+      <div class="modal" role="alertdialog" aria-modal="true" aria-labelledby="tituloConfirmarAcao" style="max-width:480px;">
+        <h3 id="tituloConfirmarAcao">${esc(opcoes.titulo || 'Confirmar')}</h3>
+        <p style="margin:0;white-space:pre-line;line-height:1.5;">${esc(texto)}</p>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" data-resposta="nao">Cancelar</button>
+          <button type="button" class="btn btn-primary" data-resposta="sim">${esc(rotulo)}</button>
+        </div>
+      </div>`;
+    const responder = (sim) => { el.remove(); resolve(sim); };
+    el.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-resposta]');
+      if (b) responder(b.dataset.resposta === 'sim');
+      else if (e.target === el) responder(false);
+    });
+    document.body.appendChild(el);
+    el.querySelector('[data-resposta="sim"]').focus();
+  });
+}
+
 // Link/atalho para outra tela só para quem pode vê-la -- senão o clique cai em
 // "Esta tela não é do seu perfil" (ex.: Gestor no drawer de Contrato, TI em
 // Dependências). Mesmo critério do route().
@@ -897,7 +930,7 @@ window.salvarConfigResposta = async () => {
 };
 
 window.excluirConfigResposta = async (cat, idx) => {
-  if (!confirm('Excluir esta opção?')) return;
+  if (!await confirmarAcao('Excluir esta opção?')) return;
   const op = window.configRespostasData[cat][idx];
   const rowIndex = op.rowIndex || op.id;
   await API.excluirConfigResposta({ rowIndex });
@@ -930,7 +963,7 @@ window.salvarPergunta = async () => {
 };
 
 window.excluirPergunta = async (id) => {
-  if (!confirm('Excluir esta pergunta?')) return;
+  if (!await confirmarAcao('Excluir esta pergunta?')) return;
   await API.excluirPergunta(id);
   showToast('🗑️ Excluído.', '#555');
   perguntas();
@@ -1158,7 +1191,7 @@ window.salvarArea = async () => {
 };
 
 window.excluirArea = async (id) => {
-  if (!confirm('Excluir esta área?')) return;
+  if (!await confirmarAcao('Excluir esta área?')) return;
   await API.excluirArea(id);
   showToast('🗑️ Excluído.', '#555');
   areas();
@@ -2092,7 +2125,7 @@ window.salvarPessoaCadastro = async () => {
   let perfilCancelado = false;
   const meuEmail = String(window.USER_EMAIL || '').toLowerCase();
   if (podeGerenciar && email && email.toLowerCase() === meuEmail && !Perfis.ehAdmin(perfisMarcados)
-    && !confirm('Você está retirando o seu próprio acesso de administrador.\n\nSe não houver outro administrador, ninguém mais consegue dar acesso a ninguém sem entrar no console do Firebase. Continuar?')) {
+    && !await confirmarAcao('Você está retirando o seu próprio acesso de administrador.\n\nSe não houver outro administrador, ninguém mais consegue dar acesso a ninguém sem entrar no console do Firebase. Continuar?')) {
     perfilCancelado = true;
   }
 
@@ -2165,7 +2198,7 @@ window.excluirPessoaCadastro = async (id) => {
   const p = pessoasData.find((x) => String(x.id) === String(id));
   if (!p) return;
   const aviso = `Excluir "${p.nome}"?\n\nSe essa pessoa estiver marcada como Gestor do Contrato de algum fornecedor ou Responsável de alguma área, o nome continua lá como texto (não é apagado em cascata), mas deixa de aparecer nas listas de seleção. Continuar?`;
-  if (!confirm(aviso)) return;
+  if (!await confirmarAcao(aviso)) return;
 
   try {
     await API.excluirDependencia(id);
@@ -2954,7 +2987,7 @@ window.aplicarEdicaoLoteProcessos = async () => {
   if (!Object.keys(camposTocados).length && !novasDependencias.length) {
     return showToast('Escolha ao menos um campo para alterar.', '#e65100');
   }
-  if (!confirm(`Aplicar as alterações a ${ids.length} processo(s) selecionado(s)?`)) return;
+  if (!await confirmarAcao(`Aplicar as alterações a ${ids.length} processo(s) selecionado(s)?`)) return;
 
   await comBotaoCarregando('btnAplicarLoteProcessos', async () => {
     let sucesso = 0;
@@ -3016,7 +3049,7 @@ window.enviarRelatorioArea = async () => {
   if (!area) return;
   const areaObj = window.areasDisponiveis.find(a => a.nome === area);
   if (!areaObj || !areaObj.email) return showToast('E-mail do responsável não cadastrado para esta área.', '#e65100');
-  if (!confirm(`Enviar relatório de "${area}" para ${areaObj.responsavel} (${areaObj.email})?`)) return;
+  if (!await confirmarAcao(`Enviar relatório de "${area}" para ${areaObj.responsavel} (${areaObj.email})?`)) return;
   try {
     showToast('⏳ Gerando relatório...', '#1565c0');
     const result = await API.post('gerarRelatorioArea', { area, email: areaObj.email });
@@ -3032,7 +3065,7 @@ window.enviarParaArea = async () => {
   if (!area) return;
   const areaObj = window.areasDisponiveis.find(a => a.nome === area);
   if (!areaObj || !areaObj.email) return showToast('E-mail do responsável não cadastrado para esta área.', '#e65100');
-  if (!confirm(`Enviar questionário para ${areaObj.responsavel} (${areaObj.email})?`)) return;
+  if (!await confirmarAcao(`Enviar questionário para ${areaObj.responsavel} (${areaObj.email})?`)) return;
   try {
     const result = await API.post('gerarTokenArea', { area, email: areaObj.email, nomeResponsavel: areaObj.responsavel || '' });
     if (result.error) throw new Error(result.error);
@@ -3749,7 +3782,7 @@ window.salvarProcesso = async () => {
 window.excluirProcesso = async (id) => {
   const p = window.processosData.find(proc => proc.id === id);
   if (!p) return;
-  if (!confirm(`Excluir o processo "${p.processo}"? Esta ação não pode ser desfeita.`)) return;
+  if (!await confirmarAcao(`Excluir o processo "${p.processo}"? Esta ação não pode ser desfeita.`)) return;
   try {
     await API.post('excluirProcesso', { id: String(id), area: p.area, processo: p.processo });
     showToast('🗑️ Excluído.', '#555');
@@ -4592,7 +4625,7 @@ function renderDrpRoteirosTeste() {
 }
 
 window.removerDrpRoteiroTeste = async (categoria) => {
-  if (!confirm(`Excluir o roteiro de teste de "${categoria}"? Todas as versões geradas pra este tipo de teste serão apagadas.`)) return;
+  if (!await confirmarAcao(`Excluir o roteiro de teste de "${categoria}"? Todas as versões geradas pra este tipo de teste serão apagadas.`)) return;
   const id = document.getElementById('depId').value || '';
   if (!id) return;
   try {
@@ -5287,7 +5320,7 @@ window.editarDep = (id) => {
 };
 
 window.excluirDep = async (id) => {
-  if (!confirm('Excluir esta dependência?')) return;
+  if (!await confirmarAcao('Excluir esta dependência?')) return;
   try {
     await API.excluirDependencia(id);
     dependenciasData = dependenciasData.filter(x => x.id !== id);
@@ -6335,7 +6368,7 @@ window.excluirServico = async (id) => {
   const nBackups = (backupsData || []).filter((b) => b.servicoId === id).length;
   const aviso = `Excluir o serviço "${s.nome}"?\n\nIsso não apaga as dependências que ele agrupa, só o agrupamento.` +
     (nBackups ? `\n\n⚠️ ${nBackups} backup(s) continuam vinculados a este serviço — o vínculo fica "órfão" (não deixa de aparecer na tela Backups), ajuste-os lá se necessário.` : '');
-  if (!confirm(aviso)) return;
+  if (!await confirmarAcao(aviso)) return;
   try {
     await API.excluirServico(id);
     servicosData = servicosData.filter((x) => String(x.id) !== String(id));
@@ -6994,7 +7027,7 @@ window.excluirBackup = async (id) => {
   const b = backupsData.find((x) => String(x.id) === String(id));
   if (!b) return;
   const nJobs = (b.jobs || []).length;
-  if (!confirm(`Excluir o backup "${b.nome}"?${nJobs ? ` Os ${nJobs} job(s) cadastrados nele também somem.` : ''} Esta ação não pode ser desfeita.`)) return;
+  if (!await confirmarAcao(`Excluir o backup "${b.nome}"?${nJobs ? ` Os ${nJobs} job(s) cadastrados nele também somem.` : ''} Esta ação não pode ser desfeita.`)) return;
   try {
     await API.excluirBackup(id);
     backupsData = backupsData.filter((x) => String(x.id) !== String(id));
@@ -7652,7 +7685,7 @@ window.clonarVulnerabilidadesSelecionadas = async () => {
   if (semTipo.length) {
     return showToast(`Classifique o Tipo antes de clonar: ${semTipo.map((v) => v.codigo || v.id).join(', ')}.`, '#e65100');
   }
-  if (!confirm(`Criar ${ids.length} cópia(s)? Cada uma recebe código novo e status Pendente; se a severidade cruzar o limiar, um risco é aberto automaticamente, como em qualquer vulnerabilidade nova.`)) return;
+  if (!await confirmarAcao(`Criar ${ids.length} cópia(s)? Cada uma recebe código novo e status Pendente; se a severidade cruzar o limiar, um risco é aberto automaticamente, como em qualquer vulnerabilidade nova.`)) return;
 
   await comBotaoCarregando('btnClonarVulnSelecionadas', async () => {
     const hoje = new Date().toISOString().slice(0, 10);
@@ -7706,7 +7739,7 @@ window.exportarVulnerabilidadesParaRiscos = async () => {
   const msg = `Criar risco no Registro de Riscos para ${aExportar.length} vulnerabilidade(s)?`
     + (comRisco.length ? `\n\n${comRisco.length} já têm risco aberto e serão puladas.` : '')
     + (fechadas ? `\n\n${fechadas} estão Corrigida/Aceita — o risco será criado mesmo assim (como na exportação individual).` : '');
-  if (!confirm(msg)) return;
+  if (!await confirmarAcao(msg)) return;
 
   await comBotaoCarregando('btnExportarVulnRiscos', async () => {
     let criados = 0;
@@ -7878,7 +7911,7 @@ window.aplicarEdicaoLoteVulnerabilidades = async () => {
     if (area) tocados.equipeResponsavel = area;
   }
 
-  if (!confirm(`Aplicar as alterações a ${ids.length} vulnerabilidade(s) selecionada(s)?`)) return;
+  if (!await confirmarAcao(`Aplicar as alterações a ${ids.length} vulnerabilidade(s) selecionada(s)?`)) return;
 
   await comBotaoCarregando('btnAplicarLoteVulnerabilidades', async () => {
     let sucesso = 0;
@@ -8763,7 +8796,7 @@ function _atualizarBotaoImportarVulnParaRisco(vulnId) {
 window.importarVulnerabilidadeParaRisco = async () => {
   const id = document.getElementById('vulnId').value;
   if (!id) return;
-  if (!confirm('Criar um Risco no Registro de Riscos a partir desta vulnerabilidade?')) return;
+  if (!await confirmarAcao('Criar um Risco no Registro de Riscos a partir desta vulnerabilidade?')) return;
   const btn = document.getElementById('btnImportarVulnParaRisco');
   const textoOriginal = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Importando...'; }
@@ -8874,7 +8907,7 @@ window.salvarVulnerabilidade = async () => {
 window.excluirVulnerabilidade = async (id) => {
   const v = vulnerabilidadesData.find((x) => String(x.id) === String(id));
   if (!v) return;
-  if (!confirm(`Excluir a vulnerabilidade "${v.nome}"? Esta ação não pode ser desfeita. Um risco ativo dela no Registro de Riscos será encerrado automaticamente.`)) return;
+  if (!await confirmarAcao(`Excluir a vulnerabilidade "${v.nome}"? Esta ação não pode ser desfeita. Um risco ativo dela no Registro de Riscos será encerrado automaticamente.`)) return;
   try {
     await API.excluirVulnerabilidade(id);
     vulnerabilidadesData = vulnerabilidadesData.filter((x) => String(x.id) !== String(id));
@@ -10647,7 +10680,7 @@ window.fecharDrawerRisco = () => _fecharComRastreador({
 window.editarRisco = (id) => abrirDrawerRisco(riscosData.find(r => r.id === id));
 
 window.excluirRisco = async (id) => {
-  if (!confirm('Excluir este risco?')) return;
+  if (!await confirmarAcao('Excluir este risco?')) return;
   try {
     await API.excluirRisco(id);
     riscosData = riscosData.filter(x => x.id !== id);
@@ -10744,7 +10777,7 @@ window.salvarRisco = async () => {
   // Encerrar a mao o risco de uma vulnerabilidade que nao foi corrigida: avisar.
   if (mudouStatus && r.status === 'Encerrado' && _vulnDoRiscoAberto(r)) {
     const v = _vulnDoRiscoAberto(r);
-    if (!confirm(`A vulnerabilidade ${v.codigo} continua "${v.statusCorrecao || 'Pendente'}". Encerrar o risco não a marca como corrigida; se ela seguir acima do limiar, um novo risco será aberto na próxima atualização dela.\n\nEncerrar mesmo assim?`)) return false;
+    if (!await confirmarAcao(`A vulnerabilidade ${v.codigo} continua "${v.statusCorrecao || 'Pendente'}". Encerrar o risco não a marca como corrigida; se ela seguir acima do limiar, um novo risco será aberto na próxima atualização dela.\n\nEncerrar mesmo assim?`)) return false;
   }
   // Reavaliacao (RMF Monitor): mudou status ou score -> registra a data e a
   // linha no historico; proxima reavaliacao sugerida pelo nivel se vazia/vencida.
@@ -10965,11 +10998,11 @@ window._atualizarDeclaracaoRisco = () => {
 };
 
 /** Sugestao: so substitui texto ja escrito com confirmacao. */
-window.usarDeclaracaoRisco = (alvo) => {
+window.usarDeclaracaoRisco = async (alvo) => {
   const frase = _fraseDeclaracaoRisco();
   if (!frase) return;
   const el = document.getElementById(alvo === 'titulo' ? 'rTitulo' : 'rDescricao');
-  if (el.value.trim() && el.value.trim() !== frase && !confirm(`Substituir ${alvo === 'titulo' ? 'o título' : 'a descrição'} atual pela declaração?`)) return;
+  if (el.value.trim() && el.value.trim() !== frase && !await confirmarAcao(`Substituir ${alvo === 'titulo' ? 'o título' : 'a descrição'} atual pela declaração?`)) return;
   el.value = frase;
   _atualizarEtapasNist();
 };
@@ -12589,7 +12622,7 @@ window.toggleTodosIndicadores = (checked) => {
 window.excluirIndicadoresSelecionados = async () => {
   const ids = [...indicadoresSelecionados];
   if (!ids.length) return;
-  if (!confirm(`Excluir ${ids.length} indicador(es) selecionado(s)? O histórico de desempenho deles será perdido. Esta ação não pode ser desfeita.`)) return;
+  if (!await confirmarAcao(`Excluir ${ids.length} indicador(es) selecionado(s)? O histórico de desempenho deles será perdido. Esta ação não pode ser desfeita.`)) return;
   try {
     for (const id of ids) {
       await API.excluirIndicadorSeguranca(id);
@@ -12841,7 +12874,7 @@ async function _removerLancamentoIndicador(indicador, mes) {
 window.excluirLancamento = async (indicadorId, mes) => {
   const indicador = indicadoresData.find(d => d.id === indicadorId);
   if (!indicador) return;
-  if (!confirm(`Excluir o lançamento de ${_formatMes(mes)} de "${indicador.nome}"? Esta ação não pode ser desfeita.`)) return;
+  if (!await confirmarAcao(`Excluir o lançamento de ${_formatMes(mes)} de "${indicador.nome}"? Esta ação não pode ser desfeita.`)) return;
   try {
     await _removerLancamentoIndicador(indicador, mes);
     showToast('✅ Lançamento excluído!', '#2e7d32');
@@ -13025,7 +13058,7 @@ window.fecharModalIndicador = () => document.getElementById('modalIndicador').cl
 window.editarIndicador = (id) => { const d = indicadoresData.find(x => x.id === id); if (d) abrirModalIndicador(d); };
 
 window.excluirIndicador = async (id) => {
-  if (!confirm('Excluir este indicador? O histórico de desempenho será perdido.')) return;
+  if (!await confirmarAcao('Excluir este indicador? O histórico de desempenho será perdido.')) return;
   try {
     await API.excluirIndicadorSeguranca(id);
     indicadoresData = indicadoresData.filter(x => x.id !== id);
@@ -14575,7 +14608,7 @@ function renderPCNLista(comPCN) {
 // EXCLUIR PCN
 // ============================================================
 window.excluirPCN = async (id, area, processo) => {
-  if (!confirm('Tem certeza que deseja excluir o PCN de "' + processo + '"? Esta ação não pode ser desfeita.')) return;
+  if (!await confirmarAcao('Tem certeza que deseja excluir o PCN de "' + processo + '"? Esta ação não pode ser desfeita.')) return;
   try {
     showToast('🗑️ Excluindo PCN...', '#555');
     const result = await API.post('excluirPCN', { id: String(id), area, processo });
@@ -14787,7 +14820,7 @@ window.copiarLinkDrpDireto = (id) => {
 /** Exclui todas as versões de DRP de uma dependência (admin), a partir da lista. */
 window.excluirDRPDaLista = async (id, nome) => {
   if (!Perfis.podeGerarDRP(window.USER_PERFIS)) return showToast('Seu perfil não pode excluir DRPs.', '#e65100');
-  if (!confirm('Tem certeza que deseja excluir o DRP de "' + nome + '"? Esta ação não pode ser desfeita.')) return;
+  if (!await confirmarAcao('Tem certeza que deseja excluir o DRP de "' + nome + '"? Esta ação não pode ser desfeita.')) return;
   try {
     showToast('🗑️ Excluindo DRP...', '#555');
     const result = await API.post('excluirDRP', { id: String(id) });
@@ -14997,7 +15030,7 @@ window.salvarCriterio = async () => {
 
 window.excluirCriterio = async (id) => {
   const c = criteriosFornecedorData.find((x) => x.id === id);
-  if (!confirm(`Excluir o critério "${c ? c.nome : id}"?\n\nAs avaliações já feitas continuam guardadas, mas este critério sai das avaliações novas. Se a ideia é só pará-lo de usar, é melhor desativar em vez de excluir.`)) return;
+  if (!await confirmarAcao(`Excluir o critério "${c ? c.nome : id}"?\n\nAs avaliações já feitas continuam guardadas, mas este critério sai das avaliações novas. Se a ideia é só pará-lo de usar, é melhor desativar em vez de excluir.`)) return;
   try {
     await API.excluirCriterioFornecedor(id);
     criteriosFornecedorData = await API.getCriteriosFornecedor();
@@ -15143,7 +15176,7 @@ window.salvarCategoriaFornecedor = async () => {
 
 window.excluirCategoriaFornecedor = async (id) => {
   const c = categoriasFornecedorData.find((x) => x.id === id);
-  if (!confirm(`Excluir a categoria "${c ? c.nome : id}"?\n\nFornecedores que já usam esta categoria continuam mostrando o nome dela até serem editados. Se a ideia é só parar de oferecê-la em fornecedores novos, é melhor desativar em vez de excluir.`)) return;
+  if (!await confirmarAcao(`Excluir a categoria "${c ? c.nome : id}"?\n\nFornecedores que já usam esta categoria continuam mostrando o nome dela até serem editados. Se a ideia é só parar de oferecê-la em fornecedores novos, é melhor desativar em vez de excluir.`)) return;
   try {
     await API.excluirCategoriaFornecedor(id);
     categoriasFornecedorData = await API.getCategoriasFornecedor();
@@ -15309,7 +15342,7 @@ window.salvarSubcategoriaFornecedor = async () => {
 
 window.excluirSubcategoriaFornecedor = async (id) => {
   const s = subcategoriasFornecedorData.find((x) => x.id === id);
-  if (!confirm(`Excluir a subcategoria "${s ? s.nome : id}"?\n\nFornecedores que já usam esta subcategoria continuam mostrando o nome dela até serem editados. Se a ideia é só parar de oferecê-la em fornecedores novos, é melhor desativar em vez de excluir.`)) return;
+  if (!await confirmarAcao(`Excluir a subcategoria "${s ? s.nome : id}"?\n\nFornecedores que já usam esta subcategoria continuam mostrando o nome dela até serem editados. Se a ideia é só parar de oferecê-la em fornecedores novos, é melhor desativar em vez de excluir.`)) return;
   try {
     await API.excluirSubcategoriaFornecedor(id);
     subcategoriasFornecedorData = await API.getSubcategoriasFornecedor();
@@ -15602,7 +15635,7 @@ window.salvarCriticidadePergunta = async () => {
 
 window.excluirCriticidadeFornecedorPergunta = async (id) => {
   const p = criticidadeFornecedorPerguntasData.find((x) => x.id === id);
-  if (!confirm(`Excluir a pergunta "${p ? p.texto : id}"?\n\nAvaliações já feitas continuam mostrando o que foi respondido na época. Se a ideia é só parar de usar esta pergunta em avaliações novas, é melhor desativar em vez de excluir.`)) return;
+  if (!await confirmarAcao(`Excluir a pergunta "${p ? p.texto : id}"?\n\nAvaliações já feitas continuam mostrando o que foi respondido na época. Se a ideia é só parar de usar esta pergunta em avaliações novas, é melhor desativar em vez de excluir.`)) return;
   try {
     await API.excluirCriticidadeFornecedorPergunta(id);
     criticidadeFornecedorPerguntasData = await API.getCriticidadeFornecedorPerguntas();
@@ -16118,7 +16151,7 @@ window.salvarAvaliacaoFornecedor = async () => {
     const partes = [];
     if (calc.pendentes.length) partes.push(`${calc.pendentes.length} critério(s) sem resposta`);
     if (calc.semEvidencia.length) partes.push(`${calc.semEvidencia.length} critério(s) sem evidência anexada`);
-    if (!confirm(`Faltam ${partes.join(' e ')}.\n\nA avaliação vai ser gravada como incompleta e a nota fica provisória. Salvar assim mesmo?`)) return;
+    if (!await confirmarAcao(`Faltam ${partes.join(' e ')}.\n\nA avaliação vai ser gravada como incompleta e a nota fica provisória. Salvar assim mesmo?`)) return;
   }
 
   const snapAvaliacao = _snapshotAvaliacaoFornecedor();
@@ -16339,7 +16372,7 @@ window.excluirProdutoSoftware = async (id) => {
   const uso = nPessoas
     ? `\n\n⚠️ ${nPessoas} pessoa${nPessoas > 1 ? 's estão associadas' : ' está associada'} a este produto como Tech Lead/Team Lead; a associação continua guardada, mas aparece como "(removido)" até alguém reescolher.`
     : '';
-  if (!confirm(`Excluir o produto "${p ? p.nome : id}"?${uso}\n\nSe a ideia é só parar de oferecê-lo em novas associações, é melhor desativar em vez de excluir.`)) return;
+  if (!await confirmarAcao(`Excluir o produto "${p ? p.nome : id}"?${uso}\n\nSe a ideia é só parar de oferecê-lo em novas associações, é melhor desativar em vez de excluir.`)) return;
   try {
     await API.excluirProdutoSoftware(id);
     produtosSoftwareData = await API.getProdutosSoftware();
@@ -16674,7 +16707,7 @@ window.salvarPerfilAcesso = async () => {
 
   // Tirar o proprio acesso de administrador deixa o sistema sem quem de acesso.
   if (email === meuEmail && !Perfis.ehAdmin(perfis)
-    && !confirm('Você está retirando o seu próprio acesso de administrador.\n\nSe não houver outro administrador, ninguém mais consegue dar acesso a ninguém sem entrar no console do Firebase. Continuar?')) return;
+    && !await confirmarAcao('Você está retirando o seu próprio acesso de administrador.\n\nSe não houver outro administrador, ninguém mais consegue dar acesso a ninguém sem entrar no console do Firebase. Continuar?')) return;
 
   await comBotaoCarregando('btnSalvarPerfilAcesso', async () => {
     try {
@@ -16690,7 +16723,7 @@ window.salvarPerfilAcesso = async () => {
 };
 
 window.excluirPerfilAcesso = async (email) => {
-  if (!confirm(`Remover o acesso de ${email}?\n\nA pessoa volta ao menor acesso (Gestor de área) e, sem área, não altera nada. Isso não impede a entrada no sistema — para isso, o acesso tem que ser retirado na conta Google dela.`)) return;
+  if (!await confirmarAcao(`Remover o acesso de ${email}?\n\nA pessoa volta ao menor acesso (Gestor de área) e, sem área, não altera nada. Isso não impede a entrada no sistema — para isso, o acesso tem que ser retirado na conta Google dela.`)) return;
   try {
     await API.excluirPerfilAcesso(email);
     perfisData = await API.getPerfis();
@@ -17480,7 +17513,7 @@ window.excluirFornecedorCadastro = async (id) => {
   }
 
   const aviso = `Excluir o fornecedor "${f.nome}"?\n\n${pendencias.length ? pendencias.map((p) => '• ' + p).join('\n') + '\n\n' : ''}Os processos que declaram depender dele também deixam de encontrá-lo. Continuar?`;
-  if (!confirm(aviso)) return;
+  if (!await confirmarAcao(aviso)) return;
 
   try {
     await API.excluirDependencia(id);

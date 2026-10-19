@@ -213,3 +213,24 @@ test('validacao leva ate o campo: troca para a aba dele, foca e marca a borda', 
   assert.match(w.document.querySelector('label + #rTitulo, #rTitulo').previousElementSibling.innerHTML, /class="req"/, 'obrigatorio com asterisco');
   w.close();
 });
+
+test('confirmacoes no modal do sistema (nao o confirm() nativo); Cancelar = nao, botao com o verbo da acao', async () => {
+  assert.doesNotMatch(APP.split('\n').filter((l) => !l.trim().startsWith('//') && !/window\.confirm/.test(l)).join('\n'), /(?<![\w.])confirm\(/);
+  const w = carregar({});
+  // Função "nativa" (bind) faz confirmarAcao usar o modal, como no navegador real.
+  w.confirm = (function () { return true; }).bind(null);
+  const p1 = w.confirmarAcao('Excluir o processo "A & B"?\nNão pode ser desfeito.');
+  const modal = w.document.querySelector('.modal-overlay.modal-sobre-drawer.open');
+  assert.ok(modal, 'abriu o modal');
+  assert.match(modal.textContent, /Excluir o processo "A & B"\?/, 'texto puro, sem &amp;/&quot;');
+  assert.strictEqual(modal.querySelector('[data-resposta="sim"]').textContent, 'Excluir');
+  modal.querySelector('[data-resposta="nao"]').click();
+  assert.strictEqual(await p1, false);
+  assert.strictEqual(w.document.querySelector('.modal-overlay.open'), null, 'fechou');
+  const p2 = w.confirmarAcao('Enviar questionário?');
+  const m2 = w.document.querySelector('.modal-overlay.open');
+  assert.strictEqual(m2.querySelector('[data-resposta="sim"]').textContent, 'Confirmar');
+  m2.querySelector('[data-resposta="sim"]').click();
+  assert.strictEqual(await p2, true);
+  w.close();
+});
