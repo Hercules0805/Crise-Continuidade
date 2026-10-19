@@ -248,3 +248,18 @@ test('mensagens de erro para pessoas: texto tecnico vira frase clara; mensagem d
   assert.doesNotMatch(APP, /showToast\([^;]*\b(e|err)\.message/);
   w.close();
 });
+
+test('pedido de texto no modal do sistema (nao o prompt() nativo): confirma o valor ou cancela com null', async () => {
+  assert.doesNotMatch(APP.split('\n').filter((l) => !l.trim().startsWith('//')).join('\n'), /(^|[^.\w'])prompt\(/m);
+  const w = carregar({});
+  w.prompt = (function () { return null; }).bind(null); // "nativa": usa o modal
+  const p1 = w.pedirTexto('E-mail do dono do processo', { valor: 'ana@x.com', tipo: 'email' });
+  const modal = w.document.querySelector('.modal-overlay.open');
+  assert.strictEqual(modal.querySelector('input').value, 'ana@x.com');
+  modal.querySelector('form').dispatchEvent(new w.Event('submit', { cancelable: true }));
+  assert.strictEqual(await p1, 'ana@x.com');
+  const p2 = w.pedirTexto('E-mail');
+  w.document.querySelector('.modal-overlay.open [data-cancelar]').click();
+  assert.strictEqual(await p2, null);
+  w.close();
+});

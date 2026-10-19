@@ -587,6 +587,45 @@ function _mensagemErro(e, padrao = 'Não foi possível concluir a operação. Te
   return pareceTecnico ? padrao : msg;
 }
 
+// Pede um texto curto no modal do sistema (no lugar do prompt() nativo).
+// Resolve com o texto digitado (sem espaços nas pontas) ou null se cancelar.
+// Se window.prompt foi substituído (ambiente de teste), usa a substituição.
+function pedirTexto(rotulo, opcoes = {}) {
+  const nativo = /\[native code\]/.test(Function.prototype.toString.call(window.prompt));
+  if (!nativo) {
+    const r = window.prompt(rotulo, opcoes.valor || '');
+    return Promise.resolve(r == null ? null : String(r).trim());
+  }
+  return new Promise((resolve) => {
+    const el = document.createElement('div');
+    el.className = 'modal-overlay modal-sobre-drawer open';
+    el.innerHTML = `
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tituloPedirTexto" style="max-width:460px;">
+        <h3 id="tituloPedirTexto">${esc(opcoes.titulo || rotulo)}</h3>
+        <form>
+          <label class="field-label" for="campoPedirTexto">${esc(rotulo)}</label>
+          <input id="campoPedirTexto" class="field-control" style="width:100%;" type="${esc(opcoes.tipo || 'text')}" value="${esc(opcoes.valor || '')}" required>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-ghost" data-cancelar>Cancelar</button>
+            <button type="submit" class="btn btn-primary">${esc(opcoes.rotuloConfirmar || 'Confirmar')}</button>
+          </div>
+        </form>
+      </div>`;
+    const campo = el.querySelector('#campoPedirTexto');
+    const responder = (valor) => { el.remove(); resolve(valor); };
+    el.querySelector('form').addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (!campo.checkValidity()) { campo.reportValidity(); return; }
+      responder(campo.value.trim() || null);
+    });
+    el.querySelector('[data-cancelar]').addEventListener('click', () => responder(null));
+    el.addEventListener('click', (e) => { if (e.target === el) responder(null); });
+    document.body.appendChild(el);
+    campo.focus();
+    campo.select();
+  });
+}
+
 // Link/atalho para outra tela só para quem pode vê-la -- senão o clique cai em
 // "Esta tela não é do seu perfil" (ex.: Gestor no drawer de Contrato, TI em
 // Dependências). Mesmo critério do route().
@@ -4952,7 +4991,7 @@ function _buildRoteiroTestePage(categoria, versoesDaCategoria, versaoAtual, dep,
           var data = JSON.parse(await res.text());
           if(data.error) throw new Error(data.error);
           alert('✅ Versão ' + (data.versao || '') + ' salva com sucesso! (' + (data.totalVersoes || '') + ' versões no total)');
-        }catch(e){alert('❌ Erro: '+e.message);}
+        }catch(e){console.error(e);alert('❌ Não foi possível salvar a versão. Verifique a conexão e tente de novo.');}
         finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
       }
     </script>
@@ -12570,12 +12609,12 @@ function renderizarIndicadoresDashboard() {
         <thead>
           <tr>
             <th style="width:12%;">Pilar</th>
-            <th style="width:26%;">Indicador</th>
+            <th>Indicador</th>
             <th style="width:16%;">Responsável</th>
             <th style="width:10%;">Mês</th>
             <th style="width:12%;">Desempenho</th>
             <th style="width:12%;">Meta Mínima</th>
-            ${isAdmin ? '<th style="width:8%;text-align:center;">Ações</th>' : ''}
+            ${isAdmin ? '<th class="col-c" style="width:8%;">Ações</th>' : ''}
           </tr>
         </thead>
         <tbody>
@@ -13491,7 +13530,7 @@ window.enviarBIADependencias = async () => {
   const area = areas.find(a => a.nome === p.area);
   const emailPadrao = area ? area.email : '';
 
-  const email = prompt('E-mail do dono do processo:', emailPadrao);
+  const email = await pedirTexto('E-mail do dono do processo', { valor: emailPadrao, tipo: 'email', titulo: 'Enviar para o dono do processo', rotuloConfirmar: 'Enviar' });
   if (!email) return;
 
   try {
@@ -13533,7 +13572,7 @@ window.enviarLinkLevantamento = async () => {
   const areas = window.areasDisponiveis || [];
   const area = areas.find(a => a.nome === p.area);
   const emailPadrao = area ? area.email : '';
-  const email = prompt('E-mail do dono do processo:', emailPadrao);
+  const email = await pedirTexto('E-mail do dono do processo', { valor: emailPadrao, tipo: 'email', titulo: 'Enviar para o dono do processo', rotuloConfirmar: 'Enviar' });
   if (!email) return;
   try {
     showToast('📧 Enviando...', '#d60014');
@@ -14201,7 +14240,7 @@ async function salvarVersaoPCN(){
     var data = JSON.parse(text);
     if(data.error) throw new Error(data.error);
     alert('✅ Versão ' + (data.versao || '') + ' salva com sucesso! (' + (data.totalVersoes || '') + ' versões no total)');
-  }catch(e){alert('❌ Erro: '+e.message);}
+  }catch(e){console.error(e);alert('❌ Não foi possível salvar a versão. Verifique a conexão e tente de novo.');}
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
@@ -14541,7 +14580,7 @@ async function salvarVersaoDRP(){
     var data = JSON.parse(await res.text());
     if(data.error) throw new Error(data.error);
     alert('✅ Versão ' + (data.versao || '') + ' salva com sucesso! (' + (data.totalVersoes || '') + ' versões no total)');
-  }catch(e){alert('❌ Erro: '+e.message);}
+  }catch(e){console.error(e);alert('❌ Não foi possível salvar a versão. Verifique a conexão e tente de novo.');}
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
