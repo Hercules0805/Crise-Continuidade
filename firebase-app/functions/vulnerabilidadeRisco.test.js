@@ -474,3 +474,30 @@ test('o risco de vulnerabilidade nasce com a declaração estruturada do NIST SP
   assert.match(r.condicaoPredisponente, /2026-099 \(CWE-79\) em/);
   assert.strictEqual(r.consequencia, 'comprometimento de Folha, Ponto');
 });
+
+// ============================================================
+// PRODUTO DE SOFTWARE herdado (20/10/2026)
+// ============================================================
+
+test('produto: o risco nasce com o Produto de Software da vulnerabilidade', () => {
+  const d = decidir({ vulnerabilidade: vuln({ produtoSoftwareId: 'ps1' }) });
+  assert.strictEqual(d.risco.produtoSoftwareId, 'ps1');
+  assert.strictEqual(d.risco.sincronizado.produtoSoftwareId, 'ps1');
+});
+
+test('produto: trocar na vulnerabilidade propaga; risco antigo vazio e preenchido', () => {
+  const base = decidir({ vulnerabilidade: vuln({ produtoSoftwareId: 'ps1' }) }).risco;
+  const troca = decidir({ vulnerabilidade: vuln({ produtoSoftwareId: 'ps2' }), riscos: [Object.assign({ id: 'r1' }, base)] });
+  assert.strictEqual(troca.acao, 'atualizar');
+  assert.strictEqual(troca.atualizacoes[0].patch.produtoSoftwareId, 'ps2');
+  const antigo = decidir({ vulnerabilidade: vuln({ produtoSoftwareId: 'ps1' }), riscos: [riscoAberto({ sincronizado: { titulo: 'x' } })] });
+  assert.strictEqual(antigo.atualizacoes[0].patch.produtoSoftwareId, 'ps1', 'campo vazio e sem baseline: a automacao preenche');
+});
+
+test('produto: trocado a mao no risco, a automacao nao sobrescreve', () => {
+  const base = decidir({ vulnerabilidade: vuln({ produtoSoftwareId: 'ps1' }) }).risco;
+  const editado = Object.assign({ id: 'r1' }, base, { produtoSoftwareId: 'ps9' });
+  const d = decidir({ vulnerabilidade: vuln({ produtoSoftwareId: 'ps2' }), riscos: [editado] });
+  const patch = d.acao === 'atualizar' ? d.atualizacoes[0].patch : {};
+  assert.ok(!('produtoSoftwareId' in patch), 'escolha humana prevalece');
+});

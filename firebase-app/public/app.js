@@ -6010,12 +6010,116 @@ async function _telaRelatorioExecutivo(tipo) {
         <input type="checkbox" id="relExecApendice" checked>
         <span>Incluir lista completa das vulnerabilidades em aberto</span>
       </label>` : ''}
-      <button class="btn btn-primary" style="margin-top:14px;" onclick="gerarRelatorioExecutivo()">📄 Gerar relatório</button>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);">
+        <div class="painel-card__titulo" style="font-size:14px;">Escopo do relatório</div>
+        <div class="painel-card__sub" style="margin-bottom:10px;">Deixe em "Todos" para a empresa inteira, ou filtre para um relatório mais específico</div>
+        <div id="relExecEscopo"><div class="vazio-inline">Carregando os filtros…</div></div>
+        <div id="relExecContagem" style="font-size:13px;color:var(--ink-muted);margin-top:8px;"></div>
+      </div>
+      <button class="btn btn-primary" id="btnGerarRelExec" style="margin-top:14px;" onclick="gerarRelatorioExecutivo()">📄 Gerar relatório</button>
     </div>
     <div id="relatoriosSalvos"></div>
     ${_htmlModalCompartilharRelatorio()}`;
-  await _carregarRelatoriosSalvos();
+  await Promise.all([_carregarEscopoRelatorio(tipo), _carregarRelatoriosSalvos()]);
 }
+
+// ---- Escopo do relatório: filtros antes de gerar (DECISÃO 20/10/2026) ----
+// As opções saem dos próprios dados (o que existe), cada filtro é um valor ou
+// "Todos", e a contagem ao vivo mostra quantos itens entram. A conta do
+// filtro está em VulnerabilidadePainel.filtrar / RiscoRelatorio.filtrar.
+window._relExecBase = null;
+
+const _NIVEIS_MINIMOS_RISCO = [['Moderado', 'Moderado ou mais grave'], ['Alto', 'Alto ou mais grave'], ['Muito alto', 'Só Muito alto']];
+const _SEVERIDADES_MINIMAS_VULN = [['Média', 'Média ou mais grave'], ['Alta', 'Alta ou mais grave'], ['Crítica', 'Só Crítica']];
+
+async function _carregarEscopoRelatorio(tipo) {
+  const cont = document.getElementById('relExecEscopo');
+  if (!cont) return;
+  try {
+    const [itens, produtos] = await Promise.all([
+      tipo === 'riscos' ? API.getRiscos() : API.getVulnerabilidades(),
+      API.getProdutosSoftware().catch(() => null),
+    ]);
+    if (produtos) produtosSoftwareData = produtos;
+    window._relExecBase = itens || [];
+  } catch (e) {
+    console.error('Escopo do relatório: dados não carregaram', e);
+    window._relExecBase = null;
+    cont.innerHTML = `<div class="vazio-inline">Não foi possível carregar os filtros (${esc(_mensagemErro(e, 'erro desconhecido'))}). O relatório pode ser gerado para a empresa inteira.</div>`;
+    return;
+  }
+  const base = window._relExecBase;
+  const distintos = (fn) => [...new Set(base.map(fn).map((x) => String(x || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const opt = (valor, rotulo) => `<option value="${esc(valor)}">${esc(rotulo)}</option>`;
+  const campo = (id, rotulo, opcoes) => `<div class="field"><label class="field-label" for="${id}">${esc(rotulo)}</label>
+      <select id="${id}" class="field-control" onchange="atualizarEscopoRelatorio()">${opt('', 'Todos')}${opcoes}</select></div>`;
+  const SEM = '__sem__';
+  let html;
+  if (tipo === 'riscos') {
+    const produtosRisco = [...new Set(base.map((r) => r.produtoSoftwareId).filter(Boolean).map(String))]
+      .map((id) => ({ id, nome: _nomeProdutoRisco({ produtoSoftwareId: id }) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+    html = campo('relFiltroProduto', 'Produto', produtosRisco.map((p) => opt(p.id, p.nome)).join('') + opt(SEM, 'Sem produto'))
+      + campo('relFiltroArea', 'Área', distintos(RiscoConsolidado.areaDoRisco).map((a) => opt(a, a)).join(''))
+      + campo('relFiltroResponsavel', 'Responsável', distintos((r) => r.responsavel).map((a) => opt(a, a)).join('') + opt(SEM, 'Sem responsável'))
+      + campo('relFiltroOrigem', 'Origem', distintos((r) => r.origem || 'Manual').map((a) => opt(a, a)).join(''))
+      + campo('relFiltroCategoria', 'Categoria', RISCO_CATEGORIAS.map((c) => opt(c, c)).join(''))
+      + campo('relFiltroNivel', 'Nível mínimo', _NIVEIS_MINIMOS_RISCO.map(([v, r]) => opt(v, r)).join(''))
+      + campo('relFiltroStatus', 'Status', RISCO_STATUS.filter((s) => s !== 'Encerrado').map((s) => opt(s, s)).join(''));
+  } else {
+    html = campo('relFiltroProduto', 'Produto', distintos(_nomeProdutoVuln).map((p) => opt(p, p)).join('') + opt(SEM, 'Sem produto'))
+      + campo('relFiltroEquipe', 'Equipe responsável', distintos((v) => v.equipeResponsavel).map((a) => opt(a, a)).join('') + opt(SEM, 'Sem equipe'))
+      + campo('relFiltroResponsavel', 'Responsável', distintos((v) => v.responsavel).map((a) => opt(a, a)).join('') + opt(SEM, 'Sem responsável'))
+      + campo('relFiltroTipo', 'Tipo', VULNERABILIDADE_TIPOS.map((t) => opt(t.tipo, t.tipo)).join('') + opt('__sem_tipo__', 'Não classificada'))
+      + campo('relFiltroSeveridade', 'Severidade mínima', _SEVERIDADES_MINIMAS_VULN.map(([v, r]) => opt(v, r)).join(''))
+      + `<div class="field"><label class="field-label" for="relFiltroDe">Detectadas de</label><input type="date" id="relFiltroDe" class="field-control" onchange="atualizarEscopoRelatorio()"></div>
+         <div class="field"><label class="field-label" for="relFiltroAte">até</label><input type="date" id="relFiltroAte" class="field-control" onchange="atualizarEscopoRelatorio()"></div>`;
+  }
+  cont.innerHTML = `<div class="filters" style="margin-bottom:0;">${html}</div>`;
+  atualizarEscopoRelatorio();
+}
+
+/** Filtros escolhidos na tela (vazio = todos). */
+function _lerFiltrosRelatorio(tipo) {
+  const v = (id) => ((document.getElementById(id) || {}).value || '');
+  if (tipo === 'riscos') {
+    return { produto: v('relFiltroProduto'), area: v('relFiltroArea'), responsavel: v('relFiltroResponsavel'), origem: v('relFiltroOrigem'),
+      categoria: v('relFiltroCategoria'), nivelMinimo: v('relFiltroNivel'), status: v('relFiltroStatus') };
+  }
+  return { produto: v('relFiltroProduto'), equipe: v('relFiltroEquipe'), responsavel: v('relFiltroResponsavel'), tipo: v('relFiltroTipo'),
+    severidadeMinima: v('relFiltroSeveridade'), detectadoDe: v('relFiltroDe'), detectadoAte: v('relFiltroAte') };
+}
+
+function _descreverFiltrosRelatorio(tipo, filtros) {
+  return tipo === 'riscos'
+    ? RiscoRelatorio.descreverFiltros(filtros, (id) => _nomeProdutoRisco({ produtoSoftwareId: id }))
+    : VulnerabilidadePainel.descreverFiltros(filtros);
+}
+
+/** Contagem ao vivo do escopo; com zero itens, Gerar fica desabilitado. */
+window.atualizarEscopoRelatorio = () => {
+  const tipo = window._relExecTipo;
+  const base = window._relExecBase;
+  const cont = document.getElementById('relExecContagem');
+  const btn = document.getElementById('btnGerarRelExec');
+  if (!cont || !base) return;
+  const filtros = _lerFiltrosRelatorio(tipo);
+  let texto, total;
+  if (tipo === 'riscos') {
+    const ativos = RiscoRelatorio.ativos(RiscoRelatorio.filtrar(base, filtros));
+    total = ativos.length;
+    texto = `${total} risco${total === 1 ? '' : 's'} ativo${total === 1 ? '' : 's'} no escopo`;
+  } else {
+    const escopo = VulnerabilidadePainel.filtrar(base, filtros, { nomeProduto: _nomeProdutoVuln });
+    const abertas = escopo.filter(VulnerabilidadePainel.emAberto).length;
+    total = escopo.length;
+    texto = `${total} vulnerabilidade${total === 1 ? '' : 's'} no escopo (${abertas} em aberto)`;
+  }
+  cont.innerHTML = `${esc(texto)} · <strong>${esc(_descreverFiltrosRelatorio(tipo, filtros))}</strong>${total ? '' : ' — <span style="color:#e65100;">nada a relatar com estes filtros</span>'}`;
+  if (btn) {
+    btn.disabled = !total;
+    btn.title = total ? '' : 'Nenhum item no escopo escolhido: ajuste os filtros.';
+  }
+};
 
 // ---- Compartilhar com gestores (DECISÃO 20/10/2026) ----
 // Edição salva -> um documento por gestor em relatorios_compartilhados, com o
@@ -6072,8 +6176,9 @@ async function _renderCompartilharRelatorio() {
   const linhasGestor = gestores.map((g, i) => {
     const jaTem = ativos.has(g.email);
     const semArea = riscos && !g.area;
-    const bloqueado = jaTem || semArea;
-    const motivo = jaTem ? 'já recebeu esta edição' : (semArea ? 'sem área no perfil: não há como recortar o relatório' : '');
+    const foraDoEscopo = riscos && !semArea && Array.isArray(ctx.meta.areasEscopo) && !ctx.meta.areasEscopo.includes(g.area);
+    const bloqueado = jaTem || semArea || foraDoEscopo;
+    const motivo = jaTem ? 'já recebeu esta edição' : (semArea ? 'sem área no perfil: não há como recortar o relatório' : (foraDoEscopo ? 'sem riscos da área neste escopo' : ''));
     // width/flex explícitos: o CSS do .modal dá largura total a todo input.
     return `<label style="display:flex;gap:10px;align-items:center;padding:6px 0;font-size:0.9em;margin:0;text-align:left;${bloqueado ? 'color:var(--ink-muted);' : 'cursor:pointer;'}">
         <input type="checkbox" style="width:auto;flex:0 0 auto;margin:0;" ${bloqueado ? 'disabled' : ''} ${ctx.selecionados.has(g.email) ? 'checked' : ''} onchange="marcarGestorCompartilhar(${i}, this.checked)">
@@ -6137,8 +6242,10 @@ window.confirmarCompartilharRelatorio = async () => {
   if (!ctx) return;
   ctx.mensagem = (document.getElementById('compartilharMensagem') || {}).value || '';
   // Além da caixa desabilitada: sem área (Riscos) ou que já recebeu não entra.
+  const areasEscopo = Array.isArray(ctx.meta.areasEscopo) ? ctx.meta.areasEscopo : null;
   const escolhidos = (ctx.gestores || []).filter((g) => ctx.selecionados.has(g.email)
-    && !(ctx.meta.tipo === 'riscos' && !g.area) && !(ctx.jaRecebeu || new Set()).has(g.email));
+    && !(ctx.meta.tipo === 'riscos' && (!g.area || (areasEscopo && !areasEscopo.includes(g.area))))
+    && !(ctx.jaRecebeu || new Set()).has(g.email));
   if (!escolhidos.length) return showToast('Escolha ao menos um gestor.', '#e65100');
   const btn = document.getElementById('btnConfirmarCompartilhar');
   if (btn) { btn.disabled = true; btn.textContent = 'Compartilhando…'; }
@@ -6241,7 +6348,9 @@ window.gerarRelatorioExecutivo = async () => {
     meses: Number(document.getElementById('relExecMeses').value) || 12,
     ia: document.getElementById('relExecIA').checked,
     apendice: tipo === 'vulnerabilidades' && !!(document.getElementById('relExecApendice') || {}).checked,
+    filtros: _lerFiltrosRelatorio(tipo),
   };
+  opcoes.escopo = _descreverFiltrosRelatorio(tipo, opcoes.filtros);
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
   const escrever = (html) => { win.document.open(); win.document.write(html); win.document.close(); };
@@ -6327,6 +6436,10 @@ window._salvarRelatorioExecutivoGerado = async (idTemp) => {
       tipo: g.tipo, titulo: _TITULO_RELATORIO_EXECUTIVO[g.tipo], geradoEm: g.edicao.geradoEm,
       meses: g.opcoes.meses, comIA: !!(g.resumoIA && !g.resumoIA.erro), resumo: (g.dados.destaques || []).slice(0, 2),
       versao: VERSAO_RETRATO_RELATORIO, conteudo: JSON.stringify(retrato),
+      // Escopo (filtros) e, no de Riscos, as áreas com risco no escopo: a lista
+      // e o modal de compartilhar leem sem baixar o conteúdo.
+      escopo: g.opcoes.escopo || 'Empresa inteira',
+      areasEscopo: g.dados.baseRecorte ? [...new Set((g.dados.baseRecorte.riscos || []).map(RiscoConsolidado.areaDoRisco))] : null,
     });
     g.salvo = r.salvoEm || new Date().toISOString();
     marcar(`✅ Salvo em ${new Date(g.salvo).toLocaleString('pt-BR')} (fica em "Edições salvas")`, true);
@@ -6370,7 +6483,7 @@ function _renderRelatoriosSalvos() {
   const pag = relatoriosSalvosPaginacao.aplicar(lista);
   const quando = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '–');
   const linhas = pag.itens.map((r) => `<tr>
-      <td class="title">${esc(r.titulo || _TITULO_RELATORIO_EXECUTIVO[r.tipo] || r.tipo)}${(r.resumo || []).length ? `<div class="muted" style="font-size:12px;">${esc(r.resumo[0])}</div>` : ''}</td>
+      <td class="title">${esc(r.titulo || _TITULO_RELATORIO_EXECUTIVO[r.tipo] || r.tipo)}${r.escopo && r.escopo !== 'Empresa inteira' ? `<div style="font-size:12px;font-weight:600;">Escopo: ${esc(r.escopo)}</div>` : ''}${(r.resumo || []).length ? `<div class="muted" style="font-size:12px;">${esc(r.resumo[0])}</div>` : ''}</td>
       <td>${esc(quando(r.geradoEm))}</td>
       <td class="muted">${esc(r.geradoPor || '–')}</td>
       <td class="col-c">${r.meses ? esc(r.meses + ' meses') : '–'}</td>
@@ -6468,12 +6581,17 @@ async function _dadosRelatorioExecutivoVulnerabilidades(opcoes) {
   const riscoAberto = riscos
     ? (id) => riscos.some((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(id) && r.status !== 'Encerrado')
     : null;
-  const d = VP.dadosRelatorio(vulns || [], {
-    meses: opcoes.meses, fotos: fotos || [], processos: processos || [], limiar, riscoAberto, nomeProduto: _nomeProdutoDoc,
+  // Escopo (filtros da tela, 20/10/2026). Com filtro, a foto mensal (empresa
+  // inteira) não vale: a série é reconstruída pelas datas, como no Painel.
+  const filtros = opcoes.filtros || {};
+  const comFiltro = VP.temFiltro(filtros);
+  const escopo = VP.filtrar(vulns || [], filtros, { nomeProduto: _nomeProdutoDoc });
+  const d = VP.dadosRelatorio(escopo, {
+    meses: opcoes.meses, fotos: comFiltro ? [] : (fotos || []), processos: processos || [], limiar, riscoAberto, nomeProduto: _nomeProdutoDoc,
   });
   return {
-    d, vulns: vulns || [], limiar, processosCarregados: !!processos, riscosCarregados: !!riscos,
-    destaques: VP.destaques(d), indicadoresIA: VP.indicadoresParaIA(d),
+    d, vulns: escopo, limiar, processosCarregados: !!processos, riscosCarregados: !!riscos,
+    destaques: VP.destaques(d), indicadoresIA: Object.assign({ escopo: opcoes.escopo || 'Empresa inteira' }, VP.indicadoresParaIA(d)),
   };
 }
 
@@ -6494,7 +6612,13 @@ async function _dadosRelatorioExecutivoRiscos(opcoes) {
   const critForn = {};
   (avals || []).forEach((av) => { if (av && av.fornecedorId) critForn[String(av.fornecedorId)] = av.scoreCriticidade; });
   const apetite = (cfg && cfg.apetite) || RiscoConsolidado.APETITE_PADRAO;
-  const lista = riscos || [];
+  // Escopo (filtros da tela, 20/10/2026). O retrato diário guarda só empresa e
+  // áreas: sem filtro, a série da empresa; só filtro de Área, a série da área;
+  // qualquer outro filtro, tendência indisponível (e a seção explica).
+  const filtros = opcoes.filtros || {};
+  const comFiltro = RR.temFiltro(filtros);
+  const soArea = RR.soFiltroDeArea(filtros);
+  const lista = RR.filtrar(riscos || [], filtros);
   const procs = processos || [];
   const d = {
     hoje,
@@ -6504,7 +6628,9 @@ async function _dadosRelatorioExecutivoRiscos(opcoes) {
     principais: RR.principais(lista, procs, critForn, apetite, 10),
     tratamento: RR.tratamento(lista, apetite, hoje),
     monitoramento: RR.monitoramento(lista, hoje, inds ? _riscoComKriForaDaMeta : null),
-    serie: historico ? RR.serieMensalHistorico(historico, opcoes.meses, hoje) : null,
+    serie: !historico || (comFiltro && !soArea) ? null
+      : RR.serieMensalHistorico(historico, opcoes.meses, hoje, soArea ? filtros.area : undefined),
+    serieIndisponivel: !!historico && comFiltro && !soArea,
   };
   // Base do recorte por área (retrato v2, 20/10/2026): o mínimo para recalcular
   // o relatório de UMA área quando a edição for compartilhada com o gestor dela.
@@ -6515,11 +6641,12 @@ async function _dadosRelatorioExecutivoRiscos(opcoes) {
   const baseRecorte = {
     riscos: ativos.map((r) => RR.riscoMinimo(r, inds ? _riscoComKriForaDaMeta(r) : false)),
     processos: procs.map((p) => ({ id: p.id, score: p.score, avaliado: p.avaliado, tierManual: p.tierManual || '' })),
-    critForn, apetite, hoje, seriePorArea: historico ? seriePorArea : null, panoramaEmpresa: d.panorama,
+    critForn, apetite, hoje, seriePorArea: historico && (!comFiltro || soArea) ? seriePorArea : null,
+    serieIndisponivel: d.serieIndisponivel, panoramaEmpresa: d.panorama, escopoFiltrado: comFiltro,
   };
   return {
     d, processosCarregados: !!processos, indicadoresCarregados: !!inds, historicoCarregado: !!historico,
-    destaques: RR.destaques(d), indicadoresIA: RR.indicadoresParaIA(d), baseRecorte,
+    destaques: RR.destaques(d), indicadoresIA: Object.assign({ escopo: opcoes.escopo || 'Empresa inteira' }, RR.indicadoresParaIA(d)), baseRecorte,
   };
 }
 
@@ -6601,7 +6728,7 @@ function _htmlAvisoDocumentoExecutivo(titulo, mensagem, erro) {
  * Documento completo. `secoes` = [{ titulo, ref, html }] já escapado por quem
  * monta; `resumoIA` = null (não pedido) | { erro } | { paragrafos, recomendacoes }.
  */
-function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoes, notas, edicao }) {
+function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoes, notas, edicao, escopo }) {
   const ed = edicao || {};
   // Data e hora DA GERAÇÃO (não a de desenhar): a edição salva reabre com a dela.
   const momento = ed.geradoEm ? new Date(ed.geradoEm) : new Date();
@@ -6638,6 +6765,7 @@ function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoe
 <body><div class="pagina">
 ${_cabecalhoDocumentoExecutivo(titulo, `${subtitulo} • ${quando} • Fortes Tecnologia`, true)}
 ${barraEdicao}
+<div class="bloco" style="padding:10px 16px;font-size:9pt;"><strong>Escopo do relatório:</strong> ${escopo && escopo !== 'Empresa inteira' ? esc(escopo) : 'empresa inteira (sem filtros)'}</div>
 ${blocoIA}
 <div class="bloco"><h3>Destaques</h3>${(destaques || []).length ? `<ul class="lista">${destaques.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '<p class="vazio">Sem dados suficientes.</p>'}</div>
 ${(secoes || []).map((s, i) => `<div class="secao"><span class="num">${i + 1}</span>${esc(s.titulo)}<span class="ref">${esc(s.ref || '')}</span></div>${s.html}`).join('\n')}
@@ -6789,7 +6917,8 @@ function _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA, edicao
   const reconstruidos = d.serie.filter((p) => p.fonte === 'reconstruida').length;
   return _htmlDocumentoExecutivo({
     titulo: _TITULO_RELATORIO_EXECUTIVO.vulnerabilidades,
-    subtitulo: `${e.abertas} em aberto • tendência de ${opcoes.meses} meses`,
+    subtitulo: `${opcoes.escopo && opcoes.escopo !== 'Empresa inteira' ? 'Escopo filtrado • ' : ''}${e.abertas} em aberto • tendência de ${opcoes.meses} meses`,
+    escopo: opcoes.escopo,
     resumoIA,
     edicao,
     destaques: dados.destaques,
@@ -6923,7 +7052,9 @@ function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao) {
     </div>`;
 
   let s7;
-  if (!d.serie) {
+  if (d.serieIndisponivel) {
+    s7 = '<div class="bloco"><p class="alerta">Tendência indisponível com este escopo: o retrato diário do risco guarda só a empresa e as áreas. Filtre só por Área (ou gere sem filtros) para ver a evolução mês a mês.</p></div>';
+  } else if (!d.serie) {
     s7 = '<div class="bloco"><p class="alerta">O histórico de risco não pôde ser lido (o retrato diário é restrito a Admin e Segurança) — a tendência ficou de fora deste relatório.</p></div>';
   } else if (!d.serie.some((x) => x.carga !== null)) {
     s7 = `<div class="bloco"><p class="vazio">Nenhum retrato diário gravado nos últimos ${opcoes.meses} meses.</p></div>`;
@@ -6944,18 +7075,21 @@ function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao) {
   // empresa só o agregado de referência; sem a tabela de carga por área.
   const area = (edicao && edicao.recorteArea) || '';
   const ref = dados.referenciaEmpresa;
+  // Relatório filtrado: a referência do recorte é o escopo, não a empresa inteira.
+  const filtrado = !!(opcoes.escopo && opcoes.escopo !== 'Empresa inteira');
+  const noRef = filtrado ? 'no escopo' : 'na empresa';
   const blocoReferencia = area && ref ? `<div class="bloco">
-      <h3>Referência da empresa</h3>
+      <h3>${filtrado ? 'Referência do escopo do relatório' : 'Referência da empresa'}</h3>
       <div class="sub-bloco">Só totais, para comparar: os riscos das outras áreas não fazem parte deste recorte.</div>
       <div class="kpis" style="margin-bottom:0;">
-        ${_kpiDoc('Riscos ativos na empresa', ref.ativos, '')}
-        ${_kpiDoc('Carga da empresa', ref.carga, ref.carga ? `${Math.round((p.carga / ref.carga) * 100)}% dela é desta área` : '')}
-        ${_kpiDoc('Acima do apetite na empresa', ref.acimaDoApetite, `Apetite: até ${ref.apetite}`)}
-        ${_kpiDoc('Alto ou Muito alto na empresa', (ref.composicao['Muito alto'] || 0) + (ref.composicao['Alto'] || 0), '')}
+        ${_kpiDoc(`Riscos ativos ${noRef}`, ref.ativos, '')}
+        ${_kpiDoc(filtrado ? 'Carga do escopo' : 'Carga da empresa', ref.carga, ref.carga ? `${Math.round((p.carga / ref.carga) * 100)}% dela é desta área` : '')}
+        ${_kpiDoc(`Acima do apetite ${noRef}`, ref.acimaDoApetite, `Apetite: até ${ref.apetite}`)}
+        ${_kpiDoc(`Alto ou Muito alto ${noRef}`, (ref.composicao['Muito alto'] || 0) + (ref.composicao['Alto'] || 0), '')}
       </div>
     </div>` : '';
   const secoes = [
-    { titulo: area ? `Panorama: quanto risco a área ${area} carrega?` : 'Panorama: quanto risco carregamos?', ref: 'NIST SP 800-39 · Enquadrar · CSF GV.RM-02', html: (area ? s1.replace('Carga da empresa', 'Carga da área') : s1) + blocoReferencia },
+    { titulo: area ? `Panorama: quanto risco a área ${area} carrega?` : 'Panorama: quanto risco carregamos?', ref: 'NIST SP 800-39 · Enquadrar · CSF GV.RM-02', html: (area ? s1.replace('Carga da empresa', 'Carga da área') : (filtrado ? s1.replace('Carga da empresa', 'Carga do escopo') : s1)) + blocoReferencia },
     { titulo: area ? 'Mapa de calor da área' : 'Mapa de calor da carteira', ref: 'NIST SP 800-30 · Avaliar', html: s2 },
     { titulo: 'Principais riscos', ref: 'NIST SP 800-30 · Avaliar', html: s3 },
   ];
@@ -6968,7 +7102,8 @@ function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao) {
 
   return _htmlDocumentoExecutivo({
     titulo: _TITULO_RELATORIO_EXECUTIVO.riscos + (area ? ` — área ${area}` : ''),
-    subtitulo: `${area ? `Recorte da área ${area} • ` : ''}${p.ativos} riscos ativos • apetite até ${p.apetite} • tendência de ${opcoes.meses} meses`,
+    subtitulo: `${area ? `Recorte da área ${area} • ` : ''}${filtrado ? 'Escopo filtrado • ' : ''}${p.ativos} riscos ativos • apetite até ${p.apetite} • tendência de ${opcoes.meses} meses`,
+    escopo: opcoes.escopo,
     resumoIA,
     edicao,
     destaques: dados.destaques,
@@ -11184,6 +11319,12 @@ async function riscos() {
         </select>
       </div>
       <div class="field">
+        <label class="field-label">Produto</label>
+        <select id="filtroRiscoProduto" onchange="filtrarRiscos()" class="field-control">
+          <option value="">Todos</option>
+        </select>
+      </div>
+      <div class="field">
         <label class="field-label">Situação</label>
         <select id="filtroRiscoSituacao" onchange="filtrarRiscos()" class="field-control">
           <option value="">Todas</option>
@@ -11265,7 +11406,10 @@ async function riscos() {
         return [];
       }),
       API.getConfigRiscos().catch(() => ({ apetite: RiscoConsolidado.APETITE_PADRAO })),
-    ]);
+      // Produto de Software do risco (20/10/2026). Sem o catálogo, a tela abre
+      // igual e o campo mostra só o valor gravado.
+      API.getProdutosSoftware().catch((e) => { console.error('Riscos: produtos não carregaram', e); return null; }),
+    ]).then((r) => { if (r[7]) produtosSoftwareData = r[7]; return r; });
     riscosApetite = (cfgRiscos_ && cfgRiscos_.apetite) || RiscoConsolidado.APETITE_PADRAO;
     riscosData = riscos_; riscosAreasCache = areas_; indicadoresData = inds_; riscosProcessosCache = procs_;
     riscosFornecedoresCache = deps_.filter(d => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
@@ -11299,8 +11443,57 @@ async function riscos() {
   document.getElementById('filtroRiscoFornecedor').innerHTML = '<option value="">Todos (inclui sem fornecedor)</option>' +
     '<option value="_qualquer_">Somente riscos de fornecedores</option>' +
     riscosFornecedoresCache.map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('');
+  _popularFiltroProdutoRisco();
 
   renderizarRiscos();
+}
+
+/**
+ * Select "Produto de Software" do drawer de Risco (20/10/2026): produtos
+ * ativos + o valor gravado, mesmo que inativo ou removido (nunca some em
+ * silêncio só por abrir o drawer). No risco de vulnerabilidade, a dica diz
+ * que o valor vem dela e que trocar aqui para de acompanhar.
+ */
+async function _popularProdutoSoftwareRisco(r) {
+  const sel = document.getElementById('rProdutoSoftware');
+  if (!sel) return;
+  if (!(produtosSoftwareData || []).length) {
+    try { produtosSoftwareData = await API.getProdutosSoftware(); } catch (e) { produtosSoftwareData = []; }
+  }
+  const atual = r && r.produtoSoftwareId ? String(r.produtoSoftwareId) : '';
+  const ativos = (produtosSoftwareData || []).filter((p) => p.ativo !== false);
+  const prodAtual = atual ? _produtoSoftwarePorId(atual) : null;
+  let extra = '';
+  if (atual && !prodAtual) extra = `<option value="${esc(atual)}">(produto removido)</option>`;
+  else if (prodAtual && prodAtual.ativo === false) extra = `<option value="${esc(atual)}">${esc(prodAtual.nome)} (inativo)</option>`;
+  sel.innerHTML = '<option value="">-- Nenhum --</option>'
+    + ativos.map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('') + extra;
+  sel.value = atual;
+  const dica = document.getElementById('rProdutoSoftwareDica');
+  if (dica) {
+    dica.textContent = r && r.origem === 'Vulnerabilidade'
+      ? `Herdado da vulnerabilidade ${r.vulnerabilidadeCodigo || ''}. Alterar aqui faz este campo deixar de acompanhar a vulnerabilidade.`.replace('  ', ' ')
+      : 'Produto do catálogo de Produtos de Software ao qual o risco se refere.';
+  }
+}
+
+/** Nome do Produto de Software do risco ('' sem produto; "(produto removido)" se saiu do catálogo). */
+function _nomeProdutoRisco(r) {
+  if (!r || !r.produtoSoftwareId) return '';
+  const p = _produtoSoftwarePorId(r.produtoSoftwareId);
+  return p ? p.nome : '(produto removido)';
+}
+
+/** Filtro Produto da grade: os produtos que aparecem nos riscos + "Sem produto". */
+function _popularFiltroProdutoRisco() {
+  const sel = document.getElementById('filtroRiscoProduto');
+  if (!sel) return;
+  const atual = sel.value;
+  const ids = [...new Set((riscosData || []).map((r) => r.produtoSoftwareId).filter(Boolean).map(String))];
+  const opcoes = ids.map((id) => ({ id, nome: _nomeProdutoRisco({ produtoSoftwareId: id }) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  sel.innerHTML = '<option value="">Todos</option>' + opcoes.map((o) => `<option value="${esc(o.id)}">${esc(o.nome)}</option>`).join('')
+    + '<option value="__sem__">Sem produto</option>';
+  sel.value = [...sel.options].some((o) => o.value === atual) ? atual : '';
 }
 
 /**
@@ -11779,6 +11972,10 @@ function renderizarRiscos() {
   if (filtroFornecedor && filtroFornecedor.value === '_qualquer_') data = data.filter(r => r.fornecedor);
   else if (filtroFornecedor && filtroFornecedor.value) data = data.filter(r => r.fornecedor === filtroFornecedor.value);
 
+  const filtroProduto = (document.getElementById('filtroRiscoProduto') || {}).value || '';
+  if (filtroProduto === '__sem__') data = data.filter((r) => !r.produtoSoftwareId);
+  else if (filtroProduto) data = data.filter((r) => String(r.produtoSoftwareId) === filtroProduto);
+
   const situacao = (document.getElementById('filtroRiscoSituacao') || {}).value || '';
   const hojeSit = new Date().toISOString().slice(0, 10);
   if (situacao === 'apetite') data = data.filter((r) => RiscoConsolidado.acimaDoApetite(r, riscosApetite));
@@ -11795,7 +11992,8 @@ function renderizarRiscos() {
       (r.responsavel || '').toLowerCase().includes(termo) ||
       (r.categorias || []).some((c) => c.toLowerCase().includes(termo)) ||
       (r.processo || '').toLowerCase().includes(termo) ||
-      (r.fornecedorNome || '').toLowerCase().includes(termo)
+      (r.fornecedorNome || '').toLowerCase().includes(termo) ||
+      _nomeProdutoRisco(r).toLowerCase().includes(termo)
     );
   }
 
@@ -12002,6 +12200,11 @@ function _htmlDrawerRisco() {
               <label style="${lbl}">Fornecedor Relacionado (opcional)</label>
               <select id="rFornecedor" style="${inp}"><option value="">-- Nenhum --</option></select>
               <span style="${dica}">Use quando o risco foi reportado por (ou envolve) um fornecedor do catálogo de Dependências. Indicadores agora ficam na aba Monitoramento, como KRIs.</span>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}" for="rProdutoSoftware">Produto de Software (opcional)</label>
+              <select id="rProdutoSoftware" style="${inp}"><option value="">-- Nenhum --</option></select>
+              <span style="${dica}" id="rProdutoSoftwareDica">Produto do catálogo de Produtos de Software ao qual o risco se refere.</span>
             </div>
             <input type="hidden" id="rIndicador">
             <div style="margin-bottom:16px;">
@@ -12330,6 +12533,7 @@ window.abrirDrawerRisco = async (r) => {
   document.getElementById('rArea').value = r ? r.area : '';
   document.getElementById('rProcesso').value = r && r.processoId ? r.processoId : '';
   document.getElementById('rFornecedor').value = r && r.fornecedor ? r.fornecedor : '';
+  await _popularProdutoSoftwareRisco(r);
   document.getElementById('rIndicador').value = r && r.indicadorId ? r.indicadorId : '';
   document.getElementById('rTitulo').value = r ? r.titulo : '';
   // Risco antigo pode ter so `categoria` (string, um valor so) -- cai num
@@ -12481,6 +12685,7 @@ function _coletarFormularioRisco() {
     processo: procSel.value && procOpt ? procOpt.textContent.split(' — ').slice(1).join(' — ') : null,
     fornecedor: fornSel.value || null,
     fornecedorNome: fornSel.value && fornOpt ? fornOpt.dataset.nome : null,
+    produtoSoftwareId: (document.getElementById('rProdutoSoftware') || {}).value || '',
     // Indicador do risco = o primeiro KRI ligado ao cadastro de Indicadores.
     indicadorId: ((window._riscoKris || []).find((k) => k.indicadorId) || {}).indicadorId || null,
     titulo: document.getElementById('rTitulo').value.trim(),

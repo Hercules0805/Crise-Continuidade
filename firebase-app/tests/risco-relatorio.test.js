@@ -155,3 +155,30 @@ test('recortarPorArea: so os riscos da area; da empresa so o agregado; nenhum ti
   const corp = RR.recortarPorArea(base, 'Corporativo (sem área)');
   assert.deepStrictEqual(corp.d.principais.map((x) => x.r.id), ['c'], 'risco sem area = Corporativo');
 });
+
+// ---- Filtros do relatorio (20/10/2026) ----
+
+test('filtrar riscos: produto, area, responsavel, origem, categoria, nivel minimo e status', () => {
+  const L = [
+    r({ id: '1', produtoSoftwareId: 'p1', area: 'TI', responsavel: 'Ana', origem: 'Vulnerabilidade', categorias: ['Operacional'], probabilidade: 'Muito alta', impacto: 'Muito alto', status: 'Em Tratamento' }),
+    r({ id: '2', produtoSoftwareId: 'p2', area: '', responsavel: '', origem: 'Fornecedor', categorias: ['Financeiro', 'Reputacional'], probabilidade: 'Moderada', impacto: 'Moderado' }),
+    r({ id: '3', area: 'TI', responsavel: 'Ana', categoria: 'Financeiro' }),
+  ];
+  const ids = (f) => RR.filtrar(L, f).map((x) => x.id);
+  assert.deepStrictEqual(ids({ produto: 'p1' }), ['1']);
+  assert.deepStrictEqual(ids({ produto: RR.SEM }), ['3']);
+  assert.deepStrictEqual(ids({ area: 'Corporativo (sem área)' }), ['2']);
+  assert.deepStrictEqual(ids({ responsavel: RR.SEM }), ['2']);
+  assert.deepStrictEqual(ids({ origem: 'Manual' }), ['3']);
+  assert.deepStrictEqual(ids({ categoria: 'Financeiro' }), ['2', '3'], 'categoria antiga (string) tambem conta');
+  assert.deepStrictEqual(ids({ nivelMinimo: 'Moderado' }), ['1', '2'], 'sem avaliacao fica fora');
+  assert.deepStrictEqual(ids({ nivelMinimo: 'Muito alto' }), ['1']);
+  assert.deepStrictEqual(ids({ status: 'Identificado' }), ['2', '3']);
+  assert.deepStrictEqual(ids({ area: 'TI', responsavel: 'Ana', status: 'Em Tratamento' }), ['1']);
+  assert.ok(RR.soFiltroDeArea({ area: 'TI' }));
+  assert.ok(!RR.soFiltroDeArea({ area: 'TI', produto: 'p1' }));
+  assert.ok(!RR.soFiltroDeArea({}));
+  assert.strictEqual(RR.descreverFiltros({ produto: 'p1', nivelMinimo: 'Alto', categoria: 'Financeiro' }, (id) => ({ p1: 'ERP' }[id])),
+    'Produto: ERP · Categoria: Financeiro · Alto ou mais grave');
+  assert.strictEqual(RR.descreverFiltros({}), 'Empresa inteira');
+});

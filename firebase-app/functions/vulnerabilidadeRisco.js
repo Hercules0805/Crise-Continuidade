@@ -267,6 +267,9 @@ function camposSincronizados(v, o) {
     processoId: principal ? principal.id : null,
     processo: principal ? principal.processo : '',
     responsavel: v.responsavel || '',
+    // Produto de Software (20/10/2026): herdado da vulnerabilidade e mantido
+    // pela sincronizacao; trocado a mao no risco, a escolha humana prevalece.
+    produtoSoftwareId: v.produtoSoftwareId || '',
     status: STATUS_RISCO_POR_CORRECAO[sc] || 'Identificado',
     estrategiaTratamento: ESTRATEGIA_POR_CORRECAO[sc] || '',
     // Declaracao de risco estruturada (NIST SP 800-30): o texto espelha

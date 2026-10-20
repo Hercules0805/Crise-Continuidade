@@ -308,3 +308,28 @@ test('relatorio: dadosRelatorio junta os blocos do painel; destaques e IA saem d
   assert.ok(!('descricao' in ia.principaisAcaoImediata[0]), 'so codigo, nome, severidade e motivos');
   assert.ok(JSON.stringify(ia).length < 20000);
 });
+
+// ---- Filtros do relatorio (20/10/2026) ----
+
+test('filtrar: produto, equipe, responsavel, tipo, severidade minima e periodo de deteccao', () => {
+  const nome = (x) => ({ a: 'ERP', b: 'Portal', c: 'Portal' }[x.id] || '');
+  const ids = (f) => VP.filtrar(LISTA, f, { nomeProduto: nome }).map((x) => x.id);
+  assert.deepStrictEqual(ids({}), LISTA.map((x) => x.id));
+  assert.deepStrictEqual(ids({ produto: 'Portal' }), ['b', 'c']);
+  assert.deepStrictEqual(ids({ produto: VP.SEM }), ['d', 'e', 'f', 'g', 'h']);
+  assert.deepStrictEqual(ids({ equipe: 'Infra' }), ['b', 'c', 'd']);
+  assert.deepStrictEqual(ids({ equipe: VP.SEM }), ['a', 'f', 'g', 'h']);
+  assert.deepStrictEqual(ids({ tipo: 'Não Conformidade' }), ['g', 'h']);
+  assert.deepStrictEqual(ids({ tipo: '__sem_tipo__' }).length, 6);
+  assert.deepStrictEqual(ids({ severidadeMinima: 'Alta' }), ['a', 'b', 'e', 'f'], 'sem severidade fica fora');
+  assert.deepStrictEqual(ids({ severidadeMinima: 'Crítica' }), ['a']);
+  assert.deepStrictEqual(ids({ detectadoDe: '2026-09-01', detectadoAte: '2026-09-30' }), ['b', 'c', 'g'], 'sem data de deteccao fica fora');
+  assert.deepStrictEqual(ids({ produto: 'Portal', severidadeMinima: 'Alta' }), ['b'], 'filtros combinados');
+});
+
+test('descreverFiltros: frase do escopo; sem filtro = Empresa inteira', () => {
+  assert.strictEqual(VP.descreverFiltros({}), 'Empresa inteira');
+  assert.ok(!VP.temFiltro({ produto: '', tipo: '' }));
+  assert.strictEqual(VP.descreverFiltros({ produto: 'ERP', equipe: VP.SEM, severidadeMinima: 'Alta', detectadoDe: '2026-07-01', detectadoAte: '2026-09-30' }),
+    'Produto: ERP · Equipe: sem equipe · Alta ou mais grave · Detectadas de 01/07/2026 até 30/09/2026');
+});

@@ -646,6 +646,8 @@ async function _lerRiscos() {
     processo: d.processo || '',
     fornecedor: d.fornecedor || null,
     fornecedorNome: d.fornecedorNome || '',
+    // Produto de Software (20/10/2026): id de produtos_software, '' quando nao ha.
+    produtoSoftwareId: d.produtoSoftwareId || '',
     indicadorId: d.indicadorId || null,
     // Vinculo com a vulnerabilidade de origem (gravado pelo servidor). Sem
     // estes dois, a tela de Vulnerabilidades nunca achava o risco aberto.
@@ -1154,6 +1156,9 @@ async function _salvarRelatorioExecutivo(r) {
     // Versão do retrato também nos metadados: a lista sabe se a edição recorta
     // por área (compartilhar com gestor) sem baixar o conteúdo.
     versao: Number(r.versao) || 1,
+    // Escopo do relatório (filtros, 20/10/2026) e áreas com risco nele.
+    escopo: String(r.escopo || 'Empresa inteira'),
+    areasEscopo: Array.isArray(r.areasEscopo) ? r.areasEscopo.map(String) : null,
   });
   lote.set(_db.collection(COLLECTION.relatoriosExecutivosConteudo).doc(ref.id), {
     tipo: r.tipo, geradoPor: por, versao: Number(r.versao) || 1, conteudo,
@@ -1722,6 +1727,8 @@ const _CAMPOS_RISCO = [
   'justificativaAceite', 'aprovadorAceite', 'probabilidadeResidual', 'impactoResidual', 'funcaoCsf',
   // Declaracao de risco estruturada (NIST SP 800-30).
   'fonteAmeaca', 'eventoAmeaca', 'condicaoPredisponente', 'consequencia',
+  // Produto de Software (20/10/2026): herdado da vulnerabilidade ou escolhido aqui.
+  'produtoSoftwareId',
 ];
 
 // Merge: só grava os campos presentes no payload (mesma semântica de salvarProcesso).

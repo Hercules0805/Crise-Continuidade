@@ -543,6 +543,67 @@
     ];
   }
 
+  // ------------------------------------------------- filtros do relatorio (20/10/2026)
+
+  var SEM = '__sem__';
+  var ROTULO_SEVERIDADE_MINIMA = { 'Média': 'Média ou mais grave', 'Alta': 'Alta ou mais grave', 'Crítica': 'Só Crítica' };
+
+  function _brData(iso) {
+    var t = _data(iso);
+    return t ? t.slice(8, 10) + '/' + t.slice(5, 7) + '/' + t.slice(0, 4) : '';
+  }
+
+  /**
+   * Escopo do relatorio: { produto, equipe, responsavel, tipo, severidadeMinima,
+   * detectadoDe, detectadoAte }. Vazio = todos; '__sem__' = sem valor (produto,
+   * equipe, responsavel) e '__sem_tipo__' = nao classificada. `ctx.nomeProduto(v)`
+   * resolve o nome do produto (catalogo ou texto antigo).
+   */
+  function filtrar(vulns, filtros, ctx) {
+    var f = filtros || {};
+    var nomeProduto = (ctx && ctx.nomeProduto) || function (v) { return v.produto || ''; };
+    var igual = function (valor, alvo) { return alvo === SEM ? !String(valor || '').trim() : String(valor || '') === alvo; };
+    var min = SEVERIDADES.indexOf(f.severidadeMinima);
+    var de = _data(f.detectadoDe), ate = _data(f.detectadoAte);
+    return (vulns || []).filter(function (v) {
+      if (f.produto && !igual(nomeProduto(v), f.produto)) return false;
+      if (f.equipe && !igual(v.equipeResponsavel, f.equipe)) return false;
+      if (f.responsavel && !igual(v.responsavel, f.responsavel)) return false;
+      if (f.tipo === '__sem_tipo__') { if (v.tipo) return false; } else if (f.tipo && v.tipo !== f.tipo) return false;
+      if (min !== -1) {
+        // SEVERIDADES vai da mais grave para a menos grave.
+        var i = SEVERIDADES.indexOf(severidade(v));
+        if (i === -1 || i > min) return false;
+      }
+      if (de || ate) {
+        var d = _data(v.dataDeteccao);
+        if (!d || (de && d < de) || (ate && d > ate)) return false;
+      }
+      return true;
+    });
+  }
+
+  function temFiltro(filtros) {
+    var f = filtros || {};
+    return Object.keys(f).some(function (k) { return f[k]; });
+  }
+
+  /** Frase do escopo para o documento, a lista de edicoes e a IA. */
+  function descreverFiltros(filtros) {
+    var f = filtros || {};
+    var sem = function (v, txt) { return v === SEM ? txt : v; };
+    var partes = [];
+    if (f.produto) partes.push('Produto: ' + sem(f.produto, 'sem produto'));
+    if (f.equipe) partes.push('Equipe: ' + sem(f.equipe, 'sem equipe'));
+    if (f.responsavel) partes.push('Responsável: ' + sem(f.responsavel, 'sem responsável'));
+    if (f.tipo) partes.push('Tipo: ' + (f.tipo === '__sem_tipo__' ? 'não classificada' : f.tipo));
+    if (f.severidadeMinima) partes.push(ROTULO_SEVERIDADE_MINIMA[f.severidadeMinima] || f.severidadeMinima);
+    if (f.detectadoDe || f.detectadoAte) {
+      partes.push('Detectadas' + (f.detectadoDe ? ' de ' + _brData(f.detectadoDe) : '') + (f.detectadoAte ? ' até ' + _brData(f.detectadoAte) : ''));
+    }
+    return partes.length ? partes.join(' · ') : 'Empresa inteira';
+  }
+
   // ------------------------------------------------- relatorio executivo (20/10/2026)
 
   /**
@@ -628,6 +689,10 @@
   }
 
   return {
+    SEM: SEM,
+    filtrar: filtrar,
+    temFiltro: temFiltro,
+    descreverFiltros: descreverFiltros,
     dadosRelatorio: dadosRelatorio,
     destaques: destaques,
     indicadoresParaIA: indicadoresParaIA,

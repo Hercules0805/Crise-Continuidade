@@ -1584,6 +1584,7 @@ Escreva o RESUMO EXECUTIVO do "${t.titulo}", seguindo ${t.referencia}.
 REGRAS:
 - Use SOMENTE os números e itens do JSON abaixo. Não invente valores, datas, nomes ou causas que não estejam nele.
 - Se um número não estiver no JSON, não fale dele.
+- O campo "escopo" diz o que o relatório cobre. Se não for "Empresa inteira", deixe claro já na primeira frase que a análise vale só para esse recorte (por exemplo, um produto, uma área ou um responsável) e não generalize para a empresa.
 - Linguagem: português do Brasil, executiva, direta, sem jargão desnecessário. Frases curtas.
 - Interprete: diga se a situação melhora ou piora, onde está a maior exposição e o que preocupa.
 - Recomendações: ações concretas e priorizadas, cada uma ligada a um número do JSON.

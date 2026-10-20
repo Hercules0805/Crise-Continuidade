@@ -375,3 +375,70 @@ test('Vulnerabilidades vai inteiro (com IA); edicao v1 de Riscos nao compartilha
   assert.ok(btn && btn.disabled);
   assert.match(btn.title, /anterior ao recorte por área/);
 });
+
+// ---- Escopo do relatorio: filtros antes de gerar (20/10/2026) ----
+
+const sel = (doc, id, valor) => { const el = doc.getElementById(id); el.value = valor; return el; };
+
+test('vulnerabilidades: filtros saem dos dados; contagem ao vivo; zero desabilita Gerar; documento e IA so com o escopo', async () => {
+  const ctx = await carregar('admin');
+  await ctx.w.vulnerabilidadesRelatorio();
+  const equipe = [...ctx.doc.getElementById('relFiltroEquipe').options].map((o) => o.value);
+  assert.deepStrictEqual(equipe, ['', 'Infra', '__sem__'], 'opcoes vem do que existe');
+  assert.match(ctx.doc.getElementById('relExecContagem').textContent, /2 vulnerabilidades no escopo \(1 em aberto\) · Empresa inteira/);
+  sel(ctx.doc, 'relFiltroTipo', 'Não Conformidade');
+  ctx.w.atualizarEscopoRelatorio();
+  assert.ok(ctx.doc.getElementById('btnGerarRelExec').disabled, 'nada no escopo');
+  sel(ctx.doc, 'relFiltroTipo', '');
+  sel(ctx.doc, 'relFiltroSeveridade', 'Crítica');
+  ctx.w.atualizarEscopoRelatorio();
+  assert.ok(!ctx.doc.getElementById('btnGerarRelExec').disabled);
+  assert.match(ctx.doc.getElementById('relExecContagem').textContent, /1 vulnerabilidade no escopo \(1 em aberto\) · Só Crítica/);
+  const html = await gerar(ctx, 'vulnerabilidades');
+  assert.match(texto(html), /Escopo do relatório: Só Crítica/);
+  assert.doesNotMatch(texto(html), /Header ausente/, 'a Baixa ficou fora do escopo');
+  const ia = ctx.chamadas.find((c) => c.nome === 'post');
+  assert.strictEqual(ia.b.indicadores.escopo, 'Só Crítica');
+});
+
+test('riscos: so Area mantem a tendencia (serie da area); outro filtro deixa a tendencia indisponivel', async () => {
+  const ctx = await carregar('admin');
+  await ctx.w.riscosRelatorio();
+  sel(ctx.doc, 'relFiltroArea', 'TI');
+  ctx.w.atualizarEscopoRelatorio();
+  assert.match(ctx.doc.getElementById('relExecContagem').textContent, /1 risco ativo no escopo · Área: TI/);
+  let html = await gerar(ctx, 'riscos', false);
+  const t = texto(html);
+  assert.match(t, /Escopo do relatório: Área: TI/);
+  assert.doesNotMatch(t, /Fornecedor único/);
+  assert.doesNotMatch(t, /Tendência indisponível/);
+  await ctx.w.riscosRelatorio();
+  sel(ctx.doc, 'relFiltroOrigem', 'Manual');
+  ctx.w.atualizarEscopoRelatorio();
+  html = await gerar(ctx, 'riscos', false);
+  assert.match(texto(html), /Tendência indisponível com este escopo/);
+});
+
+test('edicao filtrada guarda o escopo; gestor de area fora do escopo fica bloqueado no compartilhar', async () => {
+  const banco = bancoComCompartilhar();
+  banco.api.getPerfis = () => [
+    { email: 'gestor.rh@fortestecnologia.com.br', perfis: ['gestor'], area: 'RH' },
+    { email: 'gestor.ti@fortestecnologia.com.br', perfis: ['gestor'], area: 'TI' },
+  ];
+  const getRel = banco.api.getRelatoriosExecutivos;
+  banco.api.getRelatoriosExecutivos = () => getRel().map((r, i) => Object.assign(r, { escopo: banco.salvos[i].escopo, areasEscopo: banco.salvos[i].areasEscopo }));
+  const si = await carregar('seguranca', { api: banco.api });
+  await si.w.riscosRelatorio();
+  sel(si.doc, 'relFiltroArea', 'TI');
+  si.w.atualizarEscopoRelatorio();
+  await si.w._salvarRelatorioExecutivoGerado(idTempDe(await gerar(si, 'riscos', false)));
+  assert.strictEqual(banco.salvos[0].escopo, 'Área: TI');
+  assert.strictEqual(JSON.stringify(banco.salvos[0].areasEscopo), '["TI"]');
+  assert.match(si.doc.getElementById('relatoriosSalvos').textContent, /Escopo: Área: TI/);
+  await si.w.abrirCompartilharRelatorio('s1');
+  const corpo = si.doc.getElementById('compartilharRelatorioCorpo');
+  const caixas = [...corpo.querySelectorAll('input[type="checkbox"]')];
+  assert.ok(caixas[0].disabled, 'gestor de RH: area fora do escopo');
+  assert.match(corpo.textContent, /sem riscos da área neste escopo/);
+  assert.ok(!caixas[1].disabled);
+});

@@ -333,6 +333,63 @@
     };
   }
 
+  // ------------------------------------------------- filtros do relatorio (20/10/2026)
+
+  var SEM = '__sem__';
+  var ROTULO_NIVEL_MINIMO = { 'Moderado': 'Moderado ou mais grave', 'Alto': 'Alto ou mais grave', 'Muito alto': 'Só Muito alto' };
+
+  /**
+   * Escopo do relatorio: { produto (id | '__sem__'), area, responsavel, origem,
+   * categoria, nivelMinimo, status }. Vazio = todos. Area pela mesma regra do
+   * consolidado (sem area = Corporativo); nivel pela matriz inerente (sem
+   * avaliacao fica fora quando ha nivel minimo).
+   */
+  function filtrar(riscos, filtros) {
+    var f = filtros || {};
+    var min = RC.ORDEM_NIVEL.indexOf(f.nivelMinimo);
+    return (riscos || []).filter(function (r) {
+      if (f.produto === SEM) { if (r.produtoSoftwareId) return false; } else if (f.produto && String(r.produtoSoftwareId || '') !== f.produto) return false;
+      if (f.area && RC.areaDoRisco(r) !== f.area) return false;
+      if (f.responsavel === SEM) { if (String(r.responsavel || '').trim()) return false; } else if (f.responsavel && r.responsavel !== f.responsavel) return false;
+      if (f.origem && (r.origem || 'Manual') !== f.origem) return false;
+      if (f.categoria) {
+        var cats = Array.isArray(r.categorias) ? r.categorias : (r.categoria ? [r.categoria] : []);
+        if (cats.indexOf(f.categoria) === -1) return false;
+      }
+      if (min !== -1) {
+        var n = RC.ORDEM_NIVEL.indexOf(RC.nivelDoRisco(r));
+        if (n === -1 || n < min) return false;
+      }
+      if (f.status && (r.status || 'Identificado') !== f.status) return false;
+      return true;
+    });
+  }
+
+  function temFiltro(filtros) {
+    var f = filtros || {};
+    return Object.keys(f).some(function (k) { return f[k]; });
+  }
+
+  /** So a Area filtrada? Entao a tendencia usa a serie da area (o retrato diario guarda empresa e areas). */
+  function soFiltroDeArea(filtros) {
+    var f = filtros || {};
+    return !!f.area && Object.keys(f).every(function (k) { return k === 'area' || !f[k]; });
+  }
+
+  /** Frase do escopo. `nomeProduto(id)` vem da tela (catalogo). */
+  function descreverFiltros(filtros, nomeProduto) {
+    var f = filtros || {};
+    var partes = [];
+    if (f.produto) partes.push('Produto: ' + (f.produto === SEM ? 'sem produto' : ((nomeProduto && nomeProduto(f.produto)) || f.produto)));
+    if (f.area) partes.push('Área: ' + f.area);
+    if (f.responsavel) partes.push('Responsável: ' + (f.responsavel === SEM ? 'sem responsável' : f.responsavel));
+    if (f.origem) partes.push('Origem: ' + f.origem);
+    if (f.categoria) partes.push('Categoria: ' + f.categoria);
+    if (f.nivelMinimo) partes.push(ROTULO_NIVEL_MINIMO[f.nivelMinimo] || f.nivelMinimo);
+    if (f.status) partes.push('Status: ' + f.status);
+    return partes.length ? partes.join(' · ') : 'Empresa inteira';
+  }
+
   // ------------------------------------------------- recorte por area (Gestor, 20/10/2026)
 
   /** Campos de cada risco que as contas deste modulo leem -- o que vai no retrato v2. */
@@ -377,11 +434,18 @@
       tratamento: tratamento(lista, base.apetite, base.hoje),
       monitoramento: monitoramento(lista, base.hoje, function (r) { return !!r.kriForaDaMeta; }),
       serie: base.seriePorArea ? (base.seriePorArea[area] || null) : null,
+      // Escopo filtrado por algo alem de area: nao ha serie (o retrato diario so tem empresa e areas).
+      serieIndisponivel: !!base.serieIndisponivel,
     };
     return { d: d, destaques: destaques(d), referenciaEmpresa: referenciaEmpresa(base.panoramaEmpresa) };
   }
 
   return {
+    SEM: SEM,
+    filtrar: filtrar,
+    temFiltro: temFiltro,
+    soFiltroDeArea: soFiltroDeArea,
+    descreverFiltros: descreverFiltros,
     riscoMinimo: riscoMinimo,
     referenciaEmpresa: referenciaEmpresa,
     recortarPorArea: recortarPorArea,
