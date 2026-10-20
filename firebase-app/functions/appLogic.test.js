@@ -1162,3 +1162,27 @@ test('gerarResumoExecutivo: resposta fora do formato ou erro da API viram AppErr
     await assert.rejects(() => WRITE_ACTIONS.gerarResumoExecutivo(db, { tipo: 'vulnerabilidades', indicadores: { a: 1 } }, ctx({ geminiApiKey: 'k' })), /Erro na API do Gemini: quota/);
   } finally { g.restaurar(); }
 });
+
+// --- serieRiscoPorEscopo (linha do tempo do Relatorio de Riscos, 20/10/2026) ---
+
+test('serieRiscoPorEscopo: perfil, validacao e empresa x escopo com os mesmos insumos', async () => {
+  const base = () => ({
+    medicoes: {
+      m1: { fonte: 'risco', sujeitoTipo: 'risco', sujeitoId: 'r1', sujeitoRotulo: 'A', area: 'TI', valor: 10, classificacao: 'Identificado', coletadoEm: '2026-01-05T10:00:00Z' },
+      m2: { fonte: 'risco', sujeitoTipo: 'risco', sujeitoId: 'r2', sujeitoRotulo: 'B', area: 'RH', valor: 4, classificacao: 'Identificado', coletadoEm: '2026-01-06T10:00:00Z' },
+    },
+    riscos: { r1: { area: 'TI' }, r2: { area: 'RH' } },
+  });
+  await assert.rejects(() => WRITE_ACTIONS.serieRiscoPorEscopo(makeDb(Object.assign(base(), seedPerfil(['gestor']))), { meses: 6 }, ctx()), /Seu perfil não pode/);
+  const db = makeDb(Object.assign(base(), seedPerfil(['seguranca'])));
+  await assert.rejects(() => WRITE_ACTIONS.serieRiscoPorEscopo(db, { riscoIds: 'r1' }, ctx()), /Lista de riscos inválida/);
+  await assert.rejects(() => WRITE_ACTIONS.serieRiscoPorEscopo(db, { riscoIds: new Array(5001).fill('x') }, ctx()), /grande demais/);
+  const sem = await WRITE_ACTIONS.serieRiscoPorEscopo(db, { meses: 6 }, ctx());
+  assert.strictEqual(sem.escopo, null, 'sem filtro: so a empresa');
+  assert.strictEqual(sem.empresa.pontos.length, 6);
+  const com = await WRITE_ACTIONS.serieRiscoPorEscopo(db, { meses: 12, riscoIds: ['r1'] }, ctx());
+  const ultimoEmp = com.empresa.pontos[com.empresa.pontos.length - 1];
+  const ultimoEsc = com.escopo.pontos[com.escopo.pontos.length - 1];
+  assert.ok(ultimoEmp.carga > ultimoEsc.carga, 'a empresa inclui o risco de fora do escopo');
+  assert.deepStrictEqual(ultimoEsc.areas.map((a) => a.area), ['TI']);
+});

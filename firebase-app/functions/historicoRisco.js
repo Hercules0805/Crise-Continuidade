@@ -374,7 +374,84 @@ function reconstruirComMudancas(medicoesRisco, vinculosPorRiscoId, processosPorI
   return retrato;
 }
 
+// ------------------------------------------------------------------
+// Linha do tempo por escopo (Relatorio Executivo de Riscos, 20/10/2026)
+// ------------------------------------------------------------------
+
+function _mesesAte(mesAtual, n) {
+  const ano = Number(mesAtual.slice(0, 4));
+  const mes = Number(mesAtual.slice(5, 7));
+  const out = [];
+  for (let k = n - 1; k >= 0; k--) {
+    let m = mes - k;
+    let a = ano;
+    while (m <= 0) { m += 12; a--; }
+    out.push(`${a}-${String(m).padStart(2, '0')}`);
+  }
+  return out;
+}
+
+/** Fim do ultimo dia do mes 'AAAA-MM' (mesmo instante "fim do dia" do retrato diario). */
+function _fimDoMesISO(mes) {
+  const [a, m] = mes.split('-').map(Number);
+  const ultimo = new Date(Date.UTC(a, m, 0)).toISOString().slice(0, 10);
+  return new Date(ultimo + 'T23:59:59.999Z').toISOString();
+}
+
+function _mesAnterior(mes) {
+  return _mesesAte(mes, 2)[0];
+}
+
+/**
+ * Serie mensal do risco consolidado reconstruida das medicoes -- a mesma conta
+ * do retrato diario (reconstruirEmData), feita no fim de cada mes. Com
+ * `idsFiltro` (Set de riscoId), so os riscos do escopo de um relatorio
+ * filtrado: e o que permite a linha do tempo de QUALQUER filtro, nao so de
+ * empresa/area (que e tudo o que historico_risco guarda).
+ *
+ * `insumos` = retratoRisco.montarInsumos. `mesAtual` = 'AAAA-MM' do agora; o
+ * ponto do mes corrente e `agoraISO`, os outros o fim do mes.
+ * Devolve { pontos: [{ mes, carga, contados, impactoFinanceiro, composicao,
+ * novos, sairam, areas: [{ area, carga, contados, impactoFinanceiro, novos,
+ * sairam }] }], marcos } -- marcos = os 6 riscos que mais mexeram na carga no
+ * periodo (inicio -> agora).
+ */
+function serieMensal(insumos, opcoes) {
+  const o = opcoes || {};
+  const ids = o.idsFiltro ? new Set([...o.idsFiltro].map(String)) : null;
+  const medicoes = (insumos.medicoesRisco || []).filter((m) => !ids || ids.has(String(m && m.sujeitoId)));
+  const reconstruir = (alvo) => reconstruirEmData(medicoes, insumos.vinculosPorRiscoId, insumos.processosPorId, insumos.criticidadePorFornecedor, alvo);
+  const meses = _mesesAte(o.mesAtual, o.meses || 12);
+  const inicio = reconstruir(_fimDoMesISO(_mesAnterior(meses[0])));
+  let anterior = inicio;
+  const pontos = meses.map((mes) => {
+    const atual = reconstruir(mes === o.mesAtual ? o.agoraISO : _fimDoMesISO(mes));
+    const mudancas = mudancasEntre(anterior.riscos, atual.riscos);
+    anterior = atual;
+    const conta = (lista, tipos) => lista.filter((x) => tipos.indexOf(x.tipo) !== -1).length;
+    const SAIU = ['encerrado', 'excluido'];
+    return {
+      mes,
+      carga: atual.empresa.carga,
+      contados: atual.empresa.contados,
+      impactoFinanceiro: atual.empresa.impactoFinanceiro,
+      composicao: atual.empresa.composicao,
+      novos: conta(mudancas, ['novo']),
+      sairam: conta(mudancas, SAIU),
+      areas: atual.areas.map((a) => {
+        const daArea = mudancas.filter((x) => x.area === a.area);
+        return { area: a.area, carga: a.carga, contados: a.contados, impactoFinanceiro: a.impactoFinanceiro, novos: conta(daArea, ['novo']), sairam: conta(daArea, SAIU) };
+      }),
+    };
+  });
+  const marcos = mudancasEntre(inicio.riscos, anterior.riscos).slice(0, 6).map((x) => ({
+    riscoId: x.riscoId, titulo: x.titulo, area: x.area, tipo: x.tipo, cargaAntes: x.cargaAntes, cargaDepois: x.cargaDepois,
+  }));
+  return { pontos, marcos };
+}
+
 module.exports = {
+  serieMensal,
   STATUS_FORA,
   AREA_CORPORATIVA,
   TIER,

@@ -2482,6 +2482,11 @@ const API = {
     if (action === 'gerarResumoExecutivo') {
       return _appApi('POST', 'gerarResumoExecutivo', { tipo: body.tipo, indicadores: body.indicadores });
     }
+    // Linha do tempo do Relatório de Riscos (empresa + escopo filtrado),
+    // reconstruída no servidor do livro de medições.
+    if (action === 'serieRiscoPorEscopo') {
+      return _appApi('POST', 'serieRiscoPorEscopo', { meses: body.meses, riscoIds: body.riscoIds === undefined ? null : body.riscoIds });
+    }
     if (action === 'salvarRoteiroTeste') {
       return _appApi('POST', 'salvarRoteiroTeste', { id: body.id, categoria: body.categoria, html: body.html });
     }

@@ -6598,28 +6598,38 @@ async function _dadosRelatorioExecutivoVulnerabilidades(opcoes) {
 async function _dadosRelatorioExecutivoRiscos(opcoes) {
   const RR = RiscoRelatorio;
   const hoje = new Date().toISOString().slice(0, 10);
-  const desde = RR.mesesAte(hoje, opcoes.meses)[0] + '-01';
-  const [riscos, processos, avals, inds, cfg, historico] = await Promise.all([
+  const [riscos, processos, avals, inds, cfg] = await Promise.all([
     API.getRiscos(),
     API.getProcessos().catch(() => null),
     API.getAvaliacoesFornecedor().catch(() => []),
     API.getIndicadoresSeguranca().catch(() => null),
     API.getConfigRiscos().catch(() => ({ apetite: RiscoConsolidado.APETITE_PADRAO })),
-    API.getHistoricoRiscoDesde(desde).catch((e) => { console.error('Relatório de Riscos: histórico não carregou', e); return null; }),
   ]);
   // _riscoComKriForaDaMeta lê o cadastro de indicadores carregado.
   if (inds) indicadoresData = inds;
   const critForn = {};
   (avals || []).forEach((av) => { if (av && av.fornecedorId) critForn[String(av.fornecedorId)] = av.scoreCriticidade; });
   const apetite = (cfg && cfg.apetite) || RiscoConsolidado.APETITE_PADRAO;
-  // Escopo (filtros da tela, 20/10/2026). O retrato diário guarda só empresa e
-  // áreas: sem filtro, a série da empresa; só filtro de Área, a série da área;
-  // qualquer outro filtro, tendência indisponível (e a seção explica).
+  // Escopo (filtros da tela, 20/10/2026).
   const filtros = opcoes.filtros || {};
   const comFiltro = RR.temFiltro(filtros);
-  const soArea = RR.soFiltroDeArea(filtros);
   const lista = RR.filtrar(riscos || [], filtros);
   const procs = processos || [];
+  // Linha do tempo (20/10/2026): reconstruída no servidor do livro de
+  // medições, para a empresa e -- com filtro -- só para os riscos do escopo
+  // (inclusive os já encerrados, para o passado deles contar). Falha não
+  // derruba o relatório: a seção explica.
+  let serieServidor = null;
+  try {
+    const r = await API.post('serieRiscoPorEscopo', { meses: opcoes.meses, riscoIds: comFiltro ? lista.map((x) => String(x.id)) : null });
+    if (!r || r.error || !r.empresa) throw new Error((r && r.error) || 'resposta vazia');
+    serieServidor = r;
+  } catch (e) {
+    console.error('Relatório de Riscos: linha do tempo não carregou', e);
+  }
+  const historico = !!serieServidor;
+  const pontosEscopo = serieServidor ? (serieServidor.escopo || serieServidor.empresa).pontos : null;
+  const marcos = serieServidor ? (serieServidor.escopo || serieServidor.empresa).marcos : [];
   const d = {
     hoje,
     panorama: RR.panorama(lista, procs, critForn, apetite),
@@ -6628,21 +6638,38 @@ async function _dadosRelatorioExecutivoRiscos(opcoes) {
     principais: RR.principais(lista, procs, critForn, apetite, 10),
     tratamento: RR.tratamento(lista, apetite, hoje),
     monitoramento: RR.monitoramento(lista, hoje, inds ? _riscoComKriForaDaMeta : null),
-    serie: !historico || (comFiltro && !soArea) ? null
-      : RR.serieMensalHistorico(historico, opcoes.meses, hoje, soArea ? filtros.area : undefined),
-    serieIndisponivel: !!historico && comFiltro && !soArea,
+    serie: pontosEscopo ? RR.pontosDaSerie(pontosEscopo) : null,
+    serieIndisponivel: false,
+    linhaTempo: pontosEscopo ? {
+      principal: RR.pontosDaSerie(pontosEscopo),
+      referencia: comFiltro ? RR.pontosDaSerie(serieServidor.empresa.pontos) : null,
+      rotuloPrincipal: comFiltro ? 'Escopo do relatório' : 'Empresa',
+      rotuloReferencia: 'Empresa',
+      marcos,
+    } : null,
   };
+  // O mês corrente da linha do tempo é sempre o estado AO VIVO (mesma regra do
+  // Painel de Vulnerabilidades): cartão, gráfico e variação batem entre si.
+  const mesAtual = hoje.slice(0, 7);
+  const aoVivo = (pts, pan) => {
+    const ult = pts && pts[pts.length - 1];
+    if (ult && ult.mes === mesAtual) Object.assign(ult, { carga: pan.carga, impactoFinanceiro: pan.impactoFinanceiro });
+  };
+  if (d.linhaTempo) {
+    aoVivo(d.linhaTempo.principal, d.panorama);
+    if (d.linhaTempo.referencia) aoVivo(d.linhaTempo.referencia, RR.panorama(riscos || [], procs, critForn, apetite));
+    d.serie = d.linhaTempo.principal;
+  }
+  d.situacao = RR.situacaoGeral(d.serie, d.tratamento);
+  d.decisoes = RR.decisoesPendentes(d.tratamento, d.monitoramento);
   // Base do recorte por área (retrato v2, 20/10/2026): o mínimo para recalcular
   // o relatório de UMA área quando a edição for compartilhada com o gestor dela.
   const ativos = RR.ativos(lista);
-  const areas = [...new Set(ativos.map(RiscoConsolidado.areaDoRisco))];
-  const seriePorArea = {};
-  if (historico) areas.forEach((a) => { seriePorArea[a] = RR.serieMensalHistorico(historico, opcoes.meses, hoje, a); });
   const baseRecorte = {
     riscos: ativos.map((r) => RR.riscoMinimo(r, inds ? _riscoComKriForaDaMeta(r) : false)),
     processos: procs.map((p) => ({ id: p.id, score: p.score, avaliado: p.avaliado, tierManual: p.tierManual || '' })),
-    critForn, apetite, hoje, seriePorArea: historico && (!comFiltro || soArea) ? seriePorArea : null,
-    serieIndisponivel: d.serieIndisponivel, panoramaEmpresa: d.panorama, escopoFiltrado: comFiltro,
+    critForn, apetite, hoje, pontosEscopo, marcos,
+    panoramaEmpresa: d.panorama, escopoFiltrado: comFiltro,
   };
   return {
     d, processosCarregados: !!processos, indicadoresCarregados: !!inds, historicoCarregado: !!historico,
@@ -6700,8 +6727,29 @@ td{padding:6px 8px;border-bottom:1px solid #f0f0f0;vertical-align:top}
 .notas{font-size:8.5pt;color:#666}
 .notas li{margin-bottom:4px}
 .footer{margin-top:24px;text-align:center;font-size:8pt;color:#aaa}
+.situacao{display:flex;gap:14px;align-items:center;padding:12px 18px;font-size:10pt}
+.situacao .selo{font-size:12pt;font-weight:800;padding:4px 14px;border-radius:999px;color:#fff;white-space:nowrap}
+.situacao-piora{border-left:5px solid #c62828}.situacao-piora .selo{background:#c62828}
+.situacao-melhora{border-left:5px solid #2e7d32}.situacao-melhora .selo{background:#2e7d32}
+.situacao-estavel{border-left:5px solid #757575}.situacao-estavel .selo{background:#757575}
+.kpi-exec .v{font-size:20pt}
+.delta{font-size:8.5pt;color:#777}.delta.sobe{color:#c62828;font-weight:600}.delta.desce{color:#2e7d32;font-weight:600}
+.destaque-tempo{border:2px solid #fce8ea}
+.legenda-doc{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:8.5pt;color:#555;margin-top:6px}
+.legenda-doc i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.marcos{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.marco{background:#f7f7f9;border-radius:8px;padding:8px 10px;font-size:9pt}
+.decisoes{padding-left:20px}.decisoes li{margin-bottom:8px}
+.empilhada{display:flex;height:22px;border-radius:6px;overflow:hidden;background:#f0f0f0}
+.empilhada>div{height:100%}
+.mapa td.acima-apetite{outline:2px solid #b0000f;outline-offset:-3px}
+.cartao-risco{display:flex;gap:12px;align-items:center;border:1px solid #eee;border-radius:8px;padding:8px 12px;margin-bottom:6px}
+.cartao-risco .pos{width:26px;height:26px;border-radius:50%;background:#d60014;color:#fff;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.cartao-risco .corpo{flex:1;font-size:9.5pt}.cartao-risco .niveis{text-align:right;white-space:nowrap}
+.quebra-antes{page-break-before:always;break-before:page}
+@media print{.so-tela{display:none!important}.bloco{padding:11px 14px;margin-bottom:9px}.header{margin-bottom:10px}.secao{margin:16px 0 8px}.kpi-exec .v{font-size:16pt}.kpis{margin-bottom:8px}}
 @page{size:A4;margin:14mm}
-@media print{body{background:#fff;padding:0}.btn-print{display:none!important}.bloco{border-color:#ddd}.bloco,.chip,.kpi,.barra>div,.mapa td,.secao .num{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+@media print{body{background:#fff;padding:0}.btn-print{display:none!important}.bloco{border-color:#ddd}.bloco,.chip,.kpi,.barra>div,.mapa td,.secao .num,.selo,.empilhada>div,.cartao-risco .pos,.legenda-doc i{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
 `;
 
 function _cabecalhoDocumentoExecutivo(titulo, subtitulo, comBotao) {
@@ -6728,7 +6776,7 @@ function _htmlAvisoDocumentoExecutivo(titulo, mensagem, erro) {
  * Documento completo. `secoes` = [{ titulo, ref, html }] já escapado por quem
  * monta; `resumoIA` = null (não pedido) | { erro } | { paragrafos, recomendacoes }.
  */
-function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoes, notas, edicao, escopo }) {
+function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoes, notas, edicao, escopo, abertura }) {
   const ed = edicao || {};
   // Data e hora DA GERAÇÃO (não a de desenhar): a edição salva reabre com a dela.
   const momento = ed.geradoEm ? new Date(ed.geradoEm) : new Date();
@@ -6737,7 +6785,7 @@ function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoe
   let barraEdicao = '';
   if (ed.modo === 'gerado' && ed.idTemp) {
     // A aba do relatório não tem a API: pede à aba do sistema (window.opener).
-    barraEdicao = `<div style="margin:-8px 0 16px;text-align:right;">
+    barraEdicao = `<div class="so-tela" style="margin:-8px 0 16px;text-align:right;">
       <button class="btn-print" id="btnSalvarRelatorio" style="background:#fff;color:#d60014;border:1px solid #d60014;" onclick="salvarRelatorioNoSistema()">💾 Salvar no sistema</button>
     </div>
     <script>function salvarRelatorioNoSistema(){var b=document.getElementById('btnSalvarRelatorio');var o=window.opener;if(!o||o.closed||!o._salvarRelatorioExecutivoGerado){b.textContent='Volte à aba do sistema para salvar (ela foi fechada ou recarregada)';b.disabled=true;return;}o._salvarRelatorioExecutivoGerado('${escScript(ed.idTemp)}');}<\/script>`;
@@ -6766,6 +6814,8 @@ function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoe
 ${_cabecalhoDocumentoExecutivo(titulo, `${subtitulo} • ${quando} • Fortes Tecnologia`, true)}
 ${barraEdicao}
 <div class="bloco" style="padding:10px 16px;font-size:9pt;"><strong>Escopo do relatório:</strong> ${escopo && escopo !== 'Empresa inteira' ? esc(escopo) : 'empresa inteira (sem filtros)'}</div>
+${abertura || ''}
+${abertura ? '<div class="quebra-antes"></div>' : ''}
 ${blocoIA}
 <div class="bloco"><h3>Destaques</h3>${(destaques || []).length ? `<ul class="lista">${destaques.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '<p class="vazio">Sem dados suficientes.</p>'}</div>
 ${(secoes || []).map((s, i) => `<div class="secao"><span class="num">${i + 1}</span>${esc(s.titulo)}<span class="ref">${esc(s.ref || '')}</span></div>${s.html}`).join('\n')}
@@ -6935,21 +6985,145 @@ function _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA, edicao
 }
 
 // ---- Relatório Executivo de Riscos ----
-function _htmlMapaCalorDoc(mapa, titulo) {
+// DECISÃO 20/10/2026: a primeira página é executiva (situação geral, cartões
+// com variação, LINHA DO TEMPO em destaque, o que mais mudou e as decisões que
+// dependem da diretoria); o detalhamento começa na página seguinte e as
+// tabelas longas vão para o apêndice.
+function _htmlMapaCalorDoc(mapa, titulo, apetite) {
   const RC = RiscoConsolidado;
+  const limite = RC.ORDEM_NIVEL.indexOf(RC.normalizarNivel(apetite) || RC.APETITE_PADRAO);
   const linhas = RC.PROBABILIDADES.slice().reverse().map((p) => {
     const pi = RC.PROBABILIDADES.indexOf(p);
     return `<tr><td class="eixo">${esc(p)}</td>${RC.IMPACTOS.map((im, ii) => {
       const n = mapa.contagem[pi][ii];
       const nivel = RC.nivelPorMatriz(p, im);
       const fundo = _COR_NIVEL_DOC[nivel];
-      return `<td style="background:${fundo};color:${nivel === 'Muito alto' ? '#fff' : '#222'};${n ? '' : 'opacity:.45;font-weight:400;'}" title="${esc(nivel)}">${n || '·'}</td>`;
+      const acima = limite !== -1 && RC.ORDEM_NIVEL.indexOf(nivel) > limite;
+      return `<td class="${acima ? 'acima-apetite' : ''}" style="background:${fundo};color:${nivel === 'Muito alto' ? '#fff' : '#222'};${n ? '' : 'opacity:.45;font-weight:400;'}" title="${esc(nivel)}${acima ? ' — acima do apetite' : ''}">${n || '·'}</td>`;
     }).join('')}</tr>`;
   }).join('');
   return `<div><h3>${esc(titulo)}</h3>
-    <table class="mapa"><tbody>${linhas}
-      <tr><td class="eixo"></td>${RC.IMPACTOS.map((i) => `<th>${esc(i)}</th>`).join('')}</tr></tbody></table>
-    <div class="sub-bloco" style="margin-top:4px;">Linhas = probabilidade · colunas = impacto · ${mapa.avaliados} avaliado(s)${mapa.semAvaliacao ? ` · ${mapa.semAvaliacao} sem avaliação` : ''}</div></div>`;
+    <table class="mapa"><tbody>
+      <tr><td class="eixo" style="font-weight:700;">Probabilidade ↑</td><td colspan="5"></td></tr>
+      ${linhas}
+      <tr><td class="eixo"></td>${RC.IMPACTOS.map((i) => `<th>${esc(i)}</th>`).join('')}</tr>
+      <tr><td class="eixo"></td><td colspan="5" style="text-align:right;font-size:7.5pt;color:#555;font-weight:700;">Impacto →</td></tr></tbody></table>
+    <div class="sub-bloco" style="margin-top:4px;">${mapa.avaliados} avaliado(s)${mapa.semAvaliacao ? ` · ${mapa.semAvaliacao} sem avaliação` : ''}</div></div>`;
+}
+
+/** "▲ +12 vs. set/26" colorido: para risco, subir é ruim (vermelho), descer é bom (verde). */
+function _deltaDoc(delta, rotuloBase, formatar) {
+  if (delta === null || delta === undefined) return '';
+  const f = formatar || ((x) => String(x));
+  if (!delta) return `<span class="delta">= ${esc(rotuloBase)}</span>`;
+  return `<span class="delta ${delta > 0 ? 'sobe' : 'desce'}">${delta > 0 ? '▲ +' : '▼ −'}${esc(f(Math.abs(delta)))} vs. ${esc(rotuloBase)}</span>`;
+}
+
+function _kpiExecDoc(rotulo, valor, linhas) {
+  return `<div class="kpi kpi-exec"><div class="rk">${esc(rotulo)}</div><div class="v">${esc(String(valor))}</div>${(linhas || []).filter(Boolean).map((l) => `<div class="t">${l}</div>`).join('')}</div>`;
+}
+
+/**
+ * Linha do tempo do documento (SVG estático, 1000×230): a linha principal
+ * (empresa, ou o escopo/área) em vermelho; com filtro, a de referência em
+ * cinza tracejado, com o próprio eixo à direita (magnitudes diferentes).
+ * Abaixo, barras finas de novos × saídos por mês.
+ */
+function _svgLinhaTempoDoc(lt) {
+  const RR = RiscoRelatorio;
+  const pts = lt.principal;
+  const ref = lt.referencia;
+  const L = 1000, A = 200, M = { topo: 18, baixo: 28, esq: 50, dir: ref ? 56 : 20 };
+  const w = L - M.esq - M.dir, h = A - M.topo - M.baixo;
+  const n = pts.length;
+  const x = (i) => M.esq + (n === 1 ? w / 2 : (w * i) / (n - 1));
+  const maxP = Math.max(1, ...pts.map((p) => p.carga || 0)) * 1.15;
+  const maxR = ref ? Math.max(1, ...ref.map((p) => p.carga || 0)) * 1.15 : 1;
+  const yP = (v) => M.topo + h - (h * v) / maxP;
+  const yR = (v) => M.topo + h - (h * v) / maxR;
+  let grade = '';
+  for (let f = 0; f <= 4; f++) {
+    const vy = M.topo + h - (h * f) / 4;
+    grade += `<line x1="${M.esq}" y1="${vy}" x2="${L - M.dir}" y2="${vy}" stroke="#eee"/>`
+      + `<text x="${M.esq - 8}" y="${vy + 4}" text-anchor="end" font-size="11" fill="#999">${Math.round((maxP * f) / 4)}</text>`
+      + (ref ? `<text x="${L - M.dir + 8}" y="${vy + 4}" font-size="11" fill="#bbb">${Math.round((maxR * f) / 4)}</text>` : '');
+  }
+  const rotulos = pts.map((p, i) => `<text x="${x(i)}" y="${A - 8}" text-anchor="middle" font-size="11" fill="#999">${esc(RR.rotuloMes(p.mes))}</text>`).join('');
+  const linha = (serie, y, cor, tracejado) => (serie.length > 1
+    ? `<polyline points="${serie.map((p, i) => `${x(i)},${y(p.carga || 0)}`).join(' ')}" fill="none" stroke="${cor}" stroke-width="${tracejado ? 2 : 3}" ${tracejado ? 'stroke-dasharray="6 5"' : ''} stroke-linejoin="round" stroke-linecap="round"/>` : '')
+    + serie.map((p, i) => `<circle cx="${x(i)}" cy="${y(p.carga || 0)}" r="${tracejado ? 2.5 : 3.5}" fill="${cor}"/>`).join('');
+  const ultimo = pts[n - 1];
+  const rotuloFinal = `<text x="${x(n - 1)}" y="${yP(ultimo.carga || 0) - 10}" text-anchor="end" font-size="13" font-weight="700" fill="#d60014">${ultimo.carga || 0}</text>`;
+  const svg = `<svg viewBox="0 0 ${L} ${A}" style="width:100%;height:auto;display:block;" role="img" aria-label="Linha do tempo da carga de risco">
+    ${grade}${rotulos}${ref ? linha(ref, yR, '#9e9e9e', true) : ''}${linha(pts, yP, '#d60014', false)}${rotuloFinal}
+    <line x1="${M.esq}" y1="${M.topo + h}" x2="${L - M.dir}" y2="${M.topo + h}" stroke="#ccc"/></svg>`;
+  // Novos × saídos: barras finas, mesma escala horizontal.
+  const HB = 50, maxB = Math.max(1, ...pts.map((p) => Math.max(p.novos || 0, p.sairam || 0)));
+  const larg = Math.min(14, (w / Math.max(1, n)) * 0.28);
+  const barras = pts.map((p, i) => {
+    const hn = ((p.novos || 0) / maxB) * (HB - 16), hs = ((p.sairam || 0) / maxB) * (HB - 16);
+    return `${p.novos ? `<rect x="${x(i) - larg - 1}" y="${HB - 4 - hn}" width="${larg}" height="${hn}" fill="#e65100" rx="2"/>` : ''}`
+      + `${p.sairam ? `<rect x="${x(i) + 1}" y="${HB - 4 - hs}" width="${larg}" height="${hs}" fill="#558b2f" rx="2"/>` : ''}`;
+  }).join('');
+  const svgBarras = `<svg viewBox="0 0 ${L} ${HB}" style="width:100%;height:auto;display:block;margin-top:2px;" role="img" aria-label="Riscos novos e que saíram por mês">
+    <line x1="${M.esq}" y1="${HB - 4}" x2="${L - M.dir}" y2="${HB - 4}" stroke="#ddd"/>${barras}</svg>`;
+  const legenda = `<div class="legenda-doc">
+      <span><i style="background:#d60014;"></i>${esc(lt.rotuloPrincipal)} (eixo à esquerda)</span>
+      ${ref ? `<span><i style="background:#9e9e9e;"></i>${esc(lt.rotuloReferencia)} — referência (eixo à direita)</span>` : ''}
+      <span><i style="background:#e65100;"></i>Novos no mês</span><span><i style="background:#558b2f;"></i>Saíram no mês</span>
+    </div>`;
+  return svg + svgBarras + legenda;
+}
+
+/** Página executiva (primeira página do documento). */
+function _htmlAberturaRiscosDoc(dados, opcoes, area) {
+  const RR = RiscoRelatorio;
+  const d = dados.d;
+  const p = d.panorama, t = d.tratamento;
+  const lt = d.linhaTempo || (d.serie && d.serie.some((x) => x.carga !== null)
+    ? { principal: d.serie.filter((x) => x.carga !== null), referencia: null, rotuloPrincipal: area ? `Área ${area}` : 'Empresa', marcos: [] }
+    : null);
+  const sit = d.situacao || RR.situacaoGeral(lt ? lt.principal : null, t);
+  const vC = lt ? RR.variacao(lt.principal, 'carga') : null;
+  const vR = lt ? RR.variacao(lt.principal, 'impactoFinanceiro') : null;
+  const ultimo = lt ? lt.principal[lt.principal.length - 1] : null;
+  const rot = (mes) => (mes ? RR.rotuloMes(mes) : '');
+  const reais = (x) => _formatarReais(x);
+  const classe = { Piorando: 'piora', Melhorando: 'melhora', 'Estável': 'estavel' }[sit.rotulo] || 'estavel';
+  const decisoes = d.decisoes || RR.decisoesPendentes(t, d.monitoramento);
+  const alvo = area ? 'da área' : (opcoes.escopo && opcoes.escopo !== 'Empresa inteira' ? 'do escopo' : 'da empresa');
+
+  const cartoes = `<div class="kpis">
+      ${_kpiExecDoc(`Carga ${alvo}`, p.carga, vC ? [_deltaDoc(vC.deltaMes, rot(vC.mesAnterior)), _deltaDoc(vC.deltaInicio, rot(vC.mesInicio))] : [])}
+      ${_kpiExecDoc('Riscos ativos', p.ativos, ultimo ? [`<span class="delta">${ultimo.novos} novo(s) · ${ultimo.sairam} saíram neste mês</span>`] : [])}
+      ${_kpiExecDoc('Acima do apetite', p.acimaDoApetite, [`<span class="delta${t.semResposta.length ? ' sobe' : ''}">${t.semResposta.length} sem resposta definida · apetite até ${esc(p.apetite)}</span>`])}
+      ${_kpiExecDoc('Impacto financeiro estimado', reais(p.impactoFinanceiro), vR ? [_deltaDoc(vR.deltaMes, rot(vR.mesAnterior), reais)] : [])}
+    </div>`;
+
+  let tempo;
+  if (!lt) {
+    tempo = `<p class="alerta">Linha do tempo indisponível: ${d.serieIndisponivel ? 'esta edição foi gerada antes da linha do tempo por escopo.' : 'não foi possível reconstruir a série a partir do livro de medições. Gere o relatório de novo; se persistir, avise o administrador.'}</p>`;
+  } else {
+    const marcos = (lt.marcos || []).filter((x) => x.cargaDepois !== x.cargaAntes);
+    const TIPO = { novo: 'novo', reavaliado: 'reavaliado', encerrado: 'encerrado', excluido: 'excluído' };
+    tempo = `${_svgLinhaTempoDoc(lt)}
+      ${marcos.length ? `<h3 style="margin-top:12px;">O que mais mudou no período</h3><div class="marcos">${marcos.map((x) => {
+        const dif = x.cargaDepois - x.cargaAntes;
+        return `<div class="marco"><span class="delta ${dif > 0 ? 'sobe' : 'desce'}">${dif > 0 ? '▲ +' : '▼ −'}${Math.abs(dif)}</span> <strong>${esc(x.titulo)}</strong><div class="muted">${esc(x.area)} · ${esc(TIPO[x.tipo] || x.tipo)}</div></div>`;
+      }).join('')}</div>` : ''}`;
+  }
+
+  const blocoDecisoes = decisoes.length
+    ? `<ol class="decisoes">${decisoes.map((x) => `<li><strong>${esc(x.titulo)}: ${x.n}</strong>${x.exemplos && x.exemplos.length ? `<div class="muted">${esc(x.exemplos.join(' · '))}${x.n > x.exemplos.length ? ' …' : ''}</div>` : ''}<div>→ ${esc(x.passo)}</div></li>`).join('')}</ol>`
+    : '<p class="vazio">Nenhuma decisão pendente: os riscos acima do apetite têm resposta, os aceites têm aprovador e não há atraso relevante.</p>';
+
+  return `<div class="bloco situacao situacao-${classe}"><span class="selo">${esc(sit.rotulo)}</span><span><strong>Situação geral ${alvo}:</strong> ${esc(sit.motivo)}.</span></div>
+    ${cartoes}
+    <div class="bloco destaque-tempo"><h3>Linha do tempo — carga de risco ${lt ? `nos últimos ${lt.principal.length} meses` : ''}</h3>
+      <div class="sub-bloco">Carga no fim de cada mês, reconstruída do livro de medições com a mesma conta do Risco no Tempo${lt && lt.referencia ? `. Vermelho: ${esc(lt.rotuloPrincipal.toLowerCase())}; cinza: ${esc(lt.rotuloReferencia.toLowerCase())}, para comparar` : ''}.</div>
+      ${tempo}
+    </div>
+    <div class="bloco"><h3>Decisões que dependem da diretoria</h3>${blocoDecisoes}</div>`;
 }
 
 function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao) {
@@ -6959,42 +7133,62 @@ function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao) {
   const p = d.panorama, t = d.tratamento, m = d.monitoramento;
   const fmtData = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '–');
   const chipNivel = (n) => (n ? _chipDoc(n, _nivelFaixaRisco(n)) : _chipDoc('Sem avaliação', null));
-  const altos = (p.composicao['Muito alto'] || 0) + (p.composicao['Alto'] || 0);
   const maxArea = p.areas.length ? p.areas[0].carga || 1 : 1;
+  // Recorte de UMA área (compartilhado com o gestor dela): da empresa/escopo só o agregado de referência.
+  const area = (edicao && edicao.recorteArea) || '';
+  const ref = dados.referenciaEmpresa;
+  const filtrado = !!(opcoes.escopo && opcoes.escopo !== 'Empresa inteira');
+  const noRef = filtrado ? 'no escopo' : 'na empresa';
+
+  // Por nível: uma barra empilhada (mais legível que cinco barras soltas).
+  const totalNivel = RC.FAIXAS.reduce((s, f) => s + (p.composicao[f] || 0), 0) + (p.semAvaliacao || 0);
+  const segmentos = RC.FAIXAS.filter((f) => p.composicao[f]).map((f) => ({ rot: f, n: p.composicao[f], cor: _COR_NIVEL_DOC[f] === '#eef7ea' ? '#b9dcae' : _COR_NIVEL_DOC[f] }))
+    .concat(p.semAvaliacao ? [{ rot: 'Sem avaliação', n: p.semAvaliacao, cor: '#ccc' }] : []);
+  const empilhada = totalNivel
+    ? `<div class="empilhada">${segmentos.map((s) => `<div style="width:${(s.n / totalNivel) * 100}%;background:${s.cor};" title="${esc(s.rot)}: ${s.n}"></div>`).join('')}</div>
+       <div class="legenda-doc">${segmentos.map((s) => `<span><i style="background:${s.cor};"></i>${esc(s.rot)}: ${s.n}</span>`).join('')}</div>`
+    : '<p class="vazio">Nenhum risco ativo.</p>';
+
+  const blocoReferencia = area && ref ? `<div class="bloco">
+      <h3>${filtrado ? 'Referência do escopo do relatório' : 'Referência da empresa'}</h3>
+      <div class="sub-bloco">Só totais, para comparar: os riscos das outras áreas não fazem parte deste recorte.</div>
+      <div class="kpis" style="margin-bottom:0;">
+        ${_kpiDoc(`Riscos ativos ${noRef}`, ref.ativos, '')}
+        ${_kpiDoc(filtrado ? 'Carga do escopo' : 'Carga da empresa', ref.carga, ref.carga ? `${Math.round((p.carga / ref.carga) * 100)}% dela é desta área` : '')}
+        ${_kpiDoc(`Acima do apetite ${noRef}`, ref.acimaDoApetite, `Apetite: até ${ref.apetite}`)}
+        ${_kpiDoc(`Alto ou Muito alto ${noRef}`, (ref.composicao['Muito alto'] || 0) + (ref.composicao['Alto'] || 0), '')}
+      </div>
+    </div>` : '';
 
   const s1 = `<div class="bloco">
-      <div class="kpis">
-        ${_kpiDoc('Riscos ativos', p.ativos, `${p.encerrados} encerrado(s) fora da conta`)}
-        ${_kpiDoc('Carga da empresa', p.carga, `${altos} de nível Alto ou Muito alto`)}
-        ${_kpiDoc('Acima do apetite', p.acimaDoApetite, `Apetite: até ${p.apetite}`)}
-        ${_kpiDoc('Impacto financeiro estimado', _formatarReais(p.impactoFinanceiro), p.semImpactoFinanceiro ? `${p.semImpactoFinanceiro} sem estimativa` : '')}
-      </div>
-      <div class="colunas">
-        <div><h3>Por nível (inerente)</h3>
-          ${RC.FAIXAS.map((f) => _linhaBarraDoc(f, p.composicao[f] || 0, p.ativos ? ((p.composicao[f] || 0) / p.ativos) * 100 : 0, _COR_NIVEL_DOC[f] === '#eef7ea' ? '#b9dcae' : _COR_NIVEL_DOC[f])).join('')}
-          ${p.semAvaliacao ? _linhaBarraDoc('Sem avaliação', p.semAvaliacao, p.ativos ? (p.semAvaliacao / p.ativos) * 100 : 0, '#bbb') : ''}
-        </div>
+      <h3>Por nível (inerente)</h3>${empilhada}
+      <div class="colunas" style="margin-top:12px;">
         <div><h3>Por status</h3>
           ${RR.STATUS.map((s) => _linhaBarraDoc(s, p.porStatus[s] || 0, (p.ativos + p.encerrados) ? ((p.porStatus[s] || 0) / (p.ativos + p.encerrados)) * 100 : 0, s === 'Encerrado' ? '#bbb' : '#d60014')).join('')}
-          <h3 style="margin-top:10px;">Por origem</h3>
+        </div>
+        <div><h3>Por origem</h3>
           ${Object.keys(p.porOrigem).sort((a, b) => p.porOrigem[b] - p.porOrigem[a]).map((o) => _linhaBarraDoc(o, p.porOrigem[o], p.ativos ? (p.porOrigem[o] / p.ativos) * 100 : 0, '#37474f')).join('') || '<p class="vazio">Nenhum risco ativo.</p>'}
         </div>
       </div>
-    </div>`;
+    </div>${blocoReferencia}`;
 
   const s2 = `<div class="bloco"><div class="colunas">
-      ${_htmlMapaCalorDoc(d.mapaInerente, 'Risco inerente')}
-      ${_htmlMapaCalorDoc(d.mapaResidual, 'Risco residual (depois do tratamento)')}
+      ${_htmlMapaCalorDoc(d.mapaInerente, 'Risco inerente', p.apetite)}
+      ${_htmlMapaCalorDoc(d.mapaResidual, 'Risco residual (depois do tratamento)', p.apetite)}
     </div>
-    <div class="sub-bloco" style="margin-top:8px;">Quantidade de riscos ativos em cada célula da matriz 5×5 (NIST SP 800-30, Tabela I-2). A cor é o nível da célula.</div></div>`;
+    <div class="legenda-doc" style="margin-top:8px;"><span><i style="background:#fff;border:2px solid #b0000f;"></i>Célula acima do apetite (até ${esc(p.apetite)})</span></div>
+    <div class="sub-bloco" style="margin-top:4px;">Quantidade de riscos ativos em cada célula da matriz 5×5 (NIST SP 800-30, Tabela I-2). A cor é o nível da célula.</div></div>`;
 
+  // Principais: top 5 em cartões no corpo; a tabela com os 10 vai para o apêndice.
+  const cartaoRisco = (x, i) => `<div class="cartao-risco">
+      <div class="pos">${i + 1}</div>
+      <div class="corpo"><strong>${esc(x.r.titulo || '–')}</strong>${x.acimaDoApetite ? ' ' + _chipDoc('Acima do apetite', 'critical') : ''}
+        <div class="muted">${esc(RC.areaDoRisco(x.r))} · ${esc(x.r.responsavel || 'sem responsável')} · ${esc(x.r.estrategiaTratamento || 'sem estratégia')} · ${esc(x.r.status || 'Identificado')}</div></div>
+      <div class="niveis">${chipNivel(x.nivel)} → ${x.nivelResidual ? chipNivel(x.nivelResidual) : '<span class="muted">–</span>'}<div class="muted" style="text-align:right;">carga ${x.carga}</div></div>
+    </div>`;
   const s3 = `<div class="bloco">
-      <div class="sub-bloco">Ordem pela carga: score (probabilidade × impacto) × peso do Tier do processo (ou da criticidade do fornecedor).</div>
-      ${_tabelaDoc([{ t: 'Risco' }, { t: 'Área' }, { t: 'Inerente → residual' }, { t: 'Carga', cls: 'c' }, { t: 'Estratégia' }, { t: 'Status' }, { t: 'Responsável' }],
-        d.principais.map((x) => [`<strong>${esc(x.r.titulo || '–')}</strong>${x.acimaDoApetite ? ' ' + _chipDoc('Acima do apetite', 'critical') : ''}`,
-          esc(RC.areaDoRisco(x.r)), `${chipNivel(x.nivel)} → ${x.nivelResidual ? chipNivel(x.nivelResidual) : '<span class="muted">–</span>'}`,
-          String(x.carga), esc(x.r.estrategiaTratamento || '–'), esc(x.r.status || 'Identificado'), esc(x.r.responsavel || '–')]),
-        'Nenhum risco ativo avaliado.')}
+      <div class="sub-bloco">Os 5 que mais pesam na carga (score × peso do Tier do processo ou da criticidade do fornecedor). A lista com os 10 está no apêndice.</div>
+      ${d.principais.length ? d.principais.slice(0, 5).map(cartaoRisco).join('') : '<p class="vazio">Nenhum risco ativo avaliado.</p>'}
     </div>`;
 
   const s4 = `<div class="bloco">
@@ -7051,45 +7245,20 @@ function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao) {
       ${m.alertas.length ? `<h3 style="margin-top:12px;">Alertas da automação a revisar</h3><ul class="lista">${m.alertas.map((r) => `<li>${esc(r.titulo || '–')}: <span class="muted">${esc(r.alertaAutomacao)}</span></li>`).join('')}</ul>` : ''}
     </div>`;
 
-  let s7;
-  if (d.serieIndisponivel) {
-    s7 = '<div class="bloco"><p class="alerta">Tendência indisponível com este escopo: o retrato diário do risco guarda só a empresa e as áreas. Filtre só por Área (ou gere sem filtros) para ver a evolução mês a mês.</p></div>';
-  } else if (!d.serie) {
-    s7 = '<div class="bloco"><p class="alerta">O histórico de risco não pôde ser lido (o retrato diário é restrito a Admin e Segurança) — a tendência ficou de fora deste relatório.</p></div>';
-  } else if (!d.serie.some((x) => x.carga !== null)) {
-    s7 = `<div class="bloco"><p class="vazio">Nenhum retrato diário gravado nos últimos ${opcoes.meses} meses.</p></div>`;
-  } else {
-    const comDado = d.serie.filter((x) => x.carga !== null);
-    const maxCarga = Math.max(1, ...comDado.map((x) => x.carga));
-    s7 = `<div class="bloco">
-      <div class="sub-bloco">Último retrato diário de cada mês (rotina das 6h). Novos e saídos somam as mudanças registradas no mês.</div>
-      ${_tabelaDoc([{ t: 'Mês' }, { t: 'Carga' }, { t: 'Riscos', cls: 'c' }, { t: 'Impacto financeiro', cls: 'r' }, { t: 'Novos', cls: 'c' }, { t: 'Saíram', cls: 'c' }],
-        d.serie.map((x) => x.carga === null
-          ? [esc(RR.rotuloMes(x.mes)), '<span class="muted">sem retrato</span>', '–', '–', '–', '–']
-          : [esc(RR.rotuloMes(x.mes)), `<div class="linha" style="margin:0;"><div class="barra"><div style="width:${(x.carga / maxCarga) * 100}%;background:#d60014;"></div></div><span class="val">${x.carga}</span></div>`,
-            String(x.contados), esc(_formatarReais(x.impactoFinanceiro || 0)), String(x.novos), String(x.sairam)]))}
-    </div>`;
-  }
+  // Apêndice: a tabela dos 10 principais e a tendência mês a mês.
+  const apA = _tabelaDoc([{ t: '#', cls: 'c' }, { t: 'Risco' }, { t: 'Área' }, { t: 'Inerente → residual' }, { t: 'Carga', cls: 'c' }, { t: 'Estratégia' }, { t: 'Status' }, { t: 'Responsável' }],
+    d.principais.map((x, i) => [String(i + 1), `<strong>${esc(x.r.titulo || '–')}</strong>${x.acimaDoApetite ? ' ' + _chipDoc('Acima do apetite', 'critical') : ''}`,
+      esc(RC.areaDoRisco(x.r)), `${chipNivel(x.nivel)} → ${x.nivelResidual ? chipNivel(x.nivelResidual) : '<span class="muted">–</span>'}`,
+      String(x.carga), esc(x.r.estrategiaTratamento || '–'), esc(x.r.status || 'Identificado'), esc(x.r.responsavel || '–')]),
+    'Nenhum risco ativo avaliado.');
+  const serieTab = (d.linhaTempo && d.linhaTempo.principal) || (d.serie || []).filter((x) => x.carga !== null);
+  const apB = serieTab.length
+    ? _tabelaDoc([{ t: 'Mês' }, { t: 'Carga', cls: 'c' }, { t: 'Riscos na conta', cls: 'c' }, { t: 'Impacto financeiro', cls: 'r' }, { t: 'Novos', cls: 'c' }, { t: 'Saíram', cls: 'c' }],
+      serieTab.map((x) => [esc(RR.rotuloMes(x.mes)), String(x.carga), String(x.contados), esc(_formatarReais(x.impactoFinanceiro || 0)), String(x.novos), String(x.sairam)]))
+    : '<p class="vazio">Sem linha do tempo nesta edição.</p>';
 
-  // Recorte de UMA área (compartilhado com o gestor dela, 20/10/2026): da
-  // empresa só o agregado de referência; sem a tabela de carga por área.
-  const area = (edicao && edicao.recorteArea) || '';
-  const ref = dados.referenciaEmpresa;
-  // Relatório filtrado: a referência do recorte é o escopo, não a empresa inteira.
-  const filtrado = !!(opcoes.escopo && opcoes.escopo !== 'Empresa inteira');
-  const noRef = filtrado ? 'no escopo' : 'na empresa';
-  const blocoReferencia = area && ref ? `<div class="bloco">
-      <h3>${filtrado ? 'Referência do escopo do relatório' : 'Referência da empresa'}</h3>
-      <div class="sub-bloco">Só totais, para comparar: os riscos das outras áreas não fazem parte deste recorte.</div>
-      <div class="kpis" style="margin-bottom:0;">
-        ${_kpiDoc(`Riscos ativos ${noRef}`, ref.ativos, '')}
-        ${_kpiDoc(filtrado ? 'Carga do escopo' : 'Carga da empresa', ref.carga, ref.carga ? `${Math.round((p.carga / ref.carga) * 100)}% dela é desta área` : '')}
-        ${_kpiDoc(`Acima do apetite ${noRef}`, ref.acimaDoApetite, `Apetite: até ${ref.apetite}`)}
-        ${_kpiDoc(`Alto ou Muito alto ${noRef}`, (ref.composicao['Muito alto'] || 0) + (ref.composicao['Alto'] || 0), '')}
-      </div>
-    </div>` : '';
   const secoes = [
-    { titulo: area ? `Panorama: quanto risco a área ${area} carrega?` : 'Panorama: quanto risco carregamos?', ref: 'NIST SP 800-39 · Enquadrar · CSF GV.RM-02', html: (area ? s1.replace('Carga da empresa', 'Carga da área') : (filtrado ? s1.replace('Carga da empresa', 'Carga do escopo') : s1)) + blocoReferencia },
+    { titulo: area ? `Panorama da área ${area}` : 'Panorama da carteira', ref: 'NIST SP 800-39 · Enquadrar · CSF GV.RM-02', html: s1 },
     { titulo: area ? 'Mapa de calor da área' : 'Mapa de calor da carteira', ref: 'NIST SP 800-30 · Avaliar', html: s2 },
     { titulo: 'Principais riscos', ref: 'NIST SP 800-30 · Avaliar', html: s3 },
   ];
@@ -7097,19 +7266,22 @@ function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao) {
   secoes.push(
     { titulo: 'Resposta ao risco: tratamento e aceites', ref: 'NIST SP 800-39 · Responder', html: s5 },
     { titulo: 'Monitoramento', ref: 'NIST SP 800-39 · Monitorar', html: s6 },
-    { titulo: area ? 'Tendência da área' : 'Tendência', ref: 'Retrato diário (historico_risco)', html: s7 },
+    { titulo: 'Apêndice', ref: 'Detalhe para consulta', html: `<div class="bloco"><h3>A. Os 10 principais riscos</h3>${apA}</div><div class="bloco"><h3>B. Linha do tempo mês a mês</h3>${apB}</div>` },
   );
 
   return _htmlDocumentoExecutivo({
     titulo: _TITULO_RELATORIO_EXECUTIVO.riscos + (area ? ` — área ${area}` : ''),
     subtitulo: `${area ? `Recorte da área ${area} • ` : ''}${filtrado ? 'Escopo filtrado • ' : ''}${p.ativos} riscos ativos • apetite até ${p.apetite} • tendência de ${opcoes.meses} meses`,
     escopo: opcoes.escopo,
+    abertura: _htmlAberturaRiscosDoc(dados, opcoes, area),
     resumoIA,
     edicao,
     destaques: dados.destaques,
     secoes,
     notas: [
       ...(area ? [`Recorte da área ${area}: todos os números deste documento são só dos riscos dela; da empresa aparecem apenas os totais de referência. O resumo por IA da edição original não acompanha o recorte.`] : []),
+      'Situação geral: "Piorando" se a carga subiu mais de 5% no último mês ou há risco acima do apetite sem resposta definida; "Melhorando" se caiu mais de 5% e não há pendência de resposta; "Estável" nos demais casos.',
+      'Linha do tempo: a carga no fim de cada mês, reconstruída do livro de medições com a mesma conta do Risco no Tempo. Com filtro, só os riscos do escopo (filtrados pelos atributos atuais; um risco apagado entra só na linha da empresa).',
       'Ativos = todos os status menos Encerrado; riscos Aceitos continuam contando.',
       'Nível pela matriz 5×5 do NIST SP 800-30 (Tabela I-2), a partir de probabilidade e impacto. Sem os dois, o risco fica "sem avaliação" e não entra na carga.',
       'Carga = score (probabilidade × impacto, 1 a 25) × peso do Tier do processo (Tier 1 = 3, Tier 2 = 2, Tier 3 = 1) ou da criticidade do fornecedor; sem vínculo, peso 2.',

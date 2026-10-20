@@ -22,6 +22,8 @@ const drpSecoes = require('./drpSecoes');
 const contratoCiclo = require('./contratoCiclo');
 const notificacoes = require('./notificacoes');
 const transporteEmail = require('./transporteEmail');
+const historicoRisco = require('./historicoRisco');
+const retratoRisco = require('./retratoRisco');
 
 const COLLECTION = {
   processos: 'processos',
@@ -1657,6 +1659,33 @@ async function gerarResumoExecutivo(db, data, ctx) {
   return { success: true, tipo, paragrafos, recomendacoes: _textosResumo(json.recomendacoes, 3) };
 }
 
+// ============================================================
+// Linha do tempo do Relatorio Executivo de Riscos (20/10/2026): a carga no fim
+// de cada mes, reconstruida do livro de medicoes com a mesma conta do retrato
+// diario -- para a empresa e, quando o relatorio e filtrado, so para os riscos
+// do escopo (historico_risco so guarda empresa e areas). Le `medicoes`, que o
+// cliente da Seguranca nao le: por isso roda aqui, com o mesmo perfil do
+// relatorio.
+// ============================================================
+const LIMITE_IDS_SERIE = 5000;
+
+async function serieRiscoPorEscopo(db, data, ctx) {
+  if (!(await podeOperarRiscos(db, ctx.email))) throw new AppError('Seu perfil não pode gerar este relatório.');
+  const meses = [6, 12].includes(Number(data.meses)) ? Number(data.meses) : 12;
+  let ids = null;
+  if (data.riscoIds !== null && data.riscoIds !== undefined) {
+    if (!Array.isArray(data.riscoIds)) throw new AppError('Lista de riscos inválida.');
+    if (data.riscoIds.length > LIMITE_IDS_SERIE) throw new AppError('Escopo grande demais para a linha do tempo.');
+    ids = data.riscoIds.map(String);
+  }
+  const insumos = await retratoRisco.montarInsumos(db);
+  const agoraISO = new Date().toISOString();
+  const mesAtual = retratoRisco.chaveDoDia(agoraISO).slice(0, 7);
+  const empresa = historicoRisco.serieMensal(insumos, { meses, mesAtual, agoraISO });
+  const escopo = ids ? historicoRisco.serieMensal(insumos, { meses, mesAtual, agoraISO, idsFiltro: ids }) : null;
+  return { success: true, meses, mesAtual, empresa, escopo };
+}
+
 const READ_ACTIONS = {
   getLevantamentoPCN,
   dadosPCN,
@@ -1682,6 +1711,7 @@ const WRITE_ACTIONS = {
   exportarRiscoDocumento,
   enviarEmailTeste,
   gerarResumoExecutivo,
+  serieRiscoPorEscopo,
 };
 
 module.exports = {

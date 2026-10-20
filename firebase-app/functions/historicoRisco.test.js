@@ -301,3 +301,31 @@ test('acrescentar um segundo risco so aumenta a carga do retrato', () => {
   const cargaDepois = reconstruir(comMais, '2026-09-20T00:00:00.000Z').empresa.carga;
   assert.ok(cargaDepois > cargaAntes);
 });
+
+// ============================================================
+// LINHA DO TEMPO POR ESCOPO (Relatorio Executivo de Riscos, 20/10/2026)
+// ============================================================
+
+test('serieMensal: fim de cada mes, novos e saidos, so os ids do escopo e marcos do periodo', () => {
+  const insumos = {
+    medicoesRisco: [
+      medicao({ sujeitoId: 'r1', sujeitoRotulo: 'Ransomware', area: 'TI', valor: 10, coletadoEm: '2026-08-05T10:00:00Z' }),
+      medicao({ sujeitoId: 'r1', sujeitoRotulo: 'Ransomware', area: 'TI', valor: 20, coletadoEm: '2026-10-02T10:00:00Z' }),
+      medicao({ sujeitoId: 'r2', sujeitoRotulo: 'Fraude', area: 'Financeiro', valor: 5, coletadoEm: '2026-09-15T10:00:00Z' }),
+      medicao({ sujeitoId: 'r2', sujeitoRotulo: 'Fraude', area: 'Financeiro', valor: 5, classificacao: 'Encerrado', coletadoEm: '2026-10-10T10:00:00Z' }),
+    ],
+    vinculosPorRiscoId: {}, processosPorId: {}, criticidadePorFornecedor: {},
+  };
+  const peso = HR.PESO_PADRAO;
+  const tudo = HR.serieMensal(insumos, { meses: 3, mesAtual: '2026-10', agoraISO: '2026-10-20T12:00:00Z' });
+  assert.deepStrictEqual(tudo.pontos.map((p) => p.mes), ['2026-08', '2026-09', '2026-10']);
+  assert.deepStrictEqual(tudo.pontos.map((p) => p.carga), [10 * peso, (10 + 5) * peso, 20 * peso]);
+  assert.deepStrictEqual(tudo.pontos.map((p) => [p.novos, p.sairam]), [[1, 0], [1, 0], [0, 1]]);
+  assert.deepStrictEqual(tudo.pontos[1].areas.map((a) => [a.area, a.novos]), [['TI', 0], ['Financeiro', 1]].sort((x, y) => (y[0] === 'TI') - (x[0] === 'TI')));
+  assert.strictEqual(tudo.marcos[0].titulo, 'Ransomware', 'o que mais mexeu na carga no periodo');
+  const ti = HR.serieMensal(insumos, { meses: 3, mesAtual: '2026-10', agoraISO: '2026-10-20T12:00:00Z', idsFiltro: ['r1'] });
+  assert.deepStrictEqual(ti.pontos.map((p) => p.carga), [10 * peso, 10 * peso, 20 * peso], 'so o risco do escopo');
+  assert.ok(ti.marcos.every((m) => m.riscoId === 'r1'));
+  const vazio = HR.serieMensal(insumos, { meses: 2, mesAtual: '2026-07', agoraISO: '2026-07-20T12:00:00Z' });
+  assert.deepStrictEqual(vazio.pontos.map((p) => p.carga), [0, 0], 'mes sem medicao: zero riscos contados');
+});

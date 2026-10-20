@@ -182,3 +182,56 @@ test('filtrar riscos: produto, area, responsavel, origem, categoria, nivel minim
     'Produto: ERP · Categoria: Financeiro · Alto ou mais grave');
   assert.strictEqual(RR.descreverFiltros({}), 'Empresa inteira');
 });
+
+// ---- Pagina executiva (20/10/2026): variacao, situacao geral, decisoes, linha da area ----
+
+test('variacao: hoje contra o mes anterior e contra o inicio; base zero = pct null', () => {
+  const s = [{ mes: '2026-08', carga: 100 }, { mes: '2026-09', carga: 120 }, { mes: '2026-10', carga: 90 }];
+  assert.deepStrictEqual(RR.variacao(s, 'carga'), { atual: 90, anterior: 120, inicio: 100, deltaMes: -30, pctMes: -25, deltaInicio: -10, pctInicio: -10, mesAnterior: '2026-09', mesInicio: '2026-08' });
+  assert.strictEqual(RR.variacao([{ mes: '2026-10', carga: 0 }, { mes: '2026-11', carga: 5 }], 'carga').pctMes, null);
+  assert.strictEqual(RR.variacao([], 'carga'), null);
+});
+
+test('situacaoGeral: as tres regras', () => {
+  const s = (a, b) => [{ mes: '2026-09', carga: a }, { mes: '2026-10', carga: b }];
+  assert.strictEqual(RR.situacaoGeral(s(100, 110), { semResposta: [] }).rotulo, 'Piorando', '+10%');
+  assert.strictEqual(RR.situacaoGeral(s(100, 100), { semResposta: [{}] }).rotulo, 'Piorando', 'acima do apetite sem resposta');
+  assert.strictEqual(RR.situacaoGeral(s(100, 90), { semResposta: [] }).rotulo, 'Melhorando');
+  assert.strictEqual(RR.situacaoGeral(s(100, 90), { semResposta: [{}] }).rotulo, 'Piorando', 'caiu, mas tem pendencia de resposta');
+  const est = RR.situacaoGeral(s(100, 103), { semResposta: [] });
+  assert.strictEqual(est.rotulo, 'Estável');
+  assert.match(est.motivo, /\+3% no último mês, dentro de ±5%/);
+});
+
+test('decisoesPendentes: so o que depende da diretoria, com exemplos e proximo passo', () => {
+  const t = RR.tratamento(LISTA, 'Moderado', HOJE);
+  const m = RR.monitoramento(LISTA, HOJE);
+  const dec = RR.decisoesPendentes(t, m);
+  assert.deepStrictEqual(dec.map((x) => [x.titulo, x.n]), [
+    ['Acima do apetite sem resposta definida', 1],
+    ['Aceite acima do apetite sem aprovador', 1],
+    ['Reavaliação vencida de risco Alto ou Muito alto', 1],
+  ], 'acao atrasada ha 10 dias ainda nao e decisao da diretoria');
+  assert.deepStrictEqual(dec[0].exemplos, ['Ransomware']);
+  assert.ok(dec.every((x) => x.passo));
+  assert.deepStrictEqual(RR.decisoesPendentes({}, {}), []);
+});
+
+test('recorte com a linha do tempo do escopo: linha da area, referencia do escopo, marcos so da area', () => {
+  const pontos = [
+    { mes: '2026-09', carga: 50, contados: 3, areas: [{ area: 'RH', carga: 16, contados: 1, novos: 1 }, { area: 'TI', carga: 34, contados: 2 }] },
+    { mes: '2026-10', carga: 60, contados: 3, areas: [{ area: 'TI', carga: 60, contados: 3 }] },
+  ];
+  const base = {
+    riscos: LISTA.map((x) => RR.riscoMinimo(x, false)), processos: PROCESSOS, critForn: {}, apetite: 'Moderado', hoje: HOJE,
+    panoramaEmpresa: RR.panorama(LISTA, PROCESSOS, {}, 'Moderado'), pontosEscopo: pontos, escopoFiltrado: false,
+    marcos: [{ titulo: 'Vazamento', area: 'RH', cargaAntes: 0, cargaDepois: 16 }, { titulo: 'Ransomware', area: 'TI', cargaAntes: 10, cargaDepois: 75 }],
+  };
+  const rh = RR.recortarPorArea(base, 'RH');
+  assert.deepStrictEqual(rh.d.serie.map((p) => p.carga), [16, 0], 'mes sem a area = zero');
+  assert.deepStrictEqual(rh.d.linhaTempo.referencia.map((p) => p.carga), [50, 60]);
+  assert.strictEqual(rh.d.linhaTempo.rotuloReferencia, 'Empresa');
+  assert.deepStrictEqual(rh.d.linhaTempo.marcos.map((x) => x.titulo), ['Vazamento']);
+  assert.ok(!JSON.stringify(rh).includes('Ransomware'), 'nada de outra area');
+  assert.strictEqual(rh.d.situacao.rotulo, 'Melhorando', '16 -> 0');
+});

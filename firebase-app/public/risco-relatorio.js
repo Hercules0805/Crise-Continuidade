@@ -330,7 +330,98 @@
         return { titulo: x.r.titulo || '', area: RC.areaDoRisco(x.r), nivel: x.nivel, nivelResidual: x.nivelResidual, carga: x.carga, estrategia: x.r.estrategiaTratamento || '', status: x.r.status || '' };
       }),
       tendenciaMensal: (d.serie || []).filter(function (x) { return x.carga !== null; }).map(function (x) { return { mes: x.mes, carga: x.carga, novos: x.novos, sairam: x.sairam }; }),
+      situacaoGeral: d.situacao ? { rotulo: d.situacao.rotulo, motivo: d.situacao.motivo } : null,
+      oQueMaisMudou: (d.linhaTempo && d.linhaTempo.marcos ? d.linhaTempo.marcos : []).map(function (x) {
+        return { titulo: x.titulo, area: x.area, tipo: x.tipo, variacaoCarga: x.cargaDepois - x.cargaAntes };
+      }),
+      decisoesPendentes: (d.decisoes || []).map(function (x) { return { tema: x.titulo, quantidade: x.n }; }),
     };
+  }
+
+  // ------------------------------------------------- pagina executiva (20/10/2026)
+
+  /** Pontos da linha do tempo no formato do documento (de historicoRisco.serieMensal). */
+  function pontosDaSerie(pontos) {
+    return (pontos || []).map(function (p) {
+      return { mes: p.mes, carga: p.carga, contados: p.contados, impactoFinanceiro: p.impactoFinanceiro, novos: p.novos, sairam: p.sairam };
+    });
+  }
+
+  /** A linha de UMA area dentro da serie (mes sem a area = zero). */
+  function serieDaArea(pontos, area) {
+    return (pontos || []).map(function (p) {
+      var a = (p.areas || []).filter(function (x) { return x.area === area; })[0] || {};
+      return { mes: p.mes, carga: a.carga || 0, contados: a.contados || 0, impactoFinanceiro: a.impactoFinanceiro || 0, novos: a.novos || 0, sairam: a.sairam || 0 };
+    });
+  }
+
+  /**
+   * Variacao de um campo da serie: o valor de hoje contra o fim do mes
+   * anterior e contra o inicio do periodo. pct = null quando a base e zero.
+   */
+  function variacao(serie, campo) {
+    var s = (serie || []).filter(function (p) { return p && p[campo] !== null && p[campo] !== undefined; });
+    if (!s.length) return null;
+    var atual = s[s.length - 1][campo];
+    var anterior = s.length > 1 ? s[s.length - 2][campo] : null;
+    var inicio = s[0][campo];
+    var pct = function (base) { return base ? Math.round(((atual - base) / base) * 100) : null; };
+    return {
+      atual: atual,
+      anterior: anterior,
+      inicio: inicio,
+      deltaMes: anterior === null ? null : atual - anterior,
+      pctMes: anterior === null ? null : pct(anterior),
+      deltaInicio: atual - inicio,
+      pctInicio: pct(inicio),
+      mesAnterior: s.length > 1 ? s[s.length - 2].mes : null,
+      mesInicio: s[0].mes,
+    };
+  }
+
+  var LIMIAR_SITUACAO_PCT = 5;
+
+  /**
+   * Selo "Situacao geral" (regra fixa, explicada no documento):
+   *   Piorando   -- carga subiu mais de 5% contra o mes anterior, OU ha risco
+   *                 acima do apetite sem resposta definida;
+   *   Melhorando -- carga caiu mais de 5% e nenhum acima do apetite sem resposta;
+   *   Estavel    -- o resto.
+   */
+  function situacaoGeral(serie, tratamentoD) {
+    var v = variacao(serie, 'carga');
+    var semResposta = (tratamentoD && tratamentoD.semResposta ? tratamentoD.semResposta.length : 0);
+    var pct = v ? v.pctMes : null;
+    var motivos = [];
+    if (pct !== null && pct > LIMIAR_SITUACAO_PCT) motivos.push('a carga subiu ' + pct + '% no último mês');
+    if (pct !== null && pct < -LIMIAR_SITUACAO_PCT) motivos.push('a carga caiu ' + (-pct) + '% no último mês');
+    if (semResposta) motivos.push(_plural(semResposta, 'risco acima do apetite está', 'riscos acima do apetite estão') + ' sem resposta definida');
+    var rotulo = 'Estável';
+    if ((pct !== null && pct > LIMIAR_SITUACAO_PCT) || semResposta) rotulo = 'Piorando';
+    else if (pct !== null && pct < -LIMIAR_SITUACAO_PCT) rotulo = 'Melhorando';
+    if (!motivos.length) motivos.push(pct === null ? 'ainda não há mês anterior para comparar' : 'a carga variou ' + (pct > 0 ? '+' : '') + pct + '% no último mês, dentro de ±' + LIMIAR_SITUACAO_PCT + '%');
+    return { rotulo: rotulo, motivo: motivos.join('; '), pctMes: pct };
+  }
+
+  /**
+   * "Decisoes que dependem da diretoria": so o que precisa de alguem com
+   * autoridade -- resposta ausente acima do apetite, aceite sem aprovador,
+   * acao atrasada ha mais de 30 dias, reavaliacao vencida de risco Alto/Muito
+   * alto. Cada item com o numero, exemplos e o proximo passo. Vazio = nada pendente.
+   */
+  function decisoesPendentes(tratamentoD, monitoramentoD) {
+    var t = tratamentoD || {}, m = monitoramentoD || {};
+    var titulos = function (lista, fn) { return lista.slice(0, 3).map(fn); };
+    var out = [];
+    var semResp = t.semResposta || [];
+    if (semResp.length) out.push({ titulo: 'Acima do apetite sem resposta definida', n: semResp.length, exemplos: titulos(semResp, function (r) { return r.titulo || ''; }), passo: 'Definir a estratégia (mitigar, transferir, evitar ou aceitar) e o plano de ação.' });
+    var aceites = (t.aceites || []).filter(function (a) { return a.semAprovador; });
+    if (aceites.length) out.push({ titulo: 'Aceite acima do apetite sem aprovador', n: aceites.length, exemplos: titulos(aceites, function (a) { return a.r.titulo || ''; }), passo: 'Aprovar formalmente o aceite ou rever a resposta ao risco.' });
+    var atrasadas = (t.acoesAtrasadas || []).filter(function (x) { return x.diasAtraso > 30; });
+    if (atrasadas.length) out.push({ titulo: 'Ações do plano atrasadas há mais de 30 dias', n: atrasadas.length, exemplos: titulos(atrasadas, function (x) { return (x.acao.acao || '') + ' (' + x.diasAtraso + ' dias)'; }), passo: 'Cobrar os responsáveis e repactuar prazos ou recursos.' });
+    var reav = (m.reavaliacaoVencida || []).filter(function (x) { var n = RC.nivelDoRisco(x.r); return n === 'Alto' || n === 'Muito alto'; });
+    if (reav.length) out.push({ titulo: 'Reavaliação vencida de risco Alto ou Muito alto', n: reav.length, exemplos: titulos(reav, function (x) { return x.r.titulo || ''; }), passo: 'Reavaliar probabilidade, impacto e resposta.' });
+    return out.slice(0, 6);
   }
 
   // ------------------------------------------------- filtros do relatorio (20/10/2026)
@@ -433,14 +524,38 @@
       principais: principais(lista, procs, crit, base.apetite, 10),
       tratamento: tratamento(lista, base.apetite, base.hoje),
       monitoramento: monitoramento(lista, base.hoje, function (r) { return !!r.kriForaDaMeta; }),
-      serie: base.seriePorArea ? (base.seriePorArea[area] || null) : null,
-      // Escopo filtrado por algo alem de area: nao ha serie (o retrato diario so tem empresa e areas).
-      serieIndisponivel: !!base.serieIndisponivel,
+      serie: null,
+      serieIndisponivel: false,
+      linhaTempo: null,
     };
+    if (base.pontosEscopo) {
+      // Linha do tempo (20/10/2026): a area dentro do escopo, com o escopo
+      // (ou a empresa) como referencia; marcos so os da area.
+      d.serie = serieDaArea(base.pontosEscopo, area);
+      d.linhaTempo = {
+        principal: d.serie,
+        referencia: pontosDaSerie(base.pontosEscopo),
+        rotuloPrincipal: 'Área ' + area,
+        rotuloReferencia: base.escopoFiltrado ? 'Escopo do relatório' : 'Empresa',
+        marcos: (base.marcos || []).filter(function (x) { return x.area === area; }),
+      };
+    } else if (base.seriePorArea) {
+      // Edicao salva antes da linha do tempo por escopo.
+      d.serie = base.seriePorArea[area] || null;
+      d.serieIndisponivel = !!base.serieIndisponivel;
+    }
+    // Pagina executiva da area: situacao e decisoes recalculadas so com ela.
+    d.situacao = situacaoGeral(d.serie, d.tratamento);
+    d.decisoes = decisoesPendentes(d.tratamento, d.monitoramento);
     return { d: d, destaques: destaques(d), referenciaEmpresa: referenciaEmpresa(base.panoramaEmpresa) };
   }
 
   return {
+    pontosDaSerie: pontosDaSerie,
+    serieDaArea: serieDaArea,
+    variacao: variacao,
+    situacaoGeral: situacaoGeral,
+    decisoesPendentes: decisoesPendentes,
     SEM: SEM,
     filtrar: filtrar,
     temFiltro: temFiltro,

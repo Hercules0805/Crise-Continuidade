@@ -43,6 +43,12 @@ async function carregar(perfil, o) {
     if (nome === 'getConfigRiscos') return { apetite: 'Moderado' };
     if (nome === 'getHistoricoRiscoDesde') return [{ dia: dia(-1), empresa: { carga: 99, contados: 2, impactoFinanceiro: 1000 }, mudancas: [{ tipo: 'novo' }] }];
     if (nome === 'post' && a === 'gerarResumoExecutivo') return { success: true, paragrafos: ['Situação <b>grave</b>.'], recomendacoes: ['Corrigir o RCE.'] };
+    if (nome === 'post' && a === 'serieRiscoPorEscopo') {
+      const pontos = (k) => [['2026-08', 60], ['2026-09', 85], ['2026-10', 115]].map(([mes, carga], i) => ({ mes, carga: Math.round(carga * k), contados: 2, impactoFinanceiro: 1000, novos: i ? 1 : 2, sairam: i === 2 ? 1 : 0,
+        areas: [{ area: 'TI', carga: Math.round(carga * k * 0.6), contados: 1, novos: 1, sairam: 0 }] }));
+      const marcos = [{ riscoId: 'r1', titulo: 'Ransomware <img src=x onerror=alert(1)>', area: 'TI', tipo: 'reavaliado', cargaAntes: 30, cargaDepois: 75 }];
+      return { success: true, empresa: { pontos: pontos(1.5), marcos }, escopo: b && b.riscoIds ? { pontos: pontos(1), marcos } : null };
+    }
     return [];
   } });
   ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'vulnerabilidade-painel.js', 'cvss31.js', 'risco-consolidado.js', 'risco-relatorio.js', 'sanitizar-pcn.js']
@@ -117,33 +123,7 @@ test('IA desmarcada nao chama o servidor; IA com erro: relatorio sai com aviso e
   assert.strictEqual(secoes(html2).length, 8, '7 secoes + notas');
 });
 
-test('riscos: secoes nas etapas NIST, mapa de calor, aceite sem aprovador, acao atrasada, tendencia', async () => {
-  const ctx = await carregar('admin');
-  const html = await gerar(ctx, 'riscos');
-  const s = secoes(html);
-  assert.match(s[0], /Panorama/);
-  assert.match(s[1], /Mapa de calor/);
-  assert.match(s[4], /Resposta ao risco/);
-  assert.match(s[5], /Monitoramento/);
-  assert.match(s[6], /Tendência/);
-  const doc = new JSDOM(html).window.document;
-  assert.strictEqual(doc.querySelectorAll('table.mapa').length, 2, 'inerente e residual');
-  const t = texto(html);
-  assert.match(t, /Sem aprovador/);
-  assert.match(t, /Plano B/);
-  assert.match(t, /Reavaliações vencidas/);
-  assert.ok(!html.includes('<img src=x'), 'titulo do risco escapado');
-  const hist = ctx.chamadas.find((c) => c.nome === 'getHistoricoRiscoDesde');
-  assert.match(hist.a, /^\d{4}-\d{2}-01$/, 'desde o 1o dia do primeiro mes');
-  assert.match(t, /99/, 'carga do ultimo retrato');
-});
 
-test('riscos sem permissao no historico: a tendencia explica e o resto sai', async () => {
-  const ctx = await carregar('admin', { api: { getHistoricoRiscoDesde: () => { throw new Error('Missing or insufficient permissions'); } } });
-  const html = await gerar(ctx, 'riscos', false);
-  assert.match(texto(html), /histórico de risco não pôde ser lido/);
-  assert.match(texto(html), /Principais riscos/);
-});
 
 test('popup bloqueado avisa; falha ao carregar os dados vira pagina de erro na mesma aba', async () => {
   const bloq = await carregar('admin', { popupBloqueado: true });
@@ -344,6 +324,8 @@ test('Gestor: tela so com "Compartilhados com voce"; abre o recorte com faixa e 
   assert.match(t, /Compartilhado com você por analista@fortestecnologia\.com\.br/);
   assert.match(t, /recorte da área TI/);
   assert.match(t, /Referência da empresa/);
+  assert.match(t, /Área TI \(eixo à esquerda\)/, 'linha do tempo da area do gestor');
+  assert.match(t, /Empresa — referência \(eixo à direita\)/);
   assert.match(t, /Relatório Executivo de Riscos — área TI/);
   assert.doesNotMatch(t, /Fornecedor único/);
   assert.doesNotMatch(t, /Carga por área/);
@@ -401,23 +383,6 @@ test('vulnerabilidades: filtros saem dos dados; contagem ao vivo; zero desabilit
   assert.strictEqual(ia.b.indicadores.escopo, 'Só Crítica');
 });
 
-test('riscos: so Area mantem a tendencia (serie da area); outro filtro deixa a tendencia indisponivel', async () => {
-  const ctx = await carregar('admin');
-  await ctx.w.riscosRelatorio();
-  sel(ctx.doc, 'relFiltroArea', 'TI');
-  ctx.w.atualizarEscopoRelatorio();
-  assert.match(ctx.doc.getElementById('relExecContagem').textContent, /1 risco ativo no escopo · Área: TI/);
-  let html = await gerar(ctx, 'riscos', false);
-  const t = texto(html);
-  assert.match(t, /Escopo do relatório: Área: TI/);
-  assert.doesNotMatch(t, /Fornecedor único/);
-  assert.doesNotMatch(t, /Tendência indisponível/);
-  await ctx.w.riscosRelatorio();
-  sel(ctx.doc, 'relFiltroOrigem', 'Manual');
-  ctx.w.atualizarEscopoRelatorio();
-  html = await gerar(ctx, 'riscos', false);
-  assert.match(texto(html), /Tendência indisponível com este escopo/);
-});
 
 test('edicao filtrada guarda o escopo; gestor de area fora do escopo fica bloqueado no compartilhar', async () => {
   const banco = bancoComCompartilhar();
@@ -441,4 +406,57 @@ test('edicao filtrada guarda o escopo; gestor de area fora do escopo fica bloque
   assert.ok(caixas[0].disabled, 'gestor de RH: area fora do escopo');
   assert.match(corpo.textContent, /sem riscos da área neste escopo/);
   assert.ok(!caixas[1].disabled);
+});
+
+test('riscos: pagina executiva no inicio (situacao, linha do tempo, decisoes); detalhamento nas etapas NIST; apendice', async () => {
+  const ctx = await carregar('admin');
+  const html = await gerar(ctx, 'riscos');
+  const s = secoes(html);
+  assert.match(s[0], /Panorama/);
+  assert.match(s[1], /Mapa de calor/);
+  assert.match(s[4], /Resposta ao risco/);
+  assert.match(s[5], /Monitoramento/);
+  assert.match(s[6], /Apêndice/);
+  const doc = new JSDOM(html).window.document;
+  const quebra = doc.querySelector('.quebra-antes');
+  assert.ok(quebra && quebra.nextElementSibling.classList.contains('ia'), 'pagina 1 = visao executiva; o resumo abre a pagina 2');
+  const t = texto(html);
+  const pos = (re) => t.search(re);
+  assert.ok(pos(/Situação geral/) < pos(/Linha do tempo — carga de risco/) && pos(/Linha do tempo — carga de risco/) < pos(/Decisões que dependem da diretoria/)
+    && pos(/Decisões que dependem/) < pos(/Resumo executivo/), 'ordem da primeira pagina');
+  assert.match(t, /Piorando/);
+  assert.match(t, /Carga da empresa115▼ −13 vs\. set\/26▲ \+25 vs\. ago\/26/, 'mes corrente ao vivo (115) contra os fechamentos');
+  assert.match(t, /O que mais mudou no período/);
+  assert.match(t, /Aceite acima do apetite sem aprovador: 1/);
+  assert.strictEqual(doc.querySelectorAll('svg[aria-label="Linha do tempo da carga de risco"]').length, 1);
+  assert.strictEqual(doc.querySelectorAll('table.mapa').length, 2);
+  assert.ok(doc.querySelector('.mapa td.acima-apetite'), 'celulas acima do apetite marcadas');
+  assert.ok(doc.querySelectorAll('.cartao-risco').length <= 5, 'top 5 no corpo');
+  assert.match(t, /A\. Os 10 principais riscos/);
+  assert.match(t, /B\. Linha do tempo mês a mês/);
+  assert.ok(!html.includes('<img src=x'), 'titulo do risco escapado');
+  const chamada = ctx.chamadas.find((c) => c.nome === 'post' && c.a === 'serieRiscoPorEscopo');
+  assert.strictEqual(chamada.b.riscoIds, null, 'sem filtro: empresa inteira');
+  assert.strictEqual(doc.querySelectorAll('svg[aria-label="Linha do tempo da carga de risco"] polyline').length, 1, 'sem filtro: so a linha da empresa');
+});
+
+test('riscos com filtro: linha do escopo + empresa como referencia; ids do escopo incluem os encerrados', async () => {
+  const ctx = await carregar('admin');
+  await ctx.w.riscosRelatorio();
+  sel(ctx.doc, 'relFiltroOrigem', 'Manual');
+  ctx.w.atualizarEscopoRelatorio();
+  const html = await gerar(ctx, 'riscos', false);
+  const chamada = ctx.chamadas.find((c) => c.nome === 'post' && c.a === 'serieRiscoPorEscopo');
+  assert.deepStrictEqual(Array.from(chamada.b.riscoIds), ['r1', 'r2']);
+  const doc = new JSDOM(html).window.document;
+  assert.strictEqual(doc.querySelectorAll('svg[aria-label="Linha do tempo da carga de risco"] polyline').length, 2, 'escopo + referencia');
+  assert.match(texto(html), /Escopo do relatório — referência \(eixo à direita\)|Empresa — referência \(eixo à direita\)/);
+  assert.doesNotMatch(texto(html), /Tendência indisponível/);
+});
+
+test('riscos: linha do tempo que nao carrega vira aviso e o resto do relatorio sai', async () => {
+  const ctx = await carregar('admin', { api: { post: (a) => { if (a === 'serieRiscoPorEscopo') throw new Error('Falha na leitura das medições.'); return { paragrafos: [] }; } } });
+  const html = await gerar(ctx, 'riscos', false);
+  assert.match(texto(html), /Linha do tempo indisponível/);
+  assert.match(texto(html), /Principais riscos/);
 });
