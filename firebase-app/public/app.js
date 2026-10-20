@@ -11343,9 +11343,9 @@ async function riscos() {
     <div class="data-table data-table--compact" id="listaRiscos" style="display:none;">
       <!-- Larguras em px (soma 2214) em vez de %: 16 colunas não cabem espremidas;
            abaixo disso a grade rola na horizontal e Ações fica fixa à direita. -->
-      <table style="min-width:2346px;">
+      <table style="min-width:2516px;">
         <colgroup>
-          <col style="width:104px"><col style="width:210px"><col style="width:200px"><col style="width:150px">
+          <col style="width:104px"><col style="width:210px"><col style="width:200px"><col style="width:170px"><col style="width:150px">
           <col style="width:300px"><col style="width:130px"><col style="width:140px"><col style="width:140px">
           <col style="width:104px"><col style="width:104px"><col style="width:72px"><col style="width:84px"><col style="width:72px">
           <col style="width:140px"><col style="width:180px"><col style="width:112px"><col style="width:104px">
@@ -11355,6 +11355,7 @@ async function riscos() {
             <th class="col-nw" onclick="ordenarRiscos('dataIdentificacao')" style="cursor:pointer;" title="Data de identificação">Data <span id="sort-risco-dataIdentificacao"></span></th>
             <th onclick="ordenarRiscos('area')" style="cursor:pointer;">Área <span id="sort-risco-area"></span></th>
             <th title="Processo / Fornecedor">Processo</th>
+            <th onclick="ordenarRiscos('produto')" style="cursor:pointer;" title="Produto de Software">Produto <span id="sort-risco-produto"></span></th>
             <th>Origem</th>
             <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;">Título <span id="sort-risco-titulo"></span></th>
             <th>Categoria</th>
@@ -11426,7 +11427,7 @@ async function riscos() {
     riscosData = []; riscosAreasCache = []; riscosFornecedoresCache = []; riscosCriticidadePorFornecedorCache = {};
     const corpo = document.getElementById('riscoRows');
     if (corpo) {
-      corpo.innerHTML = `<tr><td colspan="17" style="padding:24px;text-align:center;color:#c62828;">
+      corpo.innerHTML = `<tr><td colspan="18" style="padding:24px;text-align:center;color:#c62828;">
         Não foi possível carregar os riscos.<br>
         <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
         <button class="btn btn-ghost" onclick="riscos()" style="margin-top:12px;">Tentar de novo</button>
@@ -12009,6 +12010,15 @@ function renderizarRiscos() {
       if (nB === null) return -1;
       return dir * (nA - nB);
     },
+    // Produto pelo nome; sem produto sempre no fim (como o score sem avaliação).
+    produto: (a, b, dir) => {
+      const pA = _nomeProdutoRisco(a);
+      const pB = _nomeProdutoRisco(b);
+      if (!pA && !pB) return 0;
+      if (!pA) return 1;
+      if (!pB) return -1;
+      return dir * pA.localeCompare(pB, 'pt-BR');
+    },
   });
 
   riscosOrdenacao.atualizarSetas('sort-risco-', ['dataIdentificacao', 'area', 'titulo', 'score']);
@@ -12023,6 +12033,7 @@ function renderizarRiscos() {
         <td class="num col-nw">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '–'}</td>
         <td>${r.area ? `<span class="chip-area" title="${esc(r.area)}">${esc(r.area)}</span>` : '<span class="muted">–</span>'}</td>
         <td>${r.processo ? esc(r.processo) : (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span class="muted">Corporativo</span>')}</td>
+        <td>${_nomeProdutoRisco(r) ? `<span title="${esc(_nomeProdutoRisco(r))}">${esc(_nomeProdutoRisco(r))}</span>` : '<span class="muted">–</span>'}</td>
         <td>${esc(_rotuloOrigemRisco(r.origem))}</td>
         <td class="title" title="${esc(r.titulo)}">${esc(r.titulo)}</td>
         <td class="muted">${esc((r.categorias || []).join(', ')) || '–'}</td>
@@ -12048,7 +12059,7 @@ function renderizarRiscos() {
           </button>` : ''}
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="17" class="vazio">Nenhum risco cadastrado.</td></tr>';
+    : '<tr><td colspan="18" class="vazio">Nenhum risco cadastrado.</td></tr>';
 }
 
 // ------------------------------------------------------------

@@ -82,3 +82,22 @@ test('grade: filtro Produto (produtos dos riscos + Sem produto) e busca pelo nom
   doc.getElementById('buscaRisco').value = 'legado'; w.filtrarRiscos();
   assert.match(linhas(), /Sistema antigo/);
 });
+
+test('grade: coluna Produto depois de Processo, com nome, "(produto removido)" e "–"; ordenar deixa sem produto no fim', async () => {
+  const { w, doc } = await carregar();
+  const cab = [...doc.querySelectorAll('#listaRiscos thead th')].map((th) => th.textContent.trim().replace(/\s+/g, ' '));
+  assert.strictEqual(cab[cab.indexOf('Processo') + 1], 'Produto');
+  assert.strictEqual(doc.querySelectorAll('#listaRiscos colgroup col').length, cab.length, 'uma largura por coluna');
+  const idx = cab.indexOf('Produto');
+  const produtoDe = () => Object.fromEntries([...doc.querySelectorAll('#riscoRows tr')].map((tr) => [tr.children[cab.findIndex((c) => c.startsWith('Título'))].textContent.trim(), tr.children[idx].textContent.trim()]));
+  const porTitulo = produtoDe();
+  assert.strictEqual(porTitulo['Falha no ERP'], 'ERP');
+  assert.strictEqual(porTitulo['Sistema antigo'], 'Legado');
+  assert.strictEqual(porTitulo['Produto apagado'], '(produto removido)');
+  assert.strictEqual(porTitulo['Risco sem produto'], '–');
+  const ordem = () => [...doc.querySelectorAll('#riscoRows tr')].map((tr) => tr.children[idx].textContent.trim());
+  w.ordenarRiscos('produto');
+  assert.deepStrictEqual(ordem(), ['(produto removido)', 'ERP', 'Legado', '–']);
+  w.ordenarRiscos('produto');
+  assert.deepStrictEqual(ordem(), ['Legado', 'ERP', '(produto removido)', '–'], 'descendente: sem produto continua no fim');
+});
