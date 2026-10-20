@@ -713,3 +713,39 @@ describe('Security Rules — relatórios executivos salvos', () => {
     await assertSucceeds(db(ADMIN).doc('relatorios_executivos/e9').delete());
   });
 });
+
+// Relatorios compartilhados com gestores (20/10/2026): destinatario le o seu (nao revogado) e so
+// marca abertoEm; Admin/Seguranca criam e revogam; Gestor nao cria.
+describe('Security Rules — relatórios compartilhados', () => {
+  const SI_C = { email: 'si-comp@fortestecnologia.com.br' };
+  const G2 = { email: 'gestor2@fortestecnologia.com.br' };
+  const doc = (para, extra) => Object.assign({ tipo: 'riscos', para, area: 'TI', compartilhadoPor: SI_C.email, revogado: false, conteudo: '{"versao":2}' }, extra);
+  async function seedC() {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('config_perfis/si-comp@fortestecnologia.com.br').set({ perfis: ['seguranca'] });
+      await ctx.firestore().doc('relatorios_compartilhados/c1').set(doc(GESTOR.email));
+      await ctx.firestore().doc('relatorios_compartilhados/c2').set(doc(G2.email));
+      await ctx.firestore().doc('relatorios_compartilhados/c3').set(doc(GESTOR.email, { revogado: true }));
+    });
+  }
+
+  test('destinatário lê o seu, não o dos outros nem o revogado; a consulta filtrada passa', async () => {
+    await seedC();
+    await assertSucceeds(db(GESTOR).doc('relatorios_compartilhados/c1').get());
+    await assertFails(db(GESTOR).doc('relatorios_compartilhados/c2').get());
+    await assertFails(db(GESTOR).doc('relatorios_compartilhados/c3').get());
+    await assertSucceeds(db(GESTOR).collection('relatorios_compartilhados').where('para', '==', GESTOR.email).where('revogado', '==', false).get());
+    await assertFails(db(GESTOR).collection('relatorios_compartilhados').get());
+  });
+
+  test('destinatário só marca abertoEm; segurança cria e revoga; gestor não cria', async () => {
+    await seedC();
+    await assertSucceeds(db(GESTOR).doc('relatorios_compartilhados/c1').update({ abertoEm: '2026-10-20T10:00:00Z' }));
+    await assertFails(db(GESTOR).doc('relatorios_compartilhados/c1').update({ area: 'RH' }));
+    await assertFails(db(GESTOR).doc('relatorios_compartilhados/c9').set(doc(GESTOR.email, { compartilhadoPor: GESTOR.email })));
+    await assertSucceeds(db(SI_C).doc('relatorios_compartilhados/c8').set(doc(G2.email)));
+    await assertFails(db(SI_C).doc('relatorios_compartilhados/c7').set(doc(G2.email, { compartilhadoPor: ADMIN.email })));
+    await assertSucceeds(db(SI_C).doc('relatorios_compartilhados/c1').update({ revogado: true, revogadoEm: 'x', revogadoPor: SI_C.email }));
+    await assertFails(db(SI_C).doc('relatorios_compartilhados/c2').update({ conteudo: '{}' }));
+  });
+});

@@ -187,3 +187,22 @@ test('configuracao do servidor: padrao SendGrid; remetente so do dominio; host/p
   assert.deepStrictEqual([outro.host, outro.porta], ['mail.x.com', 2525]);
   assert.strictEqual(N.normalizarConfig({ servidor: { provedor: 'outro', porta: 99999 } }).servidor.porta, null);
 });
+
+// --- Relatorio executivo compartilhado (20/10/2026) ---
+
+test('e-mail de relatorio compartilhado: link para a tela do relatorio, recorte da area, mensagem escapada, sem numeros', () => {
+  const N = require('./notificacoes');
+  const m = N.montarEmailRelatorioCompartilhado({
+    tipo: 'riscos', titulo: 'Relatório Executivo de Riscos', geradoEm: '2026-10-20T09:00:00Z', area: 'TI',
+    compartilhadoPor: 'si@fortestecnologia.com.br', mensagem: 'Veja <b>antes</b> da reunião\nObrigado',
+  }, { baseUrl: 'https://bia-forte-2025.web.app/' });
+  assert.strictEqual(m.assunto, '[GRC360] Relatório Executivo de Riscos compartilhado com você');
+  assert.match(m.html, /href="https:\/\/bia-forte-2025\.web\.app\/#riscos-relatorio"/);
+  assert.match(m.html, /riscos da área TI/);
+  assert.match(m.html, /Veja &lt;b&gt;antes&lt;\/b&gt; da reunião/);
+  assert.match(m.html, /20\/10\/2026/);
+  assert.match(m.texto, /Abrir no GRC360: https:\/\/bia-forte-2025\.web\.app\/#riscos-relatorio/);
+  const v = N.montarEmailRelatorioCompartilhado({ tipo: 'vulnerabilidades', titulo: 'Relatório Executivo de Vulnerabilidades', geradoEm: '2026-10-20' }, {});
+  assert.match(v.html, /#vulnerabilidades-relatorio/);
+  assert.doesNotMatch(v.html, /riscos da área/);
+});

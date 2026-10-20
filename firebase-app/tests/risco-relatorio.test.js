@@ -120,3 +120,38 @@ test('destaques e indicadores da IA saem dos mesmos numeros', () => {
   assert.ok(!JSON.stringify(ia).includes('Sem alternativa'), 'justificativa (texto livre) nao vai para a IA');
   assert.ok(JSON.stringify(ia).length < 20000);
 });
+
+// ---- Recorte por area para o Gestor (20/10/2026) ----
+
+test('serie mensal de uma area: linha da area no retrato e so as mudancas dela', () => {
+  const hist = [
+    { dia: '2026-10-19', empresa: { carga: 99, contados: 9 }, areas: [{ area: 'TI', carga: 40, contados: 2, impactoFinanceiro: 10 }, { area: 'RH', carga: 59, contados: 7 }],
+      mudancas: [{ tipo: 'novo', area: 'TI' }, { tipo: 'novo', area: 'RH' }, { tipo: 'encerrado', area: 'RH' }] },
+  ];
+  const ti = RR.serieMensalHistorico(hist, 1, HOJE, 'TI')[0];
+  assert.deepStrictEqual([ti.carga, ti.contados, ti.novos, ti.sairam], [40, 2, 1, 0]);
+  const fin = RR.serieMensalHistorico(hist, 1, HOJE, 'Financeiro')[0];
+  assert.deepStrictEqual([fin.carga, fin.contados], [0, 0], 'area sem linha no retrato: zero naquele dia');
+});
+
+test('recortarPorArea: so os riscos da area; da empresa so o agregado; nenhum titulo de outra area', () => {
+  const minimos = LISTA.map((x) => RR.riscoMinimo(x, x.id === 'b'));
+  assert.ok(!('descricao' in minimos[0]) && !('historicoReavaliacao' in minimos[0]), 'retrato v2 so com o que as contas leem');
+  const base = {
+    riscos: minimos, processos: PROCESSOS, critForn: {}, apetite: 'Moderado', hoje: HOJE,
+    seriePorArea: { RH: [{ mes: '2026-10', carga: 16 }] },
+    panoramaEmpresa: RR.panorama(LISTA, PROCESSOS, {}, 'Moderado'),
+  };
+  const rh = RR.recortarPorArea(base, 'RH');
+  assert.strictEqual(rh.d.panorama.ativos, 1);
+  assert.strictEqual(rh.d.panorama.carga, 16);
+  assert.deepStrictEqual(rh.d.principais.map((x) => x.r.id), ['b']);
+  assert.strictEqual(rh.d.tratamento.acoes.atrasadas, 1);
+  assert.deepStrictEqual(rh.d.monitoramento.kriForaDaMeta.map((x) => x.id), ['b'], 'KRI resolvido na geracao');
+  assert.deepStrictEqual(rh.d.serie, [{ mes: '2026-10', carga: 16 }]);
+  assert.deepStrictEqual(rh.referenciaEmpresa, { ativos: 4, carga: 131, acimaDoApetite: 3, composicao: base.panoramaEmpresa.composicao, apetite: 'Moderado' });
+  const json = JSON.stringify(rh);
+  for (const outro of ['Ransomware', 'Fornecedor unico', 'Sem P e I']) assert.ok(!json.includes(outro), outro + ' e de outra area');
+  const corp = RR.recortarPorArea(base, 'Corporativo (sem área)');
+  assert.deepStrictEqual(corp.d.principais.map((x) => x.r.id), ['c'], 'risco sem area = Corporativo');
+});

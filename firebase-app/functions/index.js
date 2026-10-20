@@ -731,6 +731,34 @@ exports.envioDeNotificacaoEmail = onDocumentWritten(
   }
 );
 
+// Relatorio executivo compartilhado com um gestor (20/10/2026): aviso por
+// e-mail com o link para o sistema (sem numeros, sem anexo). Mesma fila e
+// mesmo modo (desligado/simulacao/ativo) dos alertas de contrato; chave
+// `relatorio:{id}` -- o mesmo compartilhamento nunca gera dois e-mails.
+exports.avisoDeRelatorioCompartilhado = onDocumentCreated(
+  { region: 'us-central1', document: 'relatorios_compartilhados/{id}' },
+  async (event) => {
+    const c = event.data ? event.data.data() : null;
+    if (!c || c.revogado) return;
+    try {
+      const cfgSnap = await db.collection('config_notificacoes').doc('contratos').get();
+      const config = notificacoes.normalizarConfig(cfgSnap.exists ? cfgSnap.data() : null);
+      if (config.modo === notificacoes.MODO.DESLIGADO) {
+        logger.info('avisoDeRelatorioCompartilhado: e-mail desligado na configuração', { id: event.params.id });
+        return;
+      }
+      const para = notificacoes.emailCorporativo(c.para) ? String(c.para).toLowerCase() : '';
+      const m = notificacoes.montarEmailRelatorioCompartilhado(c, { baseUrl: BASE_URL });
+      await _enfileirarEmail({
+        tipo: 'relatorio', evento: 'relatorioCompartilhado', chave: `relatorio:${event.params.id}`,
+        relatorioCompartilhadoId: event.params.id, para, assunto: m.assunto, html: m.html, texto: m.texto,
+      });
+    } catch (err) {
+      logger.error('avisoDeRelatorioCompartilhado: falha ao enfileirar', { id: event.params.id, erro: err.message });
+    }
+  }
+);
+
 // Risco -> Vulnerabilidade (rastreabilidade nos dois sentidos, 15/10/2026).
 // Quando uma PESSOA aceita o risco de uma vulnerabilidade (status -> Aceito),
 // a vulnerabilidade passa a "Aceita", com a justificativa nas observacoes --

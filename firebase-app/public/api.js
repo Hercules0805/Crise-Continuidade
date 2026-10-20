@@ -50,6 +50,7 @@ const COLLECTION = {
   painelVulnerabilidades: 'painel_vulnerabilidades',
   relatoriosExecutivos: 'relatorios_executivos',
   relatoriosExecutivosConteudo: 'relatorios_executivos_conteudo',
+  relatoriosCompartilhados: 'relatorios_compartilhados',
   contratos: 'contratos',
   eventosContrato: 'eventos_contrato',
   tiposContrato: 'tipos_contrato',
@@ -1150,6 +1151,9 @@ async function _salvarRelatorioExecutivo(r) {
     meses: Number(r.meses) || null,
     comIA: !!r.comIA,
     resumo: Array.isArray(r.resumo) ? r.resumo.slice(0, 2).map(String) : [],
+    // Versão do retrato também nos metadados: a lista sabe se a edição recorta
+    // por área (compartilhar com gestor) sem baixar o conteúdo.
+    versao: Number(r.versao) || 1,
   });
   lote.set(_db.collection(COLLECTION.relatoriosExecutivosConteudo).doc(ref.id), {
     tipo: r.tipo, geradoPor: por, versao: Number(r.versao) || 1, conteudo,
@@ -1170,10 +1174,70 @@ async function _lerConteudoRelatorioExecutivo(id) {
 }
 
 async function _excluirRelatorioExecutivo(id) {
+  // Os compartilhamentos da edição são revogados no mesmo lote: o gestor não
+  // fica com acesso a uma edição que a equipe apagou.
+  const compartilhados = await _db.collection(COLLECTION.relatoriosCompartilhados).where('edicaoId', '==', String(id)).get();
   const lote = _db.batch();
+  const agora = new Date().toISOString();
+  const por = (window.USER_EMAIL || '').toLowerCase();
+  compartilhados.docs.forEach((d) => {
+    if ((d.data() || {}).revogado !== true) lote.update(d.ref, { revogado: true, revogadoEm: agora, revogadoPor: por });
+  });
   lote.delete(_db.collection(COLLECTION.relatoriosExecutivos).doc(String(id)));
   lote.delete(_db.collection(COLLECTION.relatoriosExecutivosConteudo).doc(String(id)));
   await lote.commit();
+  return { success: true };
+}
+
+// Compartilhamento com gestores (20/10/2026): um documento por destinatário,
+// com o retrato JÁ RECORTADO (no de Riscos, só a área dele). O aviso por
+// e-mail sai do servidor (gatilho avisoDeRelatorioCompartilhado).
+async function _compartilharRelatorioExecutivo(c) {
+  const destinos = Array.isArray(c && c.destinatarios) ? c.destinatarios : [];
+  if (!destinos.length) throw new Error('Escolha ao menos um gestor.');
+  const por = (window.USER_EMAIL || '').toLowerCase();
+  const agora = new Date().toISOString();
+  const lote = _db.batch();
+  destinos.forEach((d) => {
+    const conteudo = String(d.conteudo || '');
+    if (conteudo.length >= LIMITE_RELATORIO_EXECUTIVO) throw new Error('O relatório de ' + d.para + ' é grande demais para compartilhar.');
+    lote.set(_db.collection(COLLECTION.relatoriosCompartilhados).doc(), {
+      edicaoId: String(c.edicaoId), tipo: c.tipo, titulo: String(c.titulo || ''), geradoEm: String(c.geradoEm || ''),
+      para: String(d.para || '').toLowerCase(), area: String(d.area || ''), mensagem: String(c.mensagem || '').slice(0, 1000),
+      compartilhadoPor: por, compartilhadoEm: agora, revogado: false, abertoEm: null, conteudo,
+    });
+  });
+  await lote.commit();
+  return { success: true, total: destinos.length };
+}
+
+/** Compartilhamentos de uma edição, sem o conteúdo (para o modal de quem compartilha). */
+async function _lerCompartilhamentosDaEdicao(edicaoId) {
+  const snap = await _db.collection(COLLECTION.relatoriosCompartilhados).where('edicaoId', '==', String(edicaoId)).get();
+  return snap.docs.map((d) => {
+    const x = Object.assign({ id: d.id }, d.data());
+    delete x.conteudo;
+    return x;
+  }).sort((a, b) => String(b.compartilhadoEm || '').localeCompare(String(a.compartilhadoEm || '')));
+}
+
+/** Os compartilhados com quem está logado. As regras exigem os dois filtros. */
+async function _lerRelatoriosCompartilhadosComigo() {
+  const eu = (window.USER_EMAIL || '').toLowerCase();
+  const snap = await _db.collection(COLLECTION.relatoriosCompartilhados).where('para', '==', eu).where('revogado', '==', false).get();
+  return snap.docs.map((d) => Object.assign({ id: d.id }, d.data()))
+    .sort((a, b) => String(b.compartilhadoEm || '').localeCompare(String(a.compartilhadoEm || '')));
+}
+
+async function _revogarCompartilhamento(id) {
+  await _db.collection(COLLECTION.relatoriosCompartilhados).doc(String(id)).update({
+    revogado: true, revogadoEm: new Date().toISOString(), revogadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  });
+  return { success: true };
+}
+
+async function _marcarCompartilhamentoAberto(id) {
+  await _db.collection(COLLECTION.relatoriosCompartilhados).doc(String(id)).update({ abertoEm: new Date().toISOString() });
   return { success: true };
 }
 
@@ -2474,6 +2538,12 @@ const API = {
     .then((x) => { API.invalidate('getRelatoriosExecutivos'); return x; }),
   excluirRelatorioExecutivo: (id) => _excluirRelatorioExecutivo(id)
     .then((x) => { API.invalidate('getRelatoriosExecutivos'); return x; }),
+  // Compartilhamentos: lidos sempre direto (status de abertura/revogação muda fora desta aba).
+  compartilharRelatorioExecutivo: (c) => _compartilharRelatorioExecutivo(c),
+  getCompartilhamentosDaEdicao: (edicaoId) => _lerCompartilhamentosDaEdicao(edicaoId),
+  getRelatoriosCompartilhadosComigo: () => _lerRelatoriosCompartilhadosComigo(),
+  revogarCompartilhamento: (id) => _revogarCompartilhamento(id),
+  marcarCompartilhamentoAberto: (id) => _marcarCompartilhamentoAberto(id),
   getConfigFornecedor: () => API.get('getConfigFornecedor'),
   getConfigVulnerabilidade: () => API.get('getConfigVulnerabilidade'),
   getConfigRiscos: () => API.get('getConfigRiscos'),

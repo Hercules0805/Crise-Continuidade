@@ -98,8 +98,12 @@
   // Operador). O Gestor so CONSULTA os contratos da propria area.
   // DECISAO 19/10/2026: o Gestor ve o Painel de Vulnerabilidades (visao
   // executiva, so leitura), mas nao a lista nem o cadastro.
+  // DECISAO 20/10/2026: o Gestor abre as telas de relatorio do menu Riscos,
+  // mas SO para ver o que foi compartilhado com ele (no de Riscos, so a area
+  // dele) -- gerar e ver as edicoes da equipe continua com Admin/Seguranca
+  // (podeGerarRelatorioExecutivo).
   TELAS[PERFIL.GESTOR] = [
-    'processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades-painel',
+    'processos', 'pcns', 'drp', 'riscos', 'riscos-relatorio', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
     'contratos',
     'admin',

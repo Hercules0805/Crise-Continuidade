@@ -229,7 +229,9 @@
    * (encerrados ou excluidos). Mes sem retrato: valores null (nao zero --
    * ausencia de dado nao e risco zero).
    */
-  function serieMensalHistorico(historico, meses, hoje) {
+  function serieMensalHistorico(historico, meses, hoje, area) {
+    // `area` (opcional, 20/10/2026): a serie de UMA area -- a linha dela em
+    // `areas[]` do retrato e so as mudancas dela (recorte do Gestor).
     var porMes = {};
     (historico || []).forEach(function (d) {
       if (!d || !d.dia) return;
@@ -243,11 +245,14 @@
       var novos = 0, sairam = 0;
       dias.forEach(function (d) {
         (Array.isArray(d.mudancas) ? d.mudancas : []).forEach(function (m) {
+          if (area && m.area !== area) return;
           if (m.tipo === 'novo') novos++;
           else if (m.tipo === 'encerrado' || m.tipo === 'excluido') sairam++;
         });
       });
-      var emp = ultimo.empresa || {};
+      var emp = area
+        ? ((Array.isArray(ultimo.areas) ? ultimo.areas : []).filter(function (a) { return a && a.area === area; })[0] || { carga: 0, contados: 0, impactoFinanceiro: 0 })
+        : (ultimo.empresa || {});
       return {
         mes: mes,
         dia: ultimo.dia,
@@ -328,7 +333,58 @@
     };
   }
 
+  // ------------------------------------------------- recorte por area (Gestor, 20/10/2026)
+
+  /** Campos de cada risco que as contas deste modulo leem -- o que vai no retrato v2. */
+  function riscoMinimo(r, kriFora) {
+    return {
+      id: r.id, titulo: r.titulo || '', area: r.area || '', processoId: r.processoId || '', fornecedor: r.fornecedor || '',
+      status: r.status || 'Identificado', origem: r.origem || 'Manual',
+      probabilidade: r.probabilidade || '', impacto: r.impacto || '',
+      probabilidadeResidual: r.probabilidadeResidual || '', impactoResidual: r.impactoResidual || '',
+      impactoFinanceiro: _numero(r.impactoFinanceiro),
+      estrategiaTratamento: r.estrategiaTratamento || '', estrategiaDescricao: r.estrategiaDescricao || '',
+      justificativaAceite: r.justificativaAceite || '', aprovadorAceite: r.aprovadorAceite || '',
+      planoAcao: (Array.isArray(r.planoAcao) ? r.planoAcao : []).filter(Boolean)
+        .map(function (a) { return { acao: a.acao || '', quando: a.quando || '', status: a.status || '', responsavel: a.responsavel || '' }; }),
+      proximaReavaliacao: r.proximaReavaliacao || '', alertaAutomacao: r.alertaAutomacao || '',
+      responsavel: r.responsavel || '', kriForaDaMeta: !!kriFora,
+    };
+  }
+
+  /** Agregado da empresa que o recorte mostra como referencia -- so numeros, nenhum risco de outra area. */
+  function referenciaEmpresa(p) {
+    return { ativos: p.ativos, carga: p.carga, acimaDoApetite: p.acimaDoApetite, composicao: p.composicao, apetite: p.apetite };
+  }
+
+  /**
+   * Dados do relatorio so de UMA area, a partir da base salva no retrato v2
+   * (`base` = { riscos, processos, critForn, apetite, hoje, seriePorArea, panorama
+   * da empresa }). Tudo e recalculado so com os riscos da area; da empresa
+   * fica so o agregado de referencia. O resumo da IA NAO entra (foi escrito
+   * sobre a empresa inteira e cita riscos de outras areas).
+   */
+  function recortarPorArea(base, area) {
+    var lista = (base.riscos || []).filter(function (r) { return RC.areaDoRisco(r) === area; });
+    var procs = base.processos || [];
+    var crit = base.critForn || {};
+    var d = {
+      hoje: base.hoje,
+      panorama: panorama(lista, procs, crit, base.apetite),
+      mapaInerente: mapaCalor(lista, 'inerente'),
+      mapaResidual: mapaCalor(lista, 'residual'),
+      principais: principais(lista, procs, crit, base.apetite, 10),
+      tratamento: tratamento(lista, base.apetite, base.hoje),
+      monitoramento: monitoramento(lista, base.hoje, function (r) { return !!r.kriForaDaMeta; }),
+      serie: base.seriePorArea ? (base.seriePorArea[area] || null) : null,
+    };
+    return { d: d, destaques: destaques(d), referenciaEmpresa: referenciaEmpresa(base.panoramaEmpresa) };
+  }
+
   return {
+    riscoMinimo: riscoMinimo,
+    referenciaEmpresa: referenciaEmpresa,
+    recortarPorArea: recortarPorArea,
     ESTRATEGIAS: ESTRATEGIAS,
     SEM_ESTRATEGIA: SEM_ESTRATEGIA,
     STATUS: STATUS,

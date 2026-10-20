@@ -66,9 +66,9 @@ async function gerar(ctx, tipo, marcarIA) {
 const texto = (html) => new JSDOM(html).window.document.body.textContent.replace(/\s+/g, ' ');
 const secoes = (html) => [...new JSDOM(html).window.document.querySelectorAll('.secao')].map((s) => s.textContent.replace(/\s+/g, ' ').trim());
 
-test('telas proprias no menu Riscos, so para Admin e Seguranca; a tela Relatorios (Continuidade) nao tem mais os executivos', async () => {
+test('telas proprias no menu Riscos: Admin/Seguranca geram, Gestor so ve o compartilhado; TI/Operador nao; a tela Relatorios nao tem mais os executivos', async () => {
   const Perfis = require('../public/perfis.js');
-  for (const [perfil, ve] of [['admin', true], ['seguranca', true], ['gestor', false], ['ti', false], ['operador', false]]) {
+  for (const [perfil, ve] of [['admin', true], ['seguranca', true], ['gestor', true], ['ti', false], ['operador', false]]) {
     assert.strictEqual(Perfis.podeVerTela([perfil], 'vulnerabilidades-relatorio'), ve, perfil);
     assert.strictEqual(Perfis.podeVerTela([perfil], 'riscos-relatorio'), ve, perfil);
   }
@@ -163,7 +163,7 @@ function bancoRelatorios() {
     salvos,
     api: {
       salvarRelatorioExecutivo: (r) => { salvos.push(r); return { success: true, id: 's' + salvos.length, salvoEm: '2026-10-20T12:00:00.000Z' }; },
-      getRelatoriosExecutivos: () => salvos.map((r, i) => ({ id: 's' + (i + 1), tipo: r.tipo, titulo: r.titulo, geradoEm: r.geradoEm, geradoPor: 'analista@fortestecnologia.com.br', meses: r.meses, comIA: r.comIA, resumo: r.resumo })),
+      getRelatoriosExecutivos: () => salvos.map((r, i) => ({ id: 's' + (i + 1), tipo: r.tipo, titulo: r.titulo, geradoEm: r.geradoEm, geradoPor: 'analista@fortestecnologia.com.br', meses: r.meses, comIA: r.comIA, resumo: r.resumo, versao: r.versao })),
       getConteudoRelatorioExecutivo: (id) => ({ id, conteudo: salvos[Number(String(id).slice(1)) - 1].conteudo }),
     },
   };
@@ -185,7 +185,8 @@ test('relatorio gerado tem "Salvar no sistema"; salvar grava o retrato JSON (sem
   assert.strictEqual(s.tipo, 'riscos');
   assert.strictEqual(s.comIA, true);
   const retrato = JSON.parse(s.conteudo);
-  assert.strictEqual(retrato.versao, 1);
+  assert.strictEqual(retrato.versao, 2);
+  assert.ok(retrato.dados.baseRecorte && retrato.dados.baseRecorte.riscos.length, 'v2: base do recorte por area');
   assert.ok(retrato.dados.d.panorama, 'dados calculados');
   assert.deepStrictEqual(retrato.resumoIA.paragrafos, ['Situação <b>grave</b>.']);
   assert.ok(!/<html|<!DOCTYPE/i.test(s.conteudo), 'nunca o HTML do documento');
@@ -258,4 +259,119 @@ test('falha ao salvar: botao volta, toast de erro, pode tentar de novo', async (
   assert.match(ctx.toasts.join(' '), /grande demais/);
   await ctx.w._salvarRelatorioExecutivoGerado(id);
   assert.strictEqual(tentativas, 2);
+});
+
+// ---- Compartilhar com gestores (20/10/2026): Riscos recortado por area, sem IA; Gestor so ve o seu ----
+
+function bancoComCompartilhar() {
+  const b = bancoRelatorios();
+  const compartilhados = [];
+  const abertos = [];
+  const revogados = [];
+  const PERFIS_LISTA = [
+    { email: 'gestor.ti@fortestecnologia.com.br', perfis: ['gestor'], area: 'TI' },
+    { email: 'gestor.semarea@fortestecnologia.com.br', perfis: ['gestor'], area: '' },
+    { email: 'analista@fortestecnologia.com.br', perfis: ['seguranca'], area: '' },
+  ];
+  Object.assign(b.api, {
+    getPerfis: () => JSON.parse(JSON.stringify(PERFIS_LISTA)),
+    compartilharRelatorioExecutivo: (c) => {
+      c.destinatarios.forEach((d) => compartilhados.push(Object.assign({ id: 'c' + (compartilhados.length + 1), edicaoId: c.edicaoId, tipo: c.tipo, titulo: c.titulo, geradoEm: c.geradoEm,
+        mensagem: c.mensagem, compartilhadoPor: 'analista@fortestecnologia.com.br', compartilhadoEm: '2026-10-20T13:00:00Z', revogado: false, abertoEm: null }, d)));
+      return { success: true };
+    },
+    getCompartilhamentosDaEdicao: (id) => compartilhados.filter((c) => c.edicaoId === id).map((c) => Object.assign({}, c, { conteudo: undefined })),
+    getRelatoriosCompartilhadosComigo: () => compartilhados.filter((c) => !c.revogado && c.para === 'gestor.ti@fortestecnologia.com.br'),
+    marcarCompartilhamentoAberto: (id) => { abertos.push(id); compartilhados.find((c) => c.id === id).abertoEm = '2026-10-20T14:00:00Z'; return { success: true }; },
+    revogarCompartilhamento: (id) => { revogados.push(id); compartilhados.find((c) => c.id === id).revogado = true; return { success: true }; },
+  });
+  return Object.assign(b, { compartilhados, abertos, revogados });
+}
+
+// Gestores em ordem de e-mail no modal: gestor.semarea, depois gestor.ti.
+const IDX = { semArea: 0, ti: 1 };
+
+async function salvarECompartilhar(banco, tipo) {
+  const si = await carregar('seguranca', { api: banco.api });
+  await si.w._salvarRelatorioExecutivoGerado(idTempDe(await gerar(si, tipo)));
+  const edicao = 's' + banco.salvos.length;
+  await si.w._carregarRelatoriosSalvos();
+  await si.w.abrirCompartilharRelatorio(edicao);
+  return { si, edicao };
+}
+
+test('compartilhar Riscos: modal lista gestores (sem area bloqueado), cada um recebe so a area dele e sem o resumo da IA', async () => {
+  const banco = bancoComCompartilhar();
+  const { si } = await salvarECompartilhar(banco, 'riscos');
+  const modal = si.doc.getElementById('compartilharRelatorioCorpo');
+  assert.match(modal.textContent, /só os riscos da área dele/);
+  const caixas = [...modal.querySelectorAll('input[type="checkbox"]')];
+  assert.strictEqual(caixas.length, 2, 'so os perfis de Gestor');
+  assert.ok(caixas[IDX.semArea].disabled, 'gestor sem area nao recebe recorte');
+  assert.match(modal.textContent, /sem área no perfil/);
+  si.w.marcarGestorCompartilhar(IDX.semArea, true);
+  si.w.marcarGestorCompartilhar(IDX.ti, true);
+  si.doc.getElementById('compartilharMensagem').value = 'Para a reunião de segunda';
+  await si.w.confirmarCompartilharRelatorio();
+  assert.strictEqual(banco.compartilhados.length, 1);
+  const c = banco.compartilhados[0];
+  assert.deepStrictEqual([c.para, c.area, c.mensagem], ['gestor.ti@fortestecnologia.com.br', 'TI', 'Para a reunião de segunda']);
+  const r = JSON.parse(c.conteudo);
+  assert.strictEqual(r.recorteArea, 'TI');
+  assert.strictEqual(r.resumoIA, null, 'resumo da IA nao vai no recorte');
+  assert.deepStrictEqual(r.dados.d.principais.map((x) => x.r.id), ['r1']);
+  assert.ok(!c.conteudo.includes('Fornecedor único'), 'risco de outra area fora do retrato');
+  assert.ok(!c.conteudo.includes('baseRecorte'), 'a base da empresa nao vai para o gestor');
+  assert.match(si.doc.getElementById('compartilharRelatorioCorpo').textContent, /Já compartilhado[\s\S]*gestor\.ti[\s\S]*Não aberto/);
+  assert.ok(si.doc.querySelectorAll('#compartilharRelatorioCorpo input[type="checkbox"]')[IDX.ti].disabled, 'quem ja recebeu nao recebe de novo');
+});
+
+test('Gestor: tela so com "Compartilhados com voce"; abre o recorte com faixa e referencia da empresa; marca a abertura uma vez', async () => {
+  const banco = bancoComCompartilhar();
+  const { si } = await salvarECompartilhar(banco, 'riscos');
+  si.w.marcarGestorCompartilhar(IDX.ti, true);
+  await si.w.confirmarCompartilharRelatorio();
+  const g = await carregar('gestor', { api: banco.api });
+  g.w.USER_EMAIL = 'gestor.ti@fortestecnologia.com.br';
+  await g.w.riscosRelatorio();
+  const tela = g.doc.getElementById('app').textContent;
+  assert.match(tela, /Compartilhados com você/);
+  assert.doesNotMatch(tela, /Gerar relatório|Edições salvas/);
+  assert.match(tela, /Área TI/);
+  await g.w.abrirRelatorioCompartilhado('c1');
+  const html = g.paginas[g.paginas.length - 1];
+  const t = texto(html);
+  assert.match(t, /Compartilhado com você por analista@fortestecnologia\.com\.br/);
+  assert.match(t, /recorte da área TI/);
+  assert.match(t, /Referência da empresa/);
+  assert.match(t, /Relatório Executivo de Riscos — área TI/);
+  assert.doesNotMatch(t, /Fornecedor único/);
+  assert.doesNotMatch(t, /Carga por área/);
+  assert.doesNotMatch(t, /Resumo executivo/);
+  assert.ok(!html.includes('<img src=x'), 'titulo escapado');
+  assert.deepStrictEqual(banco.abertos, ['c1']);
+  await g.w.abrirRelatorioCompartilhado('c1');
+  assert.deepStrictEqual(banco.abertos, ['c1'], 'abertura marcada so na primeira vez');
+});
+
+test('Vulnerabilidades vai inteiro (com IA); edicao v1 de Riscos nao compartilha; revogar tira o acesso', async () => {
+  const banco = bancoComCompartilhar();
+  const { si } = await salvarECompartilhar(banco, 'vulnerabilidades');
+  const caixas = [...si.doc.querySelectorAll('#compartilharRelatorioCorpo input[type="checkbox"]')];
+  assert.ok(!caixas[IDX.semArea].disabled, 'no de vulnerabilidades, gestor sem area tambem recebe');
+  si.w.marcarGestorCompartilhar(IDX.ti, true);
+  await si.w.confirmarCompartilharRelatorio();
+  const r = JSON.parse(banco.compartilhados[0].conteudo);
+  assert.ok(!r.recorteArea);
+  assert.deepStrictEqual(r.resumoIA.paragrafos, ['Situação <b>grave</b>.']);
+  si.w.confirm = () => true;
+  await si.w.revogarCompartilhamentoRelatorio('c1');
+  assert.deepStrictEqual(banco.revogados, ['c1']);
+  assert.match(si.doc.getElementById('compartilharRelatorioCorpo').textContent, /Revogado/);
+  // v1 de Riscos (salvo antes do recorte): botao desabilitado
+  banco.salvos.push(Object.assign({}, banco.salvos[0], { tipo: 'riscos', titulo: 'Relatório Executivo de Riscos', versao: 1 }));
+  await si.w.riscosRelatorio();
+  const btn = [...si.doc.querySelectorAll('#relatoriosSalvos button')].find((b) => b.textContent === 'Compartilhar');
+  assert.ok(btn && btn.disabled);
+  assert.match(btn.title, /anterior ao recorte por área/);
 });

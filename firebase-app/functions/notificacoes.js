@@ -391,6 +391,39 @@ function mesAnterior(hoje) {
 }
 
 // ------------------------------------------------------------
+// Relatorio executivo compartilhado com um gestor (20/10/2026)
+// ------------------------------------------------------------
+
+const _TELA_RELATORIO = { vulnerabilidades: 'vulnerabilidades-relatorio', riscos: 'riscos-relatorio' };
+
+/**
+ * { assunto, html, texto } do aviso "relatorio compartilhado com voce". So o
+ * link para o sistema -- nenhum numero do relatorio vai no e-mail (o conteudo
+ * fica no sistema, revogavel). `c` = documento de relatorios_compartilhados.
+ */
+function montarEmailRelatorioCompartilhado(c, opts) {
+  const o = opts || {};
+  const x = c || {};
+  const titulo = String(x.titulo || 'Relatório executivo');
+  const base = String(o.baseUrl || URL_BASE_PADRAO).replace(/\/+$/, '');
+  const url = `${base}/#${_TELA_RELATORIO[x.tipo] || 'riscos-relatorio'}`;
+  const edicao = dataBR(String(x.geradoEm || '').slice(0, 10));
+  const recorte = x.area ? ` Você recebe a versão com os riscos da área ${x.area}.` : '';
+  const frase = `${x.compartilhadoPor || 'A equipe de Segurança da Informação'} compartilhou com você o ${titulo} (edição de ${edicao}).${recorte}`;
+  const mensagem = String(x.mensagem || '').trim();
+  const assunto = `[GRC360] ${titulo} compartilhado com você`;
+  const rodape = 'Você recebe este e-mail porque um relatório do GRC360 foi compartilhado com você. Ele fica disponível no sistema enquanto não for revogado.';
+  const html = _envelopeHtml(
+    _cabecalhoHtml('Relatório compartilhado com você')
+    + `<p style="font-size:15px;">${esc(frase)}</p>`
+    + (mensagem ? `<blockquote style="margin:12px 0;padding:8px 14px;border-left:3px solid #d60014;background:#f6f4f2;white-space:pre-line;">${esc(mensagem)}</blockquote>` : '')
+    + '<p>O relatório abre dentro do sistema, em "Compartilhados com você".</p>'
+    + _botao(url, 'Abrir no GRC360'), rodape);
+  const texto = [frase, '', mensagem ? `Mensagem: ${mensagem}` : '', '', `Abrir no GRC360: ${url}`, '', rodape].filter((l, i, a) => l || a[i - 1]).join('\n');
+  return { assunto, html, texto };
+}
+
+// ------------------------------------------------------------
 // Envio (o gatilho chama com o transporte de verdade; o teste, com um falso)
 // ------------------------------------------------------------
 
@@ -428,6 +461,6 @@ module.exports = {
   MODO, GRUPO, STATUS, CONFIG_PADRAO, SECOES_RESUMO, PROVEDORES_SMTP,
   normalizarConfig, emailCorporativo, idNaFila,
   decidirUrgentes, resolverDestinatarios, emailsDeOperadores,
-  montarEmailUrgente, itensDoResumo, montarResumoMensal, mesPorExtenso, mesAnterior,
+  montarEmailUrgente, itensDoResumo, montarResumoMensal, mesPorExtenso, mesAnterior, montarEmailRelatorioCompartilhado,
   linkContrato, processarEnvio, podeReenviar,
 };

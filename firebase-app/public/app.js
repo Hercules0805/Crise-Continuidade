@@ -5977,6 +5977,16 @@ async function _telaRelatorioExecutivo(tipo) {
   const t = _TELA_RELATORIO_EXECUTIVO[tipo];
   window._relExecTipo = tipo;
   relatoriosSalvosPaginacao.reiniciar();
+  // Gestor (DECISÃO 20/10/2026): só o que foi compartilhado com ele.
+  if (!Perfis.podeGerarRelatorioExecutivo(window.USER_PERFIS)) {
+    app.innerHTML = `
+      <div class="page-header">
+        <div><h2>${esc(t.titulo)}</h2><p class="page-sub">Edições do relatório compartilhadas com você pela equipe de Segurança da Informação${tipo === 'riscos' ? ' — com os riscos da sua área' : ''}</p></div>
+      </div>
+      <div id="relatoriosCompartilhados"><div class="loading">⏳ Carregando...</div></div>`;
+    await _carregarRelatoriosCompartilhadosComigo();
+    return;
+  }
   app.innerHTML = `
     <div class="page-header">
       <div><h2>${esc(t.titulo)}</h2><p class="page-sub">${esc(t.sub)}</p></div>
@@ -6002,9 +6012,227 @@ async function _telaRelatorioExecutivo(tipo) {
       </label>` : ''}
       <button class="btn btn-primary" style="margin-top:14px;" onclick="gerarRelatorioExecutivo()">📄 Gerar relatório</button>
     </div>
-    <div id="relatoriosSalvos"></div>`;
+    <div id="relatoriosSalvos"></div>
+    ${_htmlModalCompartilharRelatorio()}`;
   await _carregarRelatoriosSalvos();
 }
+
+// ---- Compartilhar com gestores (DECISÃO 20/10/2026) ----
+// Edição salva -> um documento por gestor em relatorios_compartilhados, com o
+// retrato JÁ PRONTO para ele: no de Riscos, recortado para a área dele
+// (RiscoRelatorio.recortarPorArea), sem o resumo da IA; no de
+// Vulnerabilidades, a edição inteira. Aviso por e-mail sai do servidor.
+
+function _htmlModalCompartilharRelatorio() {
+  return `<div class="modal-overlay" id="modalCompartilharRelatorio" onclick="fecharCompartilharRelatorio()"><div class="modal" onclick="event.stopPropagation()" style="max-width:640px;">
+      <h3>Compartilhar com gestores</h3>
+      <div id="compartilharRelatorioCorpo"><div class="loading">⏳ Carregando...</div></div>
+    </div></div>`;
+}
+
+window.fecharCompartilharRelatorio = () => {
+  const m = document.getElementById('modalCompartilharRelatorio');
+  if (m) m.classList.remove('open');
+};
+
+/** Pode recortar por área? Riscos só a partir do retrato v2 (com a base do recorte). */
+function _edicaoCompartilhavel(meta) {
+  return meta.tipo === 'vulnerabilidades' || (Number(meta.versao) || 1) >= 2;
+}
+
+window.abrirCompartilharRelatorio = async (edicaoId) => {
+  const meta = (_relatoriosSalvos || []).find((r) => String(r.id) === String(edicaoId));
+  if (!meta) return;
+  if (!_edicaoCompartilhavel(meta)) {
+    return showToast('Edição anterior ao recorte por área: gere e salve o relatório de novo para compartilhar.', '#e65100');
+  }
+  window._compartilharEdicao = { meta, selecionados: new Set() };
+  document.getElementById('modalCompartilharRelatorio').classList.add('open');
+  await _renderCompartilharRelatorio();
+};
+
+async function _renderCompartilharRelatorio() {
+  const corpo = document.getElementById('compartilharRelatorioCorpo');
+  const ctx = window._compartilharEdicao;
+  if (!corpo || !ctx) return;
+  let perfis, enviados;
+  try {
+    [perfis, enviados] = await Promise.all([API.getPerfis(), API.getCompartilhamentosDaEdicao(ctx.meta.id)]);
+  } catch (e) {
+    corpo.innerHTML = `<p style="color:#c62828;">${esc(_mensagemErro(e, 'Não foi possível carregar os gestores.'))}</p>
+      <div class="modal-footer"><button class="btn btn-ghost" onclick="fecharCompartilharRelatorio()">Fechar</button></div>`;
+    return;
+  }
+  const riscos = ctx.meta.tipo === 'riscos';
+  const ativos = new Set(enviados.filter((c) => !c.revogado).map((c) => c.para));
+  const gestores = (perfis || []).filter((p) => (p.perfis || []).includes('gestor')).sort((a, b) => a.email.localeCompare(b.email));
+  ctx.gestores = gestores;
+  ctx.jaRecebeu = ativos;
+  const quando = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '');
+  const linhasGestor = gestores.map((g, i) => {
+    const jaTem = ativos.has(g.email);
+    const semArea = riscos && !g.area;
+    const bloqueado = jaTem || semArea;
+    const motivo = jaTem ? 'já recebeu esta edição' : (semArea ? 'sem área no perfil: não há como recortar o relatório' : '');
+    // width/flex explícitos: o CSS do .modal dá largura total a todo input.
+    return `<label style="display:flex;gap:10px;align-items:center;padding:6px 0;font-size:0.9em;margin:0;text-align:left;${bloqueado ? 'color:var(--ink-muted);' : 'cursor:pointer;'}">
+        <input type="checkbox" style="width:auto;flex:0 0 auto;margin:0;" ${bloqueado ? 'disabled' : ''} ${ctx.selecionados.has(g.email) ? 'checked' : ''} onchange="marcarGestorCompartilhar(${i}, this.checked)">
+        <span style="flex:1;min-width:0;">${esc(g.email)}${g.area ? ` <span class="muted">· ${esc(g.area)}</span>` : ''}</span>
+        ${motivo ? `<span style="font-size:0.82em;flex:0 0 auto;max-width:45%;text-align:right;">${esc(motivo)}</span>` : ''}
+      </label>`;
+  }).join('');
+  const linhasEnviados = enviados.map((c) => `<tr>
+      <td>${esc(c.para)}${c.area ? `<div class="muted" style="font-size:12px;">área ${esc(c.area)}</div>` : ''}</td>
+      <td>${esc(quando(c.compartilhadoEm))}<div class="muted" style="font-size:12px;">por ${esc(c.compartilhadoPor || '–')}</div></td>
+      <td>${c.revogado ? `<span class="muted">Revogado ${esc(quando(c.revogadoEm))}</span>` : (c.abertoEm ? `Aberto ${esc(quando(c.abertoEm))}` : '<span class="muted">Não aberto</span>')}</td>
+      <td class="col-c">${c.revogado ? '' : `<button class="btn btn-ghost" style="padding:3px 10px;font-size:0.82em;" onclick="revogarCompartilhamentoRelatorio('${escJs(c.id)}')">Revogar</button>`}</td>
+    </tr>`).join('');
+  corpo.innerHTML = `
+    <p style="font-size:0.85em;color:var(--ink-muted);margin:4px 0 12px;">${esc(ctx.meta.titulo || '')} · edição de ${esc(quando(ctx.meta.geradoEm))}.
+      ${riscos ? 'Cada gestor recebe <strong>só os riscos da área dele</strong>, com os totais da empresa como referência. O resumo por IA não vai no recorte (ele foi escrito sobre a empresa inteira).' : 'Os gestores recebem a edição inteira (é o mesmo conteúdo do Painel de Vulnerabilidades, que eles já veem).'}
+      Cada um recebe um e-mail com o link; o relatório abre dentro do sistema e pode ser revogado.</p>
+    <div style="max-height:220px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:6px 12px;">
+      ${linhasGestor || '<p class="vazio-inline">Nenhum perfil de Gestor cadastrado.</p>'}
+    </div>
+    <div class="field" style="margin-top:12px;">
+      <label class="field-label" for="compartilharMensagem">Mensagem (opcional)</label>
+      <textarea id="compartilharMensagem" class="field-control" rows="2" maxlength="1000" style="height:auto;">${esc(ctx.mensagem || '')}</textarea>
+    </div>
+    ${enviados.length ? `<h4 style="margin:16px 0 6px;font-size:0.92em;">Já compartilhado</h4>
+      <div class="data-table data-table--compact"><table>
+        <thead><tr><th>Gestor</th><th>Enviado</th><th>Situação</th><th class="col-c"></th></tr></thead>
+        <tbody>${linhasEnviados}</tbody></table></div>` : ''}
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="fecharCompartilharRelatorio()">Fechar</button>
+      <button class="btn btn-primary" id="btnConfirmarCompartilhar" onclick="confirmarCompartilharRelatorio()">Compartilhar</button>
+    </div>`;
+}
+
+window.marcarGestorCompartilhar = (i, marcado) => {
+  const ctx = window._compartilharEdicao;
+  const g = ctx && ctx.gestores && ctx.gestores[i];
+  if (!g) return;
+  if (marcado) ctx.selecionados.add(g.email); else ctx.selecionados.delete(g.email);
+};
+
+/** Retrato que cada gestor recebe: recortado por área no de Riscos, a edição inteira no de Vulnerabilidades. */
+function _retratoParaGestor(retrato, gestor) {
+  if (retrato.tipo !== 'riscos') return retrato;
+  const base = retrato.dados && retrato.dados.baseRecorte;
+  if (!base) throw new Error('Edição sem a base do recorte por área.');
+  const recorte = RiscoRelatorio.recortarPorArea(base, gestor.area);
+  return {
+    versao: retrato.versao, tipo: 'riscos', opcoes: retrato.opcoes, resumoIA: null,
+    geradoEm: retrato.geradoEm, geradoPor: retrato.geradoPor, recorteArea: gestor.area,
+    dados: Object.assign(recorte, {
+      processosCarregados: retrato.dados.processosCarregados,
+      indicadoresCarregados: retrato.dados.indicadoresCarregados,
+      historicoCarregado: retrato.dados.historicoCarregado,
+    }),
+  };
+}
+
+window.confirmarCompartilharRelatorio = async () => {
+  const ctx = window._compartilharEdicao;
+  if (!ctx) return;
+  ctx.mensagem = (document.getElementById('compartilharMensagem') || {}).value || '';
+  // Além da caixa desabilitada: sem área (Riscos) ou que já recebeu não entra.
+  const escolhidos = (ctx.gestores || []).filter((g) => ctx.selecionados.has(g.email)
+    && !(ctx.meta.tipo === 'riscos' && !g.area) && !(ctx.jaRecebeu || new Set()).has(g.email));
+  if (!escolhidos.length) return showToast('Escolha ao menos um gestor.', '#e65100');
+  const btn = document.getElementById('btnConfirmarCompartilhar');
+  if (btn) { btn.disabled = true; btn.textContent = 'Compartilhando…'; }
+  try {
+    const c = await API.getConteudoRelatorioExecutivo(ctx.meta.id);
+    const retrato = JSON.parse(c.conteudo);
+    await API.compartilharRelatorioExecutivo({
+      edicaoId: ctx.meta.id, tipo: ctx.meta.tipo, titulo: ctx.meta.titulo, geradoEm: ctx.meta.geradoEm, mensagem: ctx.mensagem,
+      destinatarios: escolhidos.map((g) => ({
+        para: g.email, area: ctx.meta.tipo === 'riscos' ? g.area : '', conteudo: JSON.stringify(_retratoParaGestor(retrato, g)),
+      })),
+    });
+    showToast(`✅ Compartilhado com ${escolhidos.length} gestor${escolhidos.length === 1 ? '' : 'es'}. O aviso por e-mail segue a configuração de Notificações.`, '#2e7d32');
+    ctx.selecionados = new Set();
+    ctx.mensagem = '';
+    await _renderCompartilharRelatorio();
+  } catch (e) {
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível compartilhar.'), '#c62828');
+    if (btn) { btn.disabled = false; btn.textContent = 'Compartilhar'; }
+  }
+};
+
+window.revogarCompartilhamentoRelatorio = async (id) => {
+  if (!await confirmarAcao('Revogar o acesso deste gestor ao relatório? Ele deixa de ver esta edição.', { rotulo: 'Revogar' })) return;
+  try {
+    await API.revogarCompartilhamento(id);
+    showToast('✅ Acesso revogado.', '#2e7d32');
+    await _renderCompartilharRelatorio();
+  } catch (e) {
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível revogar.'), '#c62828');
+  }
+};
+
+// ---- Lado do Gestor: "Compartilhados com você" ----
+let _relatoriosCompartilhadosComigo = null;
+
+async function _carregarRelatoriosCompartilhadosComigo() {
+  const cont = document.getElementById('relatoriosCompartilhados');
+  if (!cont) return;
+  try {
+    _relatoriosCompartilhadosComigo = await API.getRelatoriosCompartilhadosComigo();
+  } catch (e) {
+    console.error('Compartilhados comigo: falha ao carregar', e);
+    cont.innerHTML = `<div class="painel-card">${_htmlErroCarga('Não foi possível carregar os relatórios compartilhados com você.', '_carregarRelatoriosCompartilhadosComigo')}</div>`;
+    return;
+  }
+  const lista = _relatoriosCompartilhadosComigo.filter((c) => c.tipo === window._relExecTipo);
+  const quando = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '–');
+  cont.innerHTML = `<div class="painel-card">
+      <div class="painel-card__titulo">Compartilhados com você</div>
+      <div class="painel-card__sub">Edições do relatório que a equipe de Segurança da Informação compartilhou com você</div>
+      ${lista.length ? `<div class="data-table data-table--compact"><table>
+        <colgroup><col><col style="width:150px"><col style="width:260px"><col style="width:160px"><col style="width:100px"></colgroup>
+        <thead><tr><th>Edição</th><th>Gerado em</th><th>Compartilhado por</th><th>Recorte</th><th class="col-c">Ações</th></tr></thead>
+        <tbody>${lista.map((c) => `<tr>
+          <td class="title">${esc(c.titulo || '')}${c.mensagem ? `<div class="muted" style="font-size:12px;">“${esc(c.mensagem)}”</div>` : ''}${c.abertoEm ? '' : ' <span class="chip chip--l3">Novo</span>'}</td>
+          <td>${esc(quando(c.geradoEm))}</td>
+          <td class="muted">${esc(c.compartilhadoPor || '–')}<div style="font-size:12px;">${esc(quando(c.compartilhadoEm))}</div></td>
+          <td>${c.area ? `Área ${esc(c.area)}` : 'Empresa inteira'}</td>
+          <td class="col-c"><button class="btn btn-ghost" style="padding:4px 10px;font-size:0.85em;" onclick="abrirRelatorioCompartilhado('${escJs(c.id)}')">Abrir</button></td>
+        </tr>`).join('')}</tbody></table></div>`
+    : _htmlVazio('Nenhum relatório compartilhado com você ainda.', 'Quando a equipe de Segurança compartilhar uma edição, ela aparece aqui e você recebe um e-mail.')}
+    </div>`;
+}
+window._carregarRelatoriosCompartilhadosComigo = _carregarRelatoriosCompartilhadosComigo;
+
+window.abrirRelatorioCompartilhado = async (id) => {
+  const c = (_relatoriosCompartilhadosComigo || []).find((x) => String(x.id) === String(id));
+  if (!c) return;
+  const titulo = c.titulo || 'Relatório executivo';
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
+  const escrever = (html) => { win.document.open(); win.document.write(html); win.document.close(); };
+  let retrato;
+  try {
+    retrato = JSON.parse(c.conteudo);
+    if (!_retratoValido(retrato)) throw new Error('Esta edição foi salva num formato que esta versão do sistema não sabe abrir.');
+    escrever(_htmlRelatorioExecutivoPorTipo(retrato.tipo, retrato.dados, retrato.opcoes || {}, retrato.resumoIA || null, {
+      modo: 'compartilhado', geradoEm: retrato.geradoEm, geradoPor: retrato.geradoPor,
+      compartilhadoPor: c.compartilhadoPor, compartilhadoEm: c.compartilhadoEm, recorteArea: retrato.recorteArea || '',
+    }));
+  } catch (e) {
+    console.error('Relatório compartilhado: falha ao abrir', e);
+    escrever(_htmlAvisoDocumentoExecutivo(titulo, e instanceof SyntaxError ? 'O conteúdo deste relatório está corrompido.' : _mensagemErro(e, 'Não foi possível abrir o relatório.'), true));
+    return;
+  }
+  if (!c.abertoEm) {
+    try {
+      await API.marcarCompartilhamentoAberto(id);
+      c.abertoEm = new Date().toISOString();
+      await _carregarRelatoriosCompartilhadosComigo();
+    } catch (e) { console.error('Relatório compartilhado: não marcou a abertura', e); }
+  }
+};
 
 window.gerarRelatorioExecutivo = async () => {
   const tipo = window._relExecTipo;
@@ -6056,7 +6284,15 @@ function _htmlRelatorioExecutivoPorTipo(tipo, dados, opcoes, resumoIA, edicao) {
 // ---- Edições salvas (DECISÃO 20/10/2026): o retrato dos DADOS em JSON, nunca
 // o HTML (HTML vindo do banco rodaria script na sessão de quem abrisse; os
 // geradores escapam tudo ao redesenhar). Imutável; só o Admin exclui. ----
-const VERSAO_RETRATO_RELATORIO = 1;
+// v2 (20/10/2026): o de Riscos guarda também a base do recorte por área
+// (`dados.baseRecorte`), para compartilhar com cada gestor só a área dele.
+// v1 continua abrindo; só não recorta.
+const VERSAO_RETRATO_RELATORIO = 2;
+const VERSOES_RETRATO_ACEITAS = [1, 2];
+
+function _retratoValido(r) {
+  return !!(r && VERSOES_RETRATO_ACEITAS.includes(r.versao) && _TITULO_RELATORIO_EXECUTIVO[r.tipo] && r.dados && r.dados.d);
+}
 
 /** Só o que os geradores leem: sem funções, e no de Vulnerabilidades a lista bruta só quando há apêndice. */
 function _retratoRelatorioExecutivo(g) {
@@ -6081,7 +6317,7 @@ window._salvarRelatorioExecutivoGerado = async (idTemp) => {
   const botao = () => g && g.win && g.win.document && g.win.document.getElementById('btnSalvarRelatorio');
   const marcar = (txt, desabilitar) => { const b = botao(); if (b) { b.textContent = txt; b.disabled = !!desabilitar; } };
   if (!g) return;
-  if (g.salvo) return marcar(`✅ Salvo em ${new Date(g.salvo).toLocaleString('pt-BR')} (abrir pela tela Relatórios)`, true);
+  if (g.salvo) return marcar(`✅ Salvo em ${new Date(g.salvo).toLocaleString('pt-BR')} (fica em "Edições salvas")`, true);
   if (g.salvando) return;
   g.salvando = true;
   marcar('Salvando…', true);
@@ -6093,7 +6329,7 @@ window._salvarRelatorioExecutivoGerado = async (idTemp) => {
       versao: VERSAO_RETRATO_RELATORIO, conteudo: JSON.stringify(retrato),
     });
     g.salvo = r.salvoEm || new Date().toISOString();
-    marcar(`✅ Salvo em ${new Date(g.salvo).toLocaleString('pt-BR')} (abrir pela tela Relatórios)`, true);
+    marcar(`✅ Salvo em ${new Date(g.salvo).toLocaleString('pt-BR')} (fica em "Edições salvas")`, true);
     showToast('✅ Relatório salvo. Ele fica em "Edições salvas", na tela do relatório.', '#2e7d32');
     await _carregarRelatoriosSalvos();
   } catch (e) {
@@ -6141,6 +6377,9 @@ function _renderRelatoriosSalvos() {
       <td class="col-c">${r.comIA ? 'Sim' : 'Não'}</td>
       <td class="col-c" style="white-space:nowrap;">
         <button class="btn btn-ghost" style="padding:4px 10px;font-size:0.85em;" onclick="abrirRelatorioExecutivoSalvo('${escJs(r.id)}')">Abrir</button>
+        ${_edicaoCompartilhavel(r)
+    ? `<button class="btn btn-ghost" style="padding:4px 10px;font-size:0.85em;" onclick="abrirCompartilharRelatorio('${escJs(r.id)}')">Compartilhar</button>`
+    : '<button class="btn btn-ghost" style="padding:4px 10px;font-size:0.85em;" disabled title="Edição anterior ao recorte por área — gere e salve de novo para compartilhar">Compartilhar</button>'}
         ${ehAdmin ? `<button class="btn-icon" title="Excluir" aria-label="Excluir" onclick="excluirRelatorioExecutivoSalvo('${escJs(r.id)}')">${SVG_EXCLUIR}</button>` : ''}
       </td>
     </tr>`).join('');
@@ -6150,7 +6389,7 @@ function _renderRelatoriosSalvos() {
       <div class="painel-card__sub">Guardadas pelo botão "Salvar no sistema" do relatório — reabrem com os números e o resumo da data em que foram geradas</div>
       ${lista.length ? `<div class="data-table data-table--compact">
         <table>
-          <colgroup><col><col style="width:150px"><col style="width:260px"><col style="width:100px"><col style="width:90px"><col style="width:130px"></colgroup>
+          <colgroup><col><col style="width:150px"><col style="width:240px"><col style="width:100px"><col style="width:80px"><col style="width:230px"></colgroup>
           <thead><tr><th>Edição</th><th>Gerado em</th><th>Por</th><th class="col-c">Período</th><th class="col-c">Com IA</th><th class="col-c">Ações</th></tr></thead>
           <tbody>${linhas}</tbody>
         </table>
@@ -6175,7 +6414,7 @@ window.abrirRelatorioExecutivoSalvo = async (id) => {
   try {
     const c = await API.getConteudoRelatorioExecutivo(id);
     retrato = JSON.parse(c.conteudo);
-    if (!retrato || retrato.versao !== VERSAO_RETRATO_RELATORIO || !_TITULO_RELATORIO_EXECUTIVO[retrato.tipo] || !retrato.dados || !retrato.dados.d) {
+    if (!_retratoValido(retrato)) {
       throw new Error('Esta edição foi salva num formato que esta versão do sistema não sabe abrir.');
     }
   } catch (e) {
@@ -6267,9 +6506,20 @@ async function _dadosRelatorioExecutivoRiscos(opcoes) {
     monitoramento: RR.monitoramento(lista, hoje, inds ? _riscoComKriForaDaMeta : null),
     serie: historico ? RR.serieMensalHistorico(historico, opcoes.meses, hoje) : null,
   };
+  // Base do recorte por área (retrato v2, 20/10/2026): o mínimo para recalcular
+  // o relatório de UMA área quando a edição for compartilhada com o gestor dela.
+  const ativos = RR.ativos(lista);
+  const areas = [...new Set(ativos.map(RiscoConsolidado.areaDoRisco))];
+  const seriePorArea = {};
+  if (historico) areas.forEach((a) => { seriePorArea[a] = RR.serieMensalHistorico(historico, opcoes.meses, hoje, a); });
+  const baseRecorte = {
+    riscos: ativos.map((r) => RR.riscoMinimo(r, inds ? _riscoComKriForaDaMeta(r) : false)),
+    processos: procs.map((p) => ({ id: p.id, score: p.score, avaliado: p.avaliado, tierManual: p.tierManual || '' })),
+    critForn, apetite, hoje, seriePorArea: historico ? seriePorArea : null, panoramaEmpresa: d.panorama,
+  };
   return {
     d, processosCarregados: !!processos, indicadoresCarregados: !!inds, historicoCarregado: !!historico,
-    destaques: RR.destaques(d), indicadoresIA: RR.indicadoresParaIA(d),
+    destaques: RR.destaques(d), indicadoresIA: RR.indicadoresParaIA(d), baseRecorte,
   };
 }
 
@@ -6367,6 +6617,10 @@ function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoe
   } else if (ed.modo === 'salvo') {
     barraEdicao = `<div class="bloco" style="background:#fff8e1;border-color:#f5d9a8;padding:10px 16px;font-size:9pt;">
       <strong>Edição salva</strong> — números e resumo de ${esc(quando)}, gerada por ${esc(geradoPor)}${ed.salvoEm ? `; salva em ${esc(new Date(ed.salvoEm).toLocaleString('pt-BR'))}` : ''}. Não reflete mudanças posteriores.
+    </div>`;
+  } else if (ed.modo === 'compartilhado') {
+    barraEdicao = `<div class="bloco" style="background:#fff8e1;border-color:#f5d9a8;padding:10px 16px;font-size:9pt;">
+      <strong>Compartilhado com você</strong> por ${esc(ed.compartilhadoPor || '–')}${ed.compartilhadoEm ? ` em ${esc(new Date(ed.compartilhadoEm).toLocaleString('pt-BR'))}` : ''} — números de ${esc(quando)}${ed.recorteArea ? `; <strong>recorte da área ${esc(ed.recorteArea)}</strong> (só os riscos dela; da empresa, só os totais de referência)` : ''}. Não reflete mudanças posteriores.
     </div>`;
   }
   let blocoIA = '';
@@ -6686,22 +6940,41 @@ function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao) {
     </div>`;
   }
 
+  // Recorte de UMA área (compartilhado com o gestor dela, 20/10/2026): da
+  // empresa só o agregado de referência; sem a tabela de carga por área.
+  const area = (edicao && edicao.recorteArea) || '';
+  const ref = dados.referenciaEmpresa;
+  const blocoReferencia = area && ref ? `<div class="bloco">
+      <h3>Referência da empresa</h3>
+      <div class="sub-bloco">Só totais, para comparar: os riscos das outras áreas não fazem parte deste recorte.</div>
+      <div class="kpis" style="margin-bottom:0;">
+        ${_kpiDoc('Riscos ativos na empresa', ref.ativos, '')}
+        ${_kpiDoc('Carga da empresa', ref.carga, ref.carga ? `${Math.round((p.carga / ref.carga) * 100)}% dela é desta área` : '')}
+        ${_kpiDoc('Acima do apetite na empresa', ref.acimaDoApetite, `Apetite: até ${ref.apetite}`)}
+        ${_kpiDoc('Alto ou Muito alto na empresa', (ref.composicao['Muito alto'] || 0) + (ref.composicao['Alto'] || 0), '')}
+      </div>
+    </div>` : '';
+  const secoes = [
+    { titulo: area ? `Panorama: quanto risco a área ${area} carrega?` : 'Panorama: quanto risco carregamos?', ref: 'NIST SP 800-39 · Enquadrar · CSF GV.RM-02', html: (area ? s1.replace('Carga da empresa', 'Carga da área') : s1) + blocoReferencia },
+    { titulo: area ? 'Mapa de calor da área' : 'Mapa de calor da carteira', ref: 'NIST SP 800-30 · Avaliar', html: s2 },
+    { titulo: 'Principais riscos', ref: 'NIST SP 800-30 · Avaliar', html: s3 },
+  ];
+  if (!area) secoes.push({ titulo: 'Carga por área', ref: 'Consolidação por área', html: s4 });
+  secoes.push(
+    { titulo: 'Resposta ao risco: tratamento e aceites', ref: 'NIST SP 800-39 · Responder', html: s5 },
+    { titulo: 'Monitoramento', ref: 'NIST SP 800-39 · Monitorar', html: s6 },
+    { titulo: area ? 'Tendência da área' : 'Tendência', ref: 'Retrato diário (historico_risco)', html: s7 },
+  );
+
   return _htmlDocumentoExecutivo({
-    titulo: _TITULO_RELATORIO_EXECUTIVO.riscos,
-    subtitulo: `${p.ativos} riscos ativos • apetite até ${p.apetite} • tendência de ${opcoes.meses} meses`,
+    titulo: _TITULO_RELATORIO_EXECUTIVO.riscos + (area ? ` — área ${area}` : ''),
+    subtitulo: `${area ? `Recorte da área ${area} • ` : ''}${p.ativos} riscos ativos • apetite até ${p.apetite} • tendência de ${opcoes.meses} meses`,
     resumoIA,
     edicao,
     destaques: dados.destaques,
-    secoes: [
-      { titulo: 'Panorama: quanto risco carregamos?', ref: 'NIST SP 800-39 · Enquadrar · CSF GV.RM-02', html: s1 },
-      { titulo: 'Mapa de calor da carteira', ref: 'NIST SP 800-30 · Avaliar', html: s2 },
-      { titulo: 'Principais riscos', ref: 'NIST SP 800-30 · Avaliar', html: s3 },
-      { titulo: 'Carga por área', ref: 'Consolidação por área', html: s4 },
-      { titulo: 'Resposta ao risco: tratamento e aceites', ref: 'NIST SP 800-39 · Responder', html: s5 },
-      { titulo: 'Monitoramento', ref: 'NIST SP 800-39 · Monitorar', html: s6 },
-      { titulo: 'Tendência', ref: 'Retrato diário (historico_risco)', html: s7 },
-    ],
+    secoes,
     notas: [
+      ...(area ? [`Recorte da área ${area}: todos os números deste documento são só dos riscos dela; da empresa aparecem apenas os totais de referência. O resumo por IA da edição original não acompanha o recorte.`] : []),
       'Ativos = todos os status menos Encerrado; riscos Aceitos continuam contando.',
       'Nível pela matriz 5×5 do NIST SP 800-30 (Tabela I-2), a partir de probabilidade e impacto. Sem os dois, o risco fica "sem avaliação" e não entra na carga.',
       'Carga = score (probabilidade × impacto, 1 a 25) × peso do Tier do processo (Tier 1 = 3, Tier 2 = 2, Tier 3 = 1) ou da criticidade do fornecedor; sem vínculo, peso 2.',

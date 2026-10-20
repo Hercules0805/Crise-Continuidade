@@ -485,6 +485,28 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    // ---- Relatorios Executivos compartilhados com gestores (DECISAO 20/10/2026) ----
+    // Um documento por destinatario, com o retrato JA RECORTADO (no de Riscos,
+    // so a area do gestor). Admin e Seguranca leem tudo e revogam; o
+    // destinatario le o seu enquanto nao revogado e so marca `abertoEm`.
+    // A consulta do gestor TEM de filtrar para == ele e revogado == false.
+    function souDestinatario() {
+      return isCorpUser() && resource.data.para == request.auth.token.email.lower() && resource.data.revogado != true;
+    }
+    match /relatorios_compartilhados/{id} {
+      allow read: if isAdmin() || isSeguranca() || souDestinatario();
+      allow create: if (isAdmin() || isSeguranca())
+        && request.resource.data.compartilhadoPor == request.auth.token.email.lower()
+        && request.resource.data.revogado == false
+        && request.resource.data.tipo in ['vulnerabilidades', 'riscos']
+        && request.resource.data.para is string
+        && request.resource.data.conteudo is string && request.resource.data.conteudo.size() < 900000;
+      allow update: if ((isAdmin() || isSeguranca())
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['revogado', 'revogadoEm', 'revogadoPor']))
+        || (souDestinatario() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['abertoEm']));
+      allow delete: if isAdmin();
+    }
+
     // ---- Foto mensal do backlog de vulnerabilidades (19/10/2026) ----
     // Um documento por mes ('AAAA-MM'), so contagens agregadas (nenhum nome de
     // vulnerabilidade) -- mesma leitura ampla de /vulnerabilidades, que ja e
