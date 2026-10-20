@@ -83,10 +83,10 @@ test('grade: filtro Produto (produtos dos riscos + Sem produto) e busca pelo nom
   assert.match(linhas(), /Sistema antigo/);
 });
 
-test('grade: coluna Produto depois de Processo, com nome, "(produto removido)" e "–"; ordenar deixa sem produto no fim', async () => {
+test('grade: coluna Produto (depois de Responsavel), com nome, "(produto removido)" e "–"; ordenar deixa sem produto no fim', async () => {
   const { w, doc } = await carregar();
   const cab = [...doc.querySelectorAll('#listaRiscos thead th')].map((th) => th.textContent.trim().replace(/\s+/g, ' '));
-  assert.strictEqual(cab[cab.indexOf('Processo') + 1], 'Produto');
+  assert.ok(cab[cab.findIndex((c) => c.startsWith('Responsável')) + 1].startsWith('Produto'));
   assert.strictEqual(doc.querySelectorAll('#listaRiscos colgroup col').length, cab.length, 'uma largura por coluna');
   const idx = cab.indexOf('Produto');
   const produtoDe = () => Object.fromEntries([...doc.querySelectorAll('#riscoRows tr')].map((tr) => [tr.children[cab.findIndex((c) => c.startsWith('Título'))].textContent.trim(), tr.children[idx].textContent.trim()]));
@@ -100,4 +100,19 @@ test('grade: coluna Produto depois de Processo, com nome, "(produto removido)" e
   assert.deepStrictEqual(ordem(), ['(produto removido)', 'ERP', 'Legado', '–']);
   w.ordenarRiscos('produto');
   assert.deepStrictEqual(ordem(), ['Legado', 'ERP', '(produto removido)', '–'], 'descendente: sem produto continua no fim');
+});
+
+test('grade: colunas na ordem Data, Area, Responsavel, Produto, Origem, Processo, Categoria, Titulo; cada celula sob o seu cabecalho', async () => {
+  const { doc } = await carregar();
+  const cab = [...doc.querySelectorAll('#listaRiscos thead th')].map((th) => th.textContent.trim().replace(/\s+/g, ' '));
+  assert.deepStrictEqual(cab.slice(0, 9).map((c) => c.split(' ')[0]), ['Data', 'Área', 'Responsável', 'Produto', 'Origem', 'Processo', 'Categoria', 'Título', 'Reportado']);
+  const tr = [...doc.querySelectorAll('#riscoRows tr')].find((x) => x.textContent.includes('Falha no ERP'));
+  const cel = (nome) => tr.children[cab.findIndex((c) => c.startsWith(nome))].textContent.trim();
+  assert.strictEqual(cel('Área'), 'TI');
+  assert.strictEqual(cel('Produto'), 'ERP');
+  assert.strictEqual(cel('Origem'), 'Vulnerabilidade Reportada');
+  assert.strictEqual(cel('Processo'), 'Corporativo');
+  assert.strictEqual(cel('Título'), 'Falha no ERP');
+  assert.ok(tr.children[cab.findIndex((c) => c.startsWith('Título'))].classList.contains('title'));
+  assert.strictEqual(doc.querySelectorAll('#listaRiscos colgroup col').length, cab.length);
 });

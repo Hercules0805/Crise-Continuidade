@@ -11345,8 +11345,8 @@ async function riscos() {
            abaixo disso a grade rola na horizontal e Ações fica fixa à direita. -->
       <table style="min-width:2516px;">
         <colgroup>
-          <col style="width:104px"><col style="width:210px"><col style="width:200px"><col style="width:170px"><col style="width:150px">
-          <col style="width:300px"><col style="width:130px"><col style="width:140px"><col style="width:140px">
+          <col style="width:104px"><col style="width:210px"><col style="width:140px"><col style="width:170px"><col style="width:150px">
+          <col style="width:200px"><col style="width:130px"><col style="width:300px"><col style="width:140px">
           <col style="width:104px"><col style="width:104px"><col style="width:72px"><col style="width:84px"><col style="width:72px">
           <col style="width:140px"><col style="width:180px"><col style="width:112px"><col style="width:104px">
         </colgroup>
@@ -11354,12 +11354,12 @@ async function riscos() {
           <tr>
             <th class="col-nw" onclick="ordenarRiscos('dataIdentificacao')" style="cursor:pointer;" title="Data de identificação">Data <span id="sort-risco-dataIdentificacao"></span></th>
             <th onclick="ordenarRiscos('area')" style="cursor:pointer;">Área <span id="sort-risco-area"></span></th>
-            <th title="Processo / Fornecedor">Processo</th>
+            <th>Responsável</th>
             <th onclick="ordenarRiscos('produto')" style="cursor:pointer;" title="Produto de Software">Produto <span id="sort-risco-produto"></span></th>
             <th>Origem</th>
-            <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;">Título <span id="sort-risco-titulo"></span></th>
+            <th title="Processo / Fornecedor">Processo</th>
             <th>Categoria</th>
-            <th>Responsável</th>
+            <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;">Título <span id="sort-risco-titulo"></span></th>
             <th>Reportado por</th>
             <th title="Probabilidade">Prob.</th>
             <th>Impacto</th>
@@ -12032,12 +12032,12 @@ function renderizarRiscos() {
     ? pag.itens.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${r.id}')">
         <td class="num col-nw">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '–'}</td>
         <td>${r.area ? `<span class="chip-area" title="${esc(r.area)}">${esc(r.area)}</span>` : '<span class="muted">–</span>'}</td>
-        <td>${r.processo ? esc(r.processo) : (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span class="muted">Corporativo</span>')}</td>
+        <td>${esc(r.responsavel || '–')}</td>
         <td>${_nomeProdutoRisco(r) ? `<span title="${esc(_nomeProdutoRisco(r))}">${esc(_nomeProdutoRisco(r))}</span>` : '<span class="muted">–</span>'}</td>
         <td>${esc(_rotuloOrigemRisco(r.origem))}</td>
-        <td class="title" title="${esc(r.titulo)}">${esc(r.titulo)}</td>
+        <td>${r.processo ? esc(r.processo) : (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span class="muted">Corporativo</span>')}</td>
         <td class="muted">${esc((r.categorias || []).join(', ')) || '–'}</td>
-        <td>${esc(r.responsavel || '–')}</td>
+        <td class="title" title="${esc(r.titulo)}">${esc(r.titulo)}</td>
         <td>${esc(r.reportadoPor || '–')}</td>
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
