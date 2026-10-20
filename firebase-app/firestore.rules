@@ -459,6 +459,32 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ---- Relatorios Executivos salvos (DECISAO 20/10/2026) ----
+    // Edicao arquivada de um relatorio de Vulnerabilidades/Riscos: salva SO
+    // quando a pessoa pede, depois de revisar. Metadados (lista) e conteudo
+    // separados, para a lista nao baixar o retrato de todas as edicoes.
+    // O conteudo e o RETRATO DOS DADOS em JSON (texto), nunca HTML: a tela
+    // redesenha com os geradores, que escapam tudo -- HTML vindo do banco
+    // rodaria script na sessao de quem abrisse.
+    // Imutavel (sem update); quem gerou e quem grava; so o Admin exclui.
+    function relatorioExecutivoValido(d) {
+      return d.tipo in ['vulnerabilidades', 'riscos']
+        && d.geradoPor == request.auth.token.email.lower();
+    }
+    match /relatorios_executivos/{id} {
+      allow read: if isAdmin() || isSeguranca();
+      allow create: if (isAdmin() || isSeguranca()) && relatorioExecutivoValido(request.resource.data);
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+    match /relatorios_executivos_conteudo/{id} {
+      allow read: if isAdmin() || isSeguranca();
+      allow create: if (isAdmin() || isSeguranca()) && relatorioExecutivoValido(request.resource.data)
+        && request.resource.data.conteudo is string && request.resource.data.conteudo.size() < 900000;
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
     // ---- Foto mensal do backlog de vulnerabilidades (19/10/2026) ----
     // Um documento por mes ('AAAA-MM'), so contagens agregadas (nenhum nome de
     // vulnerabilidade) -- mesma leitura ampla de /vulnerabilidades, que ja e

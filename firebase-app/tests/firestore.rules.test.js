@@ -674,3 +674,42 @@ describe('Security Rules — alertas por e-mail', () => {
     await assertFails(db(ADMIN).doc('notificacoes_email/n1').set({ status: 'pendente' }, { merge: true }));
   });
 });
+
+// Relatorios Executivos salvos (20/10/2026): Admin e Seguranca criam e leem; edicao imutavel;
+// so o Admin exclui; quem grava tem de ser quem gerou.
+describe('Security Rules — relatórios executivos salvos', () => {
+  const SI_REL = { email: 'si-rel@fortestecnologia.com.br' };
+  const meta = (por) => ({ tipo: 'riscos', titulo: 'Relatório Executivo de Riscos', geradoPor: por, geradoEm: '2026-10-20T09:00:00Z' });
+  const cont = (por, extra) => Object.assign({ tipo: 'riscos', geradoPor: por, versao: 1, conteudo: '{"versao":1}' }, extra);
+  async function seedSi() {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('config_perfis/si-rel@fortestecnologia.com.br').set({ perfis: ['seguranca'] });
+    });
+  }
+
+  test('segurança cria e lê a própria edição', async () => {
+    await seedSi();
+    await assertSucceeds(db(SI_REL).doc('relatorios_executivos/e1').set(meta(SI_REL.email)));
+    await assertSucceeds(db(SI_REL).doc('relatorios_executivos_conteudo/e1').set(cont(SI_REL.email)));
+    await assertSucceeds(db(SI_REL).collection('relatorios_executivos').get());
+    await assertSucceeds(db(SI_REL).doc('relatorios_executivos_conteudo/e1').get());
+  });
+
+  test('não grava em nome de outra pessoa, nem tipo fora da lista, nem conteúdo grande', async () => {
+    await seedSi();
+    await assertFails(db(SI_REL).doc('relatorios_executivos/e2').set(meta(ADMIN.email)));
+    await assertFails(db(SI_REL).doc('relatorios_executivos/e3').set(Object.assign(meta(SI_REL.email), { tipo: 'outro' })));
+    await assertFails(db(SI_REL).doc('relatorios_executivos_conteudo/e4').set(cont(SI_REL.email, { conteudo: 'x'.repeat(900001) })));
+  });
+
+  test('gestor não lê; ninguém altera; só o admin exclui', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('relatorios_executivos/e9').set(meta(ADMIN.email));
+      await ctx.firestore().doc('config_perfis/si-rel@fortestecnologia.com.br').set({ perfis: ['seguranca'] });
+    });
+    await assertFails(db(GESTOR).doc('relatorios_executivos/e9').get());
+    await assertFails(db(ADMIN).doc('relatorios_executivos/e9').update({ titulo: 'x' }));
+    await assertFails(db(SI_REL).doc('relatorios_executivos/e9').delete());
+    await assertSucceeds(db(ADMIN).doc('relatorios_executivos/e9').delete());
+  });
+});

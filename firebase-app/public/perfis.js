@@ -69,7 +69,7 @@
   var TELAS = {};
   TELAS[PERFIL.ADMIN] = '*';
   TELAS[PERFIL.SEGURANCA] = [
-    'processos', 'pcns', 'drp', 'riscos', 'monitor', 'vulnerabilidades', 'vulnerabilidades-painel',
+    'processos', 'pcns', 'drp', 'riscos', 'monitor', 'riscos-relatorio', 'vulnerabilidades', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
     'dependencias', 'areas', 'pessoas', 'relatorios', 'servicos', 'catalogo-backup', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',

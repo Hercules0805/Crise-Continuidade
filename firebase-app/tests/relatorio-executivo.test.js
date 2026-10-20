@@ -30,7 +30,9 @@ async function carregar(perfil, o) {
   const toasts = [];
   w.firebase = { auth: () => ({ currentUser: { getIdToken: async () => 't' } }) };
   w.GRC360 = {}; w.APP_API_URL = ''; w.USER_PERFIS = [perfil]; w.USER_EMAIL = 'analista@fortestecnologia.com.br';
-  w.open = () => (opc.popupBloqueado ? null : { document: { open() {}, close() {}, write: (h) => paginas.push(h) } });
+  const botoes = {};
+  w.open = () => (opc.popupBloqueado ? null : { document: { open() {}, close() {}, write: (h) => paginas.push(h), getElementById: (id) => (botoes[id] = botoes[id] || { textContent: '', disabled: false }) } });
+  w.__botoes = botoes;
   w.API = new Proxy({}, { get: (_, nome) => async (a, b) => {
     chamadas.push({ nome, a, b });
     if (opc.api && opc.api[nome]) return opc.api[nome](a, b);
@@ -47,12 +49,15 @@ async function carregar(perfil, o) {
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = (m) => { window.__toasts.push(m); };');
   w.__toasts = toasts;
-  await w.relatorios();
   return { w, doc: w.document, paginas, chamadas, toasts };
 }
 
+// DECISAO 20/10/2026: cada relatorio tem tela propria no menu Riscos
+// (#vulnerabilidades-relatorio, #riscos-relatorio), com as opcoes na tela.
+const TELA = { vulnerabilidades: 'vulnerabilidadesRelatorio', riscos: 'riscosRelatorio' };
+
 async function gerar(ctx, tipo, marcarIA) {
-  ctx.w.abrirOpcoesRelatorioExecutivo(tipo);
+  if (ctx.w._relExecTipo !== tipo || !ctx.doc.getElementById('relExecIA')) await ctx.w[TELA[tipo]]();
   ctx.doc.getElementById('relExecIA').checked = marcarIA !== false;
   await ctx.w.gerarRelatorioExecutivo();
   return ctx.paginas[ctx.paginas.length - 1];
@@ -61,13 +66,22 @@ async function gerar(ctx, tipo, marcarIA) {
 const texto = (html) => new JSDOM(html).window.document.body.textContent.replace(/\s+/g, ' ');
 const secoes = (html) => [...new JSDOM(html).window.document.querySelectorAll('.secao')].map((s) => s.textContent.replace(/\s+/g, ' ').trim());
 
-test('cards executivos so para Admin e Seguranca (TI e Operador veem a tela, mas nao os cards)', async () => {
-  for (const [perfil, ve] of [['admin', true], ['seguranca', true], ['ti', false], ['operador', false]]) {
-    const { doc } = await carregar(perfil);
-    const t = doc.getElementById('app').textContent;
-    assert.strictEqual(/Relatório Executivo de Vulnerabilidades/.test(t), ve, perfil);
-    assert.strictEqual(/Relatório Executivo de Riscos/.test(t), ve, perfil);
+test('telas proprias no menu Riscos, so para Admin e Seguranca; a tela Relatorios (Continuidade) nao tem mais os executivos', async () => {
+  const Perfis = require('../public/perfis.js');
+  for (const [perfil, ve] of [['admin', true], ['seguranca', true], ['gestor', false], ['ti', false], ['operador', false]]) {
+    assert.strictEqual(Perfis.podeVerTela([perfil], 'vulnerabilidades-relatorio'), ve, perfil);
+    assert.strictEqual(Perfis.podeVerTela([perfil], 'riscos-relatorio'), ve, perfil);
   }
+  const ctx = await carregar('admin');
+  await ctx.w.relatorios();
+  assert.doesNotMatch(ctx.doc.getElementById('app').textContent, /Executivo|Edições salvas/);
+  await ctx.w.vulnerabilidadesRelatorio();
+  assert.strictEqual(ctx.doc.querySelector('h2').textContent, 'Relatório de Vulnerabilidades');
+  assert.ok(ctx.doc.getElementById('relExecApendice'), 'opcao do apendice so no de vulnerabilidades');
+  await ctx.w.riscosRelatorio();
+  assert.strictEqual(ctx.doc.querySelector('h2').textContent, 'Relatório de Riscos');
+  assert.ok(!ctx.doc.getElementById('relExecApendice'));
+  assert.match(ctx.doc.getElementById('relatoriosSalvos').textContent, /Nenhuma edição salva deste relatório/);
 });
 
 test('vulnerabilidades: aba aberta com "Gerando…", depois o documento com as 5 perguntas, IA escapada e apendice', async () => {
@@ -139,4 +153,109 @@ test('popup bloqueado avisa; falha ao carregar os dados vira pagina de erro na m
   const html = await gerar(falha, 'riscos');
   assert.match(texto(html), /Não foi possível carregar os dados: Falha na leitura do banco de dados/);
   assert.ok(!falha.chamadas.some((c) => c.nome === 'post'), 'sem dados, nao chama a IA');
+});
+
+// ---- Edicoes salvas (20/10/2026): retrato dos dados, nunca HTML; reabre igual; so Admin exclui ----
+
+function bancoRelatorios() {
+  const salvos = [];
+  return {
+    salvos,
+    api: {
+      salvarRelatorioExecutivo: (r) => { salvos.push(r); return { success: true, id: 's' + salvos.length, salvoEm: '2026-10-20T12:00:00.000Z' }; },
+      getRelatoriosExecutivos: () => salvos.map((r, i) => ({ id: 's' + (i + 1), tipo: r.tipo, titulo: r.titulo, geradoEm: r.geradoEm, geradoPor: 'analista@fortestecnologia.com.br', meses: r.meses, comIA: r.comIA, resumo: r.resumo })),
+      getConteudoRelatorioExecutivo: (id) => ({ id, conteudo: salvos[Number(String(id).slice(1)) - 1].conteudo }),
+    },
+  };
+}
+
+const idTempDe = (html) => (html.match(/_salvarRelatorioExecutivoGerado\('([^']+)'\)/) || [])[1];
+
+test('relatorio gerado tem "Salvar no sistema"; salvar grava o retrato JSON (sem HTML) e nao duplica', async () => {
+  const banco = bancoRelatorios();
+  const ctx = await carregar('seguranca', { api: banco.api });
+  const html = await gerar(ctx, 'riscos');
+  assert.match(html, /💾 Salvar no sistema/);
+  const id = idTempDe(html);
+  assert.ok(id, 'botao chama a aba do sistema com o id da edicao');
+  await ctx.w._salvarRelatorioExecutivoGerado(id);
+  await ctx.w._salvarRelatorioExecutivoGerado(id);
+  assert.strictEqual(banco.salvos.length, 1, 'segundo clique nao duplica');
+  const s = banco.salvos[0];
+  assert.strictEqual(s.tipo, 'riscos');
+  assert.strictEqual(s.comIA, true);
+  const retrato = JSON.parse(s.conteudo);
+  assert.strictEqual(retrato.versao, 1);
+  assert.ok(retrato.dados.d.panorama, 'dados calculados');
+  assert.deepStrictEqual(retrato.resumoIA.paragrafos, ['Situação <b>grave</b>.']);
+  assert.ok(!/<html|<!DOCTYPE/i.test(s.conteudo), 'nunca o HTML do documento');
+  assert.ok(!('indicadoresIA' in retrato.dados));
+  assert.match(ctx.w.__botoes.btnSalvarRelatorio.textContent, /✅ Salvo em/);
+  assert.ok(ctx.w.__botoes.btnSalvarRelatorio.disabled);
+  assert.match(ctx.toasts.join(' '), /Relatório salvo/);
+});
+
+test('"Edicoes salvas": cada tela so lista as do proprio relatorio; abre a edicao igual, com faixa e sem botao de salvar', async () => {
+  const banco = bancoRelatorios();
+  const ctx = await carregar('admin', { api: banco.api });
+  await ctx.w._salvarRelatorioExecutivoGerado(idTempDe(await gerar(ctx, 'riscos', false)));
+  const original = await gerar(ctx, 'vulnerabilidades');
+  await ctx.w._salvarRelatorioExecutivoGerado(idTempDe(original));
+  const lista = ctx.doc.getElementById('relatoriosSalvos').textContent;
+  assert.match(lista, /Edições salvas/);
+  assert.match(lista, /Relatório Executivo de Vulnerabilidades/);
+  assert.doesNotMatch(lista, /Relatório Executivo de Riscos/, 'a de riscos fica na tela de riscos');
+  assert.ok(ctx.doc.querySelector('#relatoriosSalvos [title="Excluir"]'), 'Admin ve Excluir');
+  await ctx.w.riscosRelatorio();
+  assert.match(ctx.doc.getElementById('relatoriosSalvos').textContent, /Relatório Executivo de Riscos/);
+  await ctx.w.abrirRelatorioExecutivoSalvo('s2');
+  const reaberto = ctx.paginas[ctx.paginas.length - 1];
+  assert.match(reaberto, /Edição salva/);
+  assert.doesNotMatch(reaberto, /Salvar no sistema/);
+  const corpo = (h) => texto(h).replace(/.*?Destaques/, 'Destaques').replace(/Gerado em .*$/, '');
+  assert.strictEqual(corpo(reaberto), corpo(original), 'mesmo conteudo do documento gerado');
+});
+
+test('Seguranca ve a lista mas nao exclui; Admin exclui com confirmacao', async () => {
+  const banco = bancoRelatorios();
+  const si = await carregar('seguranca', { api: banco.api });
+  await si.w._salvarRelatorioExecutivoGerado(idTempDe(await gerar(si, 'riscos', false)));
+  assert.ok(!si.doc.querySelector('#relatoriosSalvos [title="Excluir"]'));
+  const excluidos = [];
+  const admin = await carregar('admin', { api: Object.assign({}, banco.api, { excluirRelatorioExecutivo: (id) => { excluidos.push(id); return { success: true }; } }) });
+  admin.w.confirm = () => true;
+  await admin.w.excluirRelatorioExecutivoSalvo('s1');
+  assert.deepStrictEqual(excluidos, ['s1']);
+});
+
+test('edicao adulterada sai escapada; corrompida ou de versao desconhecida vira erro na mesma aba', async () => {
+  const banco = bancoRelatorios();
+  const ctx = await carregar('admin', { api: banco.api });
+  await ctx.w._salvarRelatorioExecutivoGerado(idTempDe(await gerar(ctx, 'riscos', false)));
+  const retrato = JSON.parse(banco.salvos[0].conteudo);
+  retrato.dados.d.principais[0].r.titulo = '<script>alert("x")</script>';
+  retrato.dados.destaques = ['<img src=x onerror=alert(1)>'];
+  banco.salvos.push(Object.assign({}, banco.salvos[0], { conteudo: JSON.stringify(retrato) }));
+  banco.salvos.push(Object.assign({}, banco.salvos[0], { conteudo: '{nao e json' }));
+  banco.salvos.push(Object.assign({}, banco.salvos[0], { conteudo: JSON.stringify(Object.assign({}, retrato, { versao: 99 })) }));
+  await ctx.w.abrirRelatorioExecutivoSalvo('s2');
+  const adulterado = ctx.paginas[ctx.paginas.length - 1];
+  assert.ok(!adulterado.includes('<script>alert'), 'titulo escapado');
+  assert.ok(!adulterado.includes('<img src=x'), 'destaque escapado');
+  await ctx.w.abrirRelatorioExecutivoSalvo('s3');
+  assert.match(texto(ctx.paginas[ctx.paginas.length - 1]), /está corrompido/);
+  await ctx.w.abrirRelatorioExecutivoSalvo('s4');
+  assert.match(texto(ctx.paginas[ctx.paginas.length - 1]), /formato que esta versão do sistema não sabe abrir/);
+});
+
+test('falha ao salvar: botao volta, toast de erro, pode tentar de novo', async () => {
+  let tentativas = 0;
+  const ctx = await carregar('admin', { api: { salvarRelatorioExecutivo: () => { tentativas++; throw new Error('Este relatório é grande demais para ser salvo no sistema. Use Imprimir / PDF.'); } } });
+  const id = idTempDe(await gerar(ctx, 'riscos', false));
+  await ctx.w._salvarRelatorioExecutivoGerado(id);
+  assert.strictEqual(ctx.w.__botoes.btnSalvarRelatorio.textContent, '💾 Salvar no sistema');
+  assert.ok(!ctx.w.__botoes.btnSalvarRelatorio.disabled);
+  assert.match(ctx.toasts.join(' '), /grande demais/);
+  await ctx.w._salvarRelatorioExecutivoGerado(id);
+  assert.strictEqual(tentativas, 2);
 });

@@ -7,6 +7,8 @@ const pages = {
   processos, perguntas, areas, pessoas, admin, dependencias, pcns, drp, riscos, relatorios, servicos,
   vulnerabilidades,
   'vulnerabilidades-painel': vulnerabilidadesPainel,
+  'vulnerabilidades-relatorio': vulnerabilidadesRelatorio,
+  'riscos-relatorio': riscosRelatorio,
   'indicadores-dashboard': indicadoresDashboard,
   'indicadores-cadastro': indicadoresCadastro,
   'indicadores-lancamento': indicadoresLancamento,
@@ -5621,20 +5623,9 @@ function _refreshAposSalvarDependencia() {
 async function relatorios() {
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Relatórios</h2><p class="page-sub">Relatórios executivos e de apoio à Continuidade de Negócio</p></div>
+      <div><h2>Relatórios</h2><p class="page-sub">Relatórios de apoio à Continuidade de Negócio</p></div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:16px;">
-      ${Perfis.podeGerarRelatorioExecutivo(window.USER_PERFIS) ? `
-      <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
-        <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Relatório Executivo de Vulnerabilidades</h3>
-        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para a diretoria: exposição atual, tendência, o que exige ação imediata, cumprimento de prazos e processos críticos expostos, com resumo por IA.</p>
-        <button class="btn btn-primary" onclick="abrirOpcoesRelatorioExecutivo('vulnerabilidades')">📄 Gerar relatório</button>
-      </div>
-      <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
-        <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Relatório Executivo de Riscos</h3>
-        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para a diretoria: panorama e mapa de calor da carteira, principais riscos, resposta (plano de ação e aceites), monitoramento e tendência, com resumo por IA.</p>
-        <button class="btn btn-primary" onclick="abrirOpcoesRelatorioExecutivo('riscos')">📄 Gerar relatório</button>
-      </div>` : ''}
       <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
         <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Processos por Dependência</h3>
         <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para cada dependência do catálogo técnico, quais Processos de Negócio dependem dela.</p>
@@ -5697,33 +5688,6 @@ async function relatorios() {
       <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharSelecaoAreasRelatorio()">Cancelar</button>
         <button class="btn btn-primary" id="btnConfirmarRelatorioAreas" onclick="confirmarGerarRelatorioProcessosPorArea()">Gerar relatório</button>
-      </div>
-    </div>
-    <div class="drawer-overlay" id="drawerOverlayRelatorioExecutivo" onclick="fecharOpcoesRelatorioExecutivo()"></div>
-    <div class="drawer" id="drawerRelatorioExecutivo">
-      <div class="drawer-header">
-        <h3 id="relExecTitulo">Relatório executivo</h3>
-        <button onclick="fecharOpcoesRelatorioExecutivo()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
-      </div>
-      <div class="drawer-body">
-        <div class="field">
-          <label class="field-label" for="relExecMeses">Período da tendência</label>
-          <select id="relExecMeses" class="field-control"><option value="12">Últimos 12 meses</option><option value="6">Últimos 6 meses</option></select>
-        </div>
-        <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.9em;cursor:pointer;margin:14px 0 4px;">
-          <input type="checkbox" id="relExecIA" checked style="margin-top:3px;">
-          <span>Incluir resumo executivo por IA (Gemini)
-            <span style="display:block;font-size:0.85em;color:#888;margin-top:2px;">A IA recebe só os números agregados e os itens de topo do relatório. Leva alguns segundos; revise o texto antes de distribuir.</span>
-          </span>
-        </label>
-        <label id="relExecApendiceLinha" style="display:flex;gap:8px;align-items:center;font-size:0.9em;cursor:pointer;margin:12px 0 4px;">
-          <input type="checkbox" id="relExecApendice" checked>
-          <span>Incluir lista completa das vulnerabilidades em aberto</span>
-        </label>
-      </div>
-      <div class="drawer-footer">
-        <button class="btn btn-ghost" onclick="fecharOpcoesRelatorioExecutivo()">Cancelar</button>
-        <button class="btn btn-primary" onclick="gerarRelatorioExecutivo()">Gerar relatório</button>
       </div>
     </div>
     <div class="modal-overlay" id="modalSelecaoPessoaRelatorio"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
@@ -5992,18 +5956,55 @@ const _TITULO_RELATORIO_EXECUTIVO = {
   riscos: 'Relatório Executivo de Riscos',
 };
 
-window.abrirOpcoesRelatorioExecutivo = (tipo) => {
-  window._relExecTipo = tipo;
-  document.getElementById('relExecTitulo').textContent = _TITULO_RELATORIO_EXECUTIVO[tipo];
-  document.getElementById('relExecApendiceLinha').style.display = tipo === 'vulnerabilidades' ? 'flex' : 'none';
-  document.getElementById('drawerRelatorioExecutivo').classList.add('open');
-  document.getElementById('drawerOverlayRelatorioExecutivo').classList.add('open');
+// DECISÃO 20/10/2026 (usuário): relatório de um domínio fica no menu do
+// domínio. Cada relatório executivo tem tela própria no menu Riscos, na seção
+// do seu assunto, com as opções na tela e as próprias edições salvas.
+const _TELA_RELATORIO_EXECUTIVO = {
+  vulnerabilidades: {
+    titulo: 'Relatório de Vulnerabilidades',
+    sub: 'Documento para a diretoria: exposição atual, tendência, ação imediata, prazos e processos críticos expostos — para imprimir, salvar em PDF ou guardar no sistema',
+  },
+  riscos: {
+    titulo: 'Relatório de Riscos',
+    sub: 'Documento para a diretoria: panorama e mapa de calor da carteira, principais riscos, resposta, monitoramento e tendência — para imprimir, salvar em PDF ou guardar no sistema',
+  },
 };
 
-window.fecharOpcoesRelatorioExecutivo = () => {
-  document.getElementById('drawerRelatorioExecutivo').classList.remove('open');
-  document.getElementById('drawerOverlayRelatorioExecutivo').classList.remove('open');
-};
+async function vulnerabilidadesRelatorio() { await _telaRelatorioExecutivo('vulnerabilidades'); }
+async function riscosRelatorio() { await _telaRelatorioExecutivo('riscos'); }
+
+async function _telaRelatorioExecutivo(tipo) {
+  const t = _TELA_RELATORIO_EXECUTIVO[tipo];
+  window._relExecTipo = tipo;
+  relatoriosSalvosPaginacao.reiniciar();
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>${esc(t.titulo)}</h2><p class="page-sub">${esc(t.sub)}</p></div>
+    </div>
+    <div class="painel-card">
+      <div class="painel-card__titulo">Gerar relatório</div>
+      <div class="painel-card__sub">O relatório abre numa aba nova. Lá você revisa, imprime ou salva em PDF, e pode guardar a edição no sistema</div>
+      <div class="filters" style="margin-bottom:8px;">
+        <div class="field">
+          <label class="field-label" for="relExecMeses">Período da tendência</label>
+          <select id="relExecMeses" class="field-control"><option value="12">Últimos 12 meses</option><option value="6">Últimos 6 meses</option></select>
+        </div>
+      </div>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.9em;cursor:pointer;margin:10px 0 4px;">
+        <input type="checkbox" id="relExecIA" checked style="margin-top:3px;">
+        <span>Incluir resumo executivo por IA (Gemini)
+          <span style="display:block;font-size:0.85em;color:var(--ink-muted);margin-top:2px;">A IA recebe só os números agregados e os itens de topo do relatório. Leva alguns segundos; revise o texto antes de distribuir.</span>
+        </span>
+      </label>
+      ${tipo === 'vulnerabilidades' ? `<label style="display:flex;gap:8px;align-items:center;font-size:0.9em;cursor:pointer;margin:10px 0 4px;">
+        <input type="checkbox" id="relExecApendice" checked>
+        <span>Incluir lista completa das vulnerabilidades em aberto</span>
+      </label>` : ''}
+      <button class="btn btn-primary" style="margin-top:14px;" onclick="gerarRelatorioExecutivo()">📄 Gerar relatório</button>
+    </div>
+    <div id="relatoriosSalvos"></div>`;
+  await _carregarRelatoriosSalvos();
+}
 
 window.gerarRelatorioExecutivo = async () => {
   const tipo = window._relExecTipo;
@@ -6011,11 +6012,10 @@ window.gerarRelatorioExecutivo = async () => {
   const opcoes = {
     meses: Number(document.getElementById('relExecMeses').value) || 12,
     ia: document.getElementById('relExecIA').checked,
-    apendice: tipo === 'vulnerabilidades' && document.getElementById('relExecApendice').checked,
+    apendice: tipo === 'vulnerabilidades' && !!(document.getElementById('relExecApendice') || {}).checked,
   };
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
-  fecharOpcoesRelatorioExecutivo();
   const escrever = (html) => { win.document.open(); win.document.write(html); win.document.close(); };
   escrever(_htmlAvisoDocumentoExecutivo(_TITULO_RELATORIO_EXECUTIVO[tipo], opcoes.ia ? 'Gerando o relatório e o resumo por IA… pode levar alguns segundos.' : 'Gerando o relatório…'));
   let dados;
@@ -6037,8 +6037,179 @@ window.gerarRelatorioExecutivo = async () => {
       resumoIA = { erro: _mensagemErro(e, 'erro desconhecido') };
     }
   }
-  escrever(tipo === 'riscos' ? _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA) : _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA));
+  // Edição guardada na memória da aba do sistema até alguém pedir "Salvar no
+  // sistema" (botão na aba do relatório, que chama window.opener).
+  const idTemp = 'rel' + Date.now() + Math.random().toString(36).slice(2, 7);
+  const edicao = { modo: 'gerado', idTemp, geradoEm: new Date().toISOString(), geradoPor: (window.USER_EMAIL || '').toLowerCase() };
+  window._relatoriosGerados[idTemp] = { tipo, dados, opcoes, resumoIA, edicao, win, salvo: null };
+  escrever(_htmlRelatorioExecutivoPorTipo(tipo, dados, opcoes, resumoIA, edicao));
 };
+
+window._relatoriosGerados = window._relatoriosGerados || {};
+
+function _htmlRelatorioExecutivoPorTipo(tipo, dados, opcoes, resumoIA, edicao) {
+  return tipo === 'riscos'
+    ? _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao)
+    : _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA, edicao);
+}
+
+// ---- Edições salvas (DECISÃO 20/10/2026): o retrato dos DADOS em JSON, nunca
+// o HTML (HTML vindo do banco rodaria script na sessão de quem abrisse; os
+// geradores escapam tudo ao redesenhar). Imutável; só o Admin exclui. ----
+const VERSAO_RETRATO_RELATORIO = 1;
+
+/** Só o que os geradores leem: sem funções, e no de Vulnerabilidades a lista bruta só quando há apêndice. */
+function _retratoRelatorioExecutivo(g) {
+  const dados = Object.assign({}, g.dados);
+  delete dados.indicadoresIA;
+  if (g.tipo === 'vulnerabilidades') {
+    dados.vulns = g.opcoes.apendice
+      ? (g.dados.vulns || []).filter(VulnerabilidadePainel.emAberto).map((v) => ({
+        id: v.id, codigo: v.codigo, nome: v.nome, produtoNome: v.produtoNome, cvss: v.cvss, severidadeManual: v.severidadeManual,
+        statusCorrecao: v.statusCorrecao, dataPrevistaCorrecao: v.dataPrevistaCorrecao, equipeResponsavel: v.equipeResponsavel,
+      }))
+      : [];
+  }
+  return {
+    versao: VERSAO_RETRATO_RELATORIO, tipo: g.tipo, opcoes: g.opcoes, resumoIA: g.resumoIA,
+    geradoEm: g.edicao.geradoEm, geradoPor: g.edicao.geradoPor, dados,
+  };
+}
+
+window._salvarRelatorioExecutivoGerado = async (idTemp) => {
+  const g = (window._relatoriosGerados || {})[idTemp];
+  const botao = () => g && g.win && g.win.document && g.win.document.getElementById('btnSalvarRelatorio');
+  const marcar = (txt, desabilitar) => { const b = botao(); if (b) { b.textContent = txt; b.disabled = !!desabilitar; } };
+  if (!g) return;
+  if (g.salvo) return marcar(`✅ Salvo em ${new Date(g.salvo).toLocaleString('pt-BR')} (abrir pela tela Relatórios)`, true);
+  if (g.salvando) return;
+  g.salvando = true;
+  marcar('Salvando…', true);
+  try {
+    const retrato = _retratoRelatorioExecutivo(g);
+    const r = await API.salvarRelatorioExecutivo({
+      tipo: g.tipo, titulo: _TITULO_RELATORIO_EXECUTIVO[g.tipo], geradoEm: g.edicao.geradoEm,
+      meses: g.opcoes.meses, comIA: !!(g.resumoIA && !g.resumoIA.erro), resumo: (g.dados.destaques || []).slice(0, 2),
+      versao: VERSAO_RETRATO_RELATORIO, conteudo: JSON.stringify(retrato),
+    });
+    g.salvo = r.salvoEm || new Date().toISOString();
+    marcar(`✅ Salvo em ${new Date(g.salvo).toLocaleString('pt-BR')} (abrir pela tela Relatórios)`, true);
+    showToast('✅ Relatório salvo. Ele fica em "Edições salvas", na tela do relatório.', '#2e7d32');
+    await _carregarRelatoriosSalvos();
+  } catch (e) {
+    const msg = _mensagemErro(e, 'Não foi possível salvar o relatório.');
+    marcar('💾 Salvar no sistema', false);
+    const b = botao();
+    if (b) b.title = msg;
+    showToast('❌ ' + msg, '#c62828');
+  } finally {
+    g.salvando = false;
+  }
+};
+
+let _relatoriosSalvos = null;
+const relatoriosSalvosPaginacao = criarPaginacao(20);
+
+async function _carregarRelatoriosSalvos() {
+  const cont = document.getElementById('relatoriosSalvos');
+  if (!cont) return;
+  try {
+    _relatoriosSalvos = await API.getRelatoriosExecutivos();
+  } catch (e) {
+    console.error('Relatórios salvos: falha ao carregar', e);
+    _relatoriosSalvos = null;
+    cont.innerHTML = `<div class="painel-card">${_htmlErroCarga('Não foi possível carregar as edições salvas.', '_carregarRelatoriosSalvos')}</div>`;
+    return;
+  }
+  _renderRelatoriosSalvos();
+}
+window._carregarRelatoriosSalvos = _carregarRelatoriosSalvos;
+
+function _renderRelatoriosSalvos() {
+  const cont = document.getElementById('relatoriosSalvos');
+  if (!cont || !_relatoriosSalvos) return;
+  const ehAdmin = Perfis.ehAdmin(window.USER_PERFIS);
+  // Cada tela de relatório mostra só as próprias edições.
+  const lista = _relatoriosSalvos.filter((r) => r.tipo === window._relExecTipo);
+  const pag = relatoriosSalvosPaginacao.aplicar(lista);
+  const quando = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '–');
+  const linhas = pag.itens.map((r) => `<tr>
+      <td class="title">${esc(r.titulo || _TITULO_RELATORIO_EXECUTIVO[r.tipo] || r.tipo)}${(r.resumo || []).length ? `<div class="muted" style="font-size:12px;">${esc(r.resumo[0])}</div>` : ''}</td>
+      <td>${esc(quando(r.geradoEm))}</td>
+      <td class="muted">${esc(r.geradoPor || '–')}</td>
+      <td class="col-c">${r.meses ? esc(r.meses + ' meses') : '–'}</td>
+      <td class="col-c">${r.comIA ? 'Sim' : 'Não'}</td>
+      <td class="col-c" style="white-space:nowrap;">
+        <button class="btn btn-ghost" style="padding:4px 10px;font-size:0.85em;" onclick="abrirRelatorioExecutivoSalvo('${escJs(r.id)}')">Abrir</button>
+        ${ehAdmin ? `<button class="btn-icon" title="Excluir" aria-label="Excluir" onclick="excluirRelatorioExecutivoSalvo('${escJs(r.id)}')">${SVG_EXCLUIR}</button>` : ''}
+      </td>
+    </tr>`).join('');
+  cont.innerHTML = `
+    <div class="painel-card">
+      <div class="painel-card__titulo">Edições salvas</div>
+      <div class="painel-card__sub">Guardadas pelo botão "Salvar no sistema" do relatório — reabrem com os números e o resumo da data em que foram geradas</div>
+      ${lista.length ? `<div class="data-table data-table--compact">
+        <table>
+          <colgroup><col><col style="width:150px"><col style="width:260px"><col style="width:100px"><col style="width:90px"><col style="width:130px"></colgroup>
+          <thead><tr><th>Edição</th><th>Gerado em</th><th>Por</th><th class="col-c">Período</th><th class="col-c">Com IA</th><th class="col-c">Ações</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>${_htmlPaginacao(pag, 'moverPaginaRelatoriosSalvos')}`
+    : _htmlVazio('Nenhuma edição salva deste relatório.', 'Gere o relatório e use "Salvar no sistema" na aba dele.')}
+    </div>`;
+}
+
+window.moverPaginaRelatoriosSalvos = (delta) => {
+  relatoriosSalvosPaginacao.mover(delta);
+  _renderRelatoriosSalvos();
+};
+
+window.abrirRelatorioExecutivoSalvo = async (id) => {
+  const meta = (_relatoriosSalvos || []).find((r) => String(r.id) === String(id)) || {};
+  const titulo = meta.titulo || 'Relatório executivo';
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
+  const escrever = (html) => { win.document.open(); win.document.write(html); win.document.close(); };
+  escrever(_htmlAvisoDocumentoExecutivo(titulo, 'Abrindo a edição salva…'));
+  let retrato;
+  try {
+    const c = await API.getConteudoRelatorioExecutivo(id);
+    retrato = JSON.parse(c.conteudo);
+    if (!retrato || retrato.versao !== VERSAO_RETRATO_RELATORIO || !_TITULO_RELATORIO_EXECUTIVO[retrato.tipo] || !retrato.dados || !retrato.dados.d) {
+      throw new Error('Esta edição foi salva num formato que esta versão do sistema não sabe abrir.');
+    }
+  } catch (e) {
+    console.error('Relatório salvo: falha ao abrir', e);
+    const msg = e instanceof SyntaxError ? 'O conteúdo desta edição está corrompido.' : _mensagemErro(e, 'Não foi possível abrir a edição salva.');
+    escrever(_htmlAvisoDocumentoExecutivo(titulo, msg, true));
+    return;
+  }
+  try {
+    escrever(_htmlRelatorioExecutivoPorTipo(retrato.tipo, retrato.dados, retrato.opcoes || {}, retrato.resumoIA || null, {
+      modo: 'salvo', geradoEm: retrato.geradoEm, geradoPor: meta.geradoPor || retrato.geradoPor, salvoEm: meta.salvoEm,
+    }));
+  } catch (e) {
+    console.error('Relatório salvo: falha ao desenhar', e);
+    escrever(_htmlAvisoDocumentoExecutivo(titulo, 'O conteúdo desta edição está incompleto e não pôde ser exibido.', true));
+  }
+};
+
+window.excluirRelatorioExecutivoSalvo = async (id) => {
+  if (!Perfis.ehAdmin(window.USER_PERFIS)) return;
+  if (!await confirmarAcao('Excluir esta edição salva? Ela não poderá ser recuperada.')) return;
+  try {
+    await API.excluirRelatorioExecutivo(id);
+    showToast('✅ Edição excluída.', '#2e7d32');
+    await _carregarRelatoriosSalvos();
+  } catch (e) {
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+/** Nome do produto no documento: o congelado na geração (edição salva) ou o do catálogo. */
+function _nomeProdutoDoc(v) {
+  return (v && v.produtoNome) || _nomeProdutoVuln(v);
+}
 
 async function _dadosRelatorioExecutivoVulnerabilidades(opcoes) {
   const VP = VulnerabilidadePainel;
@@ -6051,12 +6222,15 @@ async function _dadosRelatorioExecutivoVulnerabilidades(opcoes) {
     API.getRiscos().catch(() => null),
   ]);
   if (produtos) produtosSoftwareData = produtos;
+  // Nome do produto congelado em cada vulnerabilidade: a edição salva reabre
+  // com o nome da época, sem depender do catálogo carregado depois.
+  (vulns || []).forEach((v) => { v.produtoNome = _nomeProdutoVuln(v); });
   const limiar = cfg && Number.isFinite(Number(cfg.limiarCvss)) ? Number(cfg.limiarCvss) : 7;
   const riscoAberto = riscos
     ? (id) => riscos.some((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(id) && r.status !== 'Encerrado')
     : null;
   const d = VP.dadosRelatorio(vulns || [], {
-    meses: opcoes.meses, fotos: fotos || [], processos: processos || [], limiar, riscoAberto, nomeProduto: _nomeProdutoVuln,
+    meses: opcoes.meses, fotos: fotos || [], processos: processos || [], limiar, riscoAberto, nomeProduto: _nomeProdutoDoc,
   });
   return {
     d, vulns: vulns || [], limiar, processosCarregados: !!processos, riscosCarregados: !!riscos,
@@ -6177,9 +6351,24 @@ function _htmlAvisoDocumentoExecutivo(titulo, mensagem, erro) {
  * Documento completo. `secoes` = [{ titulo, ref, html }] já escapado por quem
  * monta; `resumoIA` = null (não pedido) | { erro } | { paragrafos, recomendacoes }.
  */
-function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoes, notas }) {
-  const agora = new Date();
-  const quando = agora.toLocaleDateString('pt-BR') + ' ' + agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoes, notas, edicao }) {
+  const ed = edicao || {};
+  // Data e hora DA GERAÇÃO (não a de desenhar): a edição salva reabre com a dela.
+  const momento = ed.geradoEm ? new Date(ed.geradoEm) : new Date();
+  const quando = momento.toLocaleDateString('pt-BR') + ' ' + momento.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  const geradoPor = ed.geradoPor || window.USER_EMAIL || '';
+  let barraEdicao = '';
+  if (ed.modo === 'gerado' && ed.idTemp) {
+    // A aba do relatório não tem a API: pede à aba do sistema (window.opener).
+    barraEdicao = `<div style="margin:-8px 0 16px;text-align:right;">
+      <button class="btn-print" id="btnSalvarRelatorio" style="background:#fff;color:#d60014;border:1px solid #d60014;" onclick="salvarRelatorioNoSistema()">💾 Salvar no sistema</button>
+    </div>
+    <script>function salvarRelatorioNoSistema(){var b=document.getElementById('btnSalvarRelatorio');var o=window.opener;if(!o||o.closed||!o._salvarRelatorioExecutivoGerado){b.textContent='Volte à aba do sistema para salvar (ela foi fechada ou recarregada)';b.disabled=true;return;}o._salvarRelatorioExecutivoGerado('${escScript(ed.idTemp)}');}<\/script>`;
+  } else if (ed.modo === 'salvo') {
+    barraEdicao = `<div class="bloco" style="background:#fff8e1;border-color:#f5d9a8;padding:10px 16px;font-size:9pt;">
+      <strong>Edição salva</strong> — números e resumo de ${esc(quando)}, gerada por ${esc(geradoPor)}${ed.salvoEm ? `; salva em ${esc(new Date(ed.salvoEm).toLocaleString('pt-BR'))}` : ''}. Não reflete mudanças posteriores.
+    </div>`;
+  }
   let blocoIA = '';
   if (resumoIA && resumoIA.erro) {
     blocoIA = `<div class="bloco ia"><div class="rotulo">Resumo executivo</div><p class="aviso">Resumo por IA indisponível (${esc(resumoIA.erro)}). Os destaques abaixo foram calculados diretamente dos números do relatório.</p></div>`;
@@ -6194,11 +6383,12 @@ function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoe
 <head><meta charset="UTF-8"><title>${esc(titulo)}</title><style>${_CSS_DOCUMENTO_EXECUTIVO}</style></head>
 <body><div class="pagina">
 ${_cabecalhoDocumentoExecutivo(titulo, `${subtitulo} • ${quando} • Fortes Tecnologia`, true)}
+${barraEdicao}
 ${blocoIA}
 <div class="bloco"><h3>Destaques</h3>${(destaques || []).length ? `<ul class="lista">${destaques.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '<p class="vazio">Sem dados suficientes.</p>'}</div>
 ${(secoes || []).map((s, i) => `<div class="secao"><span class="num">${i + 1}</span>${esc(s.titulo)}<span class="ref">${esc(s.ref || '')}</span></div>${s.html}`).join('\n')}
 ${(notas || []).length ? `<div class="secao" style="border-bottom-color:#eee;">Notas metodológicas</div><div class="bloco notas"><ul class="lista">${notas.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
-<div class="footer">Gerado em ${esc(quando)} por ${esc(window.USER_EMAIL || '')} • GRC360 • Fortes Tecnologia</div>
+<div class="footer">Gerado em ${esc(quando)} por ${esc(geradoPor)} • GRC360 • Fortes Tecnologia</div>
 </div></body></html>`;
 }
 
@@ -6224,7 +6414,7 @@ function _tabelaDoc(cabecalho, linhas, vazio) {
 const _COR_NIVEL_DOC = { 'Muito alto': '#d60014', 'Alto': '#f08a92', 'Moderado': '#f5d9a8', 'Baixo': '#d5ebcc', 'Muito baixo': '#eef7ea' };
 
 // ---- Relatório Executivo de Vulnerabilidades ----
-function _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA) {
+function _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA, edicao) {
   const VP = VulnerabilidadePainel;
   const d = dados.d;
   const e = d.exposicao;
@@ -6278,7 +6468,7 @@ function _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA) {
   const linhasAcao = d.acao.map((it) => {
     const v = it.v;
     const sev = VP.severidade(v);
-    return [esc(v.codigo || '–'), `<strong>${esc(v.nome || '–')}</strong><div class="muted">${esc(_nomeProdutoVuln(v) || 'Sem produto')}</div>`,
+    return [esc(v.codigo || '–'), `<strong>${esc(v.nome || '–')}</strong><div class="muted">${esc(_nomeProdutoDoc(v) || 'Sem produto')}</div>`,
       _chipDoc(sev, nivelSev(sev)),
       it.motivos.map((m) => _chipDoc(m === VP.MOTIVO.ATRASADA ? `Atrasada ${it.diasAtraso}d` : m, nivelMotivo(m))).join(' '),
       esc(v.statusCorrecao || '–'), esc(v.responsavel || v.equipeResponsavel || '–')];
@@ -6337,8 +6527,8 @@ function _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA) {
       html: `<div class="bloco">${_tabelaDoc([{ t: 'Código' }, { t: 'Vulnerabilidade' }, { t: 'Produto' }, { t: 'Severidade' }, { t: 'Status' }, { t: 'Data prevista' }, { t: 'Equipe' }],
         abertas.map((v) => {
           const sev = VP.severidade(v);
-          return [esc(v.codigo || '–'), esc(v.nome || '–'), esc(_nomeProdutoVuln(v) || '–'), _chipDoc(sev, nivelSev(sev)), esc(v.statusCorrecao || '–'),
-            VP.atrasada(v) ? `<strong style="color:#b0000f;">${esc(fmtData(v.dataPrevistaCorrecao))}</strong>` : esc(fmtData(v.dataPrevistaCorrecao)), esc(v.equipeResponsavel || '–')];
+          return [esc(v.codigo || '–'), esc(v.nome || '–'), esc(_nomeProdutoDoc(v) || '–'), _chipDoc(sev, nivelSev(sev)), esc(v.statusCorrecao || '–'),
+            VP.atrasada(v, d.hoje) ? `<strong style="color:#b0000f;">${esc(fmtData(v.dataPrevistaCorrecao))}</strong>` : esc(fmtData(v.dataPrevistaCorrecao)), esc(v.equipeResponsavel || '–')];
         }), 'Nenhuma vulnerabilidade em aberto.')}</div>`,
     });
   }
@@ -6347,6 +6537,7 @@ function _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA) {
     titulo: _TITULO_RELATORIO_EXECUTIVO.vulnerabilidades,
     subtitulo: `${e.abertas} em aberto • tendência de ${opcoes.meses} meses`,
     resumoIA,
+    edicao,
     destaques: dados.destaques,
     secoes,
     notas: [
@@ -6378,7 +6569,7 @@ function _htmlMapaCalorDoc(mapa, titulo) {
     <div class="sub-bloco" style="margin-top:4px;">Linhas = probabilidade · colunas = impacto · ${mapa.avaliados} avaliado(s)${mapa.semAvaliacao ? ` · ${mapa.semAvaliacao} sem avaliação` : ''}</div></div>`;
 }
 
-function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA) {
+function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao) {
   const RC = RiscoConsolidado;
   const RR = RiscoRelatorio;
   const d = dados.d;
@@ -6499,6 +6690,7 @@ function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA) {
     titulo: _TITULO_RELATORIO_EXECUTIVO.riscos,
     subtitulo: `${p.ativos} riscos ativos • apetite até ${p.apetite} • tendência de ${opcoes.meses} meses`,
     resumoIA,
+    edicao,
     destaques: dados.destaques,
     secoes: [
       { titulo: 'Panorama: quanto risco carregamos?', ref: 'NIST SP 800-39 · Enquadrar · CSF GV.RM-02', html: s1 },
@@ -8542,7 +8734,10 @@ async function vulnerabilidadesPainel() {
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Painel de Vulnerabilidades</h2><p class="page-sub">Visão executiva da gestão de vulnerabilidades: exposição, tendência, ação imediata, prazos e processos críticos</p></div>
-      ${_seVeTela('vulnerabilidades', '<button class="btn btn-ghost" onclick="location.hash=\'#vulnerabilidades\'">Ver lista de vulnerabilidades</button>')}
+      <div style="display:flex;gap:8px;">
+        ${_seVeTela('vulnerabilidades-relatorio', '<button class="btn btn-ghost" onclick="location.hash=\'#vulnerabilidades-relatorio\'">📄 Relatório</button>')}
+        ${_seVeTela('vulnerabilidades', '<button class="btn btn-ghost" onclick="location.hash=\'#vulnerabilidades\'">Ver lista de vulnerabilidades</button>')}
+      </div>
     </div>
     <div class="filters">
       <div class="field">
@@ -10687,6 +10882,7 @@ async function riscos() {
     <div class="page-header">
       <div><h2>Registro de Riscos</h2><p class="page-sub">Registro, análise, tratamento e monitoramento dos riscos identificados</p></div>
       <div style="display:flex;gap:8px;">
+        ${_seVeTela('riscos-relatorio', '<button class="btn btn-ghost" onclick="location.hash=\'#riscos-relatorio\'">📄 Relatório</button>')}
         <button class="btn btn-primary" onclick="abrirImportarRisco()" id="btnImportarRisco" style="display:none;">📥 Importar Risco</button>
         <button class="btn btn-primary" onclick="abrirDrawerRisco()" id="btnNovoRisco" style="display:none;">+ Novo Risco</button>
       </div>

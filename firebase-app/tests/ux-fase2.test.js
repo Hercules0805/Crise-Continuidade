@@ -82,8 +82,10 @@ test('menu Riscos: telas de vulnerabilidade primeiro, depois as de risco', () =>
   const g = menu().find((x) => x.grupo === 'riscos');
   assert.deepStrictEqual(g.itens.map((i) => [i.tema, i.page]), [
     ['Vulnerabilidades', 'vulnerabilidades-painel'],
+    ['Vulnerabilidades', 'vulnerabilidades-relatorio'],
     ['Vulnerabilidades', 'vulnerabilidades'],
     ['Riscos', 'riscos'],
+    ['Riscos', 'riscos-relatorio'],
     ['Riscos', 'monitor'],
   ]);
 });

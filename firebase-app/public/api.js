@@ -48,6 +48,8 @@ const COLLECTION = {
   backups: 'backups',
   vulnerabilidades: 'vulnerabilidades',
   painelVulnerabilidades: 'painel_vulnerabilidades',
+  relatoriosExecutivos: 'relatorios_executivos',
+  relatoriosExecutivosConteudo: 'relatorios_executivos_conteudo',
   contratos: 'contratos',
   eventosContrato: 'eventos_contrato',
   tiposContrato: 'tipos_contrato',
@@ -1126,6 +1128,55 @@ async function _lerHistoricoRisco() {
   return snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).reverse();
 }
 
+// Relatórios Executivos salvos (20/10/2026). Metadados (lista) e conteúdo em
+// coleções separadas; o conteúdo é o RETRATO DOS DADOS em JSON, nunca HTML
+// (ver firestore.rules). Edição imutável; só o Admin exclui.
+const LIMITE_RELATORIO_EXECUTIVO = 900000;
+
+async function _salvarRelatorioExecutivo(r) {
+  const conteudo = String((r && r.conteudo) || '');
+  if (!conteudo) throw new Error('Relatório sem conteúdo para salvar.');
+  if (conteudo.length >= LIMITE_RELATORIO_EXECUTIVO) throw new Error('Este relatório é grande demais para ser salvo no sistema. Use Imprimir / PDF.');
+  const por = (window.USER_EMAIL || '').toLowerCase();
+  const agora = new Date().toISOString();
+  const ref = _db.collection(COLLECTION.relatoriosExecutivos).doc();
+  const lote = _db.batch();
+  lote.set(ref, {
+    tipo: r.tipo,
+    titulo: String(r.titulo || ''),
+    geradoEm: String(r.geradoEm || agora),
+    geradoPor: por,
+    salvoEm: agora,
+    meses: Number(r.meses) || null,
+    comIA: !!r.comIA,
+    resumo: Array.isArray(r.resumo) ? r.resumo.slice(0, 2).map(String) : [],
+  });
+  lote.set(_db.collection(COLLECTION.relatoriosExecutivosConteudo).doc(ref.id), {
+    tipo: r.tipo, geradoPor: por, versao: Number(r.versao) || 1, conteudo,
+  });
+  await lote.commit();
+  return { success: true, id: ref.id, salvoEm: agora };
+}
+
+async function _lerRelatoriosExecutivos() {
+  const docs = await _getAll(COLLECTION.relatoriosExecutivos);
+  return docs.sort((a, b) => String(b.geradoEm || '').localeCompare(String(a.geradoEm || '')));
+}
+
+async function _lerConteudoRelatorioExecutivo(id) {
+  const snap = await _db.collection(COLLECTION.relatoriosExecutivosConteudo).doc(String(id)).get();
+  if (!snap.exists) throw new Error('O conteúdo deste relatório não foi encontrado.');
+  return Object.assign({ id: snap.id }, snap.data());
+}
+
+async function _excluirRelatorioExecutivo(id) {
+  const lote = _db.batch();
+  lote.delete(_db.collection(COLLECTION.relatoriosExecutivos).doc(String(id)));
+  lote.delete(_db.collection(COLLECTION.relatoriosExecutivosConteudo).doc(String(id)));
+  await lote.commit();
+  return { success: true };
+}
+
 // Retratos diários desde `diaISO` (Relatório Executivo de Riscos: 6 ou 12
 // meses, além dos 120 dias do Monitor). Admin e Segurança (firestore.rules).
 async function _lerHistoricoRiscoDesde(diaISO) {
@@ -2136,6 +2187,7 @@ const _GET_FIRESTORE = {
   getAvaliacoesFornecedor: () => _lerAvaliacoesFornecedor(),
   getHistoricoRisco: () => _lerHistoricoRisco(),
   getHistoricoRiscoDesde: (params) => _lerHistoricoRiscoDesde(params.dia),
+  getRelatoriosExecutivos: () => _lerRelatoriosExecutivos(),
   getConfigFornecedor: () => _lerConfigFornecedor(),
   getConfigVulnerabilidade: () => _lerConfigVulnerabilidade(),
   getConfigRiscos: () => _lerConfigRiscos(),
@@ -2415,6 +2467,13 @@ const API = {
   getAvaliacoesFornecedor: () => API.get('getAvaliacoesFornecedor'),
   getHistoricoRisco: () => API.get('getHistoricoRisco'),
   getHistoricoRiscoDesde: (dia) => API.get('getHistoricoRiscoDesde', { dia }),
+  getRelatoriosExecutivos: () => API.get('getRelatoriosExecutivos'),
+  // Conteúdo de uma edição salva: imutável, mas lido direto (sem o cache de API.get).
+  getConteudoRelatorioExecutivo: (id) => _lerConteudoRelatorioExecutivo(id),
+  salvarRelatorioExecutivo: (r) => _salvarRelatorioExecutivo(r)
+    .then((x) => { API.invalidate('getRelatoriosExecutivos'); return x; }),
+  excluirRelatorioExecutivo: (id) => _excluirRelatorioExecutivo(id)
+    .then((x) => { API.invalidate('getRelatoriosExecutivos'); return x; }),
   getConfigFornecedor: () => API.get('getConfigFornecedor'),
   getConfigVulnerabilidade: () => API.get('getConfigVulnerabilidade'),
   getConfigRiscos: () => API.get('getConfigRiscos'),
