@@ -1126,6 +1126,16 @@ async function _lerHistoricoRisco() {
   return snap.docs.map((d) => Object.assign({ id: d.id }, d.data())).reverse();
 }
 
+// Retratos diários desde `diaISO` (Relatório Executivo de Riscos: 6 ou 12
+// meses, além dos 120 dias do Monitor). Admin e Segurança (firestore.rules).
+async function _lerHistoricoRiscoDesde(diaISO) {
+  const snap = await _db.collection(COLLECTION.historicoRisco)
+    .where('dia', '>=', String(diaISO || '').slice(0, 10))
+    .orderBy('dia', 'asc')
+    .get();
+  return snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+}
+
 async function _lerAvaliacoesFornecedor() {
   const docs = await _getAll(COLLECTION.avaliacoesFornecedor);
   const ultima = new Map();
@@ -2125,6 +2135,7 @@ const _GET_FIRESTORE = {
   getCriticidadeFornecedorPerguntas: () => _lerCriticidadeFornecedorPerguntas(),
   getAvaliacoesFornecedor: () => _lerAvaliacoesFornecedor(),
   getHistoricoRisco: () => _lerHistoricoRisco(),
+  getHistoricoRiscoDesde: (params) => _lerHistoricoRiscoDesde(params.dia),
   getConfigFornecedor: () => _lerConfigFornecedor(),
   getConfigVulnerabilidade: () => _lerConfigVulnerabilidade(),
   getConfigRiscos: () => _lerConfigRiscos(),
@@ -2343,6 +2354,11 @@ const API = {
     if (action === 'gerarRoteiroTeste') {
       return _appApi('POST', 'gerarRoteiroTeste', { id: body.id, categoria: body.categoria });
     }
+    // Resumo executivo por IA dos relatorios de Vulnerabilidades/Riscos (so
+    // agregados; perfil Admin/Seguranca conferido no servidor).
+    if (action === 'gerarResumoExecutivo') {
+      return _appApi('POST', 'gerarResumoExecutivo', { tipo: body.tipo, indicadores: body.indicadores });
+    }
     if (action === 'salvarRoteiroTeste') {
       return _appApi('POST', 'salvarRoteiroTeste', { id: body.id, categoria: body.categoria, html: body.html });
     }
@@ -2398,6 +2414,7 @@ const API = {
   getCriticidadeFornecedorPerguntas: () => API.get('getCriticidadeFornecedorPerguntas'),
   getAvaliacoesFornecedor: () => API.get('getAvaliacoesFornecedor'),
   getHistoricoRisco: () => API.get('getHistoricoRisco'),
+  getHistoricoRiscoDesde: (dia) => API.get('getHistoricoRiscoDesde', { dia }),
   getConfigFornecedor: () => API.get('getConfigFornecedor'),
   getConfigVulnerabilidade: () => API.get('getConfigVulnerabilidade'),
   getConfigRiscos: () => API.get('getConfigRiscos'),

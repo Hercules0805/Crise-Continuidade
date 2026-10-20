@@ -543,7 +543,94 @@
     ];
   }
 
+  // ------------------------------------------------- relatorio executivo (20/10/2026)
+
+  /**
+   * Tudo que o Relatorio Executivo de Vulnerabilidades mostra, calculado uma
+   * vez so (o documento, os destaques e os indicadores da IA leem daqui).
+   * `ctx` = { hoje, meses, fotos, processos, limiar, riscoAberto, nomeProduto, janela }.
+   */
+  function dadosRelatorio(vulns, ctx) {
+    var c = ctx || {};
+    var hoje = hojeISO(c.hoje);
+    var j = janelas(hoje, c.janela || 90);
+    var serie = serieMensal(vulns, { meses: c.meses || 12, hoje: hoje, fotos: c.fotos });
+    return {
+      hoje: hoje,
+      janela: c.janela || 90,
+      exposicao: exposicao(vulns),
+      produtos: porProduto(vulns, c.nomeProduto),
+      serie: serie,
+      mttrAtual: mttr(vulns, j.atual.de, j.atual.ate),
+      mttrAnterior: mttr(vulns, j.anterior.de, j.anterior.ate),
+      movimento: movimento(vulns, j.atual.de, j.atual.ate),
+      acao: acaoImediata(vulns, { hoje: hoje, processos: c.processos || [], limiar: c.limiar, riscoAberto: c.riscoAberto }),
+      cumprimento: cumprimentoPrazo(vulns, j.atual.de, j.atual.ate),
+      atraso: atraso(vulns, hoje),
+      equipes: porEquipe(vulns, j.atual.de, j.atual.ate, hoje),
+      processosExpostos: processosExpostos(vulns, c.processos || []),
+      dados: exposicaoDados(vulns),
+      semVinculo: semVinculo(vulns),
+    };
+  }
+
+  function _plural(n, s, p) { return n + ' ' + (n === 1 ? s : p); }
+
+  /** Frases montadas dos numeros (sem IA), sempre no topo do relatorio. */
+  function destaques(d) {
+    var e = d.exposicao;
+    var out = [];
+    var ant = d.serie.length > 1 ? d.serie[d.serie.length - 2] : null;
+    var varTxt = '';
+    if (ant) {
+      var dif = e.abertas - ant.abertas;
+      varTxt = dif ? ' (' + (dif > 0 ? '+' : '') + dif + ' vs. ' + rotuloMes(ant.mes) + ')' : ' (igual a ' + rotuloMes(ant.mes) + ')';
+    }
+    out.push(_plural(e.abertas, 'vulnerabilidade em aberto', 'vulnerabilidades em aberto') + varTxt + '; ' + _plural(e.criticasAltas, 'é Crítica ou Alta', 'são Críticas ou Altas') + '. Índice de exposição: ' + e.indice + '.');
+    if (d.acao.length) out.push(_plural(d.acao.length, 'vulnerabilidade exige', 'vulnerabilidades exigem') + ' ação imediata.');
+    if (d.atraso.atrasadas) out.push(_plural(d.atraso.atrasadas, 'está atrasada', 'estão atrasadas') + ' (atraso médio de ' + d.atraso.diasMedio + ' dias).');
+    if (d.atraso.semPrazo) out.push(_plural(d.atraso.semPrazo, 'em aberto não tem', 'em aberto não têm') + ' data prevista de correção.');
+    if (d.cumprimento.pct !== null) out.push(d.cumprimento.pct + '% das corrigidas nos últimos ' + d.janela + ' dias saíram no prazo (' + d.cumprimento.noPrazo + ' de ' + d.cumprimento.comPrazo + ').');
+    if (d.mttrAtual.media !== null) out.push('Tempo médio de correção: ' + d.mttrAtual.media + ' dias' + (d.mttrAnterior.media !== null ? ' (' + d.mttrAnterior.media + ' nos ' + d.janela + ' dias anteriores).' : '.'));
+    var t1 = d.processosExpostos.porTier[Criticidade.TIER.T1] || 0;
+    if (t1) out.push(_plural(t1, 'processo Tier 1 está exposto', 'processos Tier 1 estão expostos') + '.');
+    if (d.dados.total) out.push(_plural(d.dados.total, 'vulnerabilidade com exposição legal ou de dados pessoais', 'vulnerabilidades com exposição legal ou de dados pessoais') + '.');
+    return out;
+  }
+
+  /** O que vai para a IA: numeros agregados e os 10 itens de topo (codigo, nome, severidade, motivos). */
+  function indicadoresParaIA(d) {
+    var e = d.exposicao;
+    return {
+      emAberto: e.abertas,
+      porSeveridade: e.porSeveridade,
+      criticasEAltas: e.criticasAltas,
+      indiceDeExposicao: e.indice,
+      aceitas: e.aceitas,
+      produtosMaisExpostos: d.produtos.slice(0, 5).map(function (p) { return { produto: p.nome, emAberto: p.total, indice: p.indice }; }),
+      tendenciaMensal: d.serie.map(function (p) { return { mes: p.mes, emAberto: p.abertas, criticasEAltas: p.criticasAltas, novas: p.novas, corrigidas: p.corrigidas }; }),
+      janelaDias: d.janela,
+      tempoMedioCorrecaoDias: d.mttrAtual.media,
+      tempoMedioCorrecaoJanelaAnteriorDias: d.mttrAnterior.media,
+      novasNaJanela: d.movimento.novas,
+      corrigidasNaJanela: d.movimento.corrigidas,
+      percentualNoPrazo: d.cumprimento.pct,
+      atrasadas: d.atraso.atrasadas,
+      atrasoMedioDias: d.atraso.diasMedio,
+      semPrazoDefinido: d.atraso.semPrazo,
+      acaoImediata: d.acao.length,
+      principaisAcaoImediata: d.acao.slice(0, 10).map(function (x) { return { codigo: x.v.codigo || '', nome: x.v.nome || '', severidade: severidade(x.v), motivos: x.motivos }; }),
+      equipesComAtraso: d.equipes.filter(function (q) { return q.atrasadas; }).map(function (q) { return { equipe: q.equipe, atrasadas: q.atrasadas, emAberto: q.abertas }; }),
+      processosExpostosPorTier: d.processosExpostos.porTier,
+      exposicaoLegalOuDadosPessoais: d.dados.total,
+      emAbertoSemDependenciaVinculada: d.semVinculo.total,
+    };
+  }
+
   return {
+    dadosRelatorio: dadosRelatorio,
+    destaques: destaques,
+    indicadoresParaIA: indicadoresParaIA,
     SEVERIDADES: SEVERIDADES,
     SEM_SEVERIDADE: SEM_SEVERIDADE,
     PESO: PESO,

@@ -288,3 +288,23 @@ test('tela: dica do grafico mostra o mes', async () => {
   assert.match(doc.getElementById('dicaMonitor').textContent, /Hoje \(ao vivo\)/);
   assert.match(doc.getElementById('dicaMonitor').textContent, /Em aberto: 2/);
 });
+
+// ---- Relatorio Executivo (20/10/2026): dadosRelatorio, destaques e o que vai para a IA ----
+
+test('relatorio: dadosRelatorio junta os blocos do painel; destaques e IA saem dos mesmos numeros', () => {
+  const d = VP.dadosRelatorio(LISTA, { hoje: HOJE, meses: 3, processos: PROCESSOS, limiar: 7, riscoAberto: (id) => id === 'a' });
+  assert.strictEqual(d.exposicao.abertas, 5);
+  assert.strictEqual(d.serie.length, 3);
+  assert.deepStrictEqual(d.acao.map((i) => i.v.id), ['a', 'b']);
+  assert.strictEqual(d.janela, 90);
+  const txt = VP.destaques(d).join(' | ');
+  assert.match(txt, /5 vulnerabilidades em aberto \(\+2 vs\. set\/26\); 2 são Críticas ou Altas\. Índice de exposição: 19\./);
+  assert.match(txt, /2 vulnerabilidades exigem ação imediata/);
+  assert.match(txt, /1 está atrasada \(atraso médio de 10 dias\)/);
+  assert.match(txt, /1 processo Tier 1 está exposto/);
+  const ia = VP.indicadoresParaIA(d);
+  assert.strictEqual(ia.emAberto, 5);
+  assert.deepStrictEqual(ia.principaisAcaoImediata[0], { codigo: '2026-001', nome: 'Falha', severidade: 'Crítica', motivos: ['Crítica', 'Processo Tier 1'] });
+  assert.ok(!('descricao' in ia.principaisAcaoImediata[0]), 'so codigo, nome, severidade e motivos');
+  assert.ok(JSON.stringify(ia).length < 20000);
+});

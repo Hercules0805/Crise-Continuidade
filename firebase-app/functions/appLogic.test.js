@@ -1091,3 +1091,74 @@ test('contatos do DRP: falha ao ler os contratos nao derruba o DRP (segue sem ge
     assert.match(r.drp, /Não foi possível consultar os contratos/);
   } finally { global.fetch = orig; console.error = erro; }
 });
+
+// --- gerarResumoExecutivo (relatorios executivos, 20/10/2026) ---
+
+function seedPerfil(perfis) {
+  return { config_perfis: { 'analista@fortestecnologia.com.br': { perfis } } };
+}
+
+function capturarGemini(resposta, ok) {
+  const original = global.fetch;
+  const chamadas = [];
+  global.fetch = async (url, opts) => {
+    chamadas.push({ url, corpo: JSON.parse(opts.body) });
+    return {
+      ok: ok !== false,
+      status: ok === false ? 500 : 200,
+      json: async () => (ok === false ? { error: { message: 'quota' } } : { candidates: [{ content: { parts: [{ text: resposta }] } }] }),
+    };
+  };
+  return { chamadas, restaurar: () => { global.fetch = original; } };
+}
+
+test('gerarResumoExecutivo: Admin/Seguranca geram; Gestor e TI sao recusados', async () => {
+  for (const perfil of ['gestor', 'ti', 'operador']) {
+    await assert.rejects(
+      () => WRITE_ACTIONS.gerarResumoExecutivo(makeDb(seedPerfil([perfil])), { tipo: 'riscos', indicadores: { a: 1 } }, ctx({ geminiApiKey: 'k' })),
+      /Seu perfil não pode/
+    );
+  }
+  const g = capturarGemini(JSON.stringify({ paragrafos: ['P1'], recomendacoes: [] }));
+  try {
+    const r = await WRITE_ACTIONS.gerarResumoExecutivo(makeDb(seedPerfil(['seguranca'])), { tipo: 'vulnerabilidades', indicadores: { emAberto: 7 } }, ctx({ geminiApiKey: 'k' }));
+    assert.deepStrictEqual(r.paragrafos, ['P1']);
+  } finally { g.restaurar(); }
+});
+
+test('gerarResumoExecutivo: valida tipo, indicadores, tamanho e chave', async () => {
+  const db = makeDb(seedPerfil(['admin']));
+  await assert.rejects(() => WRITE_ACTIONS.gerarResumoExecutivo(db, { tipo: 'outro', indicadores: {} }, ctx({ geminiApiKey: 'k' })), /Tipo de relatório inválido/);
+  await assert.rejects(() => WRITE_ACTIONS.gerarResumoExecutivo(db, { tipo: 'riscos' }, ctx({ geminiApiKey: 'k' })), /Indicadores do relatório ausentes/);
+  await assert.rejects(() => WRITE_ACTIONS.gerarResumoExecutivo(db, { tipo: 'riscos', indicadores: { x: 'a'.repeat(20001) } }, ctx({ geminiApiKey: 'k' })), /grandes demais/);
+  await assert.rejects(() => WRITE_ACTIONS.gerarResumoExecutivo(db, { tipo: 'riscos', indicadores: { a: 1 } }, ctx({ geminiApiKey: '' })), /API Key do Gemini/);
+});
+
+test('gerarResumoExecutivo: prompt leva os numeros e pede JSON; resposta vira texto puro limitado', async () => {
+  const g = capturarGemini('```json\n' + JSON.stringify({ paragrafos: ['Situação.', '  ', 'Tendência.', 'extra', 'demais'], recomendacoes: ['R1', 'R2', 'R3', 'R4'] }) + '\n```');
+  try {
+    const r = await WRITE_ACTIONS.gerarResumoExecutivo(makeDb(seedPerfil(['admin'])), { tipo: 'riscos', indicadores: { riscosAtivos: 42, acimaDoApetite: 5 } }, ctx({ geminiApiKey: 'k' }));
+    const enviado = g.chamadas[0].corpo;
+    const prompt = enviado.contents[0].parts[0].text;
+    assert.match(prompt, /"riscosAtivos":42/);
+    assert.match(prompt, /Relatório Executivo de Riscos/);
+    assert.match(prompt, /SOMENTE os números/);
+    assert.strictEqual(enviado.generationConfig.responseMimeType, 'application/json');
+    assert.deepStrictEqual(r.paragrafos, ['Situação.', 'Tendência.', 'extra'], 'vazios fora, no maximo 3');
+    assert.deepStrictEqual(r.recomendacoes, ['R1', 'R2', 'R3']);
+  } finally { g.restaurar(); }
+});
+
+test('gerarResumoExecutivo: resposta fora do formato ou erro da API viram AppError', async () => {
+  const db = makeDb(seedPerfil(['admin']));
+  for (const resp of ['não é json', JSON.stringify({ paragrafos: [] }), '']) {
+    const g = capturarGemini(resp);
+    try {
+      await assert.rejects(() => WRITE_ACTIONS.gerarResumoExecutivo(db, { tipo: 'vulnerabilidades', indicadores: { a: 1 } }, ctx({ geminiApiKey: 'k' })), AppError);
+    } finally { g.restaurar(); }
+  }
+  const g = capturarGemini('', false);
+  try {
+    await assert.rejects(() => WRITE_ACTIONS.gerarResumoExecutivo(db, { tipo: 'vulnerabilidades', indicadores: { a: 1 } }, ctx({ geminiApiKey: 'k' })), /Erro na API do Gemini: quota/);
+  } finally { g.restaurar(); }
+});

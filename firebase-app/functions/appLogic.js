@@ -1554,6 +1554,108 @@ async function enviarEmailTeste(db, data, ctx) {
   return { success: true, para: ctx.email };
 }
 
+// ============================================================
+// Resumo executivo por IA dos relatorios de Vulnerabilidades e de Riscos
+// (20/10/2026). O navegador ja calculou os numeros (vulnerabilidade-painel.js
+// / risco-relatorio.js) e manda SO os agregados e os itens de topo -- nunca o
+// documento inteiro. A IA devolve TEXTO PURO (JSON com paragrafos e
+// recomendacoes); a tela escapa tudo, nada de HTML vindo da IA.
+// ============================================================
+const LIMITE_INDICADORES_IA = 20000;
+const TIPOS_RESUMO_EXECUTIVO = {
+  vulnerabilidades: {
+    pode: podeOperarVulnerabilidade,
+    titulo: 'Relatório Executivo de Vulnerabilidades',
+    referencia: 'NIST SP 800-40 (gestão de correções) e SP 800-55 (medidas), CSF 2.0 ID.RA',
+  },
+  riscos: {
+    pode: podeOperarRiscos,
+    titulo: 'Relatório Executivo de Riscos',
+    referencia: 'NIST SP 800-30 (matriz 5x5), SP 800-39 (enquadrar, avaliar, responder, monitorar) e CSF 2.0 GV.RM (apetite de risco)',
+  },
+};
+
+function _promptResumoExecutivo(tipo, indicadores) {
+  const t = TIPOS_RESUMO_EXECUTIVO[tipo];
+  return `Você é um analista sênior de riscos de segurança da informação e escreve para a diretoria da Fortes Tecnologia.
+
+Escreva o RESUMO EXECUTIVO do "${t.titulo}", seguindo ${t.referencia}.
+
+REGRAS:
+- Use SOMENTE os números e itens do JSON abaixo. Não invente valores, datas, nomes ou causas que não estejam nele.
+- Se um número não estiver no JSON, não fale dele.
+- Linguagem: português do Brasil, executiva, direta, sem jargão desnecessário. Frases curtas.
+- Interprete: diga se a situação melhora ou piora, onde está a maior exposição e o que preocupa.
+- Recomendações: ações concretas e priorizadas, cada uma ligada a um número do JSON.
+- Texto puro: sem markdown, sem HTML, sem emojis.
+
+FORMATO DA RESPOSTA (JSON):
+{"paragrafos": ["primeiro parágrafo (situação atual)", "segundo parágrafo (tendência e pontos de atenção)"], "recomendacoes": ["até 3 recomendações"]}
+
+DADOS DO RELATÓRIO (JSON):
+${JSON.stringify(indicadores)}`;
+}
+
+/** Lista de strings nao vazias, no maximo `max`, cada uma limitada (defesa contra resposta fora do formato). */
+function _textosResumo(v, max) {
+  return (Array.isArray(v) ? v : [])
+    .map((x) => String(x == null ? '' : x).trim())
+    .filter(Boolean)
+    .slice(0, max)
+    .map((x) => x.slice(0, 1500));
+}
+
+async function gerarResumoExecutivo(db, data, ctx) {
+  const tipo = String(data.tipo || '');
+  const def = TIPOS_RESUMO_EXECUTIVO[tipo];
+  if (!def) throw new AppError('Tipo de relatório inválido.');
+  if (!(await def.pode(db, ctx.email))) throw new AppError('Seu perfil não pode gerar este relatório.');
+  const indicadores = data.indicadores;
+  if (!indicadores || typeof indicadores !== 'object' || Array.isArray(indicadores)) throw new AppError('Indicadores do relatório ausentes.');
+  if (JSON.stringify(indicadores).length > LIMITE_INDICADORES_IA) throw new AppError('Dados do relatório grandes demais para o resumo.');
+  if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
+
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + ctx.geminiApiKey;
+  const payload = {
+    contents: [{ parts: [{ text: _promptResumoExecutivo(tipo, indicadores) }] }],
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: 4096,
+      responseMimeType: 'application/json',
+      thinkingConfig: { thinkingBudget: 0 },
+    },
+  };
+
+  let body;
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(LIMITE_IA_MS),
+    });
+    body = await response.json();
+    if (!response.ok) {
+      throw new AppError('Erro na API do Gemini: ' + (body.error ? body.error.message : 'Status ' + response.status));
+    }
+  } catch (err) {
+    throw _erroChamadaIA(err, 'o resumo executivo');
+  }
+
+  const content = body.candidates && body.candidates[0] && body.candidates[0].content;
+  const texto = content && content.parts && content.parts[0] && content.parts[0].text;
+  if (!texto) throw new AppError('Resposta vazia do Gemini.');
+  let json;
+  try {
+    json = JSON.parse(String(texto).replace(/^```(?:json)?\s*|\s*```$/g, ''));
+  } catch (e) {
+    throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
+  }
+  const paragrafos = _textosResumo(json && json.paragrafos, 3);
+  if (!paragrafos.length) throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
+  return { success: true, tipo, paragrafos, recomendacoes: _textosResumo(json.recomendacoes, 3) };
+}
+
 const READ_ACTIONS = {
   getLevantamentoPCN,
   dadosPCN,
@@ -1578,6 +1680,7 @@ const WRITE_ACTIONS = {
   importarVulnerabilidadeParaRisco,
   exportarRiscoDocumento,
   enviarEmailTeste,
+  gerarResumoExecutivo,
 };
 
 module.exports = {

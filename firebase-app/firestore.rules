@@ -451,8 +451,11 @@ service cloud.firestore {
     // Escrita: SO pelo servidor (retratoDiarioRisco, e o backfill manual, os
     // dois com Admin SDK). Mesma razao do livro de medicoes: um ponto da
     // curva forjado pelo navegador destroi a credibilidade do monitor.
+    // DECISAO 20/10/2026: Seguranca da Informacao tambem le (tela Risco no
+    // Tempo e tendencia do Relatorio Executivo de Riscos) -- ela ja le todos os
+    // riscos, entao o retrato agregado nao abre nada novo. Gestor continua sem.
     match /historico_risco/{dia} {
-      allow read: if isAdmin();
+      allow read: if isAdmin() || isSeguranca();
       allow write: if false;
     }
 

@@ -5621,9 +5621,20 @@ function _refreshAposSalvarDependencia() {
 async function relatorios() {
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Relatórios</h2><p class="page-sub">Relatórios de apoio à Continuidade de Negócio</p></div>
+      <div><h2>Relatórios</h2><p class="page-sub">Relatórios executivos e de apoio à Continuidade de Negócio</p></div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:16px;">
+      ${Perfis.podeGerarRelatorioExecutivo(window.USER_PERFIS) ? `
+      <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
+        <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Relatório Executivo de Vulnerabilidades</h3>
+        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para a diretoria: exposição atual, tendência, o que exige ação imediata, cumprimento de prazos e processos críticos expostos, com resumo por IA.</p>
+        <button class="btn btn-primary" onclick="abrirOpcoesRelatorioExecutivo('vulnerabilidades')">📄 Gerar relatório</button>
+      </div>
+      <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
+        <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Relatório Executivo de Riscos</h3>
+        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para a diretoria: panorama e mapa de calor da carteira, principais riscos, resposta (plano de ação e aceites), monitoramento e tendência, com resumo por IA.</p>
+        <button class="btn btn-primary" onclick="abrirOpcoesRelatorioExecutivo('riscos')">📄 Gerar relatório</button>
+      </div>` : ''}
       <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
         <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Processos por Dependência</h3>
         <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para cada dependência do catálogo técnico, quais Processos de Negócio dependem dela.</p>
@@ -5686,6 +5697,33 @@ async function relatorios() {
       <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharSelecaoAreasRelatorio()">Cancelar</button>
         <button class="btn btn-primary" id="btnConfirmarRelatorioAreas" onclick="confirmarGerarRelatorioProcessosPorArea()">Gerar relatório</button>
+      </div>
+    </div>
+    <div class="drawer-overlay" id="drawerOverlayRelatorioExecutivo" onclick="fecharOpcoesRelatorioExecutivo()"></div>
+    <div class="drawer" id="drawerRelatorioExecutivo">
+      <div class="drawer-header">
+        <h3 id="relExecTitulo">Relatório executivo</h3>
+        <button onclick="fecharOpcoesRelatorioExecutivo()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <div class="field">
+          <label class="field-label" for="relExecMeses">Período da tendência</label>
+          <select id="relExecMeses" class="field-control"><option value="12">Últimos 12 meses</option><option value="6">Últimos 6 meses</option></select>
+        </div>
+        <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.9em;cursor:pointer;margin:14px 0 4px;">
+          <input type="checkbox" id="relExecIA" checked style="margin-top:3px;">
+          <span>Incluir resumo executivo por IA (Gemini)
+            <span style="display:block;font-size:0.85em;color:#888;margin-top:2px;">A IA recebe só os números agregados e os itens de topo do relatório. Leva alguns segundos; revise o texto antes de distribuir.</span>
+          </span>
+        </label>
+        <label id="relExecApendiceLinha" style="display:flex;gap:8px;align-items:center;font-size:0.9em;cursor:pointer;margin:12px 0 4px;">
+          <input type="checkbox" id="relExecApendice" checked>
+          <span>Incluir lista completa das vulnerabilidades em aberto</span>
+        </label>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharOpcoesRelatorioExecutivo()">Cancelar</button>
+        <button class="btn btn-primary" onclick="gerarRelatorioExecutivo()">Gerar relatório</button>
       </div>
     </div>
     <div class="modal-overlay" id="modalSelecaoPessoaRelatorio"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
@@ -5935,6 +5973,551 @@ ${corpo || '<p class="vazio">Nenhuma área selecionada.</p>'}
 <div class="footer">Relatório gerado a partir do cadastro de Áreas e de Processos. Dono = responsável da área.</div>
 </body>
 </html>`;
+}
+
+// ============================================================
+// RELATÓRIOS EXECUTIVOS de Vulnerabilidades e de Riscos (DECISÃO 20/10/2026)
+//
+// Sob demanda, para a diretoria: abrem em nova aba e imprimem em PDF. A conta
+// está em vulnerabilidade-painel.js (dadosRelatorio) e risco-relatorio.js;
+// aqui só se carrega, chama a IA e desenha. Só Admin e Segurança
+// (Perfis.podeGerarRelatorioExecutivo; o servidor confere de novo na IA).
+// Resumo por IA: a aba abre NO CLIQUE (senão o navegador bloqueia o popup
+// depois do await), mostra "Gerando…" e só então recebe o documento. Se a IA
+// falhar, o relatório sai igual, com os destaques calculados e o aviso.
+// O texto da IA é sempre escapado (nunca HTML vindo dela).
+// ============================================================
+const _TITULO_RELATORIO_EXECUTIVO = {
+  vulnerabilidades: 'Relatório Executivo de Vulnerabilidades',
+  riscos: 'Relatório Executivo de Riscos',
+};
+
+window.abrirOpcoesRelatorioExecutivo = (tipo) => {
+  window._relExecTipo = tipo;
+  document.getElementById('relExecTitulo').textContent = _TITULO_RELATORIO_EXECUTIVO[tipo];
+  document.getElementById('relExecApendiceLinha').style.display = tipo === 'vulnerabilidades' ? 'flex' : 'none';
+  document.getElementById('drawerRelatorioExecutivo').classList.add('open');
+  document.getElementById('drawerOverlayRelatorioExecutivo').classList.add('open');
+};
+
+window.fecharOpcoesRelatorioExecutivo = () => {
+  document.getElementById('drawerRelatorioExecutivo').classList.remove('open');
+  document.getElementById('drawerOverlayRelatorioExecutivo').classList.remove('open');
+};
+
+window.gerarRelatorioExecutivo = async () => {
+  const tipo = window._relExecTipo;
+  if (!_TITULO_RELATORIO_EXECUTIVO[tipo]) return;
+  const opcoes = {
+    meses: Number(document.getElementById('relExecMeses').value) || 12,
+    ia: document.getElementById('relExecIA').checked,
+    apendice: tipo === 'vulnerabilidades' && document.getElementById('relExecApendice').checked,
+  };
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
+  fecharOpcoesRelatorioExecutivo();
+  const escrever = (html) => { win.document.open(); win.document.write(html); win.document.close(); };
+  escrever(_htmlAvisoDocumentoExecutivo(_TITULO_RELATORIO_EXECUTIVO[tipo], opcoes.ia ? 'Gerando o relatório e o resumo por IA… pode levar alguns segundos.' : 'Gerando o relatório…'));
+  let dados;
+  try {
+    dados = tipo === 'riscos' ? await _dadosRelatorioExecutivoRiscos(opcoes) : await _dadosRelatorioExecutivoVulnerabilidades(opcoes);
+  } catch (e) {
+    console.error('Relatório executivo: falha ao carregar', e);
+    escrever(_htmlAvisoDocumentoExecutivo(_TITULO_RELATORIO_EXECUTIVO[tipo], 'Não foi possível carregar os dados: ' + _mensagemErro(e, 'erro desconhecido') + '. Feche esta aba e tente de novo.', true));
+    return;
+  }
+  let resumoIA = null;
+  if (opcoes.ia) {
+    try {
+      const r = await API.post('gerarResumoExecutivo', { tipo, indicadores: dados.indicadoresIA });
+      if (!r || r.error) throw new Error((r && r.error) || 'resposta vazia');
+      resumoIA = { paragrafos: r.paragrafos || [], recomendacoes: r.recomendacoes || [] };
+    } catch (e) {
+      console.error('Relatório executivo: resumo por IA falhou', e);
+      resumoIA = { erro: _mensagemErro(e, 'erro desconhecido') };
+    }
+  }
+  escrever(tipo === 'riscos' ? _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA) : _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA));
+};
+
+async function _dadosRelatorioExecutivoVulnerabilidades(opcoes) {
+  const VP = VulnerabilidadePainel;
+  const [vulns, processos, produtos, cfg, fotos, riscos] = await Promise.all([
+    API.getVulnerabilidades(),
+    API.getProcessos().catch(() => null),
+    API.getProdutosSoftware().catch(() => null),
+    API.getConfigVulnerabilidade().catch(() => ({ limiarCvss: 7 })),
+    API.getFotosPainelVulnerabilidades().catch(() => []),
+    API.getRiscos().catch(() => null),
+  ]);
+  if (produtos) produtosSoftwareData = produtos;
+  const limiar = cfg && Number.isFinite(Number(cfg.limiarCvss)) ? Number(cfg.limiarCvss) : 7;
+  const riscoAberto = riscos
+    ? (id) => riscos.some((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(id) && r.status !== 'Encerrado')
+    : null;
+  const d = VP.dadosRelatorio(vulns || [], {
+    meses: opcoes.meses, fotos: fotos || [], processos: processos || [], limiar, riscoAberto, nomeProduto: _nomeProdutoVuln,
+  });
+  return {
+    d, vulns: vulns || [], limiar, processosCarregados: !!processos, riscosCarregados: !!riscos,
+    destaques: VP.destaques(d), indicadoresIA: VP.indicadoresParaIA(d),
+  };
+}
+
+async function _dadosRelatorioExecutivoRiscos(opcoes) {
+  const RR = RiscoRelatorio;
+  const hoje = new Date().toISOString().slice(0, 10);
+  const desde = RR.mesesAte(hoje, opcoes.meses)[0] + '-01';
+  const [riscos, processos, avals, inds, cfg, historico] = await Promise.all([
+    API.getRiscos(),
+    API.getProcessos().catch(() => null),
+    API.getAvaliacoesFornecedor().catch(() => []),
+    API.getIndicadoresSeguranca().catch(() => null),
+    API.getConfigRiscos().catch(() => ({ apetite: RiscoConsolidado.APETITE_PADRAO })),
+    API.getHistoricoRiscoDesde(desde).catch((e) => { console.error('Relatório de Riscos: histórico não carregou', e); return null; }),
+  ]);
+  // _riscoComKriForaDaMeta lê o cadastro de indicadores carregado.
+  if (inds) indicadoresData = inds;
+  const critForn = {};
+  (avals || []).forEach((av) => { if (av && av.fornecedorId) critForn[String(av.fornecedorId)] = av.scoreCriticidade; });
+  const apetite = (cfg && cfg.apetite) || RiscoConsolidado.APETITE_PADRAO;
+  const lista = riscos || [];
+  const procs = processos || [];
+  const d = {
+    hoje,
+    panorama: RR.panorama(lista, procs, critForn, apetite),
+    mapaInerente: RR.mapaCalor(lista, 'inerente'),
+    mapaResidual: RR.mapaCalor(lista, 'residual'),
+    principais: RR.principais(lista, procs, critForn, apetite, 10),
+    tratamento: RR.tratamento(lista, apetite, hoje),
+    monitoramento: RR.monitoramento(lista, hoje, inds ? _riscoComKriForaDaMeta : null),
+    serie: historico ? RR.serieMensalHistorico(historico, opcoes.meses, hoje) : null,
+  };
+  return {
+    d, processosCarregados: !!processos, indicadoresCarregados: !!inds, historicoCarregado: !!historico,
+    destaques: RR.destaques(d), indicadoresIA: RR.indicadoresParaIA(d),
+  };
+}
+
+// ---- Casca comum dos relatórios executivos (documento gerado: regras em ui-referencias.md) ----
+
+const _CSS_DOCUMENTO_EXECUTIVO = `
+:root{--risk-critical:#d60014;--risk-high:#b64a12;--risk-medium:#9a6700;--risk-low:#38bb0e;--risk-critical-surface:#fde7e9}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#222;background:#f5f6fa;padding:24px;font-size:10pt;line-height:1.45}
+.pagina{max-width:1040px;margin:0 auto}
+.header{display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+.header h1{font-size:18pt;color:#d60014}
+.header .sub{font-size:9pt;color:#888;margin-top:4px}
+.classificacao{display:inline-block;margin-top:6px;font-size:8pt;font-weight:700;color:#555;border:1px solid #ccc;border-radius:4px;padding:1px 6px;text-transform:uppercase;letter-spacing:.4px}
+.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}
+.bloco{background:#fff;border-radius:10px;border:1px solid #e6e6ea;padding:18px 20px;margin-bottom:16px;page-break-inside:avoid}
+.secao{margin:26px 0 10px;font-size:13pt;color:#222;display:flex;align-items:baseline;gap:10px;border-bottom:2px solid #fce8ea;padding-bottom:6px;page-break-after:avoid}
+.secao .num{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#d60014;color:#fff;font-size:10pt;flex-shrink:0}
+.secao .ref{margin-left:auto;font-size:8pt;font-weight:400;color:#999}
+h3{font-size:10.5pt;color:#333;margin-bottom:8px}
+.sub-bloco{font-size:8.5pt;color:#888;margin:-4px 0 10px}
+.ia{border-left:4px solid #d60014}
+.ia .rotulo{font-size:8pt;font-weight:700;color:#d60014;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+.ia p{margin-bottom:8px}
+.ia .aviso{font-size:8.5pt;color:#888;font-style:italic}
+ul.lista{padding-left:18px}ul.lista li{margin-bottom:4px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
+.kpi{background:#f7f7f9;border-radius:8px;padding:10px 12px}
+.kpi .rk{font-size:8pt;color:#777;text-transform:uppercase;letter-spacing:.3px}
+.kpi .v{font-size:17pt;font-weight:700;color:#222;line-height:1.2}
+.kpi .t{font-size:8pt;color:#777}
+.colunas{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+table{width:100%;border-collapse:collapse;font-size:9pt}
+th{text-align:left;padding:6px 8px;background:#f5f6fa;color:#555;font-size:8pt;text-transform:uppercase;letter-spacing:.3px}
+td{padding:6px 8px;border-bottom:1px solid #f0f0f0;vertical-align:top}
+.c{text-align:center}.r{text-align:right}
+.muted{color:#888}
+.chip{display:inline-block;padding:1px 8px;border-radius:10px;font-size:8pt;font-weight:600;margin:1px 2px 1px 0;white-space:nowrap}
+.chip-critical{background:#d60014;color:#fff}.chip-high{background:#fde7e9;color:#b0000f}.chip-medium{background:#efece8;color:#2a2623}.chip-low{background:#fff;color:#2a2623;border:1px solid #cfc9c2}.chip-null{background:#f0f0f0;color:#666}
+.barra{height:8px;background:#f0f0f0;border-radius:6px;overflow:hidden;min-width:60px}
+.barra>div{height:100%;border-radius:6px}
+.linha{display:flex;align-items:center;gap:8px;margin-bottom:6px;font-size:9pt}
+.linha .rot{width:150px;color:#555;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.linha .barra{flex:1}
+.linha .val{width:40px;text-align:right;font-weight:700}
+.vazio{font-size:9pt;color:#999;font-style:italic;padding:4px 0}
+.alerta{font-size:9pt;color:#b0000f;margin-top:8px}
+.mapa td{text-align:center;font-weight:700;width:16%;height:34px;border:2px solid #fff;vertical-align:middle}
+.mapa th{text-align:center;font-size:7.5pt}
+.mapa .eixo{text-align:right;font-size:7.5pt;color:#555;font-weight:600;background:#fff;width:20%}
+.notas{font-size:8.5pt;color:#666}
+.notas li{margin-bottom:4px}
+.footer{margin-top:24px;text-align:center;font-size:8pt;color:#aaa}
+@page{size:A4;margin:14mm}
+@media print{body{background:#fff;padding:0}.btn-print{display:none!important}.bloco{border-color:#ddd}.bloco,.chip,.kpi,.barra>div,.mapa td,.secao .num{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+`;
+
+function _cabecalhoDocumentoExecutivo(titulo, subtitulo, comBotao) {
+  return `<div class="header">
+  <div>
+    <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
+    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+    <h1>${esc(titulo)}</h1>
+    <div class="sub">${esc(subtitulo)}</div>
+    <span class="classificacao">Classificação: Uso Interno</span>
+  </div>
+  ${comBotao ? '<button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button>' : ''}
+</div>`;
+}
+
+/** Página curta de "Gerando…" ou de erro, na mesma aba que depois recebe o relatório. */
+function _htmlAvisoDocumentoExecutivo(titulo, mensagem, erro) {
+  return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>${esc(titulo)}</title><style>${_CSS_DOCUMENTO_EXECUTIVO}</style></head>
+<body><div class="pagina">${_cabecalhoDocumentoExecutivo(titulo, 'Fortes Tecnologia', false)}
+<div class="bloco"${erro ? ' style="color:#b0000f;"' : ''}>${erro ? '' : '⏳ '}${esc(mensagem)}</div></div></body></html>`;
+}
+
+/**
+ * Documento completo. `secoes` = [{ titulo, ref, html }] já escapado por quem
+ * monta; `resumoIA` = null (não pedido) | { erro } | { paragrafos, recomendacoes }.
+ */
+function _htmlDocumentoExecutivo({ titulo, subtitulo, resumoIA, destaques, secoes, notas }) {
+  const agora = new Date();
+  const quando = agora.toLocaleDateString('pt-BR') + ' ' + agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  let blocoIA = '';
+  if (resumoIA && resumoIA.erro) {
+    blocoIA = `<div class="bloco ia"><div class="rotulo">Resumo executivo</div><p class="aviso">Resumo por IA indisponível (${esc(resumoIA.erro)}). Os destaques abaixo foram calculados diretamente dos números do relatório.</p></div>`;
+  } else if (resumoIA) {
+    blocoIA = `<div class="bloco ia"><div class="rotulo">Resumo executivo</div>
+      ${(resumoIA.paragrafos || []).map((p) => `<p>${esc(p)}</p>`).join('')}
+      ${(resumoIA.recomendacoes || []).length ? `<h3 style="margin-top:6px;">Recomendações</h3><ul class="lista">${resumoIA.recomendacoes.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
+      <p class="aviso" style="margin-top:8px;">Texto gerado por IA a partir dos números deste relatório — revise antes de distribuir.</p></div>`;
+  }
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><title>${esc(titulo)}</title><style>${_CSS_DOCUMENTO_EXECUTIVO}</style></head>
+<body><div class="pagina">
+${_cabecalhoDocumentoExecutivo(titulo, `${subtitulo} • ${quando} • Fortes Tecnologia`, true)}
+${blocoIA}
+<div class="bloco"><h3>Destaques</h3>${(destaques || []).length ? `<ul class="lista">${destaques.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '<p class="vazio">Sem dados suficientes.</p>'}</div>
+${(secoes || []).map((s, i) => `<div class="secao"><span class="num">${i + 1}</span>${esc(s.titulo)}<span class="ref">${esc(s.ref || '')}</span></div>${s.html}`).join('\n')}
+${(notas || []).length ? `<div class="secao" style="border-bottom-color:#eee;">Notas metodológicas</div><div class="bloco notas"><ul class="lista">${notas.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
+<div class="footer">Gerado em ${esc(quando)} por ${esc(window.USER_EMAIL || '')} • GRC360 • Fortes Tecnologia</div>
+</div></body></html>`;
+}
+
+function _chipDoc(texto, nivel) {
+  return `<span class="chip chip-${nivel || 'null'}">${esc(texto)}</span>`;
+}
+
+function _kpiDoc(rotulo, valor, detalhe) {
+  return `<div class="kpi"><div class="rk">${esc(rotulo)}</div><div class="v">${esc(String(valor))}</div>${detalhe ? `<div class="t">${esc(detalhe)}</div>` : ''}</div>`;
+}
+
+function _linhaBarraDoc(rotulo, valor, pct, cor) {
+  return `<div class="linha"><span class="rot" title="${esc(rotulo)}">${esc(rotulo)}</span><div class="barra"><div style="width:${Math.max(0, Math.min(100, pct))}%;background:${cor};"></div></div><span class="val">${esc(String(valor))}</span></div>`;
+}
+
+/** Tabela simples: `cabecalho` = [{ t, cls }], `linhas` = arrays de células JÁ escapadas. */
+function _tabelaDoc(cabecalho, linhas, vazio) {
+  if (!linhas.length) return `<p class="vazio">${esc(vazio || 'Nada a mostrar.')}</p>`;
+  return `<table><thead><tr>${cabecalho.map((c) => `<th${c.cls ? ` class="${c.cls}"` : ''}>${esc(c.t)}</th>`).join('')}</tr></thead>
+    <tbody>${linhas.map((l) => `<tr>${l.map((cel, i) => `<td${cabecalho[i] && cabecalho[i].cls ? ` class="${cabecalho[i].cls}"` : ''}>${cel}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+}
+
+const _COR_NIVEL_DOC = { 'Muito alto': '#d60014', 'Alto': '#f08a92', 'Moderado': '#f5d9a8', 'Baixo': '#d5ebcc', 'Muito baixo': '#eef7ea' };
+
+// ---- Relatório Executivo de Vulnerabilidades ----
+function _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA) {
+  const VP = VulnerabilidadePainel;
+  const d = dados.d;
+  const e = d.exposicao;
+  const ant = d.serie.length > 1 ? d.serie[d.serie.length - 2] : null;
+  const varTxt = (atual, campo) => {
+    if (!ant) return '';
+    const dif = atual - ant[campo];
+    return dif ? `${dif > 0 ? '▲ +' : '▼ '}${dif} vs. ${VP.rotuloMes(ant.mes)}` : `Igual a ${VP.rotuloMes(ant.mes)}`;
+  };
+  const nivelSev = (s) => _nivelSeveridadeVulnerabilidade(s);
+  const fmtData = (iso) => (iso ? iso.split('-').reverse().join('/') : '–');
+
+  const s1 = `<div class="bloco">
+      <div class="kpis">
+        ${_kpiDoc('Em aberto', e.abertas, varTxt(e.abertas, 'abertas'))}
+        ${_kpiDoc('Críticas + Altas', e.criticasAltas, varTxt(e.criticasAltas, 'criticasAltas'))}
+        ${_kpiDoc('Índice de exposição', e.indice, varTxt(e.indice, 'indice'))}
+        ${_kpiDoc('Aceitas (risco assumido)', e.aceitas, '')}
+      </div>
+      <div class="colunas">
+        <div><h3>Em aberto por severidade</h3>
+          ${VP.SEVERIDADES.concat(e.semSeveridade ? [VP.SEM_SEVERIDADE] : []).map((s) => _linhaBarraDoc(s, e.porSeveridade[s], e.abertas ? (e.porSeveridade[s] / e.abertas) * 100 : 0, s === VP.SEM_SEVERIDADE ? '#bbb' : _corSeveridadeVuln(s))).join('')}
+        </div>
+        <div><h3>Produtos mais expostos</h3>
+          ${d.produtos.length ? d.produtos.slice(0, 8).map((p) => _linhaBarraDoc(p.nome, p.total, (p.indice / (d.produtos[0].indice || 1)) * 100, '#d60014')).join('') : '<p class="vazio">Nenhuma em aberto.</p>'}
+        </div>
+      </div>
+    </div>`;
+
+  const linhasMes = d.serie.map((p) => [esc(VP.rotuloMes(p.mes)), String(p.abertas), String(p.criticasAltas), String(p.indice), String(p.novas), String(p.corrigidas),
+    esc({ atual: 'Hoje', foto: 'Foto do mês', reconstruida: 'Reconstruído' }[p.fonte] || '')]);
+  const varMttr = d.mttrAtual.media !== null && d.mttrAnterior.media !== null ? ` (${d.mttrAnterior.media} nos ${d.janela} dias anteriores)` : '';
+  const s2 = `<div class="bloco">
+      <h3>Backlog em aberto no fim de cada mês</h3>
+      <div class="sub-bloco">Linha escura = total em aberto; vermelha = Críticas + Altas. Ponto vazado = mês reconstruído pelas datas.</div>
+      ${_svgPainelVulnBacklog(d.serie, true)}
+    </div>
+    <div class="bloco">
+      ${_tabelaDoc([{ t: 'Mês' }, { t: 'Em aberto', cls: 'c' }, { t: 'Críticas + Altas', cls: 'c' }, { t: 'Índice', cls: 'c' }, { t: 'Novas', cls: 'c' }, { t: 'Corrigidas', cls: 'c' }, { t: 'Fonte' }], linhasMes)}
+    </div>
+    <div class="bloco">
+      <h3>Velocidade de correção — últimos ${d.janela} dias</h3>
+      <div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-bottom:0;">
+        ${_kpiDoc('Tempo médio de correção', d.mttrAtual.media !== null ? d.mttrAtual.media + ' dias' : '–', d.mttrAtual.n ? `${d.mttrAtual.n} corrigida(s)${varMttr}` : 'Nenhuma corrigida no período')}
+        ${_kpiDoc('Taxa de fechamento', d.movimento.taxaFechamento !== null ? d.movimento.taxaFechamento + '%' : '–', `${d.movimento.corrigidas} corrigida(s) para ${d.movimento.novas} nova(s)`)}
+        ${_kpiDoc('Saldo do backlog', (d.movimento.saldo > 0 ? '+' : '') + d.movimento.saldo, d.movimento.saldo > 0 ? 'Entrou mais do que saiu' : (d.movimento.saldo < 0 ? 'Saiu mais do que entrou' : 'Empatado'))}
+      </div>
+    </div>`;
+
+  const nivelMotivo = (m) => ({ 'Crítica': 'critical', 'Processo Tier 1': 'critical', 'Alta com exploit': 'high', 'Atrasada': 'high', 'Acima do limiar sem risco': 'medium' }[m] || null);
+  const linhasAcao = d.acao.map((it) => {
+    const v = it.v;
+    const sev = VP.severidade(v);
+    return [esc(v.codigo || '–'), `<strong>${esc(v.nome || '–')}</strong><div class="muted">${esc(_nomeProdutoVuln(v) || 'Sem produto')}</div>`,
+      _chipDoc(sev, nivelSev(sev)),
+      it.motivos.map((m) => _chipDoc(m === VP.MOTIVO.ATRASADA ? `Atrasada ${it.diasAtraso}d` : m, nivelMotivo(m))).join(' '),
+      esc(v.statusCorrecao || '–'), esc(v.responsavel || v.equipeResponsavel || '–')];
+  });
+  const s3 = `<div class="bloco">
+      <div class="sub-bloco">Em aberto e: Crítica, Alta com exploit disponível, prazo vencido, atinge processo Tier 1${dados.riscosCarregados ? `, ou severidade no limiar de risco (${dados.limiar}) sem risco aberto` : ''}. Ordem: gravidade, processo crítico e dias de atraso.</div>
+      ${_tabelaDoc([{ t: 'Código' }, { t: 'Vulnerabilidade' }, { t: 'Severidade' }, { t: 'Por quê' }, { t: 'Status' }, { t: 'Responsável' }], linhasAcao, 'Nenhuma vulnerabilidade em aberto atende aos critérios.')}
+    </div>`;
+
+  const cp = d.cumprimento, at = d.atraso;
+  const linhasEquipe = d.equipes.map((q) => [`<strong>${esc(q.equipe)}</strong>`, String(q.abertas), q.atrasadas ? `<strong style="color:#b0000f;">${q.atrasadas}</strong>` : '–',
+    q.semPrazo ? String(q.semPrazo) : '–', q.corrigidas ? String(q.corrigidas) : '–', q.pctNoPrazo !== null ? q.pctNoPrazo + '%' : '–', q.mttr !== null ? q.mttr + ' d' : '–']);
+  const s4 = `<div class="bloco">
+      <div class="kpis">
+        ${_kpiDoc(`No prazo (${d.janela} dias)`, cp.pct !== null ? cp.pct + '%' : '–', cp.comPrazo ? `${cp.noPrazo} de ${cp.comPrazo} com data prevista` : 'Nenhuma corrigida com data prevista')}
+        ${_kpiDoc('Atrasadas hoje', at.atrasadas, at.atrasadas ? `Atraso médio ${at.diasMedio} dias · maior ${at.diasMaximo}` : '')}
+        ${_kpiDoc('Em aberto sem prazo', at.semPrazo, at.pctSemPrazo !== null ? `${at.pctSemPrazo}% das em aberto` : '')}
+        ${_kpiDoc(`Corrigidas sem data prevista (${d.janela} dias)`, cp.semPrazoDefinido, 'Fora do percentual')}
+      </div>
+      <h3>Por equipe responsável</h3>
+      ${_tabelaDoc([{ t: 'Equipe' }, { t: 'Em aberto', cls: 'c' }, { t: 'Atrasadas', cls: 'c' }, { t: 'Sem prazo', cls: 'c' }, { t: 'Corrigidas', cls: 'c' }, { t: '% no prazo', cls: 'c' }, { t: 'Tempo médio', cls: 'c' }], linhasEquipe, 'Nenhuma equipe com vulnerabilidades no período.')}
+    </div>`;
+
+  const T = Criticidade.TIER;
+  const criticos = d.processosExpostos.processos.filter((p) => p.tier === T.T1 || p.tier === T.T2);
+  const s5 = !dados.processosCarregados
+    ? '<div class="bloco"><p class="alerta">Os processos de negócio não carregaram: o impacto nos processos críticos não pôde ser calculado.</p></div>'
+    : `<div class="bloco">
+      <div class="colunas">
+        <div><h3>Processos expostos por Tier</h3>
+          ${[T.T1, T.T2, T.T3, T.PENDENTE].map((t) => _linhaBarraDoc(t === T.PENDENTE ? 'Pendente (sem BIA)' : t, d.processosExpostos.porTier[t] || 0, d.processosExpostos.processos.length ? ((d.processosExpostos.porTier[t] || 0) / d.processosExpostos.processos.length) * 100 : 0, t === T.PENDENTE ? '#bbb' : Criticidade.corDoTier(t))).join('')}
+          ${d.semVinculo.total ? `<p class="alerta">⚠ ${d.semVinculo.total} em aberto (${d.semVinculo.pct}%) sem dependência vinculada — o impacto delas nos processos não aparece aqui.</p>` : ''}
+        </div>
+        <div><h3>Exposição legal e de dados pessoais</h3>
+          <div class="kpis" style="grid-template-columns:1fr 1fr;">${_kpiDoc('Total', d.dados.total, '')}${_kpiDoc('LGPD / Privacidade', d.dados.lgpd, '')}</div>
+          ${d.dados.vulnerabilidades.slice(0, 8).map((v) => `<div class="linha"><span style="width:70px;">${esc(v.codigo || '–')}</span><span style="flex:1;">${esc(v.nome || '–')}</span>${_chipDoc(VP.severidade(v), nivelSev(VP.severidade(v)))}</div>`).join('')}
+        </div>
+      </div>
+      <h3 style="margin-top:12px;">Processos críticos atingidos (Tier 1 e Tier 2)</h3>
+      ${_tabelaDoc([{ t: 'Processo' }, { t: 'Área' }, { t: 'Tier' }, { t: 'Em aberto', cls: 'c' }, { t: 'Pior severidade' }],
+        criticos.map((p) => [`<strong>${esc(p.processo)}</strong>`, esc(p.area || '–'), _chipDoc(Criticidade.tierCurto(p.tier), _nivelTierProcesso(p.tier)), String(p.total), _chipDoc(p.piorSeveridade, nivelSev(p.piorSeveridade))]),
+        'Nenhum processo Tier 1 ou Tier 2 atingido por vulnerabilidade em aberto.')}
+    </div>`;
+
+  const secoes = [
+    { titulo: 'Qual é a exposição atual?', ref: 'NIST CSF 2.0 · ID.RA-01', html: s1 },
+    { titulo: 'Estamos melhorando ou piorando?', ref: 'NIST SP 800-40 · SP 800-55', html: s2 },
+    { titulo: 'Quais vulnerabilidades exigem ação imediata?', ref: 'NIST SP 800-40 · priorização', html: s3 },
+    { titulo: 'As equipes estão corrigindo dentro dos prazos?', ref: 'NIST SP 800-40 · SP 800-55', html: s4 },
+    { titulo: 'Existe risco relevante para os serviços e dados críticos?', ref: 'NIST CSF 2.0 · ID.RA-04 / GV.RM', html: s5 },
+  ];
+  if (opcoes.apendice) {
+    const abertas = dados.vulns.filter(VP.emAberto).sort((a, b) => VP.PESO[VP.severidade(b)] - VP.PESO[VP.severidade(a)] || String(a.codigo).localeCompare(String(b.codigo)));
+    secoes.push({
+      titulo: 'Apêndice: vulnerabilidades em aberto', ref: `${abertas.length} no total`,
+      html: `<div class="bloco">${_tabelaDoc([{ t: 'Código' }, { t: 'Vulnerabilidade' }, { t: 'Produto' }, { t: 'Severidade' }, { t: 'Status' }, { t: 'Data prevista' }, { t: 'Equipe' }],
+        abertas.map((v) => {
+          const sev = VP.severidade(v);
+          return [esc(v.codigo || '–'), esc(v.nome || '–'), esc(_nomeProdutoVuln(v) || '–'), _chipDoc(sev, nivelSev(sev)), esc(v.statusCorrecao || '–'),
+            VP.atrasada(v) ? `<strong style="color:#b0000f;">${esc(fmtData(v.dataPrevistaCorrecao))}</strong>` : esc(fmtData(v.dataPrevistaCorrecao)), esc(v.equipeResponsavel || '–')];
+        }), 'Nenhuma vulnerabilidade em aberto.')}</div>`,
+    });
+  }
+  const reconstruidos = d.serie.filter((p) => p.fonte === 'reconstruida').length;
+  return _htmlDocumentoExecutivo({
+    titulo: _TITULO_RELATORIO_EXECUTIVO.vulnerabilidades,
+    subtitulo: `${e.abertas} em aberto • tendência de ${opcoes.meses} meses`,
+    resumoIA,
+    destaques: dados.destaques,
+    secoes,
+    notas: [
+      'Em aberto = Pendente ou Em Correção. Aceitas saem do backlog e aparecem como risco assumido.',
+      'Severidade pelo CVSS (faixas NVD: ≥9 Crítica, ≥7 Alta, ≥4 Média) ou, sem CVSS, a escolhida na avaliação.',
+      'Índice de exposição = Crítica 10 + Alta 5 + Média 2 + Baixa 1 por vulnerabilidade em aberto; sem severidade pesa 0.',
+      'Prazo = Data Prevista de Correção de cada vulnerabilidade. Sem ela, a vulnerabilidade conta como "sem prazo" e não entra no percentual.',
+      reconstruidos ? `${reconstruidos} mês(es) da tendência reconstruído(s) pelas datas de detecção, correção e aceite, com a severidade de hoje. Os demais vêm da foto mensal gravada pelo servidor.` : 'Todos os meses da tendência vêm da foto mensal gravada pelo servidor ou do estado de hoje.',
+      `Tempo médio de correção, taxa de fechamento e % no prazo usam as corrigidas nos últimos ${d.janela} dias.`,
+    ],
+  });
+}
+
+// ---- Relatório Executivo de Riscos ----
+function _htmlMapaCalorDoc(mapa, titulo) {
+  const RC = RiscoConsolidado;
+  const linhas = RC.PROBABILIDADES.slice().reverse().map((p) => {
+    const pi = RC.PROBABILIDADES.indexOf(p);
+    return `<tr><td class="eixo">${esc(p)}</td>${RC.IMPACTOS.map((im, ii) => {
+      const n = mapa.contagem[pi][ii];
+      const nivel = RC.nivelPorMatriz(p, im);
+      const fundo = _COR_NIVEL_DOC[nivel];
+      return `<td style="background:${fundo};color:${nivel === 'Muito alto' ? '#fff' : '#222'};${n ? '' : 'opacity:.45;font-weight:400;'}" title="${esc(nivel)}">${n || '·'}</td>`;
+    }).join('')}</tr>`;
+  }).join('');
+  return `<div><h3>${esc(titulo)}</h3>
+    <table class="mapa"><tbody>${linhas}
+      <tr><td class="eixo"></td>${RC.IMPACTOS.map((i) => `<th>${esc(i)}</th>`).join('')}</tr></tbody></table>
+    <div class="sub-bloco" style="margin-top:4px;">Linhas = probabilidade · colunas = impacto · ${mapa.avaliados} avaliado(s)${mapa.semAvaliacao ? ` · ${mapa.semAvaliacao} sem avaliação` : ''}</div></div>`;
+}
+
+function _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA) {
+  const RC = RiscoConsolidado;
+  const RR = RiscoRelatorio;
+  const d = dados.d;
+  const p = d.panorama, t = d.tratamento, m = d.monitoramento;
+  const fmtData = (iso) => (iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '–');
+  const chipNivel = (n) => (n ? _chipDoc(n, _nivelFaixaRisco(n)) : _chipDoc('Sem avaliação', null));
+  const altos = (p.composicao['Muito alto'] || 0) + (p.composicao['Alto'] || 0);
+  const maxArea = p.areas.length ? p.areas[0].carga || 1 : 1;
+
+  const s1 = `<div class="bloco">
+      <div class="kpis">
+        ${_kpiDoc('Riscos ativos', p.ativos, `${p.encerrados} encerrado(s) fora da conta`)}
+        ${_kpiDoc('Carga da empresa', p.carga, `${altos} de nível Alto ou Muito alto`)}
+        ${_kpiDoc('Acima do apetite', p.acimaDoApetite, `Apetite: até ${p.apetite}`)}
+        ${_kpiDoc('Impacto financeiro estimado', _formatarReais(p.impactoFinanceiro), p.semImpactoFinanceiro ? `${p.semImpactoFinanceiro} sem estimativa` : '')}
+      </div>
+      <div class="colunas">
+        <div><h3>Por nível (inerente)</h3>
+          ${RC.FAIXAS.map((f) => _linhaBarraDoc(f, p.composicao[f] || 0, p.ativos ? ((p.composicao[f] || 0) / p.ativos) * 100 : 0, _COR_NIVEL_DOC[f] === '#eef7ea' ? '#b9dcae' : _COR_NIVEL_DOC[f])).join('')}
+          ${p.semAvaliacao ? _linhaBarraDoc('Sem avaliação', p.semAvaliacao, p.ativos ? (p.semAvaliacao / p.ativos) * 100 : 0, '#bbb') : ''}
+        </div>
+        <div><h3>Por status</h3>
+          ${RR.STATUS.map((s) => _linhaBarraDoc(s, p.porStatus[s] || 0, (p.ativos + p.encerrados) ? ((p.porStatus[s] || 0) / (p.ativos + p.encerrados)) * 100 : 0, s === 'Encerrado' ? '#bbb' : '#d60014')).join('')}
+          <h3 style="margin-top:10px;">Por origem</h3>
+          ${Object.keys(p.porOrigem).sort((a, b) => p.porOrigem[b] - p.porOrigem[a]).map((o) => _linhaBarraDoc(o, p.porOrigem[o], p.ativos ? (p.porOrigem[o] / p.ativos) * 100 : 0, '#37474f')).join('') || '<p class="vazio">Nenhum risco ativo.</p>'}
+        </div>
+      </div>
+    </div>`;
+
+  const s2 = `<div class="bloco"><div class="colunas">
+      ${_htmlMapaCalorDoc(d.mapaInerente, 'Risco inerente')}
+      ${_htmlMapaCalorDoc(d.mapaResidual, 'Risco residual (depois do tratamento)')}
+    </div>
+    <div class="sub-bloco" style="margin-top:8px;">Quantidade de riscos ativos em cada célula da matriz 5×5 (NIST SP 800-30, Tabela I-2). A cor é o nível da célula.</div></div>`;
+
+  const s3 = `<div class="bloco">
+      <div class="sub-bloco">Ordem pela carga: score (probabilidade × impacto) × peso do Tier do processo (ou da criticidade do fornecedor).</div>
+      ${_tabelaDoc([{ t: 'Risco' }, { t: 'Área' }, { t: 'Inerente → residual' }, { t: 'Carga', cls: 'c' }, { t: 'Estratégia' }, { t: 'Status' }, { t: 'Responsável' }],
+        d.principais.map((x) => [`<strong>${esc(x.r.titulo || '–')}</strong>${x.acimaDoApetite ? ' ' + _chipDoc('Acima do apetite', 'critical') : ''}`,
+          esc(RC.areaDoRisco(x.r)), `${chipNivel(x.nivel)} → ${x.nivelResidual ? chipNivel(x.nivelResidual) : '<span class="muted">–</span>'}`,
+          String(x.carga), esc(x.r.estrategiaTratamento || '–'), esc(x.r.status || 'Identificado'), esc(x.r.responsavel || '–')]),
+        'Nenhum risco ativo avaliado.')}
+    </div>`;
+
+  const s4 = `<div class="bloco">
+      ${_tabelaDoc([{ t: 'Área' }, { t: 'Carga' }, { t: 'Riscos', cls: 'c' }, { t: 'Pior nível' }, { t: 'Composição' }],
+        p.areas.map((a) => [`<strong>${esc(a.area)}</strong>`,
+          `<div class="linha" style="margin:0;"><div class="barra"><div style="width:${(a.carga / maxArea) * 100}%;background:${a.piorFaixa ? _COR_NIVEL_DOC[a.piorFaixa.rotulo] || '#d60014' : '#bbb'};"></div></div><span class="val">${a.carga}</span></div>`,
+          String(a.contados) + (a.semAvaliacao ? ` <span class="muted">(+${a.semAvaliacao} sem avaliação)</span>` : ''),
+          a.piorFaixa ? chipNivel(a.piorFaixa.rotulo) : '–',
+          RC.FAIXAS.filter((f) => a.composicao[f]).map((f) => _chipDoc(`${a.composicao[f]} ${f}`, _nivelFaixaRisco(f))).join(' ')]),
+        'Nenhuma área com risco ativo.')}
+    </div>`;
+
+  const ac = t.acoes;
+  const s5 = `<div class="bloco">
+      <div class="kpis">
+        ${_kpiDoc('Ações do plano', ac.total, ac.total ? `${ac.concluidas} concluída(s) · ${ac.emAndamento} em andamento · ${ac.pendentes} pendente(s)` : 'Nenhuma ação cadastrada')}
+        ${_kpiDoc('Ações atrasadas', ac.atrasadas, ac.total ? `${t.pctAcoesConcluidas}% concluídas` : '')}
+        ${_kpiDoc('Acima do apetite sem resposta', t.semResposta.length, 'Sem estratégia, ou Mitigar sem ação')}
+        ${_kpiDoc('Riscos aceitos', t.aceites.length, t.aceitesSemAprovador ? `${t.aceitesSemAprovador} acima do apetite sem aprovador` : '')}
+      </div>
+      <div class="colunas">
+        <div><h3>Estratégia de tratamento</h3>
+          ${RR.ESTRATEGIAS.concat(RR.SEM_ESTRATEGIA).map((e) => _linhaBarraDoc(e, t.porEstrategia[e] || 0, p.ativos ? ((t.porEstrategia[e] || 0) / p.ativos) * 100 : 0, e === RR.SEM_ESTRATEGIA ? '#bbb' : '#37474f')).join('')}
+        </div>
+        <div><h3>Acima do apetite sem resposta definida</h3>
+          ${t.semResposta.length ? `<ul class="lista">${t.semResposta.slice(0, 10).map((r) => `<li>${esc(r.titulo || '–')} <span class="muted">· ${esc(RC.areaDoRisco(r))}</span></li>`).join('')}</ul>${t.semResposta.length > 10 ? `<p class="muted">E mais ${t.semResposta.length - 10}.</p>` : ''}` : '<p class="vazio">Todos os riscos acima do apetite têm resposta definida.</p>'}
+        </div>
+      </div>
+    </div>
+    <div class="bloco"><h3>Ações atrasadas do plano (5W2H)</h3>
+      ${_tabelaDoc([{ t: 'Ação' }, { t: 'Risco' }, { t: 'Responsável' }, { t: 'Prazo' }, { t: 'Atraso', cls: 'c' }],
+        t.acoesAtrasadas.map((x) => [esc(x.acao.acao || '–'), esc(x.r.titulo || '–'), esc(x.acao.responsavel || x.r.responsavel || '–'), esc(fmtData(x.quando)), `<strong style="color:#b0000f;">${x.diasAtraso} d</strong>`]),
+        'Nenhuma ação atrasada.')}
+    </div>
+    <div class="bloco"><h3>Riscos aceitos</h3>
+      ${_tabelaDoc([{ t: 'Risco' }, { t: 'Nível' }, { t: 'Aprovador' }, { t: 'Justificativa' }],
+        t.aceites.map((a) => [`<strong>${esc(a.r.titulo || '–')}</strong>${a.acimaDoApetite ? ' ' + _chipDoc('Acima do apetite', 'critical') : ''}`, chipNivel(a.nivel),
+          a.semAprovador ? '<strong style="color:#b0000f;">Sem aprovador</strong>' : esc(a.aprovador || '–'), esc(a.justificativa || '–')]),
+        'Nenhum risco aceito.')}
+    </div>`;
+
+  const s6 = `<div class="bloco">
+      <div class="kpis" style="grid-template-columns:repeat(4,1fr);">
+        ${_kpiDoc('Reavaliações vencidas', m.reavaliacaoVencida.length, '')}
+        ${_kpiDoc('Sem data de reavaliação', m.semReavaliacao, '')}
+        ${_kpiDoc('KRI fora da meta', dados.indicadoresCarregados ? m.kriForaDaMeta.length : '–', dados.indicadoresCarregados ? '' : 'Indicadores não carregaram')}
+        ${_kpiDoc('Alertas da automação', m.alertas.length, 'Pendentes de revisão')}
+      </div>
+      <h3>Reavaliações vencidas</h3>
+      ${_tabelaDoc([{ t: 'Risco' }, { t: 'Área' }, { t: 'Nível' }, { t: 'Deveria ter sido em' }, { t: 'Atraso', cls: 'c' }],
+        m.reavaliacaoVencida.map((x) => [esc(x.r.titulo || '–'), esc(RC.areaDoRisco(x.r)), chipNivel(RC.nivelDoRisco(x.r)), esc(fmtData(x.data)), `${x.diasAtraso} d`]),
+        'Nenhuma reavaliação vencida.')}
+      ${m.kriForaDaMeta.length ? `<h3 style="margin-top:12px;">Riscos com KRI fora da meta</h3><ul class="lista">${m.kriForaDaMeta.map((r) => `<li>${esc(r.titulo || '–')} <span class="muted">· ${esc(RC.areaDoRisco(r))}</span></li>`).join('')}</ul>` : ''}
+      ${m.alertas.length ? `<h3 style="margin-top:12px;">Alertas da automação a revisar</h3><ul class="lista">${m.alertas.map((r) => `<li>${esc(r.titulo || '–')}: <span class="muted">${esc(r.alertaAutomacao)}</span></li>`).join('')}</ul>` : ''}
+    </div>`;
+
+  let s7;
+  if (!d.serie) {
+    s7 = '<div class="bloco"><p class="alerta">O histórico de risco não pôde ser lido (o retrato diário é restrito a Admin e Segurança) — a tendência ficou de fora deste relatório.</p></div>';
+  } else if (!d.serie.some((x) => x.carga !== null)) {
+    s7 = `<div class="bloco"><p class="vazio">Nenhum retrato diário gravado nos últimos ${opcoes.meses} meses.</p></div>`;
+  } else {
+    const comDado = d.serie.filter((x) => x.carga !== null);
+    const maxCarga = Math.max(1, ...comDado.map((x) => x.carga));
+    s7 = `<div class="bloco">
+      <div class="sub-bloco">Último retrato diário de cada mês (rotina das 6h). Novos e saídos somam as mudanças registradas no mês.</div>
+      ${_tabelaDoc([{ t: 'Mês' }, { t: 'Carga' }, { t: 'Riscos', cls: 'c' }, { t: 'Impacto financeiro', cls: 'r' }, { t: 'Novos', cls: 'c' }, { t: 'Saíram', cls: 'c' }],
+        d.serie.map((x) => x.carga === null
+          ? [esc(RR.rotuloMes(x.mes)), '<span class="muted">sem retrato</span>', '–', '–', '–', '–']
+          : [esc(RR.rotuloMes(x.mes)), `<div class="linha" style="margin:0;"><div class="barra"><div style="width:${(x.carga / maxCarga) * 100}%;background:#d60014;"></div></div><span class="val">${x.carga}</span></div>`,
+            String(x.contados), esc(_formatarReais(x.impactoFinanceiro || 0)), String(x.novos), String(x.sairam)]))}
+    </div>`;
+  }
+
+  return _htmlDocumentoExecutivo({
+    titulo: _TITULO_RELATORIO_EXECUTIVO.riscos,
+    subtitulo: `${p.ativos} riscos ativos • apetite até ${p.apetite} • tendência de ${opcoes.meses} meses`,
+    resumoIA,
+    destaques: dados.destaques,
+    secoes: [
+      { titulo: 'Panorama: quanto risco carregamos?', ref: 'NIST SP 800-39 · Enquadrar · CSF GV.RM-02', html: s1 },
+      { titulo: 'Mapa de calor da carteira', ref: 'NIST SP 800-30 · Avaliar', html: s2 },
+      { titulo: 'Principais riscos', ref: 'NIST SP 800-30 · Avaliar', html: s3 },
+      { titulo: 'Carga por área', ref: 'Consolidação por área', html: s4 },
+      { titulo: 'Resposta ao risco: tratamento e aceites', ref: 'NIST SP 800-39 · Responder', html: s5 },
+      { titulo: 'Monitoramento', ref: 'NIST SP 800-39 · Monitorar', html: s6 },
+      { titulo: 'Tendência', ref: 'Retrato diário (historico_risco)', html: s7 },
+    ],
+    notas: [
+      'Ativos = todos os status menos Encerrado; riscos Aceitos continuam contando.',
+      'Nível pela matriz 5×5 do NIST SP 800-30 (Tabela I-2), a partir de probabilidade e impacto. Sem os dois, o risco fica "sem avaliação" e não entra na carga.',
+      'Carga = score (probabilidade × impacto, 1 a 25) × peso do Tier do processo (Tier 1 = 3, Tier 2 = 2, Tier 3 = 1) ou da criticidade do fornecedor; sem vínculo, peso 2.',
+      `Apetite de risco configurado: até ${p.apetite} (CSF 2.0 GV.RM-02). Acima do apetite usa o nível inerente.`,
+      'Ação atrasada = prazo ("quando") vencido e não concluída. Reavaliação vencida = próxima reavaliação no passado.',
+      dados.processosCarregados ? 'Pesos de Tier calculados com o BIA atual dos processos.' : 'Os processos não carregaram: todos os riscos com processo usaram o peso padrão 2.',
+    ],
+  });
 }
 
 // ============================================================
@@ -8190,7 +8773,7 @@ function _htmlPainelVulnTendencia(vulns, serie, janelas, comFiltro) {
 }
 
 /** Geometria comum dos dois gráficos mensais (mesmo tamanho, mesmos rótulos de mês). */
-function _eixosPainelVuln(serie, maxValor) {
+function _eixosPainelVuln(serie, maxValor, estatico) {
   const L = 600, A = 220, M = { topo: 14, baixo: 30, esq: 36, dir: 10 };
   const areaW = L - M.esq - M.dir, areaH = A - M.topo - M.baixo;
   const max = Math.max(1, maxValor) * 1.15;
@@ -8206,14 +8789,15 @@ function _eixosPainelVuln(serie, maxValor) {
   }
   const rotulos = serie.map((p, i) => `<text x="${xCentro(i)}" y="${A - M.baixo + 16}" text-anchor="middle" font-size="10" fill="#999">${esc(VulnerabilidadePainel.rotuloMes(p.mes))}</text>`).join('');
   // Alvo de hover por mês: a coluna inteira, transparente (mesma classe do
-  // Monitor, para o toque fora fechar a dica).
-  const alvos = serie.map((p, i) => `<rect class="ponto-monitor-hit" x="${M.esq + passoX * i}" y="${M.topo}" width="${passoX}" height="${areaH}" fill="transparent" style="cursor:pointer;" onmouseenter="_mostrarDicaPainelVuln(event,${i})" onmouseleave="_esconderDicaMonitor()" onclick="_mostrarDicaPainelVuln(event,${i})"/>`).join('');
+  // Monitor, para o toque fora fechar a dica). No relatório impresso
+  // (`estatico`) não há dica: a aba nova não tem estas funções.
+  const alvos = estatico ? '' : serie.map((p, i) => `<rect class="ponto-monitor-hit" x="${M.esq + passoX * i}" y="${M.topo}" width="${passoX}" height="${areaH}" fill="transparent" style="cursor:pointer;" onmouseenter="_mostrarDicaPainelVuln(event,${i})" onmouseleave="_esconderDicaMonitor()" onclick="_mostrarDicaPainelVuln(event,${i})"/>`).join('');
   const moldura = `<line x1="${M.esq}" y1="${M.topo}" x2="${M.esq}" y2="${A - M.baixo}" stroke="#ccc"/><line x1="${M.esq}" y1="${A - M.baixo}" x2="${L - M.dir}" y2="${A - M.baixo}" stroke="#ccc"/>`;
   return { L, A, passoX, xCentro, y, base: A - M.baixo, fundo: grade + rotulos + moldura, alvos };
 }
 
-function _svgPainelVulnBacklog(serie) {
-  const g = _eixosPainelVuln(serie, Math.max(...serie.map((p) => p.abertas)));
+function _svgPainelVulnBacklog(serie, estatico) {
+  const g = _eixosPainelVuln(serie, Math.max(...serie.map((p) => p.abertas)), estatico);
   const linha = (campo, cor) => {
     const pontos = serie.map((p, i) => `${g.xCentro(i)},${g.y(p[campo])}`).join(' ');
     return (serie.length > 1 ? `<polyline points="${pontos}" fill="none" stroke="${cor}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : '')
@@ -8224,8 +8808,8 @@ function _svgPainelVulnBacklog(serie) {
   </svg>`;
 }
 
-function _svgPainelVulnMovimento(serie) {
-  const g = _eixosPainelVuln(serie, Math.max(...serie.map((p) => Math.max(p.novas, p.corrigidas))));
+function _svgPainelVulnMovimento(serie, estatico) {
+  const g = _eixosPainelVuln(serie, Math.max(...serie.map((p) => Math.max(p.novas, p.corrigidas))), estatico);
   const larg = Math.min(16, g.passoX * 0.32);
   const barra = (x, v, cor) => (v > 0 ? `<rect x="${x}" y="${g.y(v)}" width="${larg}" height="${g.base - g.y(v)}" fill="${cor}" rx="2"/>` : '');
   const barras = serie.map((p, i) => barra(g.xCentro(i) - larg - 1, p.novas, _COR_PAINEL_VULN.novas) + barra(g.xCentro(i) + 1, p.corrigidas, _COR_PAINEL_VULN.corrigidas)).join('');

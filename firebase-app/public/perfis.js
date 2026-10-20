@@ -69,7 +69,7 @@
   var TELAS = {};
   TELAS[PERFIL.ADMIN] = '*';
   TELAS[PERFIL.SEGURANCA] = [
-    'processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades', 'vulnerabilidades-painel',
+    'processos', 'pcns', 'drp', 'riscos', 'monitor', 'vulnerabilidades', 'vulnerabilidades-painel',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
     'dependencias', 'areas', 'pessoas', 'relatorios', 'servicos', 'catalogo-backup', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
@@ -275,6 +275,15 @@
     return ehAdmin(valor) || ehSeguranca(valor);
   }
 
+  /**
+   * Relatorios Executivos de Vulnerabilidades e de Riscos (DECISAO 20/10/2026):
+   * so Admin e Seguranca -- TI e Operador veem a tela Relatorios, mas nao estes
+   * cards. Mesmo recorte conferido no servidor (gerarResumoExecutivo).
+   */
+  function podeGerarRelatorioExecutivo(valor) {
+    return ehAdmin(valor) || ehSeguranca(valor);
+  }
+
   /** Editar Indicadores de Seguranca: Admin ou Seguranca. */
   function podeEditarIndicadores(valor) {
     return ehAdmin(valor) || ehSeguranca(valor);
@@ -389,6 +398,7 @@
     podeGerarDRP: podeGerarDRP,
     podeOperarDRP: podeOperarDRP,
     podeEditarRiscos: podeEditarRiscos,
+    podeGerarRelatorioExecutivo: podeGerarRelatorioExecutivo,
     podeEditarIndicadores: podeEditarIndicadores,
     podeEditarPerguntas: podeEditarPerguntas,
     podeEditarRegua: podeEditarRegua,

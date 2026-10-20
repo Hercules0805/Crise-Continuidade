@@ -304,6 +304,18 @@ describe('Security Rules — retrato diário do risco', () => {
     await assertFails(db(GESTOR).doc('historico_risco/2026-09-23').get());
   });
 
+  // DECISAO 20/10/2026: Seguranca le o retrato (Risco no Tempo, Relatorio Executivo de Riscos).
+  test('segurança lê o retrato do dia, mas não grava', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('historico_risco/2026-10-19').set({ dia: '2026-10-19', empresa: { carga: 7 }, areas: [] });
+      await ctx.firestore().doc('config_perfis/si-hist@fortestecnologia.com.br').set({ perfis: ['seguranca'] });
+    });
+    const SI_HIST = { email: 'si-hist@fortestecnologia.com.br' };
+    await assertSucceeds(db(SI_HIST).doc('historico_risco/2026-10-19').get());
+    await assertSucceeds(db(SI_HIST).collection('historico_risco').where('dia', '>=', '2026-01-01').get());
+    await assertFails(db(SI_HIST).doc('historico_risco/2026-10-20').set({ dia: '2026-10-20' }));
+  });
+
   test('NEM admin escreve o retrato — só o servidor grava', async () => {
     await assertFails(db(ADMIN).doc('historico_risco/2026-09-24').set({ dia: '2026-09-24', empresa: { carga: 1 }, areas: [] }));
   });
