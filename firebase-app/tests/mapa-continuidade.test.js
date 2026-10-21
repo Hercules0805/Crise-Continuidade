@@ -195,3 +195,70 @@ test('instalacao: lacuna "Sem instalação alternativa" so quando um processo Ti
   assert.ok(MC.TIPOS.includes('instalacao'));
   assert.deepStrictEqual(MC.vizinhos(i, 'instalacao:sede').map((g) => g.tipo), ['processo', 'pessoa', 'instalacao']);
 });
+
+// ---- Revisao do Processo (21/10/2026) ----
+
+test('fallback por nome (item legado sem id): exige a categoria e nao liga quando o nome e ambiguo', () => {
+  const dados = {
+    areas: [], servicos: [], contratos: [], backups: [],
+    dependencias: [
+      { id: 'a1', categoria: 'Sistemas', nome: 'ERP' },
+      { id: 'a2', categoria: 'Sistemas', nome: 'ERP' },
+      { id: 'b1', categoria: 'Servidor', nome: 'Linux' },
+      { id: 'c1', categoria: 'API', nome: 'Gateway' },
+      { id: 'c2', categoria: 'Fornecedores', nome: 'Gateway' },
+    ],
+    processos: [{ id: 'p', area: 'TI', processo: 'X', dependenciaItens: [
+      { nome: 'ERP', categoria: 'Sistemas' }, // homonimos na mesma categoria
+      { nome: 'Linux', categoria: 'API' }, // categoria diferente: nao liga ao Servidor
+      { nome: 'Gateway' }, // sem categoria e o nome existe em duas
+      { nome: 'Gateway', categoria: 'API' }, // com categoria desambigua
+    ] }],
+  };
+  const i = MC.montarIndice(dados, OPCOES);
+  const ligados = i.adj['processo:p'].map((x) => x.para).filter((id) => !id.startsWith('area:')).sort();
+  assert.deepStrictEqual(ligados, ['dependencia:c1']);
+});
+
+test('instalacao: lacuna tambem quando o processo Tier 1/2 chega nela por servico -> dependencia -> instalada em', () => {
+  const dados = JSON.parse(JSON.stringify(DADOS_INST));
+  dados.processos = [{ id: 'p9', area: 'TI', processo: 'Pix', tierManual: 'Tier 2 (Essencial)', dependenciaItens: [] }];
+  dados.servicos = [{ id: 's9', nome: 'Pix API', processoIds: [{ id: 'p9' }], dependenciaItens: [{ id: 'srv', nome: 'SRV-01', categoria: 'Servidor' }] }];
+  const i = MC.montarIndice(dados, OPCOES);
+  assert.deepStrictEqual(i.nos['instalacao:dc'].lacunas, ['Sem instalação alternativa']);
+  assert.deepStrictEqual(i.nos['instalacao:filial'].lacunas, [], 'nao esta no caminho do processo');
+});
+
+test('dependenciasDoProcesso: diretas, via servico e componentes, sem pessoas/processos, sem repetir, removidas marcadas', () => {
+  const lista = MC.dependenciasDoProcesso({
+    processo: { id: 'p1', dependenciaItens: [
+      { id: 'srv', nome: 'SRV-01', categoria: 'Servidor' },
+      { id: 'pAna', nome: 'Ana', categoria: 'Pessoas' },
+      { id: 'p2', nome: 'Cobrança', categoria: 'Processos Internos' },
+      { id: 'sumiu', nome: 'Velho', categoria: 'Servidor' },
+    ] },
+    dependencias: DADOS_INST.dependencias,
+    servicos: [
+      { id: 's1', nome: 'Portal', processoIds: [{ id: 'p1' }], dependenciaItens: [{ id: 'db', nome: 'Oracle', categoria: 'Banco de Dados' }] },
+      { id: 's2', nome: 'Outro', processoIds: [{ id: 'p7' }], dependenciaItens: [{ id: 'sede', nome: 'Sede SP', categoria: 'Instalações' }] },
+    ],
+  });
+  assert.deepStrictEqual(lista.map((x) => [x.nome, x.origens]), [
+    ['SRV-01', ['Direta (BIA)']],
+    ['Velho', ['Direta (BIA)']],
+    ['Oracle', ['Via serviço Portal', 'Componente de SRV-01']],
+    ['Data center', ['Componente de SRV-01']],
+  ]);
+  assert.strictEqual(lista[1].ausente, true);
+  assert.strictEqual(lista[1].dep, null);
+  assert.strictEqual(lista[0].dep.id, 'srv');
+});
+
+test('dependenciasDoProcesso: componentes em ciclo nao travam', () => {
+  const deps = [
+    { id: 'a', categoria: 'Servidor', nome: 'A', componentes: [{ id: 'b' }] },
+    { id: 'b', categoria: 'Servidor', nome: 'B', componentes: [{ id: 'a' }] },
+  ];
+  const lista = MC.dependenciasDoProcesso({ processo: { id: 'p', dependenciaItens: [{ id: 'a', categoria: 'Servidor', nome: 'A' }] }, dependencias: deps, servicos: [] });
+  assert.deepStrictEqual(lista.map((x) => x.nome), ['A', 'B']);
+});

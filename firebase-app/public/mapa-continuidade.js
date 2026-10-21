@@ -63,6 +63,41 @@
     return String(id).split(':')[0];
   }
 
+  /** Nomes (sem acento) que se repetem: no geral e dentro da mesma categoria. */
+  function _nomesRepetidos(deps) {
+    var cont = {}, contCat = {};
+    (deps || []).forEach(function (x) {
+      if (!x || !x.id) return;
+      var n = normalizar(x.nome);
+      contCat[n + '|' + x.categoria] = (contCat[n + '|' + x.categoria] || 0) + 1;
+      cont[n] = (cont[n] || 0) + 1;
+    });
+    var porCategoria = {}, geral = {};
+    Object.keys(contCat).forEach(function (k) { if (contCat[k] > 1) porCategoria[k] = true; });
+    Object.keys(cont).forEach(function (k) { if (cont[k] > 1) geral[k] = true; });
+    return { porCategoria: porCategoria, geral: geral };
+  }
+
+  // Relacoes, no sentido de quem parte do processo, do caminho tecnico ate o
+  // que o sustenta: servico que o suporta, o que ele/o servico usa,
+  // componentes abaixo e a instalacao onde estao.
+  var REL_CAMINHO_TECNICO = ['depende de', 'suportado pelo serviço', 'usa', 'componente abaixo', 'instalada em'];
+
+  function _alcancaveis(adj, origem, rels) {
+    var visto = {}, fila = [origem], saida = [];
+    visto[origem] = true;
+    while (fila.length) {
+      var atual = fila.shift();
+      (adj[atual] || []).forEach(function (x) {
+        if (visto[x.para] || rels.indexOf(x.rel) < 0) return;
+        visto[x.para] = true;
+        saida.push(x.para);
+        fila.push(x.para);
+      });
+    }
+    return saida;
+  }
+
   /**
    * dados = { processos, areas, dependencias (todas as categorias), servicos, contratos|null, backups }
    * opcoes = { tierDe(p), avaliarServico(s) -> {status, rotuloStatus}, situacaoContrato(c), valorMin(dep, atributo) }
@@ -110,6 +145,7 @@
 
     // ---- Dependencias por categoria ----
     var depPorId = {}, depPorNome = {}, pessoaPorNome = {};
+    var nomesRepetidos = _nomesRepetidos(deps);
     deps.forEach(function (x) {
       if (!x || !x.id) return;
       var tipo = CATEGORIAS_PESSOA.indexOf(x.categoria) >= 0 ? 'pessoa'
@@ -120,8 +156,12 @@
       if (!tipo) return;
       var id = tipo + ':' + x.id;
       depPorId[String(x.id)] = id;
-      depPorNome[normalizar(x.nome) + '|' + x.categoria] = id;
-      if (!depPorNome[normalizar(x.nome)]) depPorNome[normalizar(x.nome)] = id;
+      // Fallback por nome (item legado sem id) so liga quando o nome nao e
+      // ambiguo: homonimos na mesma categoria, ou o nome sem categoria em mais
+      // de uma, ligavam ao primeiro que aparecesse -- vinculo errado no mapa.
+      var nn = normalizar(x.nome);
+      if (!nomesRepetidos.porCategoria[nn + '|' + x.categoria]) depPorNome[nn + '|' + x.categoria] = id;
+      if (!nomesRepetidos.geral[nn]) depPorNome[nn] = id;
       if (tipo === 'pessoa') {
         if (!pessoaPorNome[normalizar(x.nome)]) pessoaPorNome[normalizar(x.nome)] = id;
         no(id, 'pessoa', x.nome, { ref: x.id, sub: (x.areas && x.areas.length ? x.areas : [x.setor]).filter(Boolean).join(', ') });
@@ -145,7 +185,8 @@
       if (!ref) return null;
       if (ref.id !== undefined && ref.id !== null && ref.id !== '' && depPorId[String(ref.id)]) return depPorId[String(ref.id)];
       if (ref.id !== undefined && ref.id !== null && ref.id !== '') return null; // id que nao existe mais
-      return depPorNome[normalizar(ref.nome) + '|' + ref.categoria] || depPorNome[normalizar(ref.nome)] || null;
+      if (_texto(ref.categoria)) return depPorNome[normalizar(ref.nome) + '|' + ref.categoria] || null;
+      return depPorNome[normalizar(ref.nome)] || null;
     }
     function pessoaPor(idOuNome) {
       if (idOuNome === null || idOuNome === undefined || idOuNome === '') return null;
@@ -266,17 +307,20 @@
       if (usada) n.lacunas.push('Sem DRP');
     });
 
-    // Lacuna de Instalacao: usada por processo Tier 1/2 e sem instalacao alternativa.
+    // Lacuna de Instalacao: usada por processo Tier 1/2 e sem instalacao
+    // alternativa. "Usada" inclui o caminho tecnico: processo -> servico ->
+    // dependencia -> (componentes) -> instalada em, nao so o vinculo direto.
+    var instalacoesCriticas = {};
     Object.keys(nos).forEach(function (id) {
       var n = nos[id];
-      if (n.tipo !== 'instalacao') return;
-      var temAlternativa = adj[id].some(function (x) { return x.rel === 'contingência'; });
-      if (temAlternativa) return;
-      var critico = adj[id].some(function (x) {
-        var v = nos[x.para];
-        return v && v.tipo === 'processo' && /^Tier [12]\b/.test(v.selos.tier || '');
+      if (n.tipo !== 'processo' || !/^Tier [12]\b/.test(n.selos.tier || '')) return;
+      _alcancaveis(adj, id, REL_CAMINHO_TECNICO).forEach(function (alvo) {
+        if (tipoDoId(alvo) === 'instalacao') instalacoesCriticas[alvo] = true;
       });
-      if (critico) n.lacunas.push('Sem instalação alternativa');
+    });
+    Object.keys(instalacoesCriticas).forEach(function (id) {
+      var temAlternativa = adj[id].some(function (x) { return x.rel === 'contingência'; });
+      if (!temAlternativa) nos[id].lacunas.push('Sem instalação alternativa');
     });
 
     return { nos: nos, adj: adj, semContratos: semContratos };
@@ -410,8 +454,98 @@
     return { nos: nos, arestas: arestas };
   }
 
+  /**
+   * Aba DRP do Processo (21/10/2026): o que tem (ou deveria ter) DRP e
+   * sustenta este processo. Mesmo caminho do mapa -- dependenciaItens do
+   * processo, os servicos que o suportam (servico.processoIds) e o que eles
+   * usam, e os componentes abaixo de cada item, em qualquer profundidade.
+   * Pessoas e Processos Internos ficam de fora (nao tem DRP). Fornecedores e
+   * Instalacoes entram, como na tela de DRP.
+   *
+   * dados = { processo, dependencias, servicos }
+   * Devolve [{ id, nome, categoria, dep|null, ausente, direta, origens:[texto] }]
+   * na ordem: diretas, via servico, componentes; depois por nome.
+   */
+  function dependenciasDoProcesso(dados) {
+    var d = dados || {};
+    var p = d.processo || {};
+    var deps = d.dependencias || [];
+    var porId = {}, porNome = {};
+    var repetidos = _nomesRepetidos(deps);
+    deps.forEach(function (x) {
+      if (!x || !x.id) return;
+      porId[String(x.id)] = x;
+      var n = normalizar(x.nome);
+      if (!repetidos.porCategoria[n + '|' + x.categoria]) porNome[n + '|' + x.categoria] = x;
+      if (!repetidos.geral[n]) porNome[n] = x;
+    });
+    function semDrp(categoria) {
+      return CATEGORIAS_PESSOA.indexOf(categoria) >= 0 || CATEGORIAS_PROCESSO.indexOf(categoria) >= 0;
+    }
+    function resolver(ref) {
+      if (!ref) return null;
+      var temId = ref.id !== undefined && ref.id !== null && ref.id !== '';
+      if (temId) return porId[String(ref.id)] || null;
+      if (_texto(ref.categoria)) return porNome[normalizar(ref.nome) + '|' + ref.categoria] || null;
+      return porNome[normalizar(ref.nome)] || null;
+    }
+
+    var itens = {}, ordem = [];
+    var PESO = { direta: 0, servico: 1, componente: 2 };
+    function registrar(ref, tipoOrigem, texto) {
+      var dep = resolver(ref);
+      var categoria = dep ? dep.categoria : _texto(ref && ref.categoria);
+      if (semDrp(categoria)) return null;
+      var chave = dep ? 'id:' + dep.id : 'nome:' + normalizar(ref && ref.nome) + '|' + categoria;
+      if (chave === 'nome:|') return null;
+      var it = itens[chave];
+      if (!it) {
+        it = itens[chave] = {
+          id: dep ? String(dep.id) : '', nome: dep ? _texto(dep.nome) : _texto(ref.nome), categoria: categoria,
+          dep: dep, ausente: !dep, direta: false, peso: PESO[tipoOrigem], origens: [],
+        };
+        ordem.push(chave);
+      }
+      if (tipoOrigem === 'direta') it.direta = true;
+      it.peso = Math.min(it.peso, PESO[tipoOrigem]);
+      if (it.origens.indexOf(texto) < 0) it.origens.push(texto);
+      return it;
+    }
+
+    var fila = [];
+    _lista(p.dependenciaItens).forEach(function (ref) {
+      var it = registrar(ref, 'direta', 'Direta (BIA)');
+      if (it && it.dep) fila.push(it.dep);
+    });
+    (d.servicos || []).forEach(function (s) {
+      var suporta = (s.processoIds || []).some(function (x) { return x && String(x.id) === String(p.id); });
+      if (!suporta) return;
+      (s.dependenciaItens || []).forEach(function (ref) {
+        var it = registrar(ref, 'servico', 'Via serviço ' + (_texto(s.nome) || '(sem nome)'));
+        if (it && it.dep) fila.push(it.dep);
+      });
+    });
+    var expandido = {};
+    while (fila.length) {
+      var pai = fila.shift();
+      if (expandido[pai.id]) continue;
+      expandido[pai.id] = true;
+      (pai.componentes || []).forEach(function (ref) {
+        var it = registrar(ref, 'componente', 'Componente de ' + (_texto(pai.nome) || '(sem nome)'));
+        if (it && it.dep && !expandido[it.dep.id]) fila.push(it.dep);
+      });
+    }
+
+    return ordem.map(function (k) { return itens[k]; })
+      .sort(function (a, b) { return (a.peso - b.peso) || a.nome.localeCompare(b.nome, 'pt-BR'); })
+      .map(function (it) {
+        return { id: it.id, nome: it.nome, categoria: it.categoria, dep: it.dep, ausente: it.ausente, direta: it.direta, origens: it.origens };
+      });
+  }
+
   return {
     TIPOS: TIPOS,
+    dependenciasDoProcesso: dependenciasDoProcesso,
     elementosGrafo: elementosGrafo,
     ROTULO_TIPO: ROTULO_TIPO,
     ROTULO_TIPO_SINGULAR: ROTULO_TIPO_SINGULAR,

@@ -88,21 +88,48 @@ function tierDoProcesso(p) {
  * carga ao vivo (caso real: 70 no retrato contra 93 ao vivo, no mesmo dia,
  * com os mesmos riscos).
  */
+/**
+ * Chaves area||processo pelas quais as respostas do BIA deste processo foram
+ * gravadas: a atual e as de antes de renomear (nomesAnteriores, gravado pelo
+ * salvarProcesso do app). respostas_bia e historico imutavel -- renomear nao
+ * reescreve as respostas antigas, so lembra o nome antigo. Mesma regra em
+ * _lerProcessos (public/api.js).
+ */
+function chavesBiaDoProcesso(p) {
+  const chaves = [`${(p && p.area) || ''}||${(p && p.processo) || ''}`];
+  ((p && Array.isArray(p.nomesAnteriores)) ? p.nomesAnteriores : []).forEach((c) => {
+    if (typeof c === 'string' && c.includes('||') && !chaves.includes(c)) chaves.push(c);
+  });
+  return chaves;
+}
+
+/**
+ * Resposta mais recente de cada processo: casa por processoId (respostas
+ * novas) ou por qualquer chave de chavesBiaDoProcesso. A ordem por data
+ * decide entre elas, nao a forma de casar.
+ */
+function _respostaMaisRecente(p, porChave, porId) {
+  const candidatas = chavesBiaDoProcesso(p).map((c) => porChave[c]);
+  if (p && p.id !== undefined) candidatas.push(porId[String(p.id)]);
+  return candidatas.filter(Boolean).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))[0] || null;
+}
+
 function resolverProcessosComBia(processosRaw, respostasBia) {
   const maisRecentePorChave = {};
+  const maisRecentePorId = {};
   (respostasBia || [])
     .slice()
     .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))
     .forEach((r) => {
+      const resumo = { score: Number(r.score) || 0, avaliado: true, timestamp: r.timestamp };
       const key = `${r.area}||${r.processo}`;
-      if (!maisRecentePorChave[key]) {
-        maisRecentePorChave[key] = { score: Number(r.score) || 0, avaliado: true };
-      }
+      if (!maisRecentePorChave[key]) maisRecentePorChave[key] = resumo;
+      if (r.processoId && !maisRecentePorId[String(r.processoId)]) maisRecentePorId[String(r.processoId)] = resumo;
     });
 
   const processosPorId = {};
   (processosRaw || []).forEach((p) => {
-    const resp = maisRecentePorChave[`${p.area}||${p.processo}`];
+    const resp = _respostaMaisRecente(p, maisRecentePorChave, maisRecentePorId);
     processosPorId[p.id] = Object.assign({}, p, {
       score: resp ? resp.score : 0,
       avaliado: resp ? resp.avaliado : false,
@@ -460,6 +487,7 @@ module.exports = {
   PESO_POR_FAIXA_FORNECEDOR,
   tierDoProcesso,
   resolverProcessosComBia,
+  chavesBiaDoProcesso,
   faixaCriticidadeFornecedor,
   pesoPorCriticidadeFornecedor,
   nivelDaMedicao,

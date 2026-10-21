@@ -329,3 +329,22 @@ test('serieMensal: fim de cada mes, novos e saidos, so os ids do escopo e marcos
   const vazio = HR.serieMensal(insumos, { meses: 2, mesAtual: '2026-07', agoraISO: '2026-07-20T12:00:00Z' });
   assert.deepStrictEqual(vazio.pontos.map((p) => p.carga), [0, 0], 'mes sem medicao: zero riscos contados');
 });
+
+// ---- Processo renomeado / resposta com processoId (21/10/2026) ----
+test('processo renomeado continua com o score do BIA pelo nome antigo (nomesAnteriores)', () => {
+  const processosRaw = [{ id: 'p1', area: 'Financeiro', processo: 'Faturamento Novo', nomesAnteriores: ['Financeiro||Faturamento'] }];
+  const respostasBia = [{ area: 'Financeiro', processo: 'Faturamento', score: 14, timestamp: '2026-09-10T00:00:00.000Z' }];
+  const porId = HR.resolverProcessosComBia(processosRaw, respostasBia);
+  assert.strictEqual(porId.p1.score, 14);
+});
+
+test('resposta com processoId casa pelo id e vence a mais antiga por nome', () => {
+  const processosRaw = [{ id: 'p1', area: 'Financeiro', processo: 'Faturamento' }];
+  const respostasBia = [
+    { area: 'Financeiro', processo: 'Faturamento', score: 14, timestamp: '2026-09-01T00:00:00.000Z' },
+    { area: 'Outra', processo: 'Outro nome', processoId: 'p1', score: 5, timestamp: '2026-09-20T00:00:00.000Z' },
+  ];
+  const porId = HR.resolverProcessosComBia(processosRaw, respostasBia);
+  assert.strictEqual(porId.p1.score, 5);
+  assert.deepStrictEqual(HR.chavesBiaDoProcesso({ area: 'A', processo: 'B', nomesAnteriores: ['A||X', 'lixo', 'A||B'] }), ['A||B', 'A||X']);
+});

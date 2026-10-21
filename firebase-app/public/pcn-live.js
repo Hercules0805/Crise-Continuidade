@@ -12,6 +12,9 @@ async function initPCNLive() {
     url.searchParams.append('action', 'dadosPCN');
     url.searchParams.append('area', PCN_AREA);
     url.searchParams.append('processo', PCN_PROCESSO);
+    // id primeiro: area+nome nao acham processo renomeado (o id do documento
+    // e a chave de quando ele foi criado).
+    if (typeof PROCESS_ID !== 'undefined' && PROCESS_ID) url.searchParams.append('id', PROCESS_ID);
     var res = await fetch(url, { headers: { 'Authorization': 'Bearer ' + PCN_TOKEN } });
     if (res.status === 401) { console.warn('PCN Live: sessão desta aba expirou; edição inline indisponível.'); return; }
     var text = await res.text();
@@ -381,9 +384,10 @@ async function saveLiveContatos() {
   // e nao deve poder reescrever area, tier ou RTO do processo.
   var payload = {
     action: 'salvarCamposPCN',
+    id: PCN_LIVE_DATA.processo.id,
     area: PCN_LIVE_DATA.processo.area,
     processo: PCN_LIVE_DATA.processo.processo,
-    bcpContatos: JSON.stringify(PCN_LIVE_DATA.processo.bcpContatos),
+    bcpContatos: PCN_LIVE_DATA.processo.bcpContatos || [],
     bcpPapeisCrise: JSON.stringify(papeis)
   };
   try {

@@ -1221,3 +1221,66 @@ test('gerarPCN: prompt traz as Instalações do processo (tipo, endereço, pesso
   assert.match(prompt, /NÃO inclua Fornecedores\/Pessoas\/Instalações nesta tabela/);
   assert.match(prompt, /NÃO invente nome nem endereço de local alternativo/);
 });
+
+// ---- Processo renomeado (21/10/2026) ----
+// O id do documento e a chave de quando o processo foi criado: depois de
+// renomear, processoKey(area, nome novo) nao acha nada. O id vem primeiro.
+const seedRenomeado = () => ({
+  processos: { ti__backup: { area: 'TI', processo: 'Backup Corporativo', nomesAnteriores: ['TI||Backup'] } },
+  respostas_bia: {
+    r1: { area: 'TI', processo: 'Backup', score: 14, timestamp: '2026-01-01T00:00:00.000Z' },
+  },
+});
+
+test('PCN de processo renomeado: salvarPCN, excluirPCN, dadosPCN e salvarCamposPCN acham pelo id', async () => {
+  const db = makeDb(seedRenomeado());
+  await WRITE_ACTIONS.salvarPCN(db, { id: 'ti__backup', area: 'TI', processo: 'Backup Corporativo', html: '<p>v1</p>' }, ctx());
+  assert.strictEqual(JSON.parse(db._store.processos.ti__backup.pcnSalvo).length, 1);
+  const r = await READ_ACTIONS.dadosPCN(db, { id: 'ti__backup', area: 'TI', processo: 'Backup Corporativo' });
+  assert.strictEqual(r.processo.id, 'ti__backup');
+  await WRITE_ACTIONS.salvarCamposPCN(db, { id: 'ti__backup', area: 'TI', processo: 'Backup Corporativo', bcpPapeisCrise: '{}' }, ctx());
+  await WRITE_ACTIONS.excluirPCN(db, { id: 'ti__backup' }, ctx());
+  assert.strictEqual(db._store.processos.ti__backup.pcnSalvo, '');
+});
+
+test('PCN de processo renomeado sem id (pagina antiga): cai na busca por area+nome', async () => {
+  const db = makeDb(seedRenomeado());
+  const r = await WRITE_ACTIONS.salvarPCN(db, { area: 'TI', processo: 'Backup Corporativo', html: '<p>v1</p>' }, ctx());
+  assert.strictEqual(r.versao, 1);
+  await assert.rejects(() => WRITE_ACTIONS.salvarPCN(db, { id: 'nao-existe', html: 'x' }, ctx()), AppError);
+});
+
+test('salvarCamposPCN grava bcpContatos como array, mesmo vindo como string JSON', async () => {
+  const db = makeDb(seed());
+  await WRITE_ACTIONS.salvarCamposPCN(db, { area: 'TI', processo: 'Backup', bcpContatos: '["d1","d2"]' }, ctx());
+  assert.deepStrictEqual(db._store.processos.ti__backup.bcpContatos, ['d1', 'd2']);
+  await WRITE_ACTIONS.salvarCamposPCN(db, { id: 'ti__backup', bcpContatos: ['d3'] }, ctx());
+  assert.deepStrictEqual(db._store.processos.ti__backup.bcpContatos, ['d3']);
+});
+
+test('listaDeContatos le array, string JSON, vazio e lixo', () => {
+  const { listaDeContatos } = require('./appLogic');
+  assert.deepStrictEqual(listaDeContatos(['a', 'b']), ['a', 'b']);
+  assert.deepStrictEqual(listaDeContatos('["a"]'), ['a']);
+  assert.deepStrictEqual(listaDeContatos(''), []);
+  assert.deepStrictEqual(listaDeContatos('nao e json'), []);
+  assert.deepStrictEqual(listaDeContatos(undefined), []);
+});
+
+test('gerarPCN de processo renomeado usa o score do nome antigo e contatos gravados como string', async () => {
+  const s = seedRenomeado();
+  s.processos.ti__backup.bcpContatos = '["d1"]';
+  s.dependencias = { d1: { nome: 'Fulano', categoria: 'Pessoas', telefone: '85 1234' } };
+  const db = makeDb(s);
+  let corpo = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    corpo = opts.body;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<h1>ok</h1>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarPCN(db, { id: 'ti__backup' }, ctx({ geminiApiKey: 'chave-teste' }));
+  } finally { global.fetch = original; }
+  assert.match(corpo, /Fulano/);
+  assert.match(corpo, /Tier 1/);
+});

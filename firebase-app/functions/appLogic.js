@@ -176,24 +176,65 @@ async function gerarLink(db, data, ctx) {
   return { success: true, token, link, expiraEm: expira.toISOString() };
 }
 
-/** Le o levantamento de PCN gravado no processo. */
-async function getLevantamentoPCN(db, data) {
+/**
+ * Documento do processo: por id quando vier, senao por area+processo.
+ *
+ * O id do documento e a chave de quando o processo foi CRIADO
+ * (processoKey(area, nome)). Depois de renomear, processoKey(area, nome novo)
+ * nao acha mais nada -- era o que fazia "Processo não encontrado" no PCN de
+ * processo renomeado (21/10/2026). Por isso o id vem primeiro; sem id, tenta
+ * a chave e depois a busca por campos (docId legado ou processo renomeado).
+ * Devolve { ref, snap } ou null quando nao existe.
+ */
+async function _acharProcesso(db, data) {
+  const col = db.collection(COLLECTION.processos);
+  const id = data.id === undefined || data.id === null ? '' : String(data.id).trim();
+  if (id) {
+    const ref = col.doc(id);
+    const snap = await ref.get();
+    return snap.exists ? { ref, snap } : null;
+  }
   const area = exigir(data.area, 'area');
   const processo = exigir(data.processo, 'processo');
-  const snap = await db.collection(COLLECTION.processos).doc(processoKey(area, processo)).get();
-  if (!snap.exists) return { success: true, levantamento: null };
-  const d = snap.data() || {};
+  const ref = col.doc(processoKey(area, processo));
+  const snap = await ref.get();
+  if (snap.exists) return { ref, snap };
+  const q = await col.where('area', '==', area).where('processo', '==', processo).get();
+  if (!q.docs.length) return null;
+  const refAchado = col.doc(q.docs[0].id);
+  return { ref: refAchado, snap: await refAchado.get() };
+}
+
+async function _exigirProcesso(db, data) {
+  const achado = await _acharProcesso(db, data);
+  if (!achado) throw new AppError('Processo não encontrado.');
+  return achado;
+}
+
+/**
+ * bcpContatos ja foi gravado de dois jeitos: array de ids (drawer do
+ * Processo) e string JSON (pagina do PCN, ate 21/10/2026). Le os dois.
+ */
+function listaDeContatos(valor) {
+  let v = valor;
+  if (typeof v === 'string') {
+    try { v = v.trim() ? JSON.parse(v) : []; } catch { v = []; }
+  }
+  return Array.isArray(v) ? v.filter((x) => x !== null && x !== undefined && String(x).trim() !== '').map(String) : [];
+}
+
+/** Le o levantamento de PCN gravado no processo. */
+async function getLevantamentoPCN(db, data) {
+  const achado = await _acharProcesso(db, data);
+  if (!achado) return { success: true, levantamento: null };
+  const d = achado.snap.data() || {};
   return { success: true, levantamento: d.levantamentoPCN || null };
 }
 
 /** Grava uma nova versao do PCN, preservando as anteriores. */
 async function salvarPCN(db, data, ctx) {
-  const area = exigir(data.area, 'area');
-  const processo = exigir(data.processo, 'processo');
   const html = exigir(data.html, 'html');
-  const ref = db.collection(COLLECTION.processos).doc(processoKey(area, processo));
-  const snap = await ref.get();
-  if (!snap.exists) throw new AppError('Processo não encontrado.');
+  const { ref, snap } = await _exigirProcesso(db, data);
 
   const atual = snap.data() || {};
   let versoes = [];
@@ -217,22 +258,27 @@ async function salvarPCN(db, data, ctx) {
 
 /** Apaga todas as versoes do PCN do processo. */
 async function excluirPCN(db, data) {
-  const area = exigir(data.area, 'area');
-  const processo = exigir(data.processo, 'processo');
-  const ref = db.collection(COLLECTION.processos).doc(processoKey(area, processo));
-  const snap = await ref.get();
-  if (!snap.exists) throw new AppError('Processo não encontrado.');
+  const { ref } = await _exigirProcesso(db, data);
   await ref.set({ pcnSalvo: '' }, { merge: true });
   return { success: true };
 }
 
-/** Score/tier de um processo: nao fica no doc, so a resposta mais recente tem. */
-async function _scoreDoProcesso(db, area, processo) {
-  const snap = await db.collection(COLLECTION.respostas)
-    .where('area', '==', area)
-    .where('processo', '==', processo)
-    .get();
-  const docs = snap.docs.map((d) => d.data()).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+/**
+ * Score/tier de um processo: nao fica no doc, so a resposta mais recente tem.
+ * Mesma regra de historicoRisco.resolverProcessosComBia: resposta com
+ * processoId deste processo, ou com area+nome atual, ou com um nome antigo
+ * (nomesAnteriores, gravado ao renomear).
+ */
+async function _scoreDoProcesso(db, p, id) {
+  const col = db.collection(COLLECTION.respostas);
+  const consultas = historicoRisco.chavesBiaDoProcesso(p).map((chave) => {
+    const [area, processo] = chave.split('||');
+    return col.where('area', '==', area).where('processo', '==', processo).get();
+  });
+  if (id) consultas.push(col.where('processoId', '==', String(id)).get());
+  const snaps = await Promise.all(consultas);
+  const docs = snaps.flatMap((s) => s.docs.map((d) => d.data()))
+    .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
   return docs[0] ? Number(docs[0].score) || 0 : 0;
 }
 
@@ -318,7 +364,7 @@ async function gerarPCN(db, data, ctx) {
   if (!snap.exists) throw new AppError('Processo não encontrado.');
   const p = snap.data() || {};
 
-  const score = await _scoreDoProcesso(db, p.area, p.processo);
+  const score = await _scoreDoProcesso(db, p, snap.id);
   const tier = calcularTier(score);
 
   const depsSnap = await db.collection(COLLECTION.dependencias).get();
@@ -350,7 +396,7 @@ async function gerarPCN(db, data, ctx) {
   // e a instalação alternativa (contingência) -- ou a ausência dela.
   const instalacoesPCN = _instalacoesDoProcessoPCN(p, dependencias);
 
-  const contatosIds = p.bcpContatos || [];
+  const contatosIds = listaDeContatos(p.bcpContatos);
   const contatosDetalhados = contatosIds.map((cid) => {
     const dep = dependencias.find((d) => d.id === cid);
     return dep ? { nome: dep.nome, setor: dep.setor, empresa: dep.empresa, telefone: dep.telefone, email: dep.email, papel: dep.detalhes } : null;
@@ -913,7 +959,7 @@ async function gerarDRP(db, data, ctx) {
   } catch (e) { processosLigados = []; }
 
   const processosComTier = await Promise.all(processosLigados.map(async (p) => {
-    const score = await _scoreDoProcesso(db, p.area, p.processo);
+    const score = await _scoreDoProcesso(db, p, p.id);
     return { ...p, tier: _tierProcessoServidor(score, p.tierManual) };
   }));
   // SLAs dos contratos vigentes (secao propria + contexto do prompt). Falha
@@ -1483,12 +1529,9 @@ async function exportarRiscoDocumento(db, data, ctx) {
  * fundiu em Dependencias -- pcn-live.js agora le so `dependencias`.
  */
 async function dadosPCN(db, data) {
-  const area = exigir(data.area, 'area');
-  const processo = exigir(data.processo, 'processo');
-
-  const snap = await db.collection(COLLECTION.processos).doc(processoKey(area, processo)).get();
-  if (!snap.exists) throw new AppError('Processo não encontrado.');
+  const { snap } = await _exigirProcesso(db, data);
   const p = { id: snap.id, ...(snap.data() || {}) };
+  p.bcpContatos = listaDeContatos(p.bcpContatos);
 
   const depsSnap = await db.collection('dependencias').get();
   const dependencias = depsSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
@@ -1506,18 +1549,16 @@ async function dadosPCN(db, data) {
 const CAMPOS_EDITAVEIS_PCN = ['bcpContatos', 'bcpPapeisCrise'];
 
 async function salvarCamposPCN(db, data, ctx) {
-  const area = exigir(data.area, 'area');
-  const processo = exigir(data.processo, 'processo');
-  const ref = db.collection(COLLECTION.processos).doc(processoKey(area, processo));
-  const snap = await ref.get();
-  if (!snap.exists) throw new AppError('Processo não encontrado.');
+  const { ref } = await _exigirProcesso(db, data);
 
   const patch = {};
   CAMPOS_EDITAVEIS_PCN.forEach((campo) => {
     if (data[campo] !== undefined) patch[campo] = data[campo];
   });
+  // Sempre array de ids, como o drawer do Processo grava.
+  if (patch.bcpContatos !== undefined) patch.bcpContatos = listaDeContatos(patch.bcpContatos);
   const recusados = Object.keys(data).filter(
-    (k) => !['action', 'area', 'processo', ...CAMPOS_EDITAVEIS_PCN].includes(k)
+    (k) => !['action', 'id', 'area', 'processo', ...CAMPOS_EDITAVEIS_PCN].includes(k)
   );
   if (!Object.keys(patch).length) throw new AppError('Nenhum campo editável informado.');
 
@@ -1768,5 +1809,6 @@ module.exports = {
   VALIDADE_DIAS,
   PAGINA,
   processoKey,
+  listaDeContatos,
   slug,
 };

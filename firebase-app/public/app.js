@@ -190,7 +190,8 @@ function route() {
   }
   // Deep link: abrir processo na aba específica (aguarda dados carregarem)
   if (params.get('editar')) {
-    const id = Number(params.get('editar'));
+    // Ids do Firestore sao texto: Number() virava NaN e abria "Novo Processo".
+    const id = params.get('editar');
     const aba = params.get('aba') || 'identificacao';
     function tryOpenProcess() {
       if (window.processosData && window.processosData.length) {
@@ -826,7 +827,10 @@ window.trocarAbaProcesso = (aba) => {
   if (aba === 'bcp') {
     renderFornecedoresBcp();
     renderPcnResumoBcp();
+    renderContatosCriseBcp();
   }
+  if (aba === 'drp') renderDrpDoProcesso();
+  if (aba === 'identificacao') renderVinculosProcesso();
   // Renderizar avaliação ao abrir aba
   if (aba === 'avaliacao') renderAvaliacaoInline();
   if (estavaLimpo) _edProcesso.marcar();
@@ -2617,11 +2621,11 @@ async function processos() {
       </div>
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
         <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
-          <button id="tab-identificacao" onclick="trocarAbaProcesso('identificacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Identificação</button>
-          <button id="tab-avaliacao" onclick="trocarAbaProcesso('avaliacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Avaliação</button>
-          <button id="tab-bia" onclick="trocarAbaProcesso('bia')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BIA</button>
-          <button id="tab-bcp" onclick="trocarAbaProcesso('bcp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">BCP</button>
-          <button id="tab-drp" onclick="trocarAbaProcesso('drp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">DRP</button>
+          <button id="tab-identificacao" class="aba-drawer aba-drawer--ativa" role="tab" onclick="trocarAbaProcesso('identificacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;cursor:pointer;">Identificação</button>
+          <button id="tab-avaliacao" class="aba-drawer" role="tab" onclick="trocarAbaProcesso('avaliacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;cursor:pointer;">Avaliação</button>
+          <button id="tab-bia" class="aba-drawer" role="tab" onclick="trocarAbaProcesso('bia')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;cursor:pointer;">BIA</button>
+          <button id="tab-bcp" class="aba-drawer" role="tab" onclick="trocarAbaProcesso('bcp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;cursor:pointer;">BCP</button>
+          <button id="tab-drp" class="aba-drawer" role="tab" onclick="trocarAbaProcesso('drp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;cursor:pointer;">DRP</button>
         </div>
         <div style="flex:1;overflow-y:auto;padding:20px 24px;">
           <input type="hidden" id="fId">
@@ -2655,6 +2659,10 @@ async function processos() {
                 <option value="Tier 3 (Suporte)">Tier 3 (Suporte)</option>
               </select>
               <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Indica a criticidade percebida antes da avaliação formal. Após a avaliação, o tier calculado prevalece.</span>
+            </div>
+            <div style="margin-bottom:16px;padding-top:12px;border-top:1px solid #f0f0f0;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Vínculos do processo</label>
+              <div id="processoVinculos"></div>
             </div>
             <div style="margin-bottom:16px;padding-top:12px;border-top:1px solid #f0f0f0;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Levantamento PCN</label>
@@ -2767,6 +2775,10 @@ async function processos() {
               <div id="bcpPcnResumo"></div>
             </div>
             <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Equipe de crise</label>
+              <div id="bcpContatosCrise"></div>
+            </div>
+            <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Fornecedores</label>
               <div id="bcpFornecedoresTabela"></div>
             </div>
@@ -2775,13 +2787,19 @@ async function processos() {
           <!-- ABA: DRP -->
           <div id="painel-drp" style="display:none;">
             <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">DRP Status</label>
+              <label for="fDrpStatus" style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">DRP Status</label>
               <select id="fDrpStatus" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
                 <option value="">Selecione...</option>
                 <option>DRP Pendente</option>
                 <option>DRP em Andamento</option>
                 <option>DRP Realizado</option>
               </select>
+              <div id="drpProcessoResumo" style="font-size:0.74em;color:#888;margin-top:4px;"></div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Planos de recuperação que sustentam o processo</label>
+              <p style="font-size:0.78em;color:#888;margin-bottom:8px;">O DRP é de cada dependência. Aqui aparecem as dependências do processo (aba BIA), as dos Serviços que o suportam e os componentes abaixo delas — o mesmo caminho do Mapa de Continuidade.</p>
+              <div id="drpProcessoTabela"></div>
             </div>
           </div>
         </div>
@@ -3379,12 +3397,6 @@ function initDependenciaTags(p) {
   renderDependenciaTabela();
 }
 
-function renderDependenciaTags() {
-  // Atualizar hidden input e re-renderizar tabela
-  document.getElementById('fDependencia').value = window._dependenciaSelecionadas.join(', ');
-  renderDependenciaTabela();
-}
-
 function renderDependenciaTabela() {
   const tabelaContainer = document.getElementById('fDependenciaTabela');
   if (!tabelaContainer) return;
@@ -3441,16 +3453,25 @@ function renderDependenciaTabela() {
     
     const tags = recursos.map((item) => {
       const globalIdx = selecionadas.indexOf(item);
-      const dep = item.id ? catalogo.find(d => d.id === item.id) : null;
+      const ehProcesso = item.categoria === 'Processos Internos' || item.categoria === 'Processo Interno';
+      const dep = item.id && !ehProcesso ? catalogo.find(d => d.id === item.id) : null;
       const semVinculo = item.id === null || item.id === undefined;
-      const isProcessoLink = item.categoria === 'Processos Internos' && item.id;
+      // Vinculo cujo cadastro sumiu: o Mapa de Continuidade descarta esse item
+      // em silencio; aqui ele aparece cinza, "(removida)", para ser tirado.
+      // So com o catalogo carregado -- lista vazia nao prova que sumiu.
+      const removida = !semVinculo && (ehProcesso
+        ? (window.processosData || []).length > 0 && !(window.processosData || []).some(p => String(p.id) === String(item.id))
+        : catalogo.length > 0 && !dep);
+      const isProcessoLink = ehProcesso && item.id && !removida;
       const tooltipBase = (dep ? [dep.empresa, dep.detalhes, dep.telefone].filter(Boolean).join(' • ') : '') || item.nome;
-      const tooltip = tooltipBase + (semVinculo ? ' (sem vínculo com o cadastro -- remova e adicione de novo pra linkar)' : isProcessoLink ? ' (clique para abrir o processo)' : '');
-      const corFundo = semVinculo ? '#fff' : '#d60014';
-      const corTexto = semVinculo ? '#555' : 'white';
-      const borda = semVinculo ? '1.5px dashed #bbb' : '1.5px solid #d60014';
-      const onclickTag = isProcessoLink ? ` onclick="editarProcesso('${item.id}')"` : '';
-      return `<span class="dep-tag-item"${onclickTag} style="display:inline-flex;align-items:center;gap:3px;background:${corFundo};color:${corTexto};border:${borda};${isProcessoLink ? 'cursor:pointer;' : 'cursor:default;'}padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;" title="${esc(tooltip)}">${esc(item.nome)}${semVinculo ? ' <span style="opacity:0.7;">⚠</span>' : ''}<button onclick="event.stopPropagation();removerDependenciaTag(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:${semVinculo ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.7)'};line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
+      const tooltip = tooltipBase + (semVinculo ? ' (sem vínculo com o cadastro -- remova e adicione de novo pra linkar)' : removida ? ' (o cadastro foi removido -- não aparece no Mapa de Continuidade)' : isProcessoLink ? ' (clique para abrir o processo)' : '');
+      const apagada = semVinculo || removida;
+      const corFundo = removida ? '#f0f0f0' : semVinculo ? '#fff' : '#d60014';
+      const corTexto = apagada ? '#555' : 'white';
+      const borda = removida ? '1.5px solid #ccc' : semVinculo ? '1.5px dashed #bbb' : '1.5px solid #d60014';
+      const onclickTag = isProcessoLink ? ` onclick="editarProcesso('${escJs(item.id)}')"` : '';
+      const sufixo = removida ? ' <span style="opacity:0.8;">(removida)</span>' : semVinculo ? ' <span style="opacity:0.7;">⚠</span>' : '';
+      return `<span class="dep-tag-item${removida ? ' dep-tag-item--removida' : ''}"${onclickTag} style="display:inline-flex;align-items:center;gap:3px;background:${corFundo};color:${corTexto};border:${borda};${isProcessoLink ? 'cursor:pointer;' : 'cursor:default;'}padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;" title="${esc(tooltip)}">${esc(item.nome)}${sufixo}<button onclick="event.stopPropagation();removerDependenciaTag(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:${apagada ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.7)'};line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
     }).join(' ');
 
     const emptyMsg = !count ? `<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum recurso mapeado</span>` : '';
@@ -3665,123 +3686,6 @@ window.removerDependenciaTag = (idx) => {
   renderDependenciaTabela();
 };
 
-// ============================================================
-// BCP - Avaliação de Riscos
-// ============================================================
-window._bcpRiscos = [];
-
-function renderRiscosBcp() {
-  const container = document.getElementById('bcpRiscosTabela');
-  if (!window._bcpRiscos.length) {
-    container.innerHTML = '<p class="vazio-inline">Nenhum evento de risco cadastrado.</p>';
-    return;
-  }
-
-  const corProb = { 'Baixo': '#e8f5e9', 'Médio': '#fff8e1', 'Alto': '#ffebee' };
-  const corProbText = { 'Baixo': '#2e7d32', 'Médio': '#f57c00', 'Alto': '#c62828' };
-
-  container.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;font-size:0.85em;border:1px solid #e0e0e0;border-radius:7px;overflow:hidden;">
-      <thead>
-        <tr style="background:#f5f6fa;">
-          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:28%;">Evento</th>
-          <th style="padding:8px 10px;text-align:center;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:18%;">Probabilidade</th>
-          <th style="padding:8px 10px;text-align:center;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:18%;">Impacto</th>
-          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:28%;">Mitigação</th>
-          <th style="padding:8px 6px;text-align:center;border-bottom:1px solid #e0e0e0;width:8%;"></th>
-        </tr>
-      </thead>
-      <tbody>
-        ${window._bcpRiscos.map((r, idx) => `<tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:6px 10px;"><input type="text" value="${esc(r.evento || '')}" onchange="atualizarRiscoBcp(${idx},'evento',this.value)" placeholder="Descreva o evento" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
-          <td style="padding:6px 6px;text-align:center;"><select onchange="atualizarRiscoBcp(${idx},'probabilidade',this.value)" style="padding:5px 8px;border-radius:12px;border:none;font-size:0.88em;font-weight:600;cursor:pointer;background:${corProb[r.probabilidade] || '#f5f5f5'};color:${corProbText[r.probabilidade] || '#555'};">
-            <option value="" ${!r.probabilidade ? 'selected' : ''}>-</option>
-            <option value="Baixo" ${r.probabilidade === 'Baixo' ? 'selected' : ''}>Baixo</option>
-            <option value="Médio" ${r.probabilidade === 'Médio' ? 'selected' : ''}>Médio</option>
-            <option value="Alto" ${r.probabilidade === 'Alto' ? 'selected' : ''}>Alto</option>
-          </select></td>
-          <td style="padding:6px 6px;text-align:center;"><select onchange="atualizarRiscoBcp(${idx},'impacto',this.value)" style="padding:5px 8px;border-radius:12px;border:none;font-size:0.88em;font-weight:600;cursor:pointer;background:${corProb[r.impacto] || '#f5f5f5'};color:${corProbText[r.impacto] || '#555'};">
-            <option value="" ${!r.impacto ? 'selected' : ''}>-</option>
-            <option value="Baixo" ${r.impacto === 'Baixo' ? 'selected' : ''}>Baixo</option>
-            <option value="Médio" ${r.impacto === 'Médio' ? 'selected' : ''}>Médio</option>
-            <option value="Alto" ${r.impacto === 'Alto' ? 'selected' : ''}>Alto</option>
-          </select></td>
-          <td style="padding:6px 10px;"><input type="text" value="${esc(r.mitigacao || '')}" onchange="atualizarRiscoBcp(${idx},'mitigacao',this.value)" placeholder="Ação de mitigação" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
-          <td style="padding:6px 6px;text-align:center;">
-            <button onclick="removerRiscoBcp(${idx})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
-          </td>
-        </tr>`).join('')}
-      </tbody>
-    </table>`;
-}
-
-window.adicionarRiscoBcp = () => {
-  window._bcpRiscos.push({ evento: '', probabilidade: '', impacto: '', mitigacao: '' });
-  renderRiscosBcp();
-};
-
-window.atualizarRiscoBcp = (idx, campo, valor) => {
-  if (window._bcpRiscos[idx]) {
-    window._bcpRiscos[idx][campo] = valor;
-    // Re-render para atualizar cores dos selects
-    if (campo === 'probabilidade' || campo === 'impacto') renderRiscosBcp();
-  }
-};
-
-window.removerRiscoBcp = (idx) => {
-  window._bcpRiscos.splice(idx, 1);
-  renderRiscosBcp();
-};
-
-// ============================================================
-// BCP - Medidas Preventivas
-// ============================================================
-window._bcpPreventivas = [];
-
-function renderPreventivasBcp() {
-  const container = document.getElementById('bcpPreventivasTabela');
-  if (!window._bcpPreventivas.length) {
-    container.innerHTML = '<p class="vazio-inline">Nenhuma medida preventiva cadastrada.</p>';
-    return;
-  }
-
-  container.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;font-size:0.85em;border:1px solid #e0e0e0;border-radius:7px;overflow:hidden;">
-      <thead>
-        <tr style="background:#f5f6fa;">
-          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:30%;">Controle</th>
-          <th style="padding:8px 10px;text-align:left;font-weight:600;color:#555;border-bottom:1px solid #e0e0e0;width:62%;">Descrição</th>
-          <th style="padding:8px 6px;text-align:center;border-bottom:1px solid #e0e0e0;width:8%;"></th>
-        </tr>
-      </thead>
-      <tbody>
-        ${window._bcpPreventivas.map((r, idx) => `<tr style="border-bottom:1px solid #f0f0f0;">
-          <td style="padding:6px 10px;"><input type="text" value="${esc(r.controle || '')}" onchange="atualizarPreventivaBcp(${idx},'controle',this.value)" placeholder="Ex: Energia" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
-          <td style="padding:6px 10px;"><input type="text" value="${esc(r.descricao || '')}" onchange="atualizarPreventivaBcp(${idx},'descricao',this.value)" placeholder="Descreva a medida preventiva" style="width:100%;border:1px solid #e8e8e8;border-radius:5px;padding:6px 8px;font-size:0.95em;box-sizing:border-box;"></td>
-          <td style="padding:6px 6px;text-align:center;">
-            <button onclick="removerPreventivaBcp(${idx})" style="background:none;border:none;cursor:pointer;color:#c62828;font-size:1.1em;" title="Remover">&times;</button>
-          </td>
-        </tr>`).join('')}
-      </tbody>
-    </table>`;
-}
-
-window.adicionarPreventivaBcp = () => {
-  window._bcpPreventivas.push({ controle: '', descricao: '' });
-  renderPreventivasBcp();
-};
-
-window.atualizarPreventivaBcp = (idx, campo, valor) => {
-  if (window._bcpPreventivas[idx]) {
-    window._bcpPreventivas[idx][campo] = valor;
-  }
-};
-
-window.removerPreventivaBcp = (idx) => {
-  window._bcpPreventivas.splice(idx, 1);
-  renderPreventivasBcp();
-};
-
 /** Título do drawer de Processo, com badge de tier/score quando já avaliado -- reaproveitado por abrirModalProcesso e, sem fechar, por salvarProcesso (depois de um "Salvar" que criou o registro). */
 function _atualizarTituloDrawerProcesso(p) {
   const titulo = p ? 'Editar Processo' : 'Novo Processo';
@@ -3814,7 +3718,9 @@ window.abrirModalProcesso = (p) => {
   // bcpContatos nao tem mais UI propria no drawer (removida -- quem edita
   // agora e o editor de Equipe de Crise dentro do proprio PCN). So hidrata
   // pra nao perder o dado no proximo salvarProcesso().
-  window._bcpContatos = p && p.bcpContatos ? (typeof p.bcpContatos === 'string' ? JSON.parse(p.bcpContatos) : p.bcpContatos) : [];
+  // _lerProcessos (api.js) ja entrega sempre array -- mesmo do que a pagina
+  // do PCN gravou como string JSON ate 21/10/2026.
+  window._bcpContatos = p && Array.isArray(p.bcpContatos) ? p.bcpContatos.slice() : [];
 
   // Preencher campos DRP
   document.getElementById('fDrpStatus').value = p ? (p.drpStatus || '') : '';
@@ -3858,6 +3764,11 @@ window.abrirModalProcesso = (p) => {
   window._bcpPcnVersaoAtual = null;
   window._bcpPcnEditando = false;
   renderPcnResumoBcp();
+  // A tabela de Fornecedores do BCP e a aba DRP sao do processo ANTERIOR ate
+  // a aba ser aberta de novo -- sem limpar, salvar este processo gravaria o
+  // Plano B/SLA daquele.
+  const tabFornBcp = document.getElementById('bcpFornecedoresTabela');
+  if (tabFornBcp) tabFornBcp.innerHTML = '';
   // Mostrar status e botão do levantamento PCN
   const levStatus = document.getElementById('levantamentoStatus');
   const btnAbrirLev = document.getElementById('btnAbrirLev');
@@ -3997,7 +3908,7 @@ window.salvarProcesso = async () => {
 
     // Salvar avaliação se respondida
     if (temResposta) {
-      await API.post('salvarRespostas', { area: p.area, processo: p.processo, scores: avalScores });
+      await API.post('salvarRespostas', { area: p.area, processo: p.processo, processoId: p.id || result.id, scores: avalScores });
     }
     _edProcesso.marcar({ p: { ...p, id: p.id || result.id }, aval: avalScores });
 
@@ -4057,11 +3968,11 @@ window.verDetalhesProcesso = (id) => {
   document.getElementById('modalDetalhesConteudo').innerHTML = `
     <div style="display:grid;gap:16px;">
       <div><strong>Área:</strong> ${esc(p.area)}</div>
-      <div><strong>Responsável:</strong> ${p.responsavelArea || p.responsavel || '-'}</div>
+      <div><strong>Responsável:</strong> ${esc(p.responsavelArea || p.responsavel || '-')}</div>
       <div><strong>Solução:</strong> ${esc(p.solucao || '-')}</div>
       <div><strong>Status:</strong> ${_htmlBadge(_nivelTierProcesso(status), status + (p.score > 0 ? ' (Score: ' + p.score + ')' : ''))}</div>
       <div><strong>Descrição do Impacto:</strong><br>${esc(p.descricao || '-')}</div>
-      <div><strong>Dependência Crítica:</strong> ${p.dependencia || '-'}</div>
+      <div><strong>Dependência Crítica:</strong> ${esc(p.dependencia || '-')}</div>
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
         <div style="background:#f5f5f5;padding:12px;border-radius:6px;text-align:center;">
           <div style="font-size:0.8em;color:#666;margin-bottom:4px;">RTO</div>
@@ -4072,8 +3983,8 @@ window.verDetalhesProcesso = (id) => {
           <div style="font-weight:600;color:#d60014;">${p.rpo || '-'}</div>
         </div>
         <div style="background:#f5f5f5;padding:12px;border-radius:6px;text-align:center;">
-          <div style="font-size:0.8em;color:#666;margin-bottom:4px;">MTPD</div>
-          <div style="font-weight:600;color:#d60014;">${p.mtpd || '-'}</div>
+          <div style="font-size:0.8em;color:#666;margin-bottom:4px;">MTD</div>
+          <div style="font-weight:600;color:#d60014;">${esc(p.mtd || '-')}</div>
         </div>
       </div>
       <div><strong>BIA Homologada:</strong> ${p.biaHomologada || '-'}</div>
@@ -5208,6 +5119,21 @@ window.removerTemplateDrp = () => {
  * editar/gerar novo. A edição inline por seção e o índice lateral ficam no
  * popup completo (_buildDRPPage).
  */
+/** Estilo da prévia de DRP (drawer de Dependência e aba DRP do Processo), injetado uma vez. */
+function _garantirEstiloPreviaDrp() {
+  if (document.getElementById('drpPreviewStyle')) return;
+  const style = document.createElement('style');
+  style.id = 'drpPreviewStyle';
+  style.textContent = `
+    .drp-preview h1, .drp-preview h2, .drp-preview h3 { color:#d60014; margin:14px 0 8px; }
+    .drp-preview h1 { font-size:1.25em; } .drp-preview h2 { font-size:1.1em; } .drp-preview h3 { font-size:1em; }
+    .drp-preview p, .drp-preview li { font-size:0.95em; color:#333; }
+    .drp-preview table { width:100%; border-collapse:collapse; margin:10px 0; font-size:0.85em; }
+    .drp-preview th, .drp-preview td { border:1px solid #e0e0e0; padding:6px 10px; text-align:left; }
+    .drp-preview th { background:#f5f6fa; }`;
+  document.head.appendChild(style);
+}
+
 function renderDrpResumo() {
   const container = document.getElementById('drpResumo');
   if (!container) return;
@@ -5234,28 +5160,28 @@ function renderDrpResumo() {
     return;
   }
 
-  if (!document.getElementById('drpPreviewStyle')) {
-    const style = document.createElement('style');
-    style.id = 'drpPreviewStyle';
-    style.textContent = `
-      .drp-preview h1, .drp-preview h2, .drp-preview h3 { color:#d60014; margin:14px 0 8px; }
-      .drp-preview h1 { font-size:1.25em; } .drp-preview h2 { font-size:1.1em; } .drp-preview h3 { font-size:1em; }
-      .drp-preview p, .drp-preview li { font-size:0.95em; color:#333; }
-      .drp-preview table { width:100%; border-collapse:collapse; margin:10px 0; font-size:0.85em; }
-      .drp-preview th, .drp-preview td { border:1px solid #e0e0e0; padding:6px 10px; text-align:left; }
-      .drp-preview th { background:#f5f6fa; }`;
-    document.head.appendChild(style);
-  }
+  _garantirEstiloPreviaDrp();
 
   const idx = versoes.length - 1;
   const versao = versoes[idx];
-  const limpo = sanitizarPCN(versao.html || '');
   const dataFmt = versao.data ? new Date(versao.data).toLocaleString('pt-BR') : '-';
   container.innerHTML = `
     <div style="font-size:0.82em;color:#666;margin-bottom:8px;">Versão ${versao.versao || (idx + 1)} · gerado em ${dataFmt}${versao.autor ? ' · ' + esc(versao.autor) : ''}</div>
     <div class="drp-preview" style="max-height:360px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:8px;padding:16px 20px;background:#fff;line-height:1.55;">
-      ${limpo.html}
+      <p class="vazio-inline">⏳ Carregando…</p>
     </div>`;
+  // drpSalvo guarda so versao/data/autor; o HTML mora em drp_conteudo e vem
+  // por obterDRP (que confere o perfil). Antes a previa lia versao.html daqui
+  // e saia sempre em branco.
+  const caixa = container.querySelector('.drp-preview');
+  API.get('obterDRP', { id }).then((r) => {
+    if ((document.getElementById('depId') || {}).value !== id) return;
+    const lista = (r && r.versoes) || [];
+    const ult = lista[lista.length - 1];
+    caixa.innerHTML = ult ? sanitizarPCN(ult.html || '').html : '<p class="vazio-inline">Nenhuma versão de DRP encontrada.</p>';
+  }).catch((e) => {
+    caixa.innerHTML = `<p class="vazio-inline" style="color:#c62828;">${esc(_mensagemErro(e, 'Não foi possível carregar o DRP.'))}</p>`;
+  });
 }
 
 /**
@@ -17207,7 +17133,7 @@ window.abrirLevantamento = () => {
   if (!p || !p.levantamentoPCN) return showToast('Nenhum levantamento preenchido.', '#e65100');
   // Abrir visualização (buscar dados do backend)
   showToast('📄 Carregando...', '#d60014');
-  API.get('getLevantamentoPCN', { area: p.area, processo: p.processo }).then(data => {
+  API.get('getLevantamentoPCN', { id: p.id, area: p.area, processo: p.processo }).then(data => {
     if (data.error) return showToast('❌ ' + data.error, '#c62828');
     const win = window.open('', '_blank');
     if (!win) return showToast('Popup bloqueado.', '#e65100');
@@ -17240,7 +17166,7 @@ window.abrirLevantamentoDireto = (id) => {
   const p = window.processosData.find(proc => proc.id === id);
   if (!p || !p.levantamentoPCN) return showToast('Nenhum levantamento preenchido.', '#e65100');
   showToast('📄 Carregando...', '#d60014');
-  API.get('getLevantamentoPCN', { area: p.area, processo: p.processo }).then(data => {
+  API.get('getLevantamentoPCN', { id: p.id, area: p.area, processo: p.processo }).then(data => {
     if (data.error) return showToast('❌ ' + data.error, '#c62828');
     const win = window.open('', '_blank');
     if (!win) return showToast('Popup bloqueado.', '#e65100');
@@ -17256,7 +17182,7 @@ window.abrirLevantamentoDireto = (id) => {
 // ============================================================
 // DOSSIÊ DO PROCESSO
 // ============================================================
-window.gerarDossieProcesso = () => {
+window.gerarDossieProcesso = async () => {
   const id = document.getElementById('fId').value || '';
   const p = id ? window.processosData.find(proc => proc.id === id) : null;
   if (!p) return showToast('Salve o processo antes de gerar o dossiê.', '#e65100');
@@ -17289,6 +17215,10 @@ window.gerarDossieProcesso = () => {
   const respostas = p.respostas || {};
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado.', '#e65100');
+  // Depois do window.open (senão o navegador bloqueia o popup): os Serviços
+  // entram no DRP do processo, igual à aba DRP do drawer.
+  const servicosDossie = await API.getServicos().catch(() => []);
+  const drpItens = MapaContinuidade.dependenciasDoProcesso({ processo: p, dependencias: catalogo, servicos: servicosDossie });
   win.document.write('<html><head><title>Dossiê - ' + p.processo + '</title><style>:root{--risk-critical:#d60014;--risk-high:#b64a12;--risk-medium:#9a6700;--risk-low:#38bb0e}body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6}h1{color:#d60014}h2{color:#d60014;border-bottom:2px solid #fce8ea;padding-bottom:6px;margin-top:24px}table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt}th{background:#d60014;color:white;padding:8px 10px;text-align:left}td{padding:7px 10px;border:1px solid #e0e0e0}.badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:9pt;font-weight:700;color:white;background:' + Criticidade.corDoTier(tier) + '}.header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px}.header .sub{font-size:9pt;color:#888;margin-top:4px;font-weight:400}.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}.btn-print:hover{opacity:.9}@media print{.btn-print{display:none!important}}</style></head><body>');
   win.document.write('<div class="header"><div><img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display=\'none\'"><div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div><h1>' + p.processo + '</h1><div class="sub">' + p.area + ' — ' + responsavel + ' • ' + new Date().toLocaleDateString('pt-BR') + ' • Fortes Tecnologia</div></div><button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button></div><span class="badge">' + tier + ' • Score ' + score + '</span>');
   win.document.write('<h2>Identificação</h2><p><b>Descrição:</b> ' + (p.descricaoFuncional || '-') + '</p>');
@@ -17296,7 +17226,20 @@ window.gerarDossieProcesso = () => {
   if (depItens.length) { win.document.write('<h3>Dependências</h3><table><tr><th>Categoria</th><th>Recurso</th><th>Detalhe</th></tr>'); depItens.forEach(function(d) { win.document.write('<tr><td><b>' + d.categoria + '</b></td><td>' + d.nome + '</td><td>' + (d.detalhe || '-') + '</td></tr>'); }); win.document.write('</table>'); }
   win.document.write('<h2>BCP</h2><p><b>Status:</b> ' + (p.bcpStatus || '-') + '</p>');
   if (contatos.length) { win.document.write('<table><tr><th>Nome</th><th>Empresa</th><th>Setor</th><th>Telefone</th><th>Email</th></tr>'); contatos.forEach(function(d) { win.document.write('<tr><td><b>' + d.nome + '</b></td><td>' + (d.empresa||'-') + '</td><td>' + (d.setor||'-') + '</td><td>' + (d.telefone||'-') + '</td><td>' + (d.email||'-') + '</td></tr>'); }); win.document.write('</table>'); }
-  win.document.write('<h2>DRP</h2><p><b>Status:</b> ' + (p.drpStatus || '-') + '</p><p style="color:#888;font-size:9pt;">Componentes técnicos do serviço aparecem na tabela de Dependências acima (categorias API, Banco de Dados, Infraestrutura, Segurança, Servidor, Sistema).</p>');
+  win.document.write('<h2>DRP</h2><p><b>Status:</b> ' + esc(p.drpStatus || '-') + '</p>');
+  if (drpItens.length) {
+    win.document.write('<table><tr><th>Dependência</th><th>Origem</th><th>RTO</th><th>DRP</th></tr>');
+    drpItens.forEach(function (it) {
+      const versoes = it.dep ? _parsePCNVersoes(it.dep.drpSalvo) : [];
+      const ult = versoes[versoes.length - 1];
+      const situacao = it.ausente ? '(removida)' : versoes.length ? 'Gerado' + (ult && ult.data ? ' em ' + new Date(ult.data).toLocaleDateString('pt-BR') : '') : 'Sem DRP';
+      const rto = it.dep ? ServicoComposicao.formatarDuracao(ServicoComposicao.valorMin(it.dep, 'rto')) : '—';
+      win.document.write('<tr><td><b>' + esc(it.nome) + '</b><br><span style="color:#888;font-size:8.5pt;">' + esc(it.categoria || '') + '</span></td><td>' + it.origens.map(esc).join('<br>') + '</td><td>' + esc(rto) + '</td><td>' + esc(situacao) + '</td></tr>');
+    });
+    win.document.write('</table>');
+  } else {
+    win.document.write('<p style="color:#888;font-size:9pt;">Nenhuma dependência técnica mapeada (aba BIA ou Serviços que suportam o processo).</p>');
+  }
   win.document.write('<div style="margin-top:30px;border-top:1px solid #ddd;padding-top:10px;font-size:8pt;color:#999;text-align:center;">Dossiê gerado em ' + new Date().toLocaleDateString('pt-BR') + ' • Fortes Tecnologia</div></body></html>');
   win.document.close();
 };
@@ -17834,7 +17777,7 @@ async function salvarVersaoPCN(){
   var btn=document.querySelector('button[onclick="salvarVersaoPCN()"]');
   if(btn){btn.disabled=true;btn.textContent='⏳ Salvando...';}
   try{
-    var payload = JSON.stringify({action:'salvarPCN',area:PCN_AREA,processo:PCN_PROCESSO,html:conteudo});
+    var payload = JSON.stringify({action:'salvarPCN',id:PROCESS_ID,area:PCN_AREA,processo:PCN_PROCESSO,html:conteudo});
     var enviar = async function(forcar){
       var tk = await tokenDoSistema(forcar);
       return fetch(PCN_API_URL, {method:'POST',headers:{'Content-Type':'text/plain;charset=UTF-8','Authorization':'Bearer '+tk},body:payload});
@@ -17850,7 +17793,7 @@ async function salvarVersaoPCN(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
-<script src="https://bia-forte-2025.web.app/pcn-live.js?v=10"></script>
+<script src="https://bia-forte-2025.web.app/pcn-live.js?v=11"></script>
 <script src="https://bia-forte-2025.web.app/tabela-editavel.js?v=1"></script>
 </body>
 </html>`;
@@ -18238,13 +18181,23 @@ function renderFornecedoresBcp() {
   // Ate 20/09/2026 estes dois campos eram desenhados sempre vazios e ninguem os
   // lia de volta: o usuario digitava contingencia e SLA, salvava, e o conteudo
   // sumia — inclusive so de trocar de aba, porque a tabela e refeita do zero.
-  const planoBSalvo = _mapaDoProcesso('bcpPlanoBProvedores');
-  const slasSalvo = _mapaDoProcesso('bcpSlas');
+  // O que ja foi digitado nesta edicao (tabela ja desenhada) vence o gravado:
+  // trocar de aba e voltar nao pode apagar o que ainda nao foi salvo.
+  // (abrirModalProcesso limpa a tabela, entao o que esta no DOM e deste processo.)
+  const planoBSalvo = _coletarMapaBcp('.planoB-contingencia') || _mapaDoProcesso('bcpPlanoBProvedores');
+  const slasSalvo = _coletarMapaBcp('.sla-valor') || _mapaDoProcesso('bcpSlas');
   
-  // Filtrar fornecedores do processo
-  const fornecedores = selecionadas.filter(nome => {
-    const dep = catalogo.find(d => d.nome === nome);
-    return dep && ['Fornecedores', 'Fornecedor'].includes(dep.categoria);
+  // Fornecedores do processo. Os itens sao {categoria, nome, id}: ate
+  // 21/10/2026 este filtro comparava o OBJETO com d.nome, nunca achava nada e
+  // a tabela dizia "Nenhum fornecedor mapeado" -- Plano B e SLA nao tinham
+  // mais onde ser editados. As chaves dos dois mapas continuam sendo o nome.
+  const vistos = new Set();
+  const fornecedores = selecionadas.filter((item) => {
+    const dep = item.id ? catalogo.find(d => d.id === item.id) : null;
+    const categoria = item.categoria || (dep && dep.categoria);
+    if (!['Fornecedores', 'Fornecedor'].includes(categoria) || vistos.has(item.nome)) return false;
+    vistos.add(item.nome);
+    return true;
   });
   
   if (!fornecedores.length) {
@@ -18265,11 +18218,17 @@ function renderFornecedoresBcp() {
     </thead>
     <tbody>`;
   
-  fornecedores.forEach(nome => {
-    const dep = catalogo.find(d => d.nome === nome) || {};
-    const contato = (dep.pessoas || [])[0];
+  fornecedores.forEach((item) => {
+    const nome = item.nome;
+    const dep = (item.id && catalogo.find(d => d.id === item.id)) || catalogo.find(d => d.nome === nome && ['Fornecedores', 'Fornecedor'].includes(d.categoria)) || {};
+    // Pessoa relacionada (cadastro de Pessoas, por id) antes da lista solta antiga.
+    const relacionada = (dep.pessoasRelacionadas || [])[0];
+    const pessoaRel = relacionada && relacionada.id ? catalogo.find(d => d.id === relacionada.id) : null;
+    const contato = relacionada
+      ? { nome: relacionada.nome || (pessoaRel && pessoaRel.nome), telefone: pessoaRel && pessoaRel.telefone }
+      : (dep.pessoas || [])[0];
     html += `<tr style="border-bottom:1px solid #f0f0f0;">
-      <td style="padding:10px 14px;font-weight:600;color:#222;">${nome}</td>
+      <td style="padding:10px 14px;font-weight:600;color:#222;">${esc(nome)}</td>
       <td style="padding:10px 14px;color:#555;">${esc(contato ? contato.nome : '-')}</td>
       <td style="padding:10px 14px;color:#555;">${esc(dep.detalhes || '-')}</td>
       <td style="padding:10px 14px;color:#555;">${esc(contato ? contato.telefone || '-' : '-')}</td>
@@ -18281,6 +18240,231 @@ function renderFornecedoresBcp() {
   html += `</tbody></table>`;
   container.innerHTML = html;
 }
+
+// ============================================================
+// Processo: Equipe de crise (BCP), DRPs (aba DRP) e Vínculos (Identificação)
+// -- 21/10/2026. Tudo somente leitura: cada coisa continua sendo editada no
+// seu lugar (PCN, Dependência, Serviço, Risco). O caminho processo ->
+// dependências é o mesmo do Mapa de Continuidade (mapa-continuidade.js).
+// ============================================================
+
+/** O processo como está no formulário agora (dependências ainda não salvas incluídas). */
+function _processoDoFormulario() {
+  const id = (document.getElementById('fId') || {}).value || '';
+  const salvo = id ? (window.processosData || []).find((p) => String(p.id) === String(id)) : null;
+  return {
+    ...(salvo || {}),
+    id: id && !id.startsWith('_tmp_') ? id : '',
+    rto: (document.getElementById('fRTO') || {}).value || '',
+    dependenciaItens: window._dependenciaSelecionadas || [],
+    bcpContatos: window._bcpContatos || [],
+  };
+}
+
+/** Fecha o drawer do Processo pelo fluxo normal (pergunta se houver alteração) e abre outro cadastro. */
+window.abrirVinculoDoProcesso = async (tipo, id) => {
+  if (!(await fecharDrawerProcesso())) return;
+  if (tipo === 'risco') { window.location.hash = '#riscos?risco=' + encodeURIComponent(id); return; }
+  if (tipo === 'drp') {
+    window._abrirAposCarregar = { pagina: 'drp', abrir: () => gerenciarDrpDependencia(id) };
+    window.location.hash = '#drp';
+    return;
+  }
+  mapaAbrirCadastro(tipo, id);
+};
+
+window.renderContatosCriseBcp = () => {
+  const cont = document.getElementById('bcpContatosCrise');
+  if (!cont) return;
+  const catalogo = window.dependenciasCatalogo || [];
+  const p = _processoDoFormulario();
+  let papeis = {};
+  try { papeis = p.bcpPapeisCrise ? JSON.parse(p.bcpPapeisCrise) : {}; } catch (e) { papeis = {}; }
+  const dono = (document.getElementById('fDono') || {}).value || '';
+  const linhas = (p.bcpContatos || []).map((cid) => {
+    const pessoa = catalogo.find((d) => String(d.id) === String(cid));
+    if (!pessoa) return `<li style="color:#888;">Pessoa removida do cadastro <span class="badge badge-gray">(removida)</span></li>`;
+    const papel = papeis[pessoa.nome] || papeis[pessoa.id] || pessoa.detalhes || '';
+    const extra = [papel, pessoa.telefone].filter(Boolean).join(' · ');
+    return `<li><strong>${esc(pessoa.nome)}</strong>${extra ? ` <span style="color:#888;">— ${esc(extra)}</span>` : ''}</li>`;
+  });
+  const temPcn = !!p.pcnSalvo;
+  cont.innerHTML = `
+    <div style="font-size:0.85em;color:#444;margin-bottom:6px;">Dono do processo: <strong>${esc(dono || '—')}</strong> <span style="color:#888;">(responsável da área)</span></div>
+    ${linhas.length
+      ? `<ul style="margin:0 0 8px 18px;padding:0;font-size:0.85em;line-height:1.7;">${linhas.join('')}</ul>`
+      : '<p class="vazio-inline">Nenhum contato de crise definido.</p>'}
+    <div style="font-size:0.74em;color:#888;">${temPcn
+      ? 'A equipe de crise é editada dentro do PCN (📂 Abrir PCN → Equipe de Crise).'
+      : 'Gere o PCN para definir a equipe de crise — ela é editada dentro dele.'}</div>`;
+};
+
+/** Última linha do registro de testes do DRP da dependência ("dd/mm/aaaa · resultado"), ou ''. */
+function _ultimoTesteDrp(dep) {
+  const regs = (dep && Array.isArray(dep.drpRegistrosTeste) ? dep.drpRegistrosTeste : []).filter((r) => r && r.data);
+  if (!regs.length) return '';
+  const ult = regs.slice().sort((a, b) => String(b.data).localeCompare(String(a.data)))[0];
+  const data = /^\d{4}-\d{2}-\d{2}/.test(ult.data) ? ult.data.slice(0, 10).split('-').reverse().join('/') : ult.data;
+  return [data, ult.resultado].filter(Boolean).join(' · ');
+}
+
+window.renderDrpDoProcesso = async () => {
+  const cont = document.getElementById('drpProcessoTabela');
+  const resumo = document.getElementById('drpProcessoResumo');
+  if (!cont) return;
+  const p = _processoDoFormulario();
+  const fIdAntes = (document.getElementById('fId') || {}).value || '';
+  cont.innerHTML = '<p class="vazio-inline">⏳ Carregando…</p>';
+  let servicos = [];
+  let semServicos = false;
+  try { servicos = await API.getServicos(); } catch (e) { semServicos = true; }
+  // O usuário pode ter trocado de processo enquanto carregava.
+  if (((document.getElementById('fId') || {}).value || '') !== fIdAntes) return;
+
+  const lista = MapaContinuidade.dependenciasDoProcesso({ processo: p, dependencias: window.dependenciasCatalogo || [], servicos });
+  const rtoProc = ServicoComposicao.valorMin({ rto: p.rto }, 'rto');
+  const podeAbrir = Perfis.podeOperarDRP(window.USER_PERFIS);
+  const podeGerenciar = podeAbrir && Perfis.podeVerTela(window.USER_PERFIS, 'drp');
+  window._drpProcessoLista = lista;
+
+  const comDrp = lista.filter((it) => it.dep && _parsePCNVersoes(it.dep.drpSalvo).length).length;
+  const acimaRto = lista.filter((it) => {
+    const v = it.dep ? ServicoComposicao.valorMin(it.dep, 'rto') : null;
+    return rtoProc !== null && v !== null && v > rtoProc;
+  }).length;
+  if (resumo) {
+    resumo.textContent = lista.length
+      ? `${comDrp} de ${lista.length} dependência${lista.length > 1 ? 's' : ''} com DRP gerado${acimaRto ? ` · ${acimaRto} com RTO acima do RTO do processo` : ''}. O status acima é informado por você.`
+      : '';
+  }
+  if (!lista.length) {
+    cont.innerHTML = `<p class="vazio-inline">Nenhuma dependência técnica mapeada. Adicione na aba BIA ou vincule o processo a um Serviço.${semServicos ? ' (Não foi possível carregar os Serviços.)' : ''}</p>`;
+    return;
+  }
+
+  const linhas = lista.map((it, i) => {
+    const icone = DEPENDENCIA_CAT_ICONES[it.categoria] || '📦';
+    const versoes = it.dep ? _parsePCNVersoes(it.dep.drpSalvo) : [];
+    const ult = versoes[versoes.length - 1];
+    const dataVersao = ult && ult.data ? new Date(ult.data).toLocaleDateString('pt-BR') : '';
+    const drpCel = it.ausente
+      ? '<span class="badge badge-gray">(removida)</span>'
+      : versoes.length
+        ? `<span class="badge badge-green" title="${versoes.length} versão(ões)">Gerado${dataVersao ? ' ' + esc(dataVersao) : ''}</span>`
+        : _htmlBadge('high', 'Sem DRP');
+    const teste = _ultimoTesteDrp(it.dep);
+    const rtoDep = it.dep ? ServicoComposicao.valorMin(it.dep, 'rto') : null;
+    const excede = rtoProc !== null && rtoDep !== null && rtoDep > rtoProc;
+    const rtoCel = rtoDep === null
+      ? '<span class="muted">—</span>'
+      : `<span${excede ? ` style="color:#c62828;font-weight:700;" title="Maior que o RTO do processo (${esc(ServicoComposicao.formatarDuracao(rtoProc))})"` : ''}>${esc(ServicoComposicao.formatarDuracao(rtoDep))}${excede ? ' ⚠' : ''}</span>`;
+    const acoes = it.dep ? [
+      versoes.length && podeAbrir ? `<button type="button" class="btn btn-ghost" style="padding:4px 8px;font-size:0.8em;" onclick="alternarPreviaDrpProcesso(${i})" title="Ver a última versão aqui">👁️ Prévia</button>` : '',
+      versoes.length && podeAbrir ? `<button type="button" class="btn btn-ghost" style="padding:4px 8px;font-size:0.8em;" onclick="abrirDRPDireto('${escJs(it.id)}')" title="Abrir o DRP completo">📄 Abrir</button>` : '',
+      podeGerenciar ? `<button type="button" class="btn btn-ghost" style="padding:4px 8px;font-size:0.8em;" onclick="abrirVinculoDoProcesso('drp','${escJs(it.id)}')" title="Parâmetros DRP e geração, na tela de DRP">⚙️ Gerenciar</button>` : '',
+    ].filter(Boolean).join(' ') : '';
+    return `<tr>
+        <td><span style="margin-right:4px;">${icone}</span><strong>${esc(it.nome)}</strong><div style="font-size:0.78em;color:#888;">${esc(it.categoria || '')}</div></td>
+        <td style="font-size:0.82em;color:#555;">${it.origens.map(esc).join('<br>')}</td>
+        <td class="col-nw">${rtoCel}</td>
+        <td class="col-nw">${drpCel}${teste ? `<div style="font-size:0.74em;color:#888;margin-top:3px;">Teste: ${esc(teste)}</div>` : ''}</td>
+        <td class="col-nw">${acoes}</td>
+      </tr>
+      <tr id="drpPreviaProcesso-${i}" style="display:none;"><td colspan="5"><div class="drp-preview" style="max-height:320px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:8px;padding:12px 16px;background:#fff;line-height:1.55;"></div></td></tr>`;
+  }).join('');
+
+  cont.innerHTML = `
+    <div class="data-table data-table--compact" style="overflow-x:auto;">
+      <table style="width:100%;">
+        <thead><tr><th>Dependência</th><th>Origem</th><th class="col-nw" title="RTO da dependência (o do processo: ${esc(rtoProc === null ? 'não definido' : ServicoComposicao.formatarDuracao(rtoProc))})">RTO</th><th class="col-nw">DRP</th><th class="col-nw">Ações</th></tr></thead>
+        <tbody>${linhas}</tbody>
+      </table>
+    </div>
+    ${podeAbrir ? '' : '<p style="font-size:0.74em;color:#888;margin-top:6px;">O conteúdo dos DRPs é restrito a Admin, Segurança e TI — aqui você vê só a situação de cada um.</p>'}
+    ${semServicos ? '<p style="font-size:0.74em;color:#e65100;margin-top:6px;">Não foi possível carregar os Serviços: as dependências que vêm deles podem estar faltando.</p>' : ''}`;
+};
+
+window.alternarPreviaDrpProcesso = async (i) => {
+  const it = (window._drpProcessoLista || [])[i];
+  const linha = document.getElementById('drpPreviaProcesso-' + i);
+  if (!it || !linha) return;
+  if (linha.style.display !== 'none') { linha.style.display = 'none'; return; }
+  linha.style.display = '';
+  const caixa = linha.querySelector('.drp-preview');
+  if (caixa.dataset.carregado) return;
+  caixa.innerHTML = '<p class="vazio-inline">⏳ Carregando…</p>';
+  _garantirEstiloPreviaDrp();
+  try {
+    // O HTML do DRP mora em drp_conteudo (coleção fechada); obterDRP confere o perfil no servidor.
+    const versoes = (await API.get('obterDRP', { id: it.id })).versoes || [];
+    const ult = versoes[versoes.length - 1];
+    caixa.innerHTML = ult ? sanitizarPCN(ult.html || '').html : '<p class="vazio-inline">Nenhuma versão de DRP encontrada.</p>';
+    caixa.dataset.carregado = '1';
+  } catch (e) {
+    caixa.innerHTML = `<p class="vazio-inline" style="color:#c62828;">${esc(_mensagemErro(e, 'Não foi possível carregar o DRP.'))}</p>`;
+  }
+};
+
+window.renderVinculosProcesso = async () => {
+  const cont = document.getElementById('processoVinculos');
+  if (!cont) return;
+  const p = _processoDoFormulario();
+  if (!p.id) {
+    cont.innerHTML = '<p class="vazio-inline">Salve o processo para ver os Serviços e Riscos ligados a ele.</p>';
+    return;
+  }
+  cont.innerHTML = '<p class="vazio-inline">⏳ Carregando…</p>';
+  const veRiscos = Perfis.podeVerTela(window.USER_PERFIS, 'riscos');
+  const [servicos, riscos] = await Promise.all([
+    API.getServicos().catch(() => null),
+    veRiscos ? API.getRiscosPorProcesso(p.id).catch(() => null) : Promise.resolve([]),
+  ]);
+  if (((document.getElementById('fId') || {}).value || '') !== p.id) return;
+  const catalogo = window.dependenciasCatalogo || [];
+
+  const servDoProc = (servicos || []).filter((s) => (s.processoIds || []).some((x) => x && String(x.id) === String(p.id)));
+  const linkServ = Perfis.podeVerTela(window.USER_PERFIS, 'servicos');
+  const htmlServ = servicos === null
+    ? '<span style="color:#c62828;">não foi possível carregar</span>'
+    : servDoProc.length
+      ? servDoProc.map((s) => {
+        const av = ServicoComposicao.avaliarServico(s, catalogo);
+        const nome = linkServ ? `<a href="javascript:void(0)" onclick="abrirVinculoDoProcesso('servico','${escJs(s.id)}')">${esc(s.nome)}</a>` : esc(s.nome);
+        return `${nome} <span class="chip-status" style="height:20px;font-size:11px;">${esc(av.rotuloStatus)}</span>`;
+      }).join(' &nbsp; ')
+      : '<span style="color:#888;">nenhum — o Serviço é que aponta para o processo (cadastro de Serviços)</span>';
+
+  const riscosAbertos = (riscos || []).filter((r) => r.status !== 'Encerrado');
+  const htmlRiscos = !veRiscos ? '' : riscos === null
+    ? '<span style="color:#c62828;">não foi possível carregar</span>'
+    : riscos.length
+      ? riscos.slice(0, 6).map((r) => `<a href="javascript:void(0)" onclick="abrirVinculoDoProcesso('risco','${escJs(r.id)}')">${esc(r.titulo || '(sem título)')}</a> ${_badgeScoreRisco(r)}`).join(' &nbsp; ')
+        + (riscos.length > 6 ? ` <span style="color:#888;">+${riscos.length - 6}</span>` : '')
+      : '<span style="color:#888;">nenhum</span>';
+
+  // Instalações do processo (4 Ps): pessoas lotadas e contingência, mesma regra do mapa e do PCN.
+  const instalacoes = (p.dependenciaItens || []).filter((it) => _ehInstalacao(it.categoria))
+    .map((it) => catalogo.find((d) => String(d.id) === String(it.id))).filter(Boolean);
+  const htmlInst = instalacoes.length
+    ? instalacoes.map((inst) => {
+      const lotadas = catalogo.filter((x) => ['Pessoas', 'Pessoa'].includes(x.categoria) && x.instalacao && String(x.instalacao.id) === String(inst.id)).length;
+      const alt = inst.instalacaoAlternativa && inst.instalacaoAlternativa.id
+        ? `contingência: ${esc(inst.instalacaoAlternativa.nome || '')}`
+        : '<span style="color:#c62828;">sem instalação alternativa</span>';
+      return `<strong>${esc(inst.nome)}</strong> <span style="color:#888;">(${lotadas} pessoa${lotadas === 1 ? '' : 's'} lotada${lotadas === 1 ? '' : 's'} · </span>${alt}<span style="color:#888;">)</span>`;
+    }).join('<br>')
+    : '<span style="color:#888;">nenhuma — adicione na aba BIA</span>';
+
+  const removidas = (p.dependenciaItens || []).filter((it) => it.id && !(['Processos Internos', 'Processo Interno'].includes(it.categoria)
+    ? (window.processosData || []).some((x) => String(x.id) === String(it.id))
+    : catalogo.some((d) => String(d.id) === String(it.id)))).length;
+
+  const linha = (rotulo, html) => `<div style="display:grid;grid-template-columns:110px 1fr;gap:8px;font-size:0.85em;line-height:1.6;margin-bottom:4px;"><div style="color:#888;">${rotulo}</div><div>${html}</div></div>`;
+  cont.innerHTML = linha('Serviços', htmlServ)
+    + (veRiscos ? linha(`Riscos${riscos && riscos.length ? ` (${riscosAbertos.length} em aberto)` : ''}`, htmlRiscos) : '')
+    + linha('Instalações', htmlInst)
+    + (removidas && catalogo.length ? `<div style="font-size:0.78em;color:#e65100;margin-top:4px;">⚠ ${removidas} dependência${removidas > 1 ? 's' : ''} da aba BIA aponta${removidas > 1 ? 'm' : ''} para cadastro removido — não aparece${removidas > 1 ? 'm' : ''} no Mapa de Continuidade.</div>` : '');
+};
 
 // ============================================================
 // PÁGINA: PCNs - Biblioteca de Planos de Continuidade
@@ -18594,7 +18778,9 @@ window.gerenciarDrpDependencia = (id) => {
 
 /** Abre o DRP salvo de uma dependência direto da lista (espelha abrirPCNDireto). */
 window.abrirDRPDireto = async (id) => {
-  const d = (window._drpData || dependenciasData || []).find(x => String(x.id) === String(id));
+  // Também a partir da aba DRP do Processo, onde a lista é o catálogo completo.
+  const d = (window._drpData || dependenciasData || []).find(x => String(x.id) === String(id))
+    || (window.dependenciasCatalogo || []).find(x => String(x.id) === String(id));
   if (!d || !d.drpSalvo) return showToast('Nenhum DRP salvo para esta dependência.', '#e65100');
   // O HTML de verdade mora em drp_conteudo (colecao fechada); obterDRP confere
   // o perfil no servidor antes de devolver alguma coisa -- quem cair aqui por

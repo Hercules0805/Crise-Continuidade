@@ -1420,27 +1420,56 @@ async function _lerRespostasIndexadas() {
   const docs = await _getAll(COLLECTION.respostas);
   docs.sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
   const porChave = {};
+  const porId = {};
   docs.forEach((r) => {
+    const resumo = {
+      score: Number(r.score) || 0,
+      tier: r.tier || '',
+      avaliado: true,
+      respostas: r.scores || {},
+      timestamp: r.timestamp,
+      respondente: r.respondente,
+    };
     const key = `${r.area}||${r.processo}`;
-    if (!porChave[key]) {
-      porChave[key] = {
-        score: Number(r.score) || 0,
-        tier: r.tier || '',
-        avaliado: true,
-        respostas: r.scores || {},
-        timestamp: r.timestamp,
-        respondente: r.respondente,
-      };
-    }
+    if (!porChave[key]) porChave[key] = resumo;
+    if (r.processoId && !porId[String(r.processoId)]) porId[String(r.processoId)] = resumo;
   });
-  return porChave;
+  return { porChave, porId };
+}
+
+/**
+ * Chaves area||processo das respostas do BIA deste processo: a atual e as de
+ * antes de renomear (nomesAnteriores). Mesma regra de
+ * historicoRisco.chavesBiaDoProcesso (functions/).
+ */
+function _chavesBiaDoProcesso(p) {
+  const chaves = [`${p.area || ''}||${p.processo || ''}`];
+  (Array.isArray(p.nomesAnteriores) ? p.nomesAnteriores : []).forEach((c) => {
+    if (typeof c === 'string' && c.includes('||') && !chaves.includes(c)) chaves.push(c);
+  });
+  return chaves;
+}
+
+/** Resposta mais recente do processo: por processoId ou por qualquer chave (nome atual ou antigo). */
+function _respostaDoProcesso(d, respIdx) {
+  const candidatas = _chavesBiaDoProcesso(d).map((c) => respIdx.porChave[c]);
+  candidatas.push(respIdx.porId[String(d.id)]);
+  return candidatas.filter(Boolean).sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0))[0] || null;
+}
+
+/** bcpContatos ja foi gravado como array e como string JSON (pagina do PCN, ate 21/10/2026). */
+function _listaContatos(valor) {
+  let v = valor;
+  if (typeof v === 'string') {
+    try { v = v.trim() ? JSON.parse(v) : []; } catch (e) { v = []; }
+  }
+  return Array.isArray(v) ? v.filter((x) => x !== null && x !== undefined && String(x).trim() !== '').map(String) : [];
 }
 
 async function _lerProcessos() {
   const [docs, respIdx] = await Promise.all([_getAll(COLLECTION.processos), _lerRespostasIndexadas()]);
   return docs.map((d) => {
-    const key = `${d.area}||${d.processo}`;
-    const resp = respIdx[key];
+    const resp = _respostaDoProcesso(d, respIdx);
     return {
       id: d.id,
       area: d.area || '',
@@ -1454,30 +1483,22 @@ async function _lerProcessos() {
       dependenciaItens: Array.isArray(d.dependenciaItens) ? d.dependenciaItens : [],
       rto: d.rto || '',
       rpo: d.rpo || '',
-      mtpd: d.mtpd || '',
+      // MTD e o campo do formulario; mtpd e o nome antigo (Apps Script), so
+      // lido como reserva para processo que nunca foi salvo pelo drawer.
+      mtd: d.mtd || d.mtpd || '',
       biaHomologada: d.biaHomologada || '',
       tier: d.tier || '',
       bcpStatus: d.bcpStatus || '',
       descricaoFuncional: d.descricaoFuncional || '',
-      impactoIndisponibilidade: d.impactoIndisponibilidade || null,
-      bcpObjetivo: d.bcpObjetivo || '',
-      bcpEscopo: d.bcpEscopo || '',
-      bcpContatos: d.bcpContatos || [],
-      bcpRiscos: d.bcpRiscos || [],
-      bcpPreventivas: d.bcpPreventivas || [],
+      bcpContatos: _listaContatos(d.bcpContatos),
       drpStatus: d.drpStatus || '',
-      drpObjetivo: d.drpObjetivo || '',
-      drpEscopo: d.drpEscopo || '',
-      drpProcedimentos: d.drpProcedimentos || '',
-      drpCriterios: d.drpCriterios || '',
-      mtd: d.mtd || '',
-      workaround: d.workaround || '',
-      impactoJanela: d.impactoJanela || '',
+      // Campos do Apps Script sem tela desde a migracao (bcpObjetivo,
+      // bcpRiscos, drpProcedimentos, workaround...) sairam da leitura e da
+      // gravacao em 21/10/2026. O que ja esta no Firestore fica intocado.
       bcpPlanoBProvedores: d.bcpPlanoBProvedores || '',
       bcpSlas: d.bcpSlas || '',
-      bcpGatilhos: d.bcpGatilhos || '',
-      bcpReconstituicao: d.bcpReconstituicao || '',
       bcpPapeisCrise: d.bcpPapeisCrise || '',
+      nomesAnteriores: Array.isArray(d.nomesAnteriores) ? d.nomesAnteriores : [],
       pcnSalvo: d.pcnSalvo || '',
       tierManual: d.tierManual || '',
       levantamentoPCN: d.levantamentoPCN ? true : false,
@@ -1841,10 +1862,9 @@ function _marcarTierManual(dados, anterior) {
 }
 
 const _CAMPOS_PROCESSO = [
-  'area', 'processo', 'descricao', 'dependencia', 'dependenciaItens', 'rto', 'rpo', 'mtpd', 'biaHomologada', 'tier',
-  'bcpStatus', 'descricaoFuncional', 'impactoIndisponibilidade', 'bcpObjetivo', 'bcpEscopo', 'bcpContatos', 'bcpRiscos', 'bcpPreventivas',
-  'drpStatus', 'drpObjetivo', 'drpEscopo', 'drpProcedimentos', 'drpCriterios',
-  'mtd', 'workaround', 'impactoJanela', 'bcpPlanoBProvedores', 'bcpSlas', 'bcpGatilhos', 'bcpReconstituicao', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual', 'tierManualPor', 'tierManualEm',
+  'area', 'processo', 'descricao', 'dependencia', 'dependenciaItens', 'rto', 'rpo', 'mtd', 'biaHomologada', 'tier',
+  'bcpStatus', 'descricaoFuncional', 'bcpContatos', 'drpStatus',
+  'bcpPlanoBProvedores', 'bcpSlas', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual', 'tierManualPor', 'tierManualEm',
 ];
 
 // Localiza o docId de um processo por id explícito ou por área+processo.
@@ -1876,18 +1896,33 @@ async function _salvarProcesso(p) {
     }
   });
 
+  if (Object.prototype.hasOwnProperty.call(data, 'bcpContatos')) data.bcpContatos = _listaContatos(data.bcpContatos);
+
   let docId = await _acharProcessoId(p);
   if (!docId) {
     docId = _processoKey(p.area, p.processo);
   }
   const ref = _db.collection(COLLECTION.processos).doc(docId);
 
-  // Se o tier foi fixado a mao, registra quem e quando. So le o documento
-  // atual quando o campo veio no payload — nao vale um ida e volta a toa.
+  // Le o documento atual quando o payload pode muda-lo de um jeito que
+  // depende do que ja esta la: tier fixado a mao (quem e quando) e troca de
+  // nome/area (nomesAnteriores). Sem nada disso, nao vale a ida e volta.
   let paraGravar = data;
-  if (Object.prototype.hasOwnProperty.call(data, 'tierManual')) {
-    const atual = await ref.get();
-    paraGravar = _marcarTierManual(data, atual.exists ? atual.data() : null);
+  const mexeNoTier = Object.prototype.hasOwnProperty.call(data, 'tierManual');
+  const mexeNoNome = p.id && (Object.prototype.hasOwnProperty.call(data, 'area') || Object.prototype.hasOwnProperty.call(data, 'processo'));
+  if (mexeNoTier || mexeNoNome) {
+    const snap = await ref.get();
+    const atual = snap.exists ? snap.data() : null;
+    if (mexeNoTier) paraGravar = _marcarTierManual(data, atual);
+    // Renomear: respostas_bia e historico (a regra nao deixa reescrever) e
+    // fica com o nome antigo. Guardar a chave antiga mantem o score do BIA.
+    if (atual && atual.area && atual.processo) {
+      const chaveAntiga = `${atual.area}||${atual.processo}`;
+      const chaveNova = `${data.area !== undefined ? data.area : atual.area}||${data.processo !== undefined ? data.processo : atual.processo}`;
+      if (chaveAntiga !== chaveNova) {
+        paraGravar = { ...paraGravar, nomesAnteriores: firebase.firestore.FieldValue.arrayUnion(chaveAntiga) };
+      }
+    }
   }
 
   await ref.set(paraGravar, { merge: true });
@@ -1926,6 +1961,9 @@ async function _salvarRespostas(payload) {
       cargo: resp.cargo || '',
       area: resp.area,
       processo: resp.processo,
+      // Liga a resposta ao processo mesmo depois de renomear (as antigas so
+      // tem area+nome -- ver _chavesBiaDoProcesso).
+      ...(resp.processoId ? { processoId: String(resp.processoId) } : {}),
       scores,
       score,
       tier,
@@ -1936,7 +1974,7 @@ async function _salvarRespostas(payload) {
 
     // Atualizar tier no processo. O RTO so e preenchido quando esta vazio:
     // ele pertence ao gestor, e a avaliacao nao apaga a escolha dele.
-    const docId = await _acharProcessoId({ area: resp.area, processo: resp.processo });
+    const docId = await _acharProcessoId({ id: resp.processoId, area: resp.area, processo: resp.processo });
     if (docId) {
       const ref = _db.collection(COLLECTION.processos).doc(docId);
       const atual = await ref.get();
@@ -2426,7 +2464,9 @@ async function _appApi(metodo, acao, dados) {
   let url = APP_API_URL;
 
   if (metodo === 'GET') {
-    const qs = new URLSearchParams({ action: acao, ...(dados || {}) });
+    // undefined/null fora: URLSearchParams os viraria o texto "undefined".
+    const limpos = Object.fromEntries(Object.entries(dados || {}).filter(([, v]) => v !== undefined && v !== null));
+    const qs = new URLSearchParams({ action: acao, ...limpos });
     url += '?' + qs.toString();
   } else {
     // text/plain evita o preflight extra; o servidor faz o parse do JSON.
@@ -2482,7 +2522,7 @@ const API = {
     }
 
     if (action === 'getLevantamentoPCN') {
-      const r = await _appApi('GET', 'getLevantamentoPCN', { area: params.area, processo: params.processo });
+      const r = await _appApi('GET', 'getLevantamentoPCN', { id: params.id, area: params.area, processo: params.processo });
       _cache[cacheKey] = r;
       return r;
     }
@@ -2530,10 +2570,10 @@ const API = {
       return _appApi('POST', 'gerarLink', { tipo: _TIPO_LINK[action], area: body.area, processo: body.processo, email: body.email });
     }
     if (action === 'salvarPCN') {
-      return _appApi('POST', 'salvarPCN', { area: body.area, processo: body.processo, html: body.pcnHtml });
+      return _appApi('POST', 'salvarPCN', { id: body.id, area: body.area, processo: body.processo, html: body.pcnHtml });
     }
     if (action === 'excluirPCN') {
-      return _appApi('POST', 'excluirPCN', { area: body.area, processo: body.processo });
+      return _appApi('POST', 'excluirPCN', { id: body.id, area: body.area, processo: body.processo });
     }
     if (action === 'gerarPCN') {
       return _appApi('POST', 'gerarPCN', { id: body.id });
