@@ -346,8 +346,42 @@
     return c;
   }
 
+  /**
+   * Visao completa (fase 2): todos os nos dos tipos visiveis e as ligacoes entre
+   * eles, uma por par (as relacoes do par juntas). grau = ligacoes visiveis.
+   * { nos:[{ id, tipo, nome, sub, lacuna, grau }], arestas:[{ id, de, para, rels }] }
+   */
+  function elementosGrafo(indice, tiposVisiveis) {
+    var vis = tiposVisiveis || TIPOS;
+    var visivel = function (id) { return vis.indexOf(tipoDoId(id)) >= 0; };
+    var pares = {}, grau = {};
+    Object.keys(indice.adj).forEach(function (de) {
+      if (!visivel(de)) return;
+      indice.adj[de].forEach(function (x) {
+        if (!visivel(x.para)) return;
+        var a = de < x.para ? de : x.para, b = de < x.para ? x.para : de;
+        var k = a + '|' + b;
+        var par = pares[k];
+        if (!par) {
+          par = pares[k] = { id: 'e:' + k, de: a, para: b, rels: [] };
+          grau[a] = (grau[a] || 0) + 1;
+          grau[b] = (grau[b] || 0) + 1;
+        }
+        // Guarda a relacao no sentido de quem a declarou (de -> para).
+        if (de === a && par.rels.indexOf(x.rel) < 0) par.rels.push(x.rel);
+      });
+    });
+    var nos = Object.keys(indice.nos).filter(visivel).map(function (id) {
+      var n = indice.nos[id];
+      return { id: id, tipo: n.tipo, nome: n.nome, sub: n.sub, lacuna: n.lacunas.length > 0, grau: grau[id] || 0 };
+    });
+    var arestas = Object.keys(pares).map(function (k) { return pares[k]; });
+    return { nos: nos, arestas: arestas };
+  }
+
   return {
     TIPOS: TIPOS,
+    elementosGrafo: elementosGrafo,
     ROTULO_TIPO: ROTULO_TIPO,
     ROTULO_TIPO_SINGULAR: ROTULO_TIPO_SINGULAR,
     normalizar: normalizar,

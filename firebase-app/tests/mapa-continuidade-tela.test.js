@@ -182,3 +182,74 @@ test('"Ver no mapa" nao aparece para quem nao ve o mapa', async () => {
   await w.dependencias();
   assert.doesNotMatch(doc.querySelector('#drawerDependencia .drawer-footer').textContent, /Ver no mapa/);
 });
+
+// ---- Visao completa (cytoscape real, em modo headless no jsdom) ----
+// O mesmo arquivo do vendor, carregado pelo Node: dentro do eval do jsdom a
+// biblioteca cruza dois "realms" e se perde (no navegador e um so).
+const cytoscapeReal = require('../public/vendor/cytoscape-3.34.3.min.js');
+function comCytoscapeReal(w) {
+  const real = cytoscapeReal;
+  w.__configCy = null;
+  // A configuracao e copiada para o realm do Node (a biblioteca so aceita objeto "simples" do proprio realm).
+  w.cytoscape = (opts) => {
+    w.__configCy = opts;
+    return real({
+      elements: JSON.parse(JSON.stringify(opts.elements)), style: JSON.parse(JSON.stringify(opts.style)),
+      layout: Object.assign({}, opts.layout), minZoom: opts.minZoom, maxZoom: opts.maxZoom, headless: true, styleEnabled: true,
+    });
+  };
+}
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms || 20));
+
+test('visao completa: alterna, monta todos os itens com a biblioteca real, contagem e lacunas', async () => {
+  const { w, doc } = await carregar(['admin']);
+  comCytoscapeReal(w);
+  assert.match(doc.getElementById('mapaModos').textContent, /Mapa centrado\s*Visão completa/);
+  w.mapaModo('completo');
+  await esperar();
+  const cy = w._mapa.cy;
+  assert.ok(cy, 'grafo montado');
+  const total = Object.keys(w._mapa.indice.nos).length;
+  assert.strictEqual(cy.nodes().length, total);
+  assert.match(doc.getElementById('mapaTrilha').textContent, new RegExp(`${total} itens · \\d+ ligações · \\d+ com lacuna`));
+  assert.strictEqual(w.location.hash, '#mapa?modo=completo');
+  assert.strictEqual(cy.getElementById('processo:p1').data('lacuna'), 1);
+  assert.strictEqual(w.__configCy.layout.name, 'cose');
+  assert.match(doc.getElementById('mapaPainel').textContent, /No mapa/);
+  w.mapaModo('centrado');
+  assert.strictEqual(w._mapa.cy, null, 'sair da visao completa destroi o grafo');
+});
+
+test('visao completa: clique destaca o item e mostra o painel; duplo clique volta ao modo centrado nele', async () => {
+  const { w, doc } = await carregar(['admin']);
+  comCytoscapeReal(w);
+  w.mapaModo('completo');
+  await esperar();
+  const cy = w._mapa.cy;
+  cy.getElementById('servico:s1').emit('tap');
+  assert.match(doc.getElementById('mapaPainel').textContent, /Portal/);
+  assert.match(doc.getElementById('mapaPainel').innerHTML, /Centralizar/);
+  assert.ok(cy.getElementById('servico:s1').hasClass('foco'));
+  assert.ok(cy.getElementById('processo:p2').hasClass('apagado'), 'fora da vizinhanca');
+  cy.getElementById('servico:s1').emit('dbltap');
+  assert.strictEqual(w._mapa.modo, 'centrado');
+  assert.strictEqual(w._mapa.cy, null, 'grafo destruido ao sair');
+  assert.match(doc.getElementById('mapaTrilha').textContent, /Início › Portal/);
+});
+
+test('visao completa: filtros por tipo refazem o grafo; deep link ?modo=completo; falha da biblioteca vira erro', async () => {
+  const ctx = await carregar(['admin'], {}, '#mapa?modo=completo');
+  comCytoscapeReal(ctx.w);
+  ctx.w.mapaModo('completo');
+  await esperar();
+  ctx.w.mapaAlternarTipo('pessoa');
+  await esperar();
+  assert.ok(ctx.w._mapa.cy.nodes().every((n) => !n.id().startsWith('pessoa:')));
+  ctx.w.mapaModo('centrado');
+  // Sem a biblioteca (download falhou): mensagem de erro, nunca mapa vazio.
+  const semLib = await carregar(['admin']);
+  semLib.w.document.head.appendChild = (s) => { setTimeout(() => s.onerror && s.onerror(), 0); return s; };
+  semLib.w.mapaModo('completo');
+  await esperar(40);
+  assert.match(semLib.doc.getElementById('mapaCy').textContent, /Não foi possível abrir a visão completa/);
+});

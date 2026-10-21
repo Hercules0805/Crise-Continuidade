@@ -134,3 +134,19 @@ test('sem contratos (perfil TI): indice monta, sem nos de contrato, e avisa', ()
   assert.ok(!Object.keys(i.nos).some((k) => k.startsWith('contrato:')));
   assert.strictEqual(idx().semContratos, false);
 });
+
+test('elementosGrafo (visao completa): um no por item, uma ligacao por par, filtro por tipo e grau', () => {
+  const i = idx();
+  const g = MC.elementosGrafo(i);
+  assert.strictEqual(g.nos.length, Object.keys(i.nos).length);
+  const ids = g.arestas.map((e) => e.de + '|' + e.para);
+  assert.strictEqual(new Set(ids).size, ids.length, 'sem par duplicado');
+  const par = g.arestas.find((e) => [e.de, e.para].sort().join() === ['area:financeiro', 'pessoa:pAna'].sort().join());
+  assert.ok(par.rels.length >= 1);
+  const p1 = g.nos.find((n) => n.id === 'processo:p1');
+  assert.strictEqual(p1.lacuna, true);
+  assert.strictEqual(p1.grau, MC.contagemVinculos(i, 'processo:p1') ? Object.values(MC.contagemVinculos(i, 'processo:p1')).reduce((s, n) => s + n, 0) : 0);
+  const soProc = MC.elementosGrafo(i, ['processo', 'area']);
+  assert.ok(soProc.nos.every((n) => ['processo', 'area'].includes(n.tipo)));
+  assert.ok(soProc.arestas.every((e) => /^(processo|area):/.test(e.de) && /^(processo|area):/.test(e.para)));
+});

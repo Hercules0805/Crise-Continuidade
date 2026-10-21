@@ -169,6 +169,12 @@ function route() {
     return;
   }
 
+  // Visão completa do Mapa de Continuidade: o grafo (cytoscape) é destruído ao
+  // trocar de tela, para não seguir vivo sobre um container que já saiu da página.
+  if (window._mapa && window._mapa.cy) {
+    try { window._mapa.cy.destroy(); } catch (e) { /* já destruído */ }
+    window._mapa.cy = null;
+  }
   const pageFunc = pages[page] || pages[_paginaInicialDoPerfil()];
   const carregando = pageFunc ? pageFunc() : null;
   // "Abrir cadastro" do Mapa de Continuidade (21/10/2026): espera a tela de
@@ -8709,6 +8715,10 @@ async function mapaContinuidade() {
           <input type="search" id="mapaBusca" class="field-control field-control--busca" autocomplete="off" placeholder="Processo, pessoa, serviço, dependência, fornecedor…" oninput="mapaBuscar()" onfocus="mapaBuscar()" onblur="setTimeout(mapaFecharBusca,250)">
           <div id="mapaBuscaResultados" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:320px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
         </div>
+        <div class="field">
+          <span class="field-label">Visão</span>
+          <div id="mapaModos" role="group" aria-label="Visão do mapa" style="display:flex;gap:0;"></div>
+        </div>
       </div>
       <div id="mapaTipos" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px;"></div>
       <div id="mapaTrilha" style="font-size:0.85em;margin-bottom:10px;"></div>
@@ -8739,7 +8749,7 @@ async function mapaContinuidade() {
     situacaoContrato: (c) => ContratoCiclo.situacaoDoStatus(c.statusId, dados.statusContrato || []),
     valorMin: ServicoComposicao.valorMin,
   });
-  window._mapa = { indice, centro: null, selecionado: null, trilha: [], tipos: new Set(MapaContinuidade.TIPOS), expandidos: {} };
+  window._mapa = { indice, centro: null, selecionado: null, trilha: [], tipos: new Set(MapaContinuidade.TIPOS), expandidos: {}, modo: 'centrado', cy: null };
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('mapaConteudo').style.display = 'block';
   document.getElementById('mapaAviso').innerHTML = indice.semContratos
@@ -8747,13 +8757,14 @@ async function mapaContinuidade() {
     : '';
   const no = params.get('no');
   if (no && indice.nos[no]) mapaCentralizar(no);
+  else if (params.get('modo') === 'completo') mapaModo('completo');
   else _renderMapa();
 }
 
 /** Atualiza o endereço (#mapa?no=...) sem recarregar a tela: o link do mapa pode ser compartilhado. */
 function _mapaAtualizarEndereco() {
   const m = window._mapa;
-  const alvo = '#mapa' + (m && m.centro ? '?no=' + encodeURIComponent(m.centro) : '');
+  const alvo = '#mapa' + (m && m.modo === 'completo' ? '?modo=completo' : m && m.centro ? '?no=' + encodeURIComponent(m.centro) : '');
   if (window.location.hash !== alvo && window.history && window.history.replaceState) window.history.replaceState(null, '', alvo);
 }
 
@@ -8762,6 +8773,7 @@ window.mapaCentralizar = (id) => {
   if (!m || !m.indice.nos[id]) return;
   const pos = m.trilha.indexOf(id);
   if (pos >= 0) m.trilha = m.trilha.slice(0, pos + 1); else m.trilha.push(id);
+  m.modo = 'centrado';
   m.centro = id;
   m.selecionado = id;
   m.expandidos = {};
@@ -8772,7 +8784,7 @@ window.mapaCentralizar = (id) => {
 window.mapaVoltarAoInicio = () => {
   const m = window._mapa;
   if (!m) return;
-  m.centro = null; m.selecionado = null; m.trilha = []; m.expandidos = {};
+  m.centro = null; m.selecionado = null; m.trilha = []; m.expandidos = {}; m.modo = 'centrado';
   _mapaAtualizarEndereco();
   _renderMapa();
 };
@@ -8832,6 +8844,13 @@ function _renderMapa() {
     const ativo = m.tipos.has(t);
     return `<button type="button" onclick="mapaAlternarTipo('${t}')" aria-pressed="${ativo}" style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:14px;font-size:0.8em;font-weight:600;cursor:pointer;border:1.5px solid ${_COR_TIPO_MAPA[t]};background:${ativo ? _COR_TIPO_MAPA[t] : '#fff'};color:${ativo ? '#fff' : _COR_TIPO_MAPA[t]};">${_ICONE_TIPO_MAPA[t]} ${esc(MC.ROTULO_TIPO[t])}</button>`;
   }).join('');
+  // Alternância de visão (centrado | completo), botões ghost colados.
+  document.getElementById('mapaModos').innerHTML = [['centrado', 'Mapa centrado'], ['completo', 'Visão completa']].map(([k, rot], i) => {
+    const ativo = m.modo === k;
+    return `<button type="button" class="btn ${ativo ? 'btn-primary' : 'btn-ghost'}" aria-pressed="${ativo}" onclick="mapaModo('${k}')" style="padding:6px 14px;font-size:0.85em;border-radius:${i ? '0 7px 7px 0' : '7px 0 0 7px'};${i ? 'margin-left:-1px;' : ''}">${rot}</button>`;
+  }).join('');
+  if (m.modo === 'completo') return _renderMapaCompleto();
+  if (m.cy) { m.cy.destroy(); m.cy = null; }
   // Trilha.
   document.getElementById('mapaTrilha').innerHTML = m.centro
     ? `<a href="javascript:void(0)" onclick="mapaVoltarAoInicio()" style="color:#d60014;">Início</a>` + m.trilha.map((id, i) => {
@@ -8852,12 +8871,122 @@ function _renderMapa() {
   const grupos = MC.vizinhos(m.indice, m.centro, [...m.tipos]);
   const layout = MC.layoutRadial(grupos, { maxPorGrupo: 8, expandidos: m.expandidos });
   canvas.innerHTML = _svgMapaContinuidade(m, grupos, layout);
-  legenda.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:0.76em;color:#666;padding:6px 4px 0;">
-      ${MC.TIPOS.map((t) => `<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${_COR_TIPO_MAPA[t]};margin-right:4px;vertical-align:-1px;"></span>${esc(MC.ROTULO_TIPO[t])}</span>`).join('')}
-      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:2.5px solid #c62828;margin-right:4px;vertical-align:-2px;"></span>Lacuna (Tier 1/2 sem PCN, dependência sem DRP, serviço em alerta)</span>
-    </div>
+  legenda.innerHTML = `${_htmlLegendaMapa()}
     <div style="font-size:0.74em;color:#999;padding:2px 4px;">Clique num item para ver os detalhes; clique de novo para trazê-lo ao centro.</div>`;
   document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, m.selecionado || m.centro, m.centro);
+}
+
+window.mapaModo = (modo) => {
+  const m = window._mapa;
+  if (!m || (modo !== 'centrado' && modo !== 'completo')) return;
+  m.modo = modo;
+  if (modo === 'completo') m.selecionado = null;
+  _mapaAtualizarEndereco();
+  _renderMapa();
+};
+
+// ---- Visão completa (21/10/2026): todos os itens, com zoom e arrasto ----
+// cytoscape.js (MIT) servido do próprio domínio (public/vendor), carregado só
+// quando alguém abre esta visão -- nada de CDN, nada pesando nas outras telas.
+let _promessaCytoscape = null;
+function _carregarCytoscape() {
+  if (window.cytoscape) return Promise.resolve(window.cytoscape);
+  if (!_promessaCytoscape) {
+    _promessaCytoscape = new Promise((ok, falha) => {
+      const s = document.createElement('script');
+      s.src = 'vendor/cytoscape-3.34.3.min.js';
+      s.onload = () => (window.cytoscape ? ok(window.cytoscape) : falha(new Error('a biblioteca do mapa não carregou')));
+      s.onerror = () => { _promessaCytoscape = null; falha(new Error('não foi possível baixar a biblioteca do mapa')); };
+      document.head.appendChild(s);
+    });
+  }
+  return _promessaCytoscape;
+}
+
+async function _renderMapaCompleto() {
+  const m = window._mapa;
+  const MC = MapaContinuidade;
+  const g = MC.elementosGrafo(m.indice, [...m.tipos]);
+  const lacunas = g.nos.filter((n) => n.lacuna).length;
+  document.getElementById('mapaTrilha').innerHTML = `<span style="color:#555;">${g.nos.length} itens · ${g.arestas.length} ligações${lacunas ? ` · <span style="color:#c62828;font-weight:600;">${lacunas} com lacuna</span>` : ''}</span>
+    <span style="color:#999;"> — arraste para mover, role para aproximar; clique num item para os detalhes, duplo clique para centralizar nele.</span>`;
+  document.getElementById('mapaCanvas').innerHTML = `
+    <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:6px;">
+      ${g.nos.length > 800 ? '<span style="flex:1;font-size:0.8em;color:#e65100;align-self:center;">Muitos itens: use os filtros por tipo se o mapa ficar lento.</span>' : ''}
+      <button type="button" class="btn btn-ghost" style="padding:4px 12px;font-size:0.82em;" onclick="mapaAjustarTela()">Ajustar à tela</button>
+    </div>
+    <div id="mapaCy" style="height:68vh;min-height:460px;border:1px solid #eee;border-radius:8px;background:#fcfcfd;"><div class="loading" style="padding:20px;">⏳ Montando o mapa…</div></div>`;
+  document.getElementById('mapaLegenda').innerHTML = _htmlLegendaMapa();
+  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapaResumo(m.indice);
+  let cytoscape;
+  try {
+    cytoscape = await _carregarCytoscape();
+  } catch (e) {
+    console.error('Mapa de Continuidade: visão completa', e);
+    const alvo = document.getElementById('mapaCy');
+    if (alvo) alvo.innerHTML = `<div style="padding:20px;">${_htmlErroCarga('Não foi possível abrir a visão completa (' + _mensagemErro(e, 'erro desconhecido') + ').', 'mapaContinuidade')}</div>`;
+    return;
+  }
+  const container = document.getElementById('mapaCy');
+  if (!container || m.modo !== 'completo') return; // trocou de visão enquanto carregava
+  container.innerHTML = '';
+  if (m.cy) { m.cy.destroy(); m.cy = null; }
+  const corta = (t, max) => { t = String(t || ''); return t.length > max ? t.slice(0, max - 1) + '…' : t; };
+  m.cy = cytoscape({
+    container,
+    elements: [
+      ...g.nos.map((n) => ({ data: { id: n.id, rotulo: corta(n.nome, 28), cor: _COR_TIPO_MAPA[n.tipo], grau: n.grau, lacuna: n.lacuna ? 1 : 0 } })),
+      ...g.arestas.map((e) => ({ data: { id: e.id, source: e.de, target: e.para, rels: e.rels.join(', ') } })),
+    ],
+    style: [
+      { selector: 'node', style: {
+        'background-color': 'data(cor)', label: 'data(rotulo)', 'font-size': 9, color: '#333', 'text-valign': 'bottom', 'text-margin-y': 3,
+        'text-outline-color': '#fff', 'text-outline-width': 2, 'min-zoomed-font-size': 7,
+        width: 'mapData(grau, 0, 30, 14, 44)', height: 'mapData(grau, 0, 30, 14, 44)', 'border-width': 0,
+      } },
+      { selector: 'node[lacuna = 1]', style: { 'border-width': 4, 'border-color': '#c62828' } },
+      { selector: 'edge', style: { width: 1, 'line-color': '#cfcfd6', 'curve-style': 'haystack', opacity: 0.8 } },
+      { selector: '.apagado', style: { opacity: 0.12 } },
+      { selector: 'node.foco', style: { 'border-width': 3, 'border-color': '#222', 'font-size': 11, 'font-weight': 700, 'z-index': 10 } },
+      { selector: 'edge.foco', style: { 'line-color': '#555', width: 2, opacity: 1, label: 'data(rels)', 'font-size': 8, color: '#666', 'text-outline-color': '#fff', 'text-outline-width': 2 } },
+    ],
+    layout: { name: 'cose', animate: false, nodeRepulsion: () => 9000, idealEdgeLength: () => 70, numIter: 1500, randomize: true },
+    minZoom: 0.05, maxZoom: 3, wheelSensitivity: 0.3,
+  });
+  m.cy.on('tap', 'node', (ev) => _mapaFocarNoCompleto(ev.target.id()));
+  m.cy.on('dbltap', 'node', (ev) => mapaCentralizar(ev.target.id()));
+  m.cy.on('tap', (ev) => { if (ev.target === m.cy) _mapaFocarNoCompleto(null); });
+}
+
+/** Clique na visão completa: destaca o item e as ligações dele, painel ao lado. */
+function _mapaFocarNoCompleto(id) {
+  const m = window._mapa;
+  if (!m || !m.cy) return;
+  m.cy.elements().removeClass('apagado foco');
+  m.selecionado = id;
+  if (!id) {
+    document.getElementById('mapaPainel').innerHTML = _htmlPainelMapaResumo(m.indice);
+    return;
+  }
+  const no = m.cy.getElementById(id);
+  const vizinhanca = no.closedNeighborhood();
+  m.cy.elements().not(vizinhanca).addClass('apagado');
+  vizinhanca.addClass('foco');
+  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, id, null);
+}
+window._mapaFocarNoCompleto = _mapaFocarNoCompleto;
+
+window.mapaAjustarTela = () => {
+  const m = window._mapa;
+  if (m && m.cy) m.cy.fit(undefined, 30);
+};
+
+function _htmlLegendaMapa() {
+  const MC = MapaContinuidade;
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:0.76em;color:#666;padding:6px 4px 0;">
+      ${MC.TIPOS.map((t) => `<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${_COR_TIPO_MAPA[t]};margin-right:4px;vertical-align:-1px;"></span>${esc(MC.ROTULO_TIPO[t])}</span>`).join('')}
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:2.5px solid #c62828;margin-right:4px;vertical-align:-2px;"></span>Lacuna (Tier 1/2 sem PCN, dependência sem DRP, serviço em alerta)</span>
+    </div>`;
 }
 
 function _htmlMapaInicio(indice) {
