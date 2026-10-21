@@ -152,3 +152,20 @@ test('api: lê e grava os campos da instalação e a lotação; só o que vem no
   await ctx._salvarDependencia({ id: 'pAna', categoria: 'Pessoas', nome: 'Ana', instalacao: null });
   assert.strictEqual(banco.pAna.instalacao, null);
 });
+
+// ---- Etapa 3: Processo (BIA) e formulario do gestor ----
+test('Processo: linha Instalações sempre presente na aba de dependências, depois de Pessoas', () => {
+  const src = fs.readFileSync(path.join(PUB, 'app.js'), 'utf8');
+  const linhas = src.split('\n').filter((l) => /\['Fornecedores', 'Pessoas', DEPENDENCIA_CATEGORIA_INSTALACAO, 'Processos Internos'/.test(l));
+  assert.strictEqual(linhas.length, 2, 'aba BIA do drawer e edicao em lote');
+});
+
+test('formulario do gestor (bia-dependencias.html): cartao 4. Instalações, chave e payload', () => {
+  const html = fs.readFileSync(path.join(PUB, 'bia-dependencias.html'), 'utf8');
+  assert.match(html, /renderCategoryCard\('instalacoes', '4\. Instalações'/);
+  assert.match(html, /if \(c === 'Instalações' \|\| c === 'Instalação'\) return 'instalacoes';/);
+  assert.match(html, /instalacoes: JSON\.stringify\(DEPS\.instalacoes\)/);
+  assert.match(html, /13\. Observações/);
+  const numeros = [...html.matchAll(/renderCategoryCard\('[^']+', '(\d+)\./g)].map((m) => Number(m[1]));
+  assert.deepStrictEqual(numeros, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'numeracao continua');
+});

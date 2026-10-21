@@ -3105,7 +3105,7 @@ function _renderLoteDependenciasPorCategoria() {
   const selecionadas = window._loteDependencias || [];
 
   const categoriasSet = new Set(Object.keys(porCategoria));
-  ['Fornecedores', 'Pessoas', 'Processos Internos', ...DEPENDENCIA_CATEGORIAS_TECNICAS.filter((c) => c !== 'Outros')].forEach((c) => categoriasSet.add(c));
+  ['Fornecedores', 'Pessoas', DEPENDENCIA_CATEGORIA_INSTALACAO, 'Processos Internos', ...DEPENDENCIA_CATEGORIAS_TECNICAS.filter((c) => c !== 'Outros')].forEach((c) => categoriasSet.add(c));
   selecionadas.forEach((item) => categoriasSet.add(item.categoria || 'Outros'));
   const categorias = [...categoriasSet].sort();
 
@@ -3360,7 +3360,7 @@ function renderDependenciaTabela() {
   // uma seção vazia por padrão -- se algum processo já tiver algo nela, a
   // linha abaixo (selecionadas.forEach) garante que ela aparece do mesmo
   // jeito, nunca escondendo dado já selecionado.
-  ['Fornecedores', 'Pessoas', 'Processos Internos', ...DEPENDENCIA_CATEGORIAS_TECNICAS.filter(c => c !== 'Outros')].forEach(c => categoriasSet.add(c));
+  ['Fornecedores', 'Pessoas', DEPENDENCIA_CATEGORIA_INSTALACAO, 'Processos Internos', ...DEPENDENCIA_CATEGORIAS_TECNICAS.filter(c => c !== 'Outros')].forEach(c => categoriasSet.add(c));
   // Cada item ja carrega sua propria categoria (dependenciaItens, ou adivinhada
   // uma unica vez por _adivinharDependenciaLegada) -- sem precisar comparar
   // nome com o catalogo de novo a cada render.

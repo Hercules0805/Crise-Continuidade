@@ -365,3 +365,28 @@ test('sem régua registrada, a resposta fica na versão 1 em vez de falhar', asy
 
   assert.strictEqual(Object.values(db._store.respostas_bia)[0].reguaVersao, 1);
 });
+
+// ---- Instalações (21/10/2026): o "P" de Premises dos 4 Ps do BIA ----
+test('salvarDependenciasBIA: gestor informa Instalações; nova vira item do catalogo, existente e reaproveitada', async () => {
+  const seed = baseSeed();
+  seed.dependencias['dep-sede'] = { categoria: 'Instalações', nome: 'Sede SP' };
+  seed.tokens['b9'] = { token: 'b9', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  const db = makeDb(seed);
+  await WRITE_ACTIONS.salvarDependenciasBIA(db, {
+    token: 'b9',
+    instalacoes: JSON.stringify([{ nome: 'Sede SP', id: null }, { nome: 'Filial RJ', id: null }]),
+  });
+  const itens = db._store.processos['ti__backup'].dependenciaItens.filter((it) => it.categoria === 'Instalações');
+  assert.deepStrictEqual(itens.map((it) => it.nome), ['Sede SP', 'Filial RJ']);
+  assert.strictEqual(itens[0].id, 'dep-sede', 'reaproveita a existente pelo nome');
+  assert.strictEqual(db._store.dependencias[itens[1].id].categoria, 'Instalações');
+});
+
+test('validarTokenBIA: catalogo de Instalações na chave instalacoes (sem acento)', async () => {
+  const seed = baseSeed();
+  seed.dependencias['dep-sede'] = { categoria: 'Instalações', nome: 'Sede SP' };
+  seed.tokens['b10'] = { token: 'b10', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  const db = makeDb(seed);
+  const res = await READ_ACTIONS.validarTokenBIA(db, 'b10');
+  assert.deepStrictEqual(res.catalogo.instalacoes, [{ id: 'dep-sede', nome: 'Sede SP' }]);
+});

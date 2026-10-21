@@ -153,7 +153,8 @@ async function validarTokenBIA(db, token) {
   depSnap.docs.forEach((d) => {
     const c = d.data();
     const cat = (c.categoria || 'Outros').toLowerCase().replace(/[^a-záéíóúãõç]/g, '');
-    const key = cat === 'fornecedor' ? 'fornecedores' : cat === 'pessoa' ? 'pessoas' : cat === 'sistema' ? 'sistemas' : cat;
+    const key = cat === 'fornecedor' ? 'fornecedores' : cat === 'pessoa' ? 'pessoas' : cat === 'sistema' ? 'sistemas'
+      : (cat === 'instalações' || cat === 'instalação') ? 'instalacoes' : cat;
     if (!catalogoPorCategoria[key]) catalogoPorCategoria[key] = [];
     catalogoPorCategoria[key].push({ id: d.id, nome: c.nome });
   });
@@ -324,6 +325,8 @@ async function salvarDependenciasBIA(db, data) {
   const grupos = {
     Fornecedores: parseMaybeJson(data.fornecedores, []),
     Pessoas: parseMaybeJson(data.pessoas, []),
+    // Instalações (21/10/2026): o "P" de Premises dos 4 Ps do BIA.
+    'Instalações': parseMaybeJson(data.instalacoes, []),
     'Processos Internos': parseMaybeJson(data.processos, []),
     API: parseMaybeJson(data.api, []),
     'Banco de Dados': parseMaybeJson(data.bancoDados, []),
