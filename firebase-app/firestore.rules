@@ -153,9 +153,9 @@ service cloud.firestore {
       allow write: if podeMexerNaArea();
     }
 
-    // /dependencias guarda o catalogo dos 5 Ps do BIA (Fornecedores,
-    // Infraestrutura, Pessoas, Sistemas, Processos Internos) e os parametros de
-    // DRP de cada dependencia.
+    // /dependencias guarda o catalogo dos 4 Ps do BIA (Pessoas, Instalacoes,
+    // Processos Internos e Tecnologia, Fornecedores) e os parametros de DRP de
+    // cada dependencia. Instalacoes (21/10/2026) e so mais uma categoria aqui.
     //
     // DECISAO 28/09/2026: com o fim do perfil 'fornecedores' cai a guarda por
     // categoria. Quem escreve aqui e Admin, Seguranca da Informacao (opera todos
