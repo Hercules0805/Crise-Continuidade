@@ -393,7 +393,10 @@ function construirRisco(vulnerabilidade, opts) {
     descricao: `A vulnerabilidade "${nome}"${v.cwe ? ` (${v.cwe})` : ''}${v.cve ? ` (${v.cve})` : ''} foi registrada com severidade ${cvssOuSeveridade}.${v.tipo ? ` Tipo: ${v.tipo}${v.subtipo ? ` / ${v.subtipo}` : ''}.` : ''}${procTxt} ${motivo} ${v.descricao || ''}`.trim(),
     // `categoria` (singular) mantido por compatibilidade; a tela le `categorias`.
     categoria: categoriaDoRisco(v),
-    dataIdentificacao: data,
+    // DECISAO 21/10/2026: o risco foi identificado quando a vulnerabilidade foi
+    // detectada (nao quando cruzou o limiar) -- e o que faz o Risco no Tempo
+    // mostra-lo desde entao (medicoes.medicaoDeRisco data a 1a medicao por aqui).
+    dataIdentificacao: /^\d{4}-\d{2}-\d{2}/.test(String(v.dataDeteccao || '')) ? String(v.dataDeteccao).slice(0, 10) : data,
     origem: ORIGEM,
     vulnerabilidadeId: id,
     vulnerabilidadeCodigo: v.codigo || '',

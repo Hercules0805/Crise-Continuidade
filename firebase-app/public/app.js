@@ -11992,7 +11992,7 @@ function _svgLinhaTempoRisco(historico, opcoes) {
     // dica com os riscos do dia (substitui o <title> nativo, que só mostrava o valor).
     const circulos = historico.map((dia, i) => {
       const v = valorDoDia(dia, s.nome);
-      return `<circle cx="${x(i)}" cy="${y(v)}" r="3" fill="${s.cor}"/>`
+      return `<circle cx="${x(i)}" cy="${y(v)}" r="${n > 90 ? 1.2 : 3}" fill="${s.cor}"/>`
         + `<circle class="ponto-monitor-hit" cx="${x(i)}" cy="${y(v)}" r="9" fill="transparent" style="cursor:pointer;" `
         + `onmouseenter="_mostrarDicaMonitor(event,'${campo}',${sIdx},${i})" onmouseleave="_esconderDicaMonitor()" onclick="_mostrarDicaMonitor(event,'${campo}',${sIdx},${i})"/>`;
     }).join('');
@@ -12007,8 +12007,17 @@ function _svgLinhaTempoRisco(historico, opcoes) {
       <span style="width:10px;height:10px;border-radius:50%;background:${s.cor};display:inline-block;"></span>${esc(s.nome)}
     </span>`).join('');
 
+  // Trecho reconstruído pela data de identificação (antes do início real do
+  // livro de medições): fundo cinza e linha tracejada na fronteira.
+  const inicioLivro = opcoes && opcoes.inicioLivro;
+  const idxLivro = inicioLivro ? historico.findIndex((dia) => dia.dia >= inicioLivro) : -1;
+  const faixaReconstruida = idxLivro > 0
+    ? `<rect class="trecho-reconstruido" x="${MARGEM.esq}" y="${MARGEM.topo}" width="${x(idxLivro) - MARGEM.esq}" height="${areaH}" fill="#f2f2f2"/>`
+      + `<line x1="${x(idxLivro)}" y1="${MARGEM.topo}" x2="${x(idxLivro)}" y2="${ALTURA - MARGEM.baixo}" stroke="#bbb" stroke-dasharray="5 4"/>`
+      + `<text x="${MARGEM.esq + 8}" y="${MARGEM.topo + 14}" font-size="11" fill="#999">reconstruído pela data de identificação</text>`
+    : '';
   const svg = `<svg viewBox="0 0 ${LARGURA} ${ALTURA}" style="width:100%;height:auto;display:block;" role="img" aria-label="${esc(rotuloGrafico)}">
-    ${grade}${rotulosX}${linhas}
+    ${faixaReconstruida}${grade}${rotulosX}${linhas}
     <line x1="${MARGEM.esq}" y1="${MARGEM.topo}" x2="${MARGEM.esq}" y2="${ALTURA - MARGEM.baixo}" stroke="#ccc" stroke-width="1"/>
     <line x1="${MARGEM.esq}" y1="${ALTURA - MARGEM.baixo}" x2="${LARGURA - MARGEM.dir}" y2="${ALTURA - MARGEM.baixo}" stroke="#ccc" stroke-width="1"/>
   </svg>`;
@@ -12016,17 +12025,44 @@ function _svgLinhaTempoRisco(historico, opcoes) {
   return { svg, legendaHtml: legenda };
 }
 
+// Período do Risco no Tempo (DECISÃO 21/10/2026): padrão "Este ano".
+const _MONITOR_PERIODOS = [['90d', 'Últimos 90 dias'], ['6m', 'Últimos 6 meses'], ['ano', 'Este ano'], ['12m', 'Últimos 12 meses']];
+let _monitorPeriodo = 'ano';
+
+/** Primeiro dia ('AAAA-MM-DD') do período escolhido, contado a partir de `hojeISO`. */
+function _inicioPeriodoMonitor(periodo, hojeISO) {
+  const hoje = String(hojeISO || new Date().toISOString()).slice(0, 10);
+  if (periodo === 'ano') return hoje.slice(0, 4) + '-01-01';
+  const dias = { '90d': 89, '6m': 182, '12m': 364 }[periodo] || 89;
+  const d = new Date(hoje + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() - dias);
+  return d.toISOString().slice(0, 10);
+}
+
+window.trocarPeriodoMonitor = (periodo) => {
+  _monitorPeriodo = _MONITOR_PERIODOS.some(([v]) => v === periodo) ? periodo : 'ano';
+  monitor();
+};
+
 async function monitor() {
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Risco no Tempo</h2><p class="page-sub">A carga de risco da empresa ao longo do tempo — empresa e as áreas mais carregadas hoje</p></div>
+    </div>
+    <div class="filters">
+      <div class="field">
+        <label class="field-label" for="monitorPeriodo">Período</label>
+        <select id="monitorPeriodo" class="field-control" onchange="trocarPeriodoMonitor(this.value)">
+          ${_MONITOR_PERIODOS.map(([v, r]) => `<option value="${v}"${v === _monitorPeriodo ? ' selected' : ''}>${r}</option>`).join('')}
+        </select>
+      </div>
     </div>
     <div class="loading" id="loadingMonitor">⏳ Carregando...</div>
     <div id="monitorConteudo"></div>`;
 
   let historico;
   try {
-    historico = await API.getHistoricoRisco();
+    historico = await API.getHistoricoRiscoDesde(_inicioPeriodoMonitor(_monitorPeriodo));
   } catch (e) {
     console.error('Monitor: falha ao carregar', e);
     document.getElementById('loadingMonitor').style.display = 'none';
@@ -12041,7 +12077,7 @@ async function monitor() {
 
   if (!historico.length) {
     conteudo.innerHTML = `<div style="border:1px solid #e0e0e0;border-radius:10px;padding:24px;background:#fff;color:#666;">
-      Ainda não existe nenhum retrato registrado.<br>
+      Nenhum retrato registrado neste período.<br>
       <span style="font-size:0.88em;">A rotina diária grava o primeiro amanhã de manhã. Para preencher os dias já registrados no livro de medições, alguém precisa rodar o script de reconstrução (<code>scripts/backfill-historico-risco.js</code>) uma vez, no computador.</span>
     </div>`;
     return;
@@ -12050,10 +12086,17 @@ async function monitor() {
   const ultimo = historico[historico.length - 1];
   const idade = _idadeEmDias(ultimo.dia);
   const statusIdade = _corIdade(idade);
-  const grafico = _svgLinhaTempoRisco(historico, { campo: 'carga', rotulo: 'Carga de risco ao longo do tempo' });
+  // Trecho reconstruído (21/10/2026): antes do início real do livro de
+  // medições, a curva vem da Data de identificação de cada risco.
+  const inicioLivro = ultimo.inicioLivro || null;
+  const temReconstruido = !!(inicioLivro && historico[0].dia < inicioLivro);
+  const grafico = _svgLinhaTempoRisco(historico, { campo: 'carga', rotulo: 'Carga de risco ao longo do tempo', inicioLivro });
   const graficoFinanceiro = _svgLinhaTempoRisco(historico, {
-    campo: 'impactoFinanceiro', formatarValor: _formatarReais, rotulo: 'Impacto financeiro estimado ao longo do tempo',
+    campo: 'impactoFinanceiro', formatarValor: _formatarReais, rotulo: 'Impacto financeiro estimado ao longo do tempo', inicioLivro,
   });
+  const notaReconstruido = temReconstruido
+    ? `<div style="font-size:0.76em;color:#777;margin-top:10px;">▒ Antes de ${_dataCurta(inicioLivro)}/${inicioLivro.slice(0, 4)}, a curva é reconstruída pela data de identificação de cada risco, com a avaliação mais antiga registrada — não reflete reavaliações feitas antes disso.</div>`
+    : '';
 
   const badgesComposicao = (comp) => RiscoConsolidado.FAIXAS
     .filter((f) => comp[f] > 0)
@@ -12090,6 +12133,7 @@ async function monitor() {
       <div class="painel-kpi__rotulo" style="text-align:left;margin-bottom:10px;">Carga ao longo do tempo</div>
       ${grafico ? grafico.svg : '<div style="color:#999;">Sem dados suficientes para o gráfico.</div>'}
       <div style="margin-top:8px;">${grafico ? grafico.legendaHtml : ''}</div>
+      ${notaReconstruido}
       ${historico.length < 5 ? `<div style="font-size:0.76em;color:#999;margin-top:10px;">Só ${historico.length} dia${historico.length === 1 ? '' : 's'} de histórico até agora — a curva fica mais útil conforme os dias passam.</div>` : ''}
     </div>
 
@@ -12097,6 +12141,7 @@ async function monitor() {
       <div class="painel-kpi__rotulo" style="text-align:left;margin-bottom:10px;">Impacto financeiro estimado ao longo do tempo</div>
       ${graficoFinanceiro ? graficoFinanceiro.svg : '<div style="color:#999;">Sem dados suficientes para o gráfico.</div>'}
       <div style="margin-top:8px;">${graficoFinanceiro ? graficoFinanceiro.legendaHtml : ''}</div>
+      ${notaReconstruido}
       ${ultimo.semImpactoFinanceiro ? `<div style="font-size:0.76em;color:#e65100;margin-top:10px;">⚠ ${ultimo.semImpactoFinanceiro} risco${ultimo.semImpactoFinanceiro > 1 ? 's' : ''} sem estimativa financeira — fora desta conta, o que a puxa para baixo</div>` : ''}
     </div>
 

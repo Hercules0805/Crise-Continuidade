@@ -42,14 +42,20 @@ async function main() {
     return;
   }
 
-  const inicioISO = primeira.docs[0].data().coletadoEm;
+  // --desde=AAAA-MM-DD (21/10/2026): comeca num dia escolhido em vez da
+  // primeira medicao (ex.: regravar so um trecho).
+  const desdeArg = (process.argv.find((a) => a.startsWith('--desde=')) || '').slice('--desde='.length);
+  const inicioISO = /^\d{4}-\d{2}-\d{2}$/.test(desdeArg) ? desdeArg + 'T12:00:00.000Z' : primeira.docs[0].data().coletadoEm;
   let cursor = new Date(retratoRisco.chaveDoDia(inicioISO) + 'T12:00:00.000Z'); // meio-dia evita duvida de fuso na virada
+  // Insumos lidos UMA vez (antes, cada dia relia tudo -- com um ano inteiro,
+  // ~300 leituras completas do livro de medicoes).
+  const insumos = await retratoRisco.montarInsumos(db);
   const hoje = new Date(retratoRisco.chaveDoDia(new Date().toISOString()) + 'T12:00:00.000Z');
 
   let gravados = 0;
   while (cursor.getTime() <= hoje.getTime()) {
     const fimDoDiaISO = new Date(cursor.getTime() + (12 * 60 * 60 * 1000 - 1)).toISOString(); // = retratoRisco.fimDoDiaISO(dia): 23:59:59.999 UTC
-    const retrato = await retratoRisco.gerarRetrato(db, fimDoDiaISO);
+    const retrato = await retratoRisco.gerarRetrato(db, fimDoDiaISO, insumos);
     const dia = await retratoRisco.salvarRetrato(db, retrato);
     console.log(`${dia}: carga da empresa = ${retrato.empresa.carga} (${retrato.empresa.contados} riscos contados, ${retrato.foraPorStatus} fora por status)`);
     gravados += 1;

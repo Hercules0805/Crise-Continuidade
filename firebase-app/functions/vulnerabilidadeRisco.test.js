@@ -501,3 +501,8 @@ test('produto: trocado a mao no risco, a automacao nao sobrescreve', () => {
   const patch = d.acao === 'atualizar' ? d.atualizacoes[0].patch : {};
   assert.ok(!('produtoSoftwareId' in patch), 'escolha humana prevalece');
 });
+
+test('o risco nasce com a Data de identificacao = data de deteccao da vulnerabilidade (21/10/2026)', () => {
+  assert.strictEqual(decidir({ vulnerabilidade: vuln({ dataDeteccao: '2026-02-03' }) }).risco.dataIdentificacao, '2026-02-03');
+  assert.strictEqual(decidir({ vulnerabilidade: vuln({ dataDeteccao: '' }) }).risco.dataIdentificacao, HOJE.slice(0, 10), 'sem deteccao: hoje');
+});

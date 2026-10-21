@@ -91,10 +91,51 @@ function diaAnterior(chave) {
  * `mudancas`: o que mudou, risco a risco, desde o fim do dia anterior (a
  * resposta para "por que a curva subiu neste dia?").
  */
-async function gerarRetrato(db, dataAlvoISO) {
-  const { medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor } = await montarInsumos(db);
+async function gerarRetrato(db, dataAlvoISO, insumosProntos) {
+  const { medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor } = insumosProntos || await montarInsumos(db);
   const baselineISO = fimDoDiaISO(diaAnterior(chaveDoDia(dataAlvoISO)));
-  return historicoRisco.reconstruirComMudancas(medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor, dataAlvoISO, baselineISO);
+  const retrato = historicoRisco.reconstruirComMudancas(medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor, dataAlvoISO, baselineISO);
+  // Onde o livro de medicoes comeca DE VERDADE (sem os pontos retroativos):
+  // a tela marca o trecho anterior como reconstruido pela identificacao.
+  retrato.inicioLivro = inicioDoLivro(medicoesRisco);
+  return retrato;
+}
+
+/** Dia ('AAAA-MM-DD') da medicao de risco mais antiga que nao e retroativa; null sem nenhuma. */
+function inicioDoLivro(medicoesRisco) {
+  let min = null;
+  (medicoesRisco || []).forEach((m) => {
+    if (!m || m.retroativa || !m.coletadoEm || isNaN(new Date(m.coletadoEm).getTime())) return;
+    const dia = chaveDoDia(m.coletadoEm);
+    if (!min || dia < min) min = dia;
+  });
+  return min;
+}
+
+const LIMITE_DIAS_REGRAVAR = 400;
+
+/**
+ * Dias ja gravados que ficaram desatualizados (DECISAO 21/10/2026): medicao
+ * registrada nas ultimas 26 h com `coletadoEm` anterior a ontem -- risco
+ * criado com Data de identificacao no passado, ou retroacao. Devolve as
+ * chaves 'AAAA-MM-DD' do dia mais antigo afetado ate ONTEM (o de hoje o
+ * proprio retrato diario grava), no maximo 400 dias. Vazio = nada a regravar.
+ */
+function diasParaRegravar(medicoesRisco, agoraISO) {
+  const agora = new Date(agoraISO).getTime();
+  const ontem = diaAnterior(chaveDoDia(agoraISO));
+  let maisAntigo = null;
+  (medicoesRisco || []).forEach((m) => {
+    if (!m || !m.registradoEm || !m.coletadoEm) return;
+    const registrado = new Date(m.registradoEm).getTime();
+    if (isNaN(registrado) || agora - registrado > 26 * 60 * 60 * 1000) return;
+    const dia = chaveDoDia(m.coletadoEm);
+    if (dia <= ontem && (!maisAntigo || dia < maisAntigo)) maisAntigo = dia;
+  });
+  if (!maisAntigo) return [];
+  const dias = [];
+  for (let d = ontem; d >= maisAntigo && dias.length < LIMITE_DIAS_REGRAVAR; d = diaAnterior(d)) dias.push(d);
+  return dias.reverse();
 }
 
 /**
@@ -111,4 +152,4 @@ async function salvarRetrato(db, retrato) {
   return dia;
 }
 
-module.exports = { COLECAO_RETRATOS, chaveDoDia, fimDoDiaISO, diaAnterior, montarInsumos, gerarRetrato, salvarRetrato };
+module.exports = { COLECAO_RETRATOS, LIMITE_DIAS_REGRAVAR, chaveDoDia, fimDoDiaISO, diaAnterior, diasParaRegravar, inicioDoLivro, montarInsumos, gerarRetrato, salvarRetrato };

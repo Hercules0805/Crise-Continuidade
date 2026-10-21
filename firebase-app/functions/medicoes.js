@@ -210,6 +210,14 @@ function _valorFinanceiroDoRisco(risco) {
   return v === null || v === undefined ? null : Number(v);
 }
 
+/** 'AAAA-MM-DD' -> meio-dia de Sao Paulo em ISO (15:00 UTC); null se a data nao for valida. */
+function inicioPelaIdentificacao(dataISO) {
+  const d = String(dataISO || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  const iso = `${d}T15:00:00.000Z`;
+  return isNaN(new Date(iso).getTime()) ? null : iso;
+}
+
 function medicaoDeRisco(origemId, risco, anterior) {
   if (!risco) return null;
 
@@ -241,10 +249,20 @@ function medicaoDeRisco(origemId, risco, anterior) {
   // mais antiga que o ponto anterior, invertendo a ordem da curva (bug real:
   // editar so o financeiro de um risco reavaliado no dia anterior fez o
   // Monitor continuar mostrando o estado de ANTES da edicao).
-  const coletadoEm = anterior
+  // Primeira medicao (DECISAO 21/10/2026): o risco passa a contar desde a
+  // Data de identificacao, quando ela e mais antiga -- "quando isto passou a
+  // valer" e a identificacao, nao o dia em que o registro entrou no sistema
+  // (risco de vulnerabilidade nasce com a data de deteccao). Meio-dia de Sao
+  // Paulo, para o dia nao escorregar na virada do fuso.
+  let coletadoEm = anterior
     ? (risco.atualizadoEm || new Date().toISOString())
     : (risco.dataUltimaReavaliacao || risco.atualizadoEm || new Date().toISOString());
   if (isNaN(new Date(coletadoEm).getTime())) return null;
+  let retroativa = false;
+  if (!anterior) {
+    const ident = inicioPelaIdentificacao(risco.dataIdentificacao);
+    if (ident && new Date(ident).getTime() < new Date(coletadoEm).getTime()) { coletadoEm = ident; retroativa = true; }
+  }
 
   return {
     sujeitoTipo: 'risco',
@@ -269,6 +287,9 @@ function medicaoDeRisco(origemId, risco, anterior) {
     validoAte: _somarDias(coletadoEm, VALIDADE_DIAS[FONTE.RISCO]),
     origemColecao: 'riscos',
     origemId,
+    // Datada pela identificacao, antes de o registro existir: a tela Risco no
+    // Tempo trata o trecho anterior ao inicio real do livro como reconstruido.
+    ...(retroativa ? { retroativa: true } : {}),
   };
 }
 
@@ -367,6 +388,7 @@ function medicaoDeAvaliacaoFornecedor(origemId, av) {
 
 module.exports = {
   scoreDeRisco,
+  inicioPelaIdentificacao,
   medicaoDeRisco,
   medicaoDeExclusaoRisco,
   medicaoDeLancamento,

@@ -882,7 +882,17 @@ exports.retratoDiarioRisco = onSchedule(
   { region: 'us-central1', schedule: '0 6 * * *', timeZone: 'America/Sao_Paulo' },
   async () => {
     try {
-      const retrato = await retratoRisco.gerarRetrato(db, new Date().toISOString());
+      const agora = new Date().toISOString();
+      const insumos = await retratoRisco.montarInsumos(db);
+      // DECISAO 21/10/2026: risco criado (ou datado) no passado muda os dias ja
+      // gravados -- regrava do dia mais antigo afetado ate ontem, com os mesmos
+      // insumos, antes do retrato de hoje.
+      const dias = retratoRisco.diasParaRegravar(insumos.medicoesRisco, agora);
+      for (const d of dias) {
+        await retratoRisco.salvarRetrato(db, await retratoRisco.gerarRetrato(db, retratoRisco.fimDoDiaISO(d), insumos));
+      }
+      if (dias.length) logger.info('retratoDiarioRisco: dias passados regravados', { de: dias[0], ate: dias[dias.length - 1], total: dias.length });
+      const retrato = await retratoRisco.gerarRetrato(db, agora, insumos);
       const dia = await retratoRisco.salvarRetrato(db, retrato);
       logger.info('retratoDiarioRisco: gravado', { dia, carga: retrato.empresa.carga, contados: retrato.empresa.contados });
     } catch (err) {

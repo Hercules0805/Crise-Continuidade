@@ -314,3 +314,21 @@ test('cada avaliacao e um ponto proprio: o id da medicao segue o id da avaliacao
     medicoes.idDaMedicao(medicoes.FONTE.FORNECEDOR, 'av2'),
   );
 });
+
+// --- Primeira medicao datada pela identificacao (21/10/2026) ---
+
+test('primeira medição: Data de identificação mais antiga vira o coletadoEm (meio-dia de SP) e marca retroativa', () => {
+  const m = medicaoDeRisco('r1', { ...riscoOk(), dataIdentificacao: '2026-02-10', atualizadoEm: '2026-10-20T10:00:00.000Z' }, null);
+  assert.strictEqual(m.coletadoEm, '2026-02-10T15:00:00.000Z');
+  assert.strictEqual(m.retroativa, true);
+  const recente = medicaoDeRisco('r1', { ...riscoOk(), dataIdentificacao: '2026-10-25', atualizadoEm: '2026-10-20T10:00:00.000Z' }, null);
+  assert.strictEqual(recente.coletadoEm, '2026-10-20T10:00:00.000Z', 'identificação futura não puxa a data');
+  assert.ok(!('retroativa' in recente));
+});
+
+test('reavaliação NÃO usa a Data de identificação', () => {
+  const depois = { ...riscoOk(), impacto: 'Muito alto', dataIdentificacao: '2026-01-05', atualizadoEm: '2026-10-21T09:00:00.000Z' };
+  const m = medicaoDeRisco('r1', depois, riscoOk());
+  assert.strictEqual(m.coletadoEm, '2026-10-21T09:00:00.000Z');
+  assert.ok(!m.retroativa);
+});
