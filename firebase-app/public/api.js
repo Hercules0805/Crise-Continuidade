@@ -405,6 +405,11 @@ async function _lerDependencias() {
     rpoMin: _minutosOuNull(d.rpoMin),
     mttrMin: _minutosOuNull(d.mttrMin),
     componentes: Array.isArray(d.componentes) ? d.componentes : [],
+    // Instalações (21/10/2026): tipo e a instalação alternativa (contingência);
+    // o endereço é o campo `endereco` acima. Pessoa: a instalação de lotação.
+    tipoInstalacao: d.tipoInstalacao || '',
+    instalacaoAlternativa: d.instalacaoAlternativa && d.instalacaoAlternativa.id ? { id: String(d.instalacaoAlternativa.id), nome: d.instalacaoAlternativa.nome || '' } : null,
+    instalacao: d.instalacao && d.instalacao.id ? { id: String(d.instalacao.id), nome: d.instalacao.nome || '' } : null,
     estrategia: d.estrategia || '',
     responsavel: d.responsavel || '',
     // Aba DRP: listas guiadas (Criterios de Acionamento, Pre-requisitos,
@@ -1685,6 +1690,14 @@ async function _salvarDependencia(d) {
   if (Array.isArray(d.componentes)) {
     data.componentes = _refsDependencia(d.componentes).filter((x) => x.id !== String(d.id || ''));
   }
+  // Instalações (21/10/2026): mesma regra -- so grava o que vier no payload.
+  const _refOuNull = (r) => (r && r.id ? { id: String(r.id), nome: String(r.nome || '') } : null);
+  if (d.tipoInstalacao !== undefined) data.tipoInstalacao = String(d.tipoInstalacao || '');
+  if (d.instalacaoAlternativa !== undefined) {
+    const alt = _refOuNull(d.instalacaoAlternativa);
+    data.instalacaoAlternativa = alt && alt.id !== String(d.id || '') ? alt : null;
+  }
+  if (d.instalacao !== undefined) data.instalacao = _refOuNull(d.instalacao);
   if (Array.isArray(d.canaisSuporte)) {
     data.canaisSuporte = d.canaisSuporte.map((c) => ({
       tipo: String(c.tipo || ''),

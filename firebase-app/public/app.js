@@ -4167,6 +4167,17 @@ let dependenciasOrdenacao = criarOrdenacao('categoria', 'asc');
 // Internos sao as outras 3, cada uma sua propria entidade).
 const DEPENDENCIA_CATEGORIAS_TECNICAS = ['API', 'Banco de Dados', 'Infraestrutura', 'Segurança', 'Servidor', 'Sistemas', 'Outros'];
 
+// Instalações (21/10/2026): o "P" de Premises dos 4 Ps do BIA (Pessoas,
+// Instalações, Processos, Fornecedores/Tecnologia). Mora no mesmo catálogo e
+// na mesma tela de Dependências, com campos próprios (tipo, endereço,
+// instalação alternativa). Não é técnica: Serviços continua escolhendo só
+// itens técnicos -- a instalação chega ao Serviço pelos "Componentes abaixo".
+const DEPENDENCIA_CATEGORIA_INSTALACAO = 'Instalações';
+const TIPOS_INSTALACAO = ['Sede', 'Filial', 'Escritório', 'Data center', 'Site alternativo', 'Home office', 'Outro'];
+// Catálogo editável na tela Dependências: as técnicas + Instalações.
+const DEPENDENCIA_CATEGORIAS_CATALOGO = [...DEPENDENCIA_CATEGORIAS_TECNICAS, DEPENDENCIA_CATEGORIA_INSTALACAO];
+const _ehInstalacao = (categoria) => categoria === DEPENDENCIA_CATEGORIA_INSTALACAO || categoria === 'Instalação';
+
 // Ícone e frase de exemplo por categoria de dependência -- usados tanto pelo
 // componente de dependência do drawer individual (renderDependenciaTabela)
 // quanto pelo picker por categoria da edição em lote de Processos. Dado
@@ -4176,6 +4187,7 @@ const DEPENDENCIA_CAT_ICONES = {
   'Fornecedores': '🏢', 'Fornecedor': '🏢',
   'Pessoas': '👤', 'Pessoa': '👤',
   'Processos Internos': '🔄', 'Processo Interno': '🔄',
+  'Instalações': '📍', 'Instalação': '📍',
   'API': '🔌',
   'Banco de Dados': '🗄️',
   'Infraestrutura': '⚡',
@@ -4191,6 +4203,8 @@ const DEPENDENCIA_CAT_EXEMPLOS = {
   'Pessoa': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
   'Processos Internos': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
   'Processo Interno': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
+  'Instalações': 'Ex: Sede São Paulo, Filial Recife, Data center Tamboré, escritório de atendimento',
+  'Instalação': 'Ex: Sede São Paulo, Filial Recife, Data center Tamboré, escritório de atendimento',
   'API': 'Ex: API de pagamento (PIX/cartão), API de CEP, integração com Receita Federal, webhook de terceiros',
   'Banco de Dados': 'Ex: PostgreSQL de produção, banco Oracle financeiro, réplica de leitura, data warehouse',
   'Infraestrutura': 'Ex: Internet, energia elétrica, climatização, switches/roteadores, telefonia',
@@ -4545,6 +4559,7 @@ function _iconeCategoriaDep(cat) {
     'Fornecedores': '🏢', 'Fornecedor': '🏢', 'Pessoas': '👤', 'Pessoa': '👤',
     'Processos Internos': '🔄', 'Processo Interno': '🔄', 'API': '🔌', 'Banco de Dados': '🗄️',
     'Infraestrutura': '⚡', 'Segurança': '🔒', 'Servidor': '🖥️', 'Sistemas': '💻', 'Outros': '📦',
+    'Instalações': '📍', 'Instalação': '📍',
   };
   return map[cat] || '📦';
 }
@@ -5259,6 +5274,61 @@ function _textoCampoDuracao(idBase) {
   return `${valor.replace('.', ',')} ${Number(valor) === 1 ? rot[0] : rot[1]}`;
 }
 
+// ---- Instalações (21/10/2026): bloco próprio no drawer de Dependência ----
+function _htmlDadosInstalacao() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  return `
+    <div id="depInstalacaoBloco" style="display:none;border-top:1px solid #eee;margin-top:18px;padding-top:14px;">
+      <label style="${lbl}margin-bottom:8px;">Dados da instalação</label>
+      <div style="display:grid;grid-template-columns:200px 1fr;gap:16px;margin-bottom:12px;">
+        <div>
+          <label for="depTipoInstalacao" style="${lbl}">Tipo</label>
+          <select id="depTipoInstalacao" style="${inp}"><option value="">Selecione...</option>${TIPOS_INSTALACAO.map((t) => `<option value="${t}">${t}</option>`).join('')}</select>
+        </div>
+        <div>
+          <label for="depEndereco" style="${lbl}">Endereço</label>
+          <input type="text" id="depEndereco" placeholder="Rua, número, cidade/UF" style="${inp}">
+        </div>
+      </div>
+      <div>
+        <label for="depInstalacaoAlternativa" style="${lbl}">Instalação alternativa (contingência)</label>
+        <select id="depInstalacaoAlternativa" style="${inp}"></select>
+        <div style="font-size:0.72em;color:#888;margin-top:3px;">Para onde a operação vai se esta instalação ficar indisponível. Entra no PCN e no Mapa de Continuidade.</div>
+      </div>
+    </div>`;
+}
+
+/** Mostra o bloco só para Instalações e preenche as alternativas (as outras instalações). */
+function _atualizarBlocoInstalacao(alternativaId) {
+  const bloco = document.getElementById('depInstalacaoBloco');
+  if (!bloco) return;
+  const ehInst = _ehInstalacao(document.getElementById('depCategoria').value);
+  bloco.style.display = ehInst ? 'block' : 'none';
+  const sel = document.getElementById('depInstalacaoAlternativa');
+  const atual = alternativaId !== undefined ? (alternativaId || '') : sel.value;
+  const selfId = (document.getElementById('depId') || {}).value || '';
+  const outras = (dependenciasData || []).filter((d) => _ehInstalacao(d.categoria) && d.id && String(d.id) !== String(selfId) && !String(d.id).startsWith('_tmp_'))
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  const temAtual = !atual || outras.some((d) => String(d.id) === String(atual));
+  sel.innerHTML = '<option value="">Nenhuma</option>' + outras.map((d) => `<option value="${esc(d.id)}">${esc(d.nome)}${d.tipoInstalacao ? ' (' + esc(d.tipoInstalacao) + ')' : ''}</option>`).join('')
+    + (temAtual ? '' : `<option value="${esc(atual)}">(instalação removida)</option>`);
+  sel.value = atual;
+}
+window._atualizarBlocoInstalacao = _atualizarBlocoInstalacao;
+
+/** Campos da instalação para o formulário (só quando a categoria é Instalações). */
+function _coletarDadosInstalacao(categoria) {
+  if (!_ehInstalacao(categoria)) return {};
+  const altId = document.getElementById('depInstalacaoAlternativa').value;
+  const alt = altId ? (dependenciasData || []).find((d) => String(d.id) === String(altId)) : null;
+  return {
+    tipoInstalacao: document.getElementById('depTipoInstalacao').value,
+    endereco: document.getElementById('depEndereco').value.trim(),
+    instalacaoAlternativa: altId ? { id: altId, nome: alt ? alt.nome : '' } : null,
+  };
+}
+
 /** Seção "Componentes abaixo" (aba Dados Gerais da Dependência). */
 function _htmlDepComponentes() {
   return `
@@ -5284,7 +5354,7 @@ function _depCompDisponiveis(filtro) {
   const bloqueados = new Set(ServicoComposicao.bloqueadosComoComponente(selfId, dependenciasData).map(String));
   const termo = (filtro || '').toLowerCase();
   return (dependenciasData || []).filter((d) =>
-    DEPENDENCIA_CATEGORIAS_TECNICAS.includes(d.categoria) &&
+    DEPENDENCIA_CATEGORIAS_CATALOGO.includes(d.categoria) &&
     d.id && !String(d.id).startsWith('_tmp_') &&
     !bloqueados.has(String(d.id)) &&
     !window._depComponentesSel.some((s) => String(s.id) === String(d.id)) &&
@@ -5349,7 +5419,9 @@ async function _renderAcimaDaDependencia(d) {
   try { servicos = await API.getServicos(); } catch (e) { servicos = []; }
   if ((document.getElementById('depId') || {}).value !== String(d.id)) return; // drawer já trocou de registro
   const acima = ServicoComposicao.acimaDe(d.id, dependenciasData, servicos);
+  const alternativaDe = (dependenciasData || []).filter((x) => _ehInstalacao(x.categoria) && x.instalacaoAlternativa && String(x.instalacaoAlternativa.id) === String(d.id));
   const itens = [
+    ...alternativaDe.map((x) => `<span onclick="editarDep('${escJs(x.id)}')" style="cursor:pointer;display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.8em;background:white;border:1px solid #e0e0e0;color:#333;" title="Abrir ${esc(x.nome)}">📍 ${esc(x.nome)} <span style="color:#999;">(contingência dela)</span></span>`),
     ...acima.servicos.map((s) => `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.8em;background:white;border:1px solid #e0e0e0;color:#333;">🧩 ${esc(s.nome)} <span style="color:#999;">(Serviço)</span></span>`),
     ...acima.dependencias.map((x) => `<span onclick="editarDep('${escJs(x.id)}')" style="cursor:pointer;display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.8em;background:white;border:1px solid #e0e0e0;color:#333;" title="Abrir ${esc(x.nome)}">${esc(_iconeCategoriaDep(x.categoria))} ${esc(x.nome)} <span style="color:#999;">(${esc(x.categoria)})</span></span>`),
   ];
@@ -5383,9 +5455,9 @@ function _htmlDrawerDependencia() {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
               <div>
                 <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Categoria <span class="req" aria-hidden="true">*</span></label>
-                <select id="depCategoria" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+                <select id="depCategoria" onchange="_atualizarBlocoInstalacao()" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
                   <option value="">Selecione...</option>
-                  ${DEPENDENCIA_CATEGORIAS_TECNICAS.map(c => `<option value="${c}">${c}</option>`).join('')}
+                  ${DEPENDENCIA_CATEGORIAS_CATALOGO.map(c => `<option value="${c}">${c}</option>`).join('')}
                 </select>
               </div>
               <div>
@@ -5397,6 +5469,7 @@ function _htmlDrawerDependencia() {
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Papel</label>
               <textarea id="depDetalhes" rows="3" placeholder="Papel ou função desta dependência" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
             </div>
+            ${_htmlDadosInstalacao()}
             ${_htmlDepComponentes()}
             <div id="depAcimaDe" style="margin-top:18px;"></div>
           </div>
@@ -5466,6 +5539,9 @@ function _atualizarTituloDrawerDependencia(d) {
 window.abrirDrawerDependencia = (d) => {
   document.getElementById('depId').value = d ? d.id : '';
   document.getElementById('depCategoria').value = d ? d.categoria : '';
+  document.getElementById('depTipoInstalacao').value = d ? (d.tipoInstalacao || '') : '';
+  document.getElementById('depEndereco').value = d ? (d.endereco || '') : '';
+  _atualizarBlocoInstalacao(d && d.instalacaoAlternativa ? d.instalacaoAlternativa.id : '');
   document.getElementById('depNome').value = d ? d.nome : '';
   document.getElementById('depDetalhes').value = d ? (d.detalhes || '') : '';
   // Sem rtoMin/rpoMin ainda (antes da migracao), o texto legado e convertido
@@ -5632,6 +5708,7 @@ function _coletarFormularioDependencia() {
     rpoMin: _lerCampoDuracao('depRpo'),
     mttrMin: _lerCampoDuracao('depMttr'),
     componentes: (window._depComponentesSel || []).map((x) => ({ id: x.id, nome: x.nome, categoria: x.categoria })),
+    ..._coletarDadosInstalacao(document.getElementById('depCategoria').value.trim()),
     estrategia: document.getElementById('depEstrategia').value,
     responsavel: document.getElementById('depResponsavel').value,
     drpCriteriosAcionamento: window._depDrpListas.drpCriteriosAcionamento || [],
@@ -5682,7 +5759,9 @@ window.salvarDep = async () => {
     empresa: existente ? (existente.empresa || '') : '',
     telefone: existente ? (existente.telefone || '') : '',
     email: existente ? (existente.email || '') : '',
-    endereco: existente ? (existente.endereco || '') : '',
+    // Endereço: da instalação vem do formulário (bloco "Dados da instalação");
+    // nas outras categorias segue preservado do registro.
+    endereco: _ehInstalacao(estadoDoFormulario.categoria) ? (estadoDoFormulario.endereco || '') : (existente ? (existente.endereco || '') : ''),
     // Roteiros de Teste: gerado/apagado só pelo fluxo próprio (gerarRoteiroTeste/
     // excluirRoteiroTeste) -- aqui só preserva o que já existe, mesmo tratamento
     // de drpSalvo logo abaixo.
@@ -5818,7 +5897,7 @@ async function relatorios() {
     <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:16px;">
       <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
         <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Processos por Dependência</h3>
-        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para cada dependência do catálogo técnico, quais Processos de Negócio dependem dela.</p>
+        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para cada dependência do catálogo técnico e cada instalação, quais Processos de Negócio dependem dela.</p>
         <button class="btn btn-primary" onclick="abrirSelecaoDependenciasRelatorio()">📄 Gerar relatório</button>
       </div>
       <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
@@ -5927,7 +6006,7 @@ function _renderRelatorioDepsChecklist() {
   if (!cont) return;
   const catalogo = window._relatorioDepsCatalogo || [];
   const selecionadas = window._relatorioDepsSelecionadas || new Set();
-  const grupos = DEPENDENCIA_CATEGORIAS_TECNICAS
+  const grupos = DEPENDENCIA_CATEGORIAS_CATALOGO
     .map((cat) => ({ categoria: cat, itens: catalogo.filter((d) => d.categoria === cat).sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR')) }))
     .filter((g) => g.itens.length);
 
@@ -6946,7 +7025,7 @@ async function _carregarEscopoRelatorioServicos() {
     ${campo('relSrvFiltroServico', 'Serviço', [...b.servicos].sort((x, y) => (x.nome || '').localeCompare(y.nome || '', 'pt-BR')).map((s) => opt(s.id, s.nome)).join(''))}
     ${campo('relSrvFiltroProcesso', 'Processo suportado', procs.map((p) => opt(p.id, p.nome)).join(''))}
     ${campo('relSrvFiltroStatus', 'Composição', ServicoComposicao.ORDEM_STATUS.map((k) => opt(k, ServicoComposicao.STATUS[k])).join(''))}
-    ${campo('relSrvFiltroCategoria', 'Com dependência de', DEPENDENCIA_CATEGORIAS_TECNICAS.map((c) => opt(c, c)).join(''))}
+    ${campo('relSrvFiltroCategoria', 'Com dependência de', DEPENDENCIA_CATEGORIAS_CATALOGO.map((c) => opt(c, c)).join(''))}
   </div>`;
   atualizarEscopoRelatorioServicos();
 }
@@ -7860,7 +7939,7 @@ window.confirmarGerarRelatorioProcessosPorDependencia = async () => {
 };
 
 function _htmlRelatorioProcessosPorDependencia(dependencias, processos) {
-  const categorias = DEPENDENCIA_CATEGORIAS_TECNICAS;
+  const categorias = DEPENDENCIA_CATEGORIAS_CATALOGO;
   const porCategoria = categorias.map((cat) => ({
     categoria: cat,
     itens: (dependencias || []).filter((d) => d.categoria === cat).sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR')),
@@ -8753,7 +8832,8 @@ async function mapaContinuidade() {
     document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar o mapa.', 'mapaContinuidade');
     return;
   }
-  const tecnicas = (dados.dependencias || []).filter((d) => DEPENDENCIA_CATEGORIAS_TECNICAS.includes(d.categoria));
+  // Técnicas + Instalações: uma instalação pode estar no caminho crítico de um Serviço.
+  const tecnicas = (dados.dependencias || []).filter((d) => DEPENDENCIA_CATEGORIAS_CATALOGO.includes(d.categoria));
   const indice = MapaContinuidade.montarIndice(dados, {
     tierDe: (p) => Criticidade.tierDoProcesso(p),
     avaliarServico: (s) => ServicoComposicao.avaliarServico(s, tecnicas),
@@ -9838,7 +9918,7 @@ window.novaDependenciaDeVulnerabilidade = () => {
       if (!window.areasData) window.areasData = await API.getAreas();
     },
     // Já vem com a categoria escolhida no campo (se for uma categoria técnica).
-    abrir: () => abrirDrawerDependencia(DEPENDENCIA_CATEGORIAS_TECNICAS.includes(cat) ? { categoria: cat } : undefined),
+    abrir: () => abrirDrawerDependencia(DEPENDENCIA_CATEGORIAS_CATALOGO.includes(cat) ? { categoria: cat } : undefined),
     aoSalvar: (d) => {
       if (!VULN_CATEGORIAS_DEPENDENCIA.includes(d.categoria)) {
         return showToast(`Dependência criada na categoria "${d.categoria}", que não se aplica a vulnerabilidades.`, '#e65100');
