@@ -1189,3 +1189,35 @@ test('serieRiscoPorEscopo: perfil, validacao e empresa x escopo com os mesmos in
   assert.ok(ultimoEmp.carga > ultimoEsc.carga, 'a empresa inclui o risco de fora do escopo');
   assert.deepStrictEqual(ultimoEsc.areas.map((a) => a.area), ['TI']);
 });
+
+// --- PCN nos 4 Ps (Instalações, 21/10/2026) ---
+test('gerarPCN: prompt traz as Instalações do processo (tipo, endereço, pessoas lotadas, alternativa) e os 4 Ps', async () => {
+  const s = seed();
+  s.dependencias = Object.assign({}, s.dependencias, {
+    sede: { categoria: 'Instalações', nome: 'Sede SP', tipoInstalacao: 'Sede', endereco: 'Av. Paulista, 1000', instalacaoAlternativa: { id: 'filial', nome: 'Filial RJ' } },
+    filial: { categoria: 'Instalações', nome: 'Filial RJ', tipoInstalacao: 'Filial', endereco: 'Rua do Ouvidor, 50' },
+    dc: { categoria: 'Instalações', nome: 'Data center', tipoInstalacao: 'Data center' },
+    ana: { categoria: 'Pessoas', nome: 'Ana', instalacao: { id: 'sede', nome: 'Sede SP' } },
+    beto: { categoria: 'Pessoas', nome: 'Beto', instalacao: { id: 'sede', nome: 'Sede SP' } },
+  });
+  s.processos.ti__backup.dependenciaItens = [
+    { categoria: 'Instalações', nome: 'Sede SP', id: 'sede' },
+    { categoria: 'Instalações', nome: 'Data center', id: 'dc' },
+  ];
+  const db = makeDb(s);
+  let prompt = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    prompt = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<h1>PCN</h1>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarPCN(db, { id: 'ti__backup' }, ctx({ geminiApiKey: 'chave-teste' }));
+  } finally { global.fetch = original; }
+  assert.match(prompt, /### Instalações \(4 Ps do BIA/);
+  assert.match(prompt, /- \*\*Sede SP\*\* \(Sede\) — Av\. Paulista, 1000 \| Pessoas lotadas: 2 \| Instalação alternativa \(contingência\): Filial RJ \(Filial\) — Rua do Ouvidor, 50/);
+  assert.match(prompt, /- \*\*Data center\*\* \(Data center\) \| Pessoas lotadas: 0 \| SEM instalação alternativa definida/);
+  assert.match(prompt, /pelos 4 Ps do BIA/);
+  assert.match(prompt, /NÃO inclua Fornecedores\/Pessoas\/Instalações nesta tabela/);
+  assert.match(prompt, /NÃO invente nome nem endereço de local alternativo/);
+});

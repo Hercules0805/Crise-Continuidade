@@ -283,6 +283,33 @@ function _erroChamadaIA(err, rotulo) {
   return new AppError('Erro ao gerar ' + rotulo + ': ' + (err && err.message));
 }
 
+const CATEGORIAS_INSTALACAO = ['Instalações', 'Instalação'];
+
+/**
+ * Instalações do processo para o PCN: as de dependenciaItens (por id, ou por
+ * nome no processo legado), com tipo, endereço, pessoas lotadas (Pessoas com
+ * `instalacao.id` apontando para ela) e a instalação alternativa resolvida.
+ */
+function _instalacoesDoProcessoPCN(p, dependencias) {
+  const porId = new Map(dependencias.map((d) => [String(d.id), d]));
+  const ehInst = (d) => d && CATEGORIAS_INSTALACAO.includes(d.categoria);
+  let refs = Array.isArray(p.dependenciaItens) && p.dependenciaItens.length
+    ? p.dependenciaItens.filter((it) => CATEGORIAS_INSTALACAO.includes(it.categoria)).map((it) => (it.id ? porId.get(String(it.id)) : dependencias.find((d) => ehInst(d) && d.nome === it.nome)) || { nome: it.nome, categoria: it.categoria })
+    : String(p.dependencia || '').split(',').map((s) => s.trim()).filter(Boolean).map((nome) => dependencias.find((d) => ehInst(d) && d.nome === nome)).filter(Boolean);
+  const vistos = new Set();
+  refs = refs.filter((d) => { const k = d.id || d.nome; if (vistos.has(k)) return false; vistos.add(k); return true; });
+  return refs.map((d) => {
+    const altRef = d.instalacaoAlternativa && d.instalacaoAlternativa.id ? porId.get(String(d.instalacaoAlternativa.id)) : null;
+    return {
+      nome: d.nome || '',
+      tipo: d.tipoInstalacao || '',
+      endereco: d.endereco || '',
+      pessoasLotadas: d.id ? dependencias.filter((x) => (x.categoria === 'Pessoas' || x.categoria === 'Pessoa') && x.instalacao && String(x.instalacao.id) === String(d.id)).length : 0,
+      alternativa: altRef ? { nome: altRef.nome || '', tipo: altRef.tipoInstalacao || '', endereco: altRef.endereco || '' } : null,
+    };
+  });
+}
+
 async function gerarPCN(db, data, ctx) {
   const id = exigir(data.id, 'id');
   if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
@@ -317,6 +344,11 @@ async function gerarPCN(db, data, ctx) {
       return dep ? { nome: dep.nome, categoria: dep.categoria, setor: dep.setor, empresa: dep.empresa, telefone: dep.telefone, email: dep.email, papel: dep.detalhes, rto: dep.rto, rpo: dep.rpo, estrategia: dep.estrategia, responsavel: dep.responsavel } : { nome };
     });
   }
+
+  // Instalações (21/10/2026): o "P" de Premises dos 4 Ps do BIA. Para cada
+  // instalação do processo: tipo, endereço, quantas pessoas estão lotadas nela
+  // e a instalação alternativa (contingência) -- ou a ausência dela.
+  const instalacoesPCN = _instalacoesDoProcessoPCN(p, dependencias);
 
   const contatosIds = p.bcpContatos || [];
   const contatosDetalhados = contatosIds.map((cid) => {
@@ -354,6 +386,9 @@ Onde houver dados disponíveis, preencha com informações reais. Onde não houv
 ### Dependências Críticas
 ${depsDetalhadas.length ? depsDetalhadas.map((d) => `- **${d.categoria || 'Outros'}:** ${d.nome}${d.empresa ? ' (' + d.empresa + ')' : ''}${d.papel ? ' — ' + d.papel : ''}${d.estrategia ? ' | Estratégia: ' + d.estrategia : ''}${d.rto ? ' | RTO: ' + d.rto : ''}${d.rpo ? ' | RPO: ' + d.rpo : ''}${d.responsavel ? ' | Responsável: ' + d.responsavel : ''}`).join('\n') : 'Nenhuma dependência mapeada.'}
 
+### Instalações (4 Ps do BIA — locais físicos do processo)
+${instalacoesPCN.length ? instalacoesPCN.map((i) => `- **${i.nome}**${i.tipo ? ' (' + i.tipo + ')' : ''}${i.endereco ? ' — ' + i.endereco : ''} | Pessoas lotadas: ${i.pessoasLotadas} | ${i.alternativa ? 'Instalação alternativa (contingência): ' + i.alternativa.nome + (i.alternativa.tipo ? ' (' + i.alternativa.tipo + ')' : '') + (i.alternativa.endereco ? ' — ' + i.alternativa.endereco : '') : 'SEM instalação alternativa definida'}`).join('\n') : 'Nenhuma instalação mapeada.'}
+
 ### Equipe de Crise (Contatos)
 ${contatosDetalhados.length ? contatosDetalhados.map((d) => {
     const papel = papeisCrise[d.nome] || papeisCrise[String(contatosIds[contatosDetalhados.indexOf(d)])] || d.papel || '';
@@ -379,7 +414,7 @@ ${Object.keys(slasData).length ? Object.entries(slasData).map(([dep, sla]) => `-
    - [ ] Tier 3 - Suporte: Baixo impacto imediato (score < 6)
    Marcar com [x] o tier correto baseado no score ${score}. NÃO USE 4 tiers. NÃO USE nomes como "Importante" ou "Tolerável". São APENAS 3 tiers.
 3. Matriz de Impacto da Indisponibilidade (tabela: Dimensão × Janelas 1h/4h/24h para Operacional, Reputacional, Financeiro, Legal)
-4. Mapeamento de Dependências Críticas (tabela: Tipo × Recursos — Pessoas, Sistemas, Fornecedores, Infraestrutura)
+4. Mapeamento de Dependências Críticas pelos 4 Ps do BIA (tabela: P × Recursos — Pessoas; Instalações; Processos e Tecnologia (processos internos, sistemas, infraestrutura, servidores, bancos de dados, APIs); Fornecedores)
 5. Objetivos de Recuperação RTO e RPO (tabela: Recurso × RTO × RPO)
 
 ## PARTE 2: PLANO DE CONTINUIDADE DE NEGÓCIOS (BCP)
@@ -387,7 +422,7 @@ ${Object.keys(slasData).length ? Object.entries(slasData).map(([dep, sla]) => `-
 2. Informações de Contato e Matriz de Responsabilidade (tabela: Nome, Papel na Crise, Setor, Telefone, E-mail)
 3. Avaliação de Riscos (tabela: Evento, Probabilidade, Impacto, Estratégia de Mitigação)
 4. Medidas Preventivas / Controles Existentes (tabela: Controle × Descrição)
-5. Estratégia Operacional em Contingência (tabela: Atividade Afetada × Alternativa Operacional)
+5. Estratégia Operacional em Contingência (tabela: Atividade Afetada × Alternativa Operacional — inclua o local de contingência de cada instalação)
 6. Estrutura de Governança da Crise (tabela: Papel × Responsabilidade)
 7. Critérios de Ativação do BCP (lista de condições)
 8. Fluxo Prioritário de Recuperação (tabela: Ordem × Recurso × RTO × RPO)
@@ -423,8 +458,9 @@ ${Object.keys(slasData).length ? Object.entries(slasData).map(([dep, sla]) => `-
 ## REGRAS ESPECÍFICAS
 
 - MATRIZ DE RESPONSABILIDADE: Se houver contatos fornecidos na seção "Equipe de Crise (Contatos)" acima, use os dados reais (nome, telefone, e-mail, setor) EXATAMENTE como fornecidos. Complete o "Papel na Crise" com sugestões adequadas ao contexto. Se NÃO houver contatos fornecidos, preencha apenas "Papel na Crise" e "Setor" com sugestões funcionais (ex: "Coordenador de Crise", "Líder Técnico"), deixando "Nome", "Telefone" e "E-mail" EM BRANCO — NÃO invente dados pessoais fictícios.
+- INSTALAÇÕES (4 Ps): use as instalações listadas em "Instalações" na linha "Instalações" do Mapeamento de Dependências. Na Estratégia Operacional em Contingência, indique para cada instalação a instalação alternativa informada como local de contingência, com o tipo e o endereço EXATAMENTE como fornecidos, e dimensione a realocação pelo número de pessoas lotadas. Se a instalação estiver "SEM instalação alternativa definida", registre essa ausência como risco na Matriz de Riscos e recomende definir um local alternativo — NÃO invente nome nem endereço de local alternativo.
 - MATRIZ DE RISCOS: Analise CADA evento de risco individualmente e atribua Probabilidade (Muito alta, Alta, Moderada, Baixa ou Muito baixa) e Impacto (Muito alto, Alto, Moderado, Baixo ou Muito baixo) — escala NIST SP 800-30 de forma REALISTA e DIFERENCIADA — NÃO use o mesmo valor para todos os riscos. Considere o contexto do processo, setor e dependências para variar as classificações. Por exemplo: falha de energia pode ser "Baixa" probabilidade mas "Crítico" impacto; erro humano pode ser "Alta" probabilidade mas "Moderado" impacto.
-- ESTRATÉGIA TÉCNICA DE RECUPERAÇÃO (Parte 3, item 2): monte uma linha por dependência crítica listada em "Dependências Críticas" que seja de categoria técnica (API, Banco de Dados, Infraestrutura, Segurança, Servidor, Sistemas, Outros — NÃO inclua Fornecedores/Pessoas nesta tabela). Colunas: Recurso/Dependência, Estratégia, RTO, RPO, Responsável. Onde a dependência já tiver Estratégia/RTO/RPO/Responsável informados acima, use ESSES VALORES EXATOS, palavra por palavra — não invente, não reformule. Onde faltar algum desses dados, infira um valor tecnicamente razoável a partir da categoria e do contexto do processo, do mesmo jeito que já faz pros demais campos sem dado informado.`;
+- ESTRATÉGIA TÉCNICA DE RECUPERAÇÃO (Parte 3, item 2): monte uma linha por dependência crítica listada em "Dependências Críticas" que seja de categoria técnica (API, Banco de Dados, Infraestrutura, Segurança, Servidor, Sistemas, Outros — NÃO inclua Fornecedores/Pessoas/Instalações nesta tabela). Colunas: Recurso/Dependência, Estratégia, RTO, RPO, Responsável. Onde a dependência já tiver Estratégia/RTO/RPO/Responsável informados acima, use ESSES VALORES EXATOS, palavra por palavra — não invente, não reformule. Onde faltar algum desses dados, infira um valor tecnicamente razoável a partir da categoria e do contexto do processo, do mesmo jeito que já faz pros demais campos sem dado informado.`;
 
   const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + ctx.geminiApiKey;
   const payload = {

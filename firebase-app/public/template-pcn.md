@@ -24,14 +24,14 @@
 | **Financeiro** | [Descrever atrasos pontuais de caixa/receita] | [Descrever perdas e impacto no fluxo de caixa] | [Descrever prejuízos graves e quebra de caixa] |
 | **Legal / Regulatório** | [Descrever riscos contratuais ou fiscais imediatos] | [Descrever quebras de prazos regulatórios] | [Descrever riscos elevados de multas ou autuações] |
 
-4. Mapeamento de Dependências Críticas
+4. Mapeamento de Dependências Críticas (os 4 Ps do BIA)
 
 | Tipo de Dependência | Recursos Necessários para Continuidade |
 | :---- | :---- |
 | **Pessoas** | [Inserir equipes internas, analistas e técnicos vitais] |
-| **Sistemas** | [Inserir softwares, ERPs, integrações e plataformas utilizadas] |
+| **Instalações** | [Inserir sede, filiais, escritórios e data centers do processo, com a instalação alternativa de cada uma] |
+| **Processos e Tecnologia** | [Inserir processos internos, softwares, ERPs, integrações, servidores, bancos de dados, redes, energia] |
 | **Fornecedores** | [Inserir parceiros externos, bancos, prestadores de serviços, links de internet] |
-| **Infraestrutura** | [Inserir servidores, bancos de dados, redes, energia, estações de trabalho] |
 
 5. Objetivos de Recuperação (RTO e RPO)
 
@@ -84,6 +84,7 @@
 | [Serviço 1] | [Ex: Processamento manual via planilha, lote físico ou fluxo offline] |
 | [Serviço 2] | [Ex: Priorização de atendimento para clientes críticos / contratos VIP] |
 | [Comunicação] | [Ex: Utilização de canais ou servidores SMTP alternativos] |
+| [Local de trabalho] | [Ex: Realocação da equipe da Sede para a instalação alternativa (Filial RJ) ou home office] |
 
 6. Estrutura de Governança da Crise
 
