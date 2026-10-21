@@ -169,3 +169,23 @@ test('formulario do gestor (bia-dependencias.html): cartao 4. Instalações, cha
   const numeros = [...html.matchAll(/renderCategoryCard\('[^']+', '(\d+)\./g)].map((m) => Number(m[1]));
   assert.deepStrictEqual(numeros, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'numeracao continua');
 });
+
+// ---- Etapa 4: lotacao da Pessoa ----
+test('Pessoa: select "Instalação (lotação)" com as instalações; salvar grava {id, nome}; relatório mostra a lotação', async () => {
+  const ana = { id: 'pAna', categoria: 'Pessoas', nome: 'Ana', areas: ['TI'], instalacao: { id: 'sede', nome: 'Sede SP' } };
+  const ctx = await carregar(['admin'], { getDependencias: DEPS.filter((d) => d.id !== 'pAna').concat([ana]), getPerfis: [], getProdutosSoftware: [] });
+  await ctx.w.pessoas();
+  ctx.w.abrirModalPessoa('pAna');
+  const sel = ctx.doc.getElementById('pessoaInstalacao');
+  assert.deepStrictEqual([...sel.options].map((o) => o.textContent), ['Nenhuma', 'Data center (Data center)', 'Filial RJ (Filial)', 'Sede SP (Sede)']);
+  assert.strictEqual(sel.value, 'sede');
+  sel.value = 'filial';
+  await ctx.w.salvarPessoaCadastro();
+  const g = ctx.gravacoes.find((x) => x.nome === 'salvarDependencia').arg;
+  assert.deepStrictEqual(g.instalacao, { id: 'filial', nome: 'Filial RJ' });
+  sel.value = '';
+  await ctx.w.salvarPessoaCadastro();
+  assert.strictEqual(ctx.gravacoes.filter((x) => x.nome === 'salvarDependencia').pop().arg.instalacao, null);
+  const html = ctx.w._buildRelatorioPessoaPage(ana, { processos: [], deps: [ana], riscos: [], indicadores: [], backups: [], perfis: [], areas: [], servicos: [] });
+  assert.match(html, /Instalação \(lotação\):<\/b> Sede SP/);
+});

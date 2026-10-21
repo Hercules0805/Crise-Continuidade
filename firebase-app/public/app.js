@@ -175,6 +175,8 @@ function route() {
     try { window._mapa.cy.destroy(); } catch (e) { /* já destruído */ }
     window._mapa.cy = null;
   }
+  // Lista de instalações da tela Pessoas: vale só enquanto ela está aberta.
+  window._instalacoesData = null;
   const pageFunc = pages[page] || pages[_paginaInicialDoPerfil()];
   const carregando = pageFunc ? pageFunc() : null;
   // "Abrir cadastro" do Mapa de Continuidade (21/10/2026): espera a tela de
@@ -1461,6 +1463,11 @@ function _htmlDrawerPessoa() {
           <select id="pessoaLider" style="${inp}"><option value="">Selecione...</option></select>
         </div>
         <div style="margin-bottom:16px;">
+          <label style="${lbl}" for="pessoaInstalacao">Instalação (lotação)</label>
+          <select id="pessoaInstalacao" style="${inp}"><option value="">Nenhuma</option></select>
+          <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Onde a pessoa trabalha. Entra no Mapa de Continuidade e no PCN (quantas pessoas uma instalação fora do ar afeta).</span>
+        </div>
+        <div style="margin-bottom:16px;">
           <label style="${lbl}">Liderança em produtos</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:0.9em;cursor:pointer;margin-bottom:6px;">
             <input type="checkbox" id="pessoaTechLead" onchange="alternarLiderancaPessoa('techLead')"> <strong>Tech Lead</strong>
@@ -1571,6 +1578,8 @@ async function pessoas() {
     API.getProdutosSoftware().catch((e) => { console.error('Pessoas: produtos não carregaram', e); return null; }),
   ]);
   pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+  // Opções de "Instalação (lotação)" no drawer da Pessoa.
+  window._instalacoesData = deps.filter((d) => _ehInstalacao(d.categoria));
   if (produtos) produtosSoftwareData = produtos;
   // Fonte do dropdown "Área" no modal de Pessoa -- mesmo catálogo de Áreas.
   window.areasData = areas;
@@ -1864,6 +1873,7 @@ window.abrirModalPessoa = (id) => {
     : (p && p.setor ? [p.setor] : []);
   renderPessoaAreas();
   _popularSelectLiderPessoa(p ? (p.liderImediato || '') : '', p ? p.id : null);
+  _popularSelectInstalacaoPessoa(p && p.instalacao ? p.instalacao.id : '');
   window._pessoaLideranca = {
     techLead: !!(p && p.techLead), techLeadProdutos: p && Array.isArray(p.techLeadProdutos) ? p.techLeadProdutos.map(String) : [],
     teamLead: !!(p && p.teamLead), teamLeadProdutos: p && Array.isArray(p.teamLeadProdutos) ? p.teamLeadProdutos.map(String) : [],
@@ -1908,6 +1918,33 @@ window.fecharModalPessoa = () => _fecharComRastreador({
 
 const _edPessoa = criarRastreadorEdicao(() => _coletarFormularioPessoa());
 
+// ---- Lotação da Pessoa (Instalações, 21/10/2026) ----
+// Fonte: o catálogo carregado pela tela atual (Pessoas guarda as instalações em
+// window._instalacoesData; de outras telas, o cadastro rápido usa o catálogo delas).
+function _instalacoesDoCatalogo() {
+  const fonte = window._instalacoesData || (typeof dependenciasData !== 'undefined' && dependenciasData.length ? dependenciasData : null) || window.dependenciasCatalogo || [];
+  return fonte.filter((d) => _ehInstalacao(d.categoria) && d.id)
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+}
+
+function _popularSelectInstalacaoPessoa(valorAtual) {
+  const sel = document.getElementById('pessoaInstalacao');
+  if (!sel) return;
+  const lista = _instalacoesDoCatalogo();
+  const tem = !valorAtual || lista.some((d) => String(d.id) === String(valorAtual));
+  sel.innerHTML = '<option value="">Nenhuma</option>' + lista.map((d) => `<option value="${esc(d.id)}">${esc(d.nome)}${d.tipoInstalacao ? ' (' + esc(d.tipoInstalacao) + ')' : ''}</option>`).join('')
+    + (tem ? '' : `<option value="${esc(valorAtual)}">(instalação removida)</option>`);
+  sel.value = valorAtual || '';
+}
+
+function _instalacaoEscolhidaPessoa() {
+  const sel = document.getElementById('pessoaInstalacao');
+  const id = sel ? sel.value : '';
+  if (!id) return null;
+  const d = _instalacoesDoCatalogo().find((x) => String(x.id) === String(id));
+  return { id, nome: d ? d.nome : '' };
+}
+
 // Estado do formulário (não o payload final): perfis = o que está marcado nos
 // checkboxes -- ou, pra quem não gerencia perfis (checkboxes ocultos), o valor
 // original, que não muda.
@@ -1919,6 +1956,7 @@ function _coletarFormularioPessoa() {
     detalhes: document.getElementById('pessoaDetalhes').value.trim(),
     areas: window._pessoaAreas || [],
     liderImediato: document.getElementById('pessoaLider').value,
+    instalacao: _instalacaoEscolhidaPessoa(),
     techLead: !!window._pessoaLideranca.techLead,
     techLeadProdutos: window._pessoaLideranca.techLeadProdutos || [],
     teamLead: !!window._pessoaLideranca.teamLead,
@@ -2124,6 +2162,7 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
     + '<b>Nome:</b> ' + esc(nome) + '<br>'
     + '<b>Cargo:</b> ' + esc(pessoa.detalhes || '-') + '<br>'
     + '<b>Área(s):</b> ' + esc((Array.isArray(pessoa.areas) && pessoa.areas.length ? pessoa.areas : [pessoa.setor]).filter(Boolean).join(', ') || '-') + '<br>'
+    + '<b>Instalação (lotação):</b> ' + esc(pessoa.instalacao && pessoa.instalacao.nome ? pessoa.instalacao.nome : '-') + '<br>'
     + '<b>Telefone:</b> ' + esc(pessoa.telefone || '-') + '<br>'
     + '<b>E-mail:</b> ' + esc(pessoa.email || '-')
     + '</p>';
@@ -2383,6 +2422,8 @@ window.salvarPessoaCadastro = async () => {
         setor: (window._pessoaAreas && window._pessoaAreas[0]) || '',
         // Líder imediato -- id de outra Pessoa (base do organograma).
         liderImediato: document.getElementById('pessoaLider').value,
+        // Lotação (Instalações, 21/10/2026): {id, nome} ou null.
+        instalacao: estadoDoFormulario.instalacao,
         techLead: estadoDoFormulario.techLead,
         techLeadProdutos: estadoDoFormulario.techLeadProdutos,
         teamLead: estadoDoFormulario.teamLead,
