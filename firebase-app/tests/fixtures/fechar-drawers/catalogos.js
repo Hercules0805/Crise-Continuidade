@@ -210,7 +210,7 @@ window.__rodar = async () => {
 
   // ------------------------------------------------------------ Backup
   html(_htmlDrawerBackup);
-  backupsData = [{ id: 'b1', nome: 'Bk', descricao: '', servicoId: 's1', servidorId: '', stakeholderId: '', jobs: [] }];
+  backupsData = [{ id: 'b1', nome: 'Bk', descricao: '', servicoIds: ['s1'], servidorId: '', stakeholderId: '', jobs: [] }];
   pessoasData = [];
   zera(); abrirDrawerBackup('b1'); await fecharDrawerBackup();
   ok(n('salvarBackup') === 0 && !aberto('drawerBackup'), 'backup: sem mexer = 0 gravacoes');
@@ -220,6 +220,45 @@ window.__rodar = async () => {
   ok(n('salvarBackup') === 1, 'backup: so adicionou job (estado fora do input) = grava');
   zera(); abrirDrawerBackup(); await fecharDrawerBackup();
   ok(n('salvarBackup') === 0 && !aberto('drawerBackup'), 'backup: novo em branco fecha sem criar (serv. vazio)');
+
+  // DECISAO 21/10/2026: varios servicos, ferramenta, modo/escopo; stakeholder foi pro Servico.
+  servicosData = [{ id: 's1', nome: 'Serv', descricao: 'd', dependenciaItens: [] }, { id: 's2', nome: 'ERP', descricao: '', dependenciaItens: [] }];
+  ferramentasBackupData = [{ id: 'f1', nome: 'Veeam', ativo: true }, { id: 'f9', nome: 'Outra', ativo: true }];
+  zera(); abrirDrawerBackup('b1'); document.getElementById('backupServicoAdd').value = 's2'; adicionarServicoBackup(); await fecharDrawerBackup();
+  const pb = (window.__calls.salvarBackup || [])[0];
+  ok(n('salvarBackup') === 1 && pb && JSON.stringify(pb[0].servicoIds) === '["s1","s2"]', 'backup: adicionou 2o servico = grava servicoIds com os dois');
+  ok(pb && !('servicoId' in pb[0]) && !('stakeholderId' in pb[0]), 'backup: payload nao leva mais servicoId nem stakeholder');
+  zera(); abrirDrawerBackup('b1'); set('backupFerramenta', 'f9'); _ajustarFerramentaOutraBackup(); set('backupFerramentaOutra', 'Rsync'); selecionarModoBackup('Diretório / Arquivos');
+  ok(document.getElementById('backupEscopoLabel').textContent === 'Caminhos', 'backup: modo Diretorio troca o rotulo do Escopo para Caminhos');
+  set('backupEscopo', '/var/www'); await fecharDrawerBackup();
+  const pf = ((window.__calls.salvarBackup || [])[0] || [])[0] || {};
+  ok(pf.ferramentaId === 'f9' && pf.ferramentaNome === 'Outra' && pf.ferramentaOutra === 'Rsync' && pf.modo === 'Diretório / Arquivos' && pf.escopo === '/var/www',
+    'backup: grava ferramenta (com texto de Outra), modo e escopo');
+  ok(_nomeFerramentaBackup(pf) === 'Rsync', 'grade: ferramenta Outra mostra o texto digitado');
+  backupsData = [{ id: 'b1', nome: 'Bk', servicoIds: ['s1'], jobs: [{ nome: 'j', tipo: 'Diferencial', destino: '' }], modo: 'Snapshot' }];
+  zera(); abrirDrawerBackup('b1');
+  ok(document.getElementById('backupAvisosModo').style.display === 'block', 'backup: Snapshot com job Diferencial sem destino mostra aviso');
+  await fecharDrawerBackup();
+  ok(n('salvarBackup') === 0, 'backup: aviso de modo nao suja o formulario');
+
+  // Stakeholders no Servico: herdados dos backups sem sujar o Fechar; salvar grava a lista.
+  pessoasData = [{ id: 'p1', nome: 'Ana', categoria: 'Pessoas' }, { id: 'p2', nome: 'Bia', categoria: 'Pessoas' }];
+  servicosData = [{ id: 's1', nome: 'Serv', descricao: 'd', dependenciaItens: [], stakeholders: [] }];
+  backupsData = [{ id: 'b1', nome: 'Bk', servicoIds: ['s1'], stakeholderId: 'p1', stakeholderNome: 'Ana', jobs: [] },
+    { id: 'b2', nome: 'Bk2', servicoIds: ['s1', 's9'], stakeholderId: 'p1', stakeholderNome: 'Ana', jobs: [] }];
+  zera(); abrirDrawerServico('s1');
+  ok(window._servicoStakeholders.length === 1 && window._servicoStakeholders[0].id === 'p1', 'servico: sem lista propria herda o stakeholder (distinto) dos backups');
+  ok(document.getElementById('servicoStakeholdersMigrados').style.display === 'block', 'servico: avisa que veio dos backups');
+  await fecharDrawerServico();
+  ok(n('salvarServico') === 0, 'servico: stakeholder herdado nao suja o Fechar');
+  zera(); abrirDrawerServico('s1'); document.getElementById('servicoStakeholderAdd').value = 'p2'; adicionarStakeholderServico(); await fecharDrawerServico();
+  const ps = ((window.__calls.salvarServico || [])[0] || [])[0] || {};
+  ok(n('salvarServico') === 1 && JSON.stringify((ps.stakeholders || []).map((p) => p.id)) === '["p1","p2"]', 'servico: adicionou pessoa = grava stakeholders');
+  servicosData = [{ id: 's1', nome: 'Serv', dependenciaItens: [], stakeholders: [{ id: 'p2', nome: 'Bia' }] }];
+  zera(); abrirDrawerServico('s1');
+  ok(window._servicoStakeholders.length === 1 && window._servicoStakeholders[0].id === 'p2', 'servico: com lista propria ignora o stakeholder legado dos backups');
+  await fecharDrawerServico();
+  pessoasData = [];
 
   // ------------------------------------------------------------ Perguntas de Criticidade
   html(_htmlDrawerCriticidadePergunta);

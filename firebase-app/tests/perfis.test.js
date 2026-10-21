@@ -250,7 +250,7 @@ test('dependencias no banco liberam escrita para Admin, SI e TI (sem guarda de c
 const TODAS_AS_TELAS = [
   'processos', 'pcns', 'drp', 'areas', 'pessoas', 'riscos', 'vulnerabilidades',
   'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
-  'dependencias', 'componentes', 'perguntas', 'relatorios', 'servicos', 'catalogo-backup',
+  'dependencias', 'componentes', 'perguntas', 'relatorios', 'servicos', 'catalogo-backup', 'catalogo-backup-ferramentas',
   'admin', 'perfis', 'produtos-software',
   'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
   'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status', 'notificacoes-email',
@@ -263,7 +263,7 @@ test('admin ve todas as telas', () => {
 });
 
 test('SI ve quase tudo, menos as tres telas proprias do Admin', () => {
-  ['processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades', 'areas', 'pessoas', 'dependencias', 'relatorios', 'servicos', 'catalogo-backup', 'produtos-software',
+  ['processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades', 'areas', 'pessoas', 'dependencias', 'relatorios', 'servicos', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
     'indicadores-dashboard', 'admin'].forEach((t) => {
@@ -281,7 +281,7 @@ test('TI ve o DRP, o catalogo de dependencias e relatorios, e nada mais', () => 
 
 test('TI NAO ve processos, PCNs, riscos, fornecedores, servicos/catalogo-backup nem admin', () => {
   ['processos', 'pcns', 'riscos', 'fornecedores', 'admin', 'perfis', 'perguntas',
-    'indicadores-dashboard', 'areas', 'pessoas', 'servicos', 'catalogo-backup'].forEach((t) => {
+    'indicadores-dashboard', 'areas', 'pessoas', 'servicos', 'catalogo-backup', 'catalogo-backup-ferramentas'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.TI, t), false, `TI nao deveria ver ${t}`);
   });
 });
@@ -295,7 +295,7 @@ test('TI + Gestor ve a uniao: DRP e dependencias (TI) mais o que o gestor ve', (
 });
 
 test('gestor NAO ve telas de cadastro nem as de fornecedor', () => {
-  ['areas', 'pessoas', 'perguntas', 'dependencias', 'componentes', 'perfis', 'relatorios', 'servicos', 'catalogo-backup',
+  ['areas', 'pessoas', 'perguntas', 'dependencias', 'componentes', 'perfis', 'relatorios', 'servicos', 'catalogo-backup', 'catalogo-backup-ferramentas',
     'fornecedores', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.GESTOR, t), false, `nao deveria ver ${t}`);
   });
@@ -368,7 +368,7 @@ test('operador ve exatamente as 13 telas combinadas, e nenhuma outra', () => {
 test('operador NAO ve nada tecnico: DRP, PCN, riscos, vulnerabilidades, indicadores, perfis, perguntas, dependencias', () => {
   ['drp', 'pcns', 'riscos', 'vulnerabilidades', 'indicadores-dashboard', 'indicadores-cadastro',
     'indicadores-lancamento', 'indicadores-matriz', 'dependencias', 'componentes', 'perfis', 'perguntas',
-    'servicos', 'catalogo-backup', 'produtos-software', 'admin'].forEach((t) => {
+    'servicos', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software', 'admin'].forEach((t) => {
     assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.OPERADOR, t), false, `operador nao deveria ver ${t}`);
   });
 });

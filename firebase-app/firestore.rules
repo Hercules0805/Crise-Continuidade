@@ -221,6 +221,13 @@ service cloud.firestore {
       allow write: if isAdmin() || isSeguranca();
     }
 
+    // DECISAO 21/10/2026: lista configuravel de Ferramentas de Backup (Veeam,
+    // Commvault...) usada no campo Ferramenta do Backup -- mesma posse.
+    match /ferramentas_backup/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin() || isSeguranca();
+    }
+
     // DECISAO 06/10/2026: Vulnerabilidades (catalogo de vulnerabilidades
     // reportadas, com score e abertura automatica de Risco) -- mesma posse de
     // Servicos/Backups (Admin + Seguranca da Informacao). A abertura do risco

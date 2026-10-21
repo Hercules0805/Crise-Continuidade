@@ -46,6 +46,7 @@ const COLLECTION = {
   historicoRisco: 'historico_risco',
   servicos: 'servicos',
   backups: 'backups',
+  ferramentasBackup: 'ferramentas_backup',
   vulnerabilidades: 'vulnerabilidades',
   painelVulnerabilidades: 'painel_vulnerabilidades',
   relatoriosExecutivos: 'relatorios_executivos',
@@ -432,10 +433,13 @@ async function _lerServicos() {
     nome: s.nome || '',
     descricao: s.descricao || '',
     dependenciaItens: Array.isArray(s.dependenciaItens) ? s.dependenciaItens : [],
+    // Pessoas (categoria Pessoas de dependencias) donas do serviço, {id, nome}.
+    // DECISAO 21/10/2026: o Stakeholder saiu do Backup e veio pra cá.
+    stakeholders: Array.isArray(s.stakeholders) ? s.stakeholders : [],
   })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
-const _CAMPOS_SERVICO = ['nome', 'descricao', 'dependenciaItens'];
+const _CAMPOS_SERVICO = ['nome', 'descricao', 'dependenciaItens', 'stakeholders'];
 
 async function _salvarServico(s) {
   const data = {};
@@ -456,8 +460,8 @@ async function _salvarServico(s) {
 }
 
 /**
- * Backup: vinculado a 1 Serviço, 1 Servidor (Dependência) e 1 Stakeholder
- * (Pessoa). Jobs ficam como array dentro do próprio documento -- nunca são
+ * Backup: vinculado a N Serviços, 1 Servidor (Dependência) e 1 Ferramenta
+ * (lista ferramentas_backup), com o Modo (o que é copiado) e o Escopo. Jobs ficam como array dentro do próprio documento -- nunca são
  * abertos/buscados sozinhos, não precisam de coleção própria (mesmo espírito
  * de Pessoas Associadas/Gestores do Contrato do Fornecedor).
  *
@@ -465,6 +469,11 @@ async function _salvarServico(s) {
  * virou 1 Dependência só, igual Stakeholder -- servidorId/servidorNome.
  * servidorItens continua lido (não gravado mais) só pra abrirDrawerBackup()
  * migrar não-destrutivamente backups antigos que ainda não têm servidorId.
+ *
+ * DECISAO 21/10/2026: servicoId (1) virou servicoIds[] (N) -- backup antigo só
+ * com servicoId é lido como [servicoId], sem regravar nada. stakeholderId/Nome
+ * saíram do Backup (agora são do Serviço, ver _lerServicos) e só continuam
+ * lidos para o drawer do Serviço migrar quem ainda não tem stakeholders.
  */
 async function _lerBackups() {
   const docs = await _getAll(COLLECTION.backups);
@@ -472,17 +481,23 @@ async function _lerBackups() {
     id: b.id,
     nome: b.nome || '',
     descricao: b.descricao || '',
-    servicoId: b.servicoId || '',
+    servicoIds: Array.isArray(b.servicoIds) ? b.servicoIds.map(String) : (b.servicoId ? [String(b.servicoId)] : []),
     servidorId: b.servidorId || '',
     servidorNome: b.servidorNome || '',
     servidorItens: Array.isArray(b.servidorItens) ? b.servidorItens : [],
     stakeholderId: b.stakeholderId || '',
     stakeholderNome: b.stakeholderNome || '',
+    ferramentaId: b.ferramentaId || '',
+    ferramentaNome: b.ferramentaNome || '',
+    ferramentaOutra: b.ferramentaOutra || '',
+    modo: b.modo || '',
+    escopo: b.escopo || '',
     jobs: Array.isArray(b.jobs) ? b.jobs : [],
   })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
-const _CAMPOS_BACKUP = ['nome', 'descricao', 'servicoId', 'servidorId', 'servidorNome', 'stakeholderId', 'stakeholderNome', 'jobs'];
+const _CAMPOS_BACKUP = ['nome', 'descricao', 'servicoIds', 'servidorId', 'servidorNome',
+  'ferramentaId', 'ferramentaNome', 'ferramentaOutra', 'modo', 'escopo', 'jobs'];
 
 async function _salvarBackup(b) {
   const data = {};
@@ -2265,6 +2280,7 @@ const _GET_FIRESTORE = {
   getPerfis: () => _lerPerfis(),
   getServicos: () => _lerServicos(),
   getBackups: () => _lerBackups(),
+  getFerramentasBackup: () => _lerListaContrato(COLLECTION.ferramentasBackup),
   getVulnerabilidades: () => _lerVulnerabilidades(),
   getFotosPainelVulnerabilidades: () => _lerFotosPainelVulnerabilidades(),
   getContratos: () => _lerContratos(),
@@ -2309,6 +2325,8 @@ const _POST_FIRESTORE = {
   excluirServico: (b) => _db.collection(COLLECTION.servicos).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarBackup: (b) => _salvarBackup(b),
   excluirBackup: (b) => _db.collection(COLLECTION.backups).doc(String(b.id)).delete().then(() => ({ success: true })),
+  salvarFerramentaBackup: (b) => _salvarListaContrato(COLLECTION.ferramentasBackup, [], b),
+  excluirFerramentaBackup: (b) => _db.collection(COLLECTION.ferramentasBackup).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarVulnerabilidade: (b) => _salvarVulnerabilidade(b),
   excluirVulnerabilidade: (b) => _db.collection(COLLECTION.vulnerabilidades).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarAvaliacaoFornecedor: (b) => _salvarAvaliacaoFornecedor(b),
@@ -2596,6 +2614,11 @@ const API = {
     .then((r) => { API.invalidate('getBackups'); return r; }),
   excluirBackup: (id) => API.post('excluirBackup', { id })
     .then((r) => { API.invalidate('getBackups'); return r; }),
+  getFerramentasBackup: () => API.get('getFerramentasBackup'),
+  salvarFerramentaBackup: (t) => API.post('salvarFerramentaBackup', t)
+    .then((r) => { API.invalidate('getFerramentasBackup'); return r; }),
+  excluirFerramentaBackup: (id) => API.post('excluirFerramentaBackup', { id })
+    .then((r) => { API.invalidate('getFerramentasBackup'); return r; }),
   getVulnerabilidades: () => API.get('getVulnerabilidades'),
   getFotosPainelVulnerabilidades: () => API.get('getFotosPainelVulnerabilidades'),
   salvarVulnerabilidade: (v) => API.post('salvarVulnerabilidade', v)

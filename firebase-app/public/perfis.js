@@ -71,7 +71,7 @@
   TELAS[PERFIL.SEGURANCA] = [
     'processos', 'pcns', 'drp', 'riscos', 'monitor', 'riscos-relatorio', 'vulnerabilidades', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
-    'dependencias', 'areas', 'pessoas', 'relatorios', 'servicos', 'catalogo-backup', 'produtos-software',
+    'dependencias', 'areas', 'pessoas', 'relatorios', 'servicos', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
     'admin',
@@ -82,6 +82,8 @@
   // DECISAO 03/10/2026: Backup deixou de ter tela propria (virou aba do drawer
   // de Servico) -- revertido na DECISAO 04/10/2026: Backup volta a ter tela
   // propria ("catalogo-backup"), mesma posse de 'servicos' (Admin + Seguranca).
+  // DECISAO 21/10/2026: 'catalogo-backup-ferramentas' (lista de Ferramentas de
+  // Backup) tem a mesma posse do Catalogo do Backup.
   TELAS[PERFIL.TI] = [
     'drp', 'dependencias', 'relatorios',
   ];

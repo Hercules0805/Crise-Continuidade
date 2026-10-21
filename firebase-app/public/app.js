@@ -20,6 +20,7 @@ const pages = {
   'fornecedores-subcategorias': fornecedoresSubcategorias,
   'fornecedores-criticidade': fornecedoresCriticidadePerguntas,
   'catalogo-backup': catalogoBackup,
+  'catalogo-backup-ferramentas': catalogoBackupFerramentas,
   'produtos-software': produtosSoftware,
   contratos,
   'contratos-tipos': contratosTipos,
@@ -1939,7 +1940,8 @@ function _espelharPerfilPessoaEmSegundoPlano(dados) {
 // Dono do Processo = responsável da Área do processo (por nome, igual à seção
 // "Áreas"; a mesma regra da coluna Responsável da tela de Processos).
 // Vínculos por ID (confiáveis): bcpContatos/dependenciaItens (Processo),
-// gestoresContrato (Fornecedor), stakeholderId (Backup), liderImediato
+// gestoresContrato (Fornecedor), stakeholders (Serviço; antes stakeholderId do
+// Backup, ainda lido para serviço não migrado -- _stakeholdersDoServico), liderImediato
 // (hierarquia), techLeadProdutos/teamLeadProdutos (Produtos de Software, ids
 // do catálogo produtos_software). Vínculos por NOME (Risco.responsavel e Área.responsavel são
 // <select> do catálogo de Pessoas -- comparação por nome é confiável;
@@ -1968,7 +1970,7 @@ window.gerarRelatorioPessoa = async (pessoaDireta) => {
   win.document.write('<p style="font-family:Segoe UI,Arial,sans-serif;padding:40px;color:#d60014;">⏳ Gerando relatório...</p>');
 
   try {
-    const [processos, deps, riscos, indicadores, backups, perfis, areas, produtos, contratos, statusContratos] = await Promise.all([
+    const [processos, deps, riscos, indicadores, backups, perfis, areas, produtos, contratos, statusContratos, servicos] = await Promise.all([
       API.getProcessos(), API.getDependencias(), API.getRiscos(),
       API.getIndicadoresSeguranca(), API.getBackups(), API.getPerfis(), API.getAreas(),
       // Só dá nome aos produtos da liderança; se falhar, o relatório ainda sai
@@ -1978,8 +1980,9 @@ window.gerarRelatorioPessoa = async (pessoaDireta) => {
       // fica só com as relações por "pessoa relacionada", e o relatório avisa.
       API.getContratos().catch((e) => { console.error('Relatório de vínculos: contratos não carregaram', e); return null; }),
       API.getStatusContrato().catch(() => null),
+      API.getServicos().catch((e) => { console.error('Relatório de vínculos: serviços não carregaram', e); return []; }),
     ]);
-    const html = _buildRelatorioPessoaPage(pessoa, { processos, deps, riscos, indicadores, backups, perfis, areas, produtos, contratos, statusContratos });
+    const html = _buildRelatorioPessoaPage(pessoa, { processos, deps, riscos, indicadores, backups, perfis, areas, produtos, contratos, statusContratos, servicos });
     win.document.open();
     win.document.write(html);
     win.document.close();
@@ -2046,8 +2049,10 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
     .forEach((r) => relacionar(f, 'Pessoa relacionada' + (r.papel ? ' — ' + r.papel : ''))));
   const fornecedoresDaPessoa = [...relacoesPorFornecedor.values()].sort((a, b) => (a.f.nome || '').localeCompare(b.f.nome || '', 'pt-BR'));
 
-  // Backups onde é Stakeholder.
-  const backupsDaPessoa = backups.filter((b) => b.stakeholderId && String(b.stakeholderId) === String(pessoa.id));
+  // Serviços onde é Stakeholder (DECISAO 21/10/2026: era do Backup). Serviço sem
+  // lista própria ainda herda os stakeholders dos backups dele.
+  const servicosDaPessoa = (dados.servicos || []).filter((s) =>
+    _stakeholdersDoServico(s, backups || []).lista.some((p) => String(p.id) === String(pessoa.id)));
 
   // Produtos de Software onde é Tech Lead / Team Lead (vínculo por id). Uma
   // linha por produto, com as funções juntas; função marcada sem produto
@@ -2076,7 +2081,7 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
   semProduto.forEach((rotulo) => produtosDaPessoa.push({ nome: '— (sem produto associado)', funcoes: rotulo }));
 
   const temVinculoOperacional = processosDaPessoa.length || riscosDaPessoa.length || indicadoresDaPessoa.length
-    || areasDaPessoa.length || fornecedoresDaPessoa.length || backupsDaPessoa.length || produtosDaPessoa.length;
+    || areasDaPessoa.length || fornecedoresDaPessoa.length || servicosDaPessoa.length || produtosDaPessoa.length;
 
   const linhaOuVazio = (lista, montarLinha) => lista.length ? lista.map(montarLinha).join('') : '';
 
@@ -2148,9 +2153,9 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
         + '</table>'
         + (contratosCarregados ? '' : '<p style="font-size:0.8em;color:#888;">Os contratos não puderam ser lidos com o seu perfil: a gestão de contratos não aparece aqui.</p>');
     }
-    if (backupsDaPessoa.length) {
-      html += '<h2>Backups (Stakeholder)</h2><table><tr><th>Backup</th></tr>'
-        + linhaOuVazio(backupsDaPessoa, (b) => '<tr><td><b>' + esc(b.nome) + '</b></td></tr>')
+    if (servicosDaPessoa.length) {
+      html += '<h2>Serviços (Stakeholder)</h2><table><tr><th>Serviço</th></tr>'
+        + linhaOuVazio(servicosDaPessoa, (s) => '<tr><td><b>' + esc(s.nome) + '</b></td></tr>')
         + '</table>';
     }
     if (produtosDaPessoa.length) {
@@ -2386,7 +2391,6 @@ window.salvarPessoaCadastro = async () => {
       const idx = pessoasData.findIndex((x) => String(x.id) === String(r.id));
       if (idx >= 0) pessoasData[idx] = item; else pessoasData.push(item);
       if (document.getElementById('rowsPessoas')) renderizarPessoas();
-      _popularSelectBackupStakeholder(r.id);
       if (empilhado) _entregarCadastroRapido(item, _fecharModalPessoaSemSalvar);
       showToast(perfilCancelado ? '✅ Salvo. Perfil de sistema não foi alterado.' : '✅ Salvo!', perfilCancelado ? '#e65100' : '#2e7d32');
     } catch (e) {
@@ -7485,6 +7489,8 @@ async function servicos() {
     window.processosData = processosList;
     backupsData = backupsList;
     window.areasData = areasList;
+    // Stakeholders do Serviço são Pessoas (DECISAO 21/10/2026).
+    pessoasData = depsList.filter((d) => d.categoria === 'Pessoas');
     // Mesmo filtro que a tela Dependências aplica -- dependenciasData é a
     // variável que salvarDep() usa e depois espelha em window.dependenciasCatalogo;
     // sem popular aqui também, essa sobrescrita apagaria o catálogo completo
@@ -7515,7 +7521,7 @@ function renderizarServicos() {
         <td style="font-weight:600;">${esc(s.nome)}</td>
         <td>${esc(s.descricao || '')}</td>
         <td style="text-align:center;">${(s.dependenciaItens || []).length}</td>
-        <td style="text-align:center;">${(backupsData || []).filter((b) => b.servicoId === s.id).length}</td>
+        <td style="text-align:center;">${(backupsData || []).filter((b) => (b.servicoIds || []).includes(String(s.id))).length}</td>
         <td style="text-align:center;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="abrirDrawerServico('${esc(s.id)}')" title="Editar">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
@@ -7558,6 +7564,14 @@ function _htmlDrawerServico() {
               <textarea id="servicoDescricao" rows="3" placeholder="O que esse serviço entrega, para quem" style="${inp}resize:vertical;font-family:inherit;"></textarea>
             </div>
             <div style="margin-bottom:16px;">
+              <label style="${lbl}">Stakeholders</label>
+              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Pessoas donas do serviço no negócio: quem decide e é avisado quando ele para.</span>
+              <div id="servicoStakeholdersChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
+              <div id="servicoStakeholdersMigrados" style="display:none;font-size:0.75em;color:#1565c0;font-weight:600;margin-bottom:6px;">Trazidos dos backups deste serviço — salve para confirmar.</div>
+              <select id="servicoStakeholderAdd" onchange="adicionarStakeholderServico()" style="${inp}"><option value="">Adicionar pessoa...</option></select>
+              ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaPessoaDeServico()">+ Nova pessoa</button>' : ''}
+            </div>
+            <div style="margin-bottom:16px;">
               <label style="${lbl}">Dependências do Serviço</label>
               <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Itens do catálogo técnico de Dependências que compõem este serviço.</span>
               <div id="servicoDependenciasPorCategoria"></div>
@@ -7591,6 +7605,25 @@ window.trocarAbaServico = (aba) => {
 
 window._servicoDependencias = [];
 window._servicoDependenciasCatalogoPorCategoria = {};
+window._servicoStakeholders = [];
+
+/**
+ * Stakeholders de um serviço, {id, nome}. DECISAO 21/10/2026: o Stakeholder era
+ * do Backup e passou a ser do Serviço. Serviço que ainda não tem a lista própria
+ * herda (só na leitura, nada é gravado) os stakeholders distintos dos backups
+ * ligados a ele -- `migrados` diz que veio daí. Usado no drawer do Serviço e no
+ * relatório de vínculos da Pessoa.
+ */
+function _stakeholdersDoServico(servico, backups) {
+  if (!servico) return { lista: [], migrados: false };
+  if (Array.isArray(servico.stakeholders) && servico.stakeholders.length) {
+    return { lista: servico.stakeholders.map((p) => ({ id: String(p.id), nome: p.nome || '' })), migrados: false };
+  }
+  const vistos = new Map();
+  (backups || []).filter((b) => (b.servicoIds || []).includes(String(servico.id)) && b.stakeholderId)
+    .forEach((b) => { if (!vistos.has(String(b.stakeholderId))) vistos.set(String(b.stakeholderId), { id: String(b.stakeholderId), nome: b.stakeholderNome || '' }); });
+  return { lista: [...vistos.values()], migrados: vistos.size > 0 };
+}
 
 window.abrirDrawerServico = (id) => {
   const s = id ? (servicosData || []).find((x) => String(x.id) === String(id)) : null;
@@ -7600,6 +7633,12 @@ window.abrirDrawerServico = (id) => {
   document.getElementById('servicoDrawerTitulo').textContent = s ? 'Editar Serviço' : 'Novo Serviço';
 
   window._servicoDependencias = s && Array.isArray(s.dependenciaItens) ? [...s.dependenciaItens] : [];
+  // Antes do marcar() do rastreador: os stakeholders herdados dos backups contam
+  // como estado inicial (Fechar sem mexer não pergunta nada; só grava ao Salvar).
+  const stk = _stakeholdersDoServico(s, backupsData);
+  window._servicoStakeholders = stk.lista;
+  document.getElementById('servicoStakeholdersMigrados').style.display = stk.migrados ? 'block' : 'none';
+  _renderStakeholdersServico();
 
   // Catálogo pickável: só as 7 categorias técnicas (decisão confirmada) --
   // Fornecedores/Pessoas/Processos Internos ficam de fora, apesar de
@@ -7639,7 +7678,7 @@ function _renderServicoBackupsTab(servicoId) {
   }
   const irParaCatalogo = `window.location.hash='catalogo-backup?servico=' + encodeURIComponent('${escJs(servicoId)}')`;
   acao.innerHTML = `<button class="btn btn-primary" onclick="${irParaCatalogo}">+ Novo Backup</button>`;
-  const vinculados = (backupsData || []).filter((b) => b.servicoId === servicoId);
+  const vinculados = (backupsData || []).filter((b) => (b.servicoIds || []).includes(String(servicoId)));
   if (!vinculados.length) {
     cont.innerHTML = '<p class="vazio-inline">Nenhum backup cadastrado ainda.</p>';
     return;
@@ -7648,14 +7687,16 @@ function _renderServicoBackupsTab(servicoId) {
     <thead><tr>
       <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Nome</th>
       <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Servidor</th>
-      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Stakeholder</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Ferramenta</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Modo</th>
       <th style="padding:8px 0;text-align:center;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Jobs</th>
     </tr></thead>
     <tbody>
       ${vinculados.map((b) => `<tr style="cursor:pointer;" onclick="${irParaCatalogo}" title="Abrir no Catálogo do Backup">
         <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;font-weight:600;">${esc(b.nome)}</td>
         <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;">${esc(b.servidorNome || '-')}</td>
-        <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;">${esc(b.stakeholderNome || '-')}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;">${esc(_nomeFerramentaBackup(b) || '-')}</td>
+        <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;">${esc(b.modo || '-')}</td>
         <td style="padding:8px 0;border-bottom:1px solid #f0f0f0;text-align:center;">${(b.jobs || []).length}</td>
       </tr>`).join('')}
     </tbody>
@@ -7683,8 +7724,54 @@ function _coletarFormularioServico() {
     nome: document.getElementById('servicoNome').value.trim(),
     descricao: document.getElementById('servicoDescricao').value.trim(),
     dependenciaItens: window._servicoDependencias || [],
+    stakeholders: window._servicoStakeholders || [],
   };
 }
+
+// ---- Stakeholders do Serviço (chips de Pessoas, mesmo molde de Áreas da Pessoa) ----
+function _renderStakeholdersServico() {
+  const cont = document.getElementById('servicoStakeholdersChips');
+  if (!cont) return;
+  const lista = window._servicoStakeholders || [];
+  cont.innerHTML = lista.length ? lista.map((p, i) => {
+    const pessoa = (pessoasData || []).find((x) => String(x.id) === String(p.id));
+    const removida = (pessoasData || []).length && !pessoa;
+    const nome = pessoa ? pessoa.nome : (p.nome || '(sem nome)');
+    return `<span style="display:inline-flex;align-items:center;gap:6px;background:${removida ? '#999' : '#d60014'};color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(nome)}${removida ? ' (removida)' : ''}<button type="button" onclick="removerStakeholderServico(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
+  }).join('') : '<p class="vazio-inline">Nenhum stakeholder.</p>';
+  _popularSelectStakeholderServico();
+}
+
+function _popularSelectStakeholderServico() {
+  const sel = document.getElementById('servicoStakeholderAdd');
+  if (!sel) return;
+  const ja = new Set((window._servicoStakeholders || []).map((p) => String(p.id)));
+  sel.innerHTML = '<option value="">Adicionar pessoa...</option>' +
+    [...(pessoasData || [])].filter((p) => !ja.has(String(p.id))).sort((a, c) => (a.nome || '').localeCompare(c.nome || '', 'pt-BR'))
+      .map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('');
+  sel.value = '';
+}
+
+function _incluirStakeholderServico(id) {
+  const pessoa = (pessoasData || []).find((p) => String(p.id) === String(id));
+  if (!pessoa) return;
+  window._servicoStakeholders = window._servicoStakeholders || [];
+  if (window._servicoStakeholders.some((p) => String(p.id) === String(id))) return;
+  window._servicoStakeholders.push({ id: String(pessoa.id), nome: pessoa.nome || '' });
+  _renderStakeholdersServico();
+}
+
+window.adicionarStakeholderServico = () => {
+  const sel = document.getElementById('servicoStakeholderAdd');
+  if (sel && sel.value) _incluirStakeholderServico(sel.value);
+};
+
+window.removerStakeholderServico = (i) => {
+  window._servicoStakeholders.splice(i, 1);
+  _renderStakeholdersServico();
+};
+
+window.novaPessoaDeServico = () => _cadastroRapidoPessoa('drawerServico', 'drawerOverlayServico', (p) => _incluirStakeholderServico(p.id));
 
 /**
  * Uma seção por categoria técnica (mesmo padrão já usado 2x nesta sessão:
@@ -7846,14 +7933,13 @@ window.salvarServico = async () => {
     try {
       const r = await API.salvarServico(dados);
       _edServico.marcar({ ...dados, id: id || r.id });
-      const item = { id: r.id, nome, descricao, dependenciaItens: window._servicoDependencias || [] };
+      const item = { id: r.id, nome, descricao, dependenciaItens: window._servicoDependencias || [], stakeholders: window._servicoStakeholders || [] };
       const idx = servicosData.findIndex((x) => String(x.id) === String(r.id));
       if (idx >= 0) servicosData[idx] = item; else servicosData.push(item);
-      // Cadastro rápido de Serviço a partir do Catálogo do Backup: só tem efeito
-      // se #backupServico existir (ou seja, se viemos de abrirDrawerServicoDeBackup).
-      _popularSelectBackupServico(r.id);
+      document.getElementById('servicoStakeholdersMigrados').style.display = 'none';
       if (_temDrawerPaiEmpilhado()) {
-        _fecharDrawerServicoSemSalvar();
+        // Cadastro rápido a partir do Backup: devolve o serviço, que entra na lista dele.
+        _entregarCadastroRapido(item, _fecharDrawerServicoSemSalvar);
       } else if (!id) {
         // Sem fechar o drawer, o próximo "Salvar" precisa gravar no MESMO
         // registro em vez de criar um segundo serviço idêntico.
@@ -7873,9 +7959,10 @@ window.salvarServico = async () => {
 window.excluirServico = async (id) => {
   const s = servicosData.find((x) => String(x.id) === String(id));
   if (!s) return;
-  const nBackups = (backupsData || []).filter((b) => b.servicoId === id).length;
+  // Backup com outros serviços só perde este; o aviso conta os que ficam sem nenhum.
+  const nBackups = (backupsData || []).filter((b) => { const ids = b.servicoIds || []; return ids.includes(String(id)) && ids.length === 1; }).length;
   const aviso = `Excluir o serviço "${s.nome}"?\n\nIsso não apaga as dependências que ele agrupa, só o agrupamento.` +
-    (nBackups ? `\n\n⚠️ ${nBackups} backup(s) continuam vinculados a este serviço — o vínculo fica "órfão" (não deixa de aparecer na tela Backups), ajuste-os lá se necessário.` : '');
+    (nBackups ? `\n\n⚠️ ${nBackups} backup(s) ficam sem nenhum serviço vinculado (aparecem como "(removido)" no Catálogo do Backup) — ajuste-os lá se necessário.` : '');
   if (!await confirmarAcao(aviso)) return;
   try {
     await API.excluirServico(id);
@@ -7890,7 +7977,7 @@ window.excluirServico = async (id) => {
 // ============================================================
 // PÁGINA: CATÁLOGO DO BACKUP
 //
-// Backup e vinculado a 1 Servico, 1 "Servidor" e 1 Stakeholder (Pessoa). Jobs
+// Backup e vinculado a N Servicos, 1 "Servidor" e 1 Ferramenta. Jobs
 // (varias rotinas de execucao por Backup) ficam como array dentro do proprio
 // documento -- nunca sao abertos/buscados sozinhos, nao precisam de colecao
 // propria (mesmo espirito de Pessoas Associadas/Gestor do Contrato do
@@ -7903,14 +7990,61 @@ window.excluirServico = async (id) => {
 // so lugar edita de verdade, mesmo principio documentado em
 // ui-referencias.md ("cadastro completo de verdade, nunca um caminho
 // paralelo").
+//
+// DECISAO 21/10/2026: (1) Ferramenta (lista configuravel ferramentas_backup,
+// com "Outra" + texto); (2) Modo de Backup = O QUE e copiado (imagem, VM,
+// snapshot, volume, diretorio, banco, aplicacao) + Escopo, atributos do Backup
+// e nao do job -- o job so varia agenda, Tipo (Full/Diferencial/Incremental) e
+// retencao; mesmo ativo com dois modos = dois backups; (3) varios Servicos por
+// backup (servicoIds); (4) Stakeholder saiu do Backup e foi para o Servico.
 // ============================================================
 let backupsOrdenacao = criarOrdenacao('nome', 'asc');
+let ferramentasBackupData = [];
+
+// Lista fixa (guia a tela, não é cadastrável): cada modo diz o que pôr no Escopo.
+const BACKUP_MODOS = [
+  { valor: 'Imagem Completa', descricao: 'O servidor inteiro (SO, aplicações e dados), restaurável do zero (bare-metal).', escopo: 'Observação do escopo', exemplo: 'Ex.: servidor inteiro, SO + dados' },
+  { valor: 'Máquina Virtual', descricao: 'A VM inteira, copiada pelo hypervisor (vSphere, Hyper-V...).', escopo: 'VMs / Host', exemplo: 'Ex.: VM-ERP01 no cluster vSphere' },
+  { valor: 'Snapshot', descricao: 'Cópia instantânea no próprio storage ou hypervisor. Rápida, mas não substitui uma cópia fora do equipamento.', escopo: 'Volume / VM / Storage do snapshot', exemplo: 'Ex.: LUN01 no storage X' },
+  { valor: 'Volume / Disco', descricao: 'Volumes ou discos inteiros, sem o sistema como um todo.', escopo: 'Volumes', exemplo: 'Ex.: C:, D:' },
+  { valor: 'Diretório / Arquivos', descricao: 'Só as pastas e arquivos escolhidos.', escopo: 'Caminhos', exemplo: 'Ex.: D:\\Dados\\Fiscal; /var/www' },
+  { valor: 'Banco de Dados', descricao: 'Dump ou backup nativo do banco (SQL Server, PostgreSQL, Oracle...).', escopo: 'Instância / Bases', exemplo: 'Ex.: SQL01\\ERP, SQL01\\Folha' },
+  { valor: 'Aplicação / SaaS', descricao: 'Dados de uma aplicação ou serviço em nuvem (Microsoft 365, Google Workspace...).', escopo: 'Aplicação / Tenant', exemplo: 'Ex.: Microsoft 365 — Exchange e OneDrive' },
+];
+
+// Valores do botão "Cadastrar valores padrão" da tela Ferramentas de Backup.
+const FERRAMENTAS_BACKUP_PADRAO = ['Veeam', 'Commvault', 'Acronis', 'Bacula', 'Veritas NetBackup', 'AWS Backup', 'Azure Backup',
+  'Nativa do Sistema Operacional', 'Nativa do Banco de Dados', 'Outra'].map((nome) => ({ nome }));
+
+/** "Outra" da lista de ferramentas: pede o nome da ferramenta num texto ao lado. */
+function _ehFerramentaOutra(id) {
+  const f = (ferramentasBackupData || []).find((x) => String(x.id) === String(id));
+  return !!f && _nomeComparavelBackup(f.nome) === 'outra';
+}
+function _nomeComparavelBackup(t) { return String(t || '').trim().toLowerCase(); }
+
+/** Nome da ferramenta para grades: o texto de "Outra", o nome atual da lista, ou a cópia gravada. */
+function _nomeFerramentaBackup(b) {
+  if (!b || !b.ferramentaId) return '';
+  // Só é gravado com "Outra" escolhida -- vale mesmo em telas que não carregam a lista.
+  if (b.ferramentaOutra) return b.ferramentaOutra;
+  const f = (ferramentasBackupData || []).find((x) => String(x.id) === String(b.ferramentaId));
+  return f ? f.nome : (b.ferramentaNome || '(removida)');
+}
+
+/** Nomes dos serviços do backup, na ordem gravada; id que sumiu vira "(removido)". */
+function _nomesServicosBackup(b) {
+  return (b.servicoIds || []).map((id) => { const s = (servicosData || []).find((x) => String(x.id) === String(id)); return s ? s.nome : '(removido)'; });
+}
 
 async function catalogoBackup() {
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Catálogo do Backup</h2><p class="page-sub">Política de backup de cada Serviço: servidor, stakeholder e jobs de execução</p></div>
-      <button class="btn btn-primary" onclick="abrirDrawerBackup()">+ Novo Backup</button>
+      <div><h2>Catálogo do Backup</h2><p class="page-sub">Política de backup dos Serviços: ferramenta, o que é copiado, servidor e jobs de execução</p></div>
+      <div style="display:flex;gap:8px;">
+        <a href="#catalogo-backup-ferramentas" class="btn btn-ghost">Ferramentas</a>
+        <button class="btn btn-primary" onclick="abrirDrawerBackup()">+ Novo Backup</button>
+      </div>
     </div>
     <div class="filters">
       <input type="search" id="buscaBackup" placeholder="Buscar backup…" aria-label="Buscar backup" oninput="renderizarCatalogoBackup()" class="field-control field-control--busca">
@@ -7929,7 +8063,8 @@ async function catalogoBackup() {
             <th onclick="ordenarCatalogoBackup('nome')" style="cursor:pointer;">Nome <span id="sort-backup-nome"></span></th>
             <th onclick="ordenarCatalogoBackup('servico')" style="cursor:pointer;">Serviço <span id="sort-backup-servico"></span></th>
             <th>Servidor</th>
-            <th>Stakeholder</th>
+            <th onclick="ordenarCatalogoBackup('ferramenta')" style="cursor:pointer;">Ferramenta <span id="sort-backup-ferramenta"></span></th>
+            <th onclick="ordenarCatalogoBackup('modo')" style="cursor:pointer;">Modo <span id="sort-backup-modo"></span></th>
             <th style="width:9%;text-align:center;">Jobs</th>
             <th style="width:12%;text-align:center;">Ações</th>
           </tr>
@@ -7943,10 +8078,11 @@ async function catalogoBackup() {
     ${_htmlDrawerDependencia()}`;
 
   try {
-    const [backupsList, servicosList, depsList, processosList, areasList] = await Promise.all([
-      API.getBackups(), API.getServicos(), API.getDependencias(), API.getProcessos(), API.getAreas(),
+    const [backupsList, servicosList, depsList, processosList, areasList, ferramentasList] = await Promise.all([
+      API.getBackups(), API.getServicos(), API.getDependencias(), API.getProcessos(), API.getAreas(), API.getFerramentasBackup(),
     ]);
     backupsData = backupsList;
+    ferramentasBackupData = ferramentasList;
     servicosData = servicosList;
     window.dependenciasCatalogo = depsList;
     pessoasData = depsList.filter((d) => d.categoria === 'Pessoas');
@@ -7982,20 +8118,23 @@ function renderizarCatalogoBackup() {
     data = data.filter((b) => (b.nome || '').toLowerCase().includes(termo) || (b.descricao || '').toLowerCase().includes(termo));
   }
   const filtroServico = (document.getElementById('filtroBackupServico') || {}).value || '';
-  if (filtroServico) data = data.filter((b) => b.servicoId === filtroServico);
+  if (filtroServico) data = data.filter((b) => (b.servicoIds || []).includes(String(filtroServico)));
 
-  const nomeServico = (id) => { const s = (servicosData || []).find((x) => String(x.id) === String(id)); return s ? s.nome : '—'; };
+  // Ordena pelo primeiro serviço do backup (a coluna mostra todos).
+  const primeiroServico = (b) => _nomesServicosBackup(b)[0] || '';
   data = backupsOrdenacao.aplicar(data, {
-    servico: (a, b, dir) => dir * nomeServico(a.servicoId).localeCompare(nomeServico(b.servicoId), 'pt-BR'),
+    servico: (a, b, dir) => dir * primeiroServico(a).localeCompare(primeiroServico(b), 'pt-BR'),
+    ferramenta: (a, b, dir) => dir * _nomeFerramentaBackup(a).localeCompare(_nomeFerramentaBackup(b), 'pt-BR'),
   });
-  backupsOrdenacao.atualizarSetas('sort-backup-', ['nome', 'servico']);
+  backupsOrdenacao.atualizarSetas('sort-backup-', ['nome', 'servico', 'ferramenta', 'modo']);
 
   document.getElementById('backupRows').innerHTML = data.length
     ? data.map((b) => `<tr style="cursor:pointer;" onclick="abrirDrawerBackup('${esc(b.id)}')">
         <td style="font-weight:600;">${esc(b.nome)}</td>
-        <td>${esc(nomeServico(b.servicoId))}</td>
+        <td>${esc(_nomesServicosBackup(b).join(', ') || '—')}</td>
         <td>${esc(b.servidorNome || '-')}</td>
-        <td>${esc(b.stakeholderNome || '-')}</td>
+        <td>${esc(_nomeFerramentaBackup(b) || '-')}</td>
+        <td>${esc(b.modo || '-')}</td>
         <td style="text-align:center;">${(b.jobs || []).length}</td>
         <td style="text-align:center;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="abrirDrawerBackup('${esc(b.id)}')" title="Editar">
@@ -8006,7 +8145,7 @@ function renderizarCatalogoBackup() {
           </button>
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="6" class="vazio">Nenhum backup cadastrado.</td></tr>';
+    : '<tr><td colspan="7" class="vazio">Nenhum backup cadastrado.</td></tr>';
 }
 
 window.ordenarCatalogoBackup = (coluna) => { backupsOrdenacao.ordenar(coluna); renderizarCatalogoBackup(); };
@@ -8031,7 +8170,7 @@ function _htmlDrawerBackup() {
 
           <div id="painel-backup-dados">
             <div style="margin-bottom:16px;">
-              <label style="${lbl}">Nome</label>
+              <label style="${lbl}">Nome <span class="req" aria-hidden="true">*</span></label>
               <input type="text" id="backupNome" placeholder="Ex: Backup do ERP" style="${inp}">
             </div>
             <div style="margin-bottom:16px;">
@@ -8039,9 +8178,11 @@ function _htmlDrawerBackup() {
               <textarea id="backupDescricao" rows="2" style="${inp}resize:vertical;font-family:inherit;"></textarea>
             </div>
             <div style="margin-bottom:16px;">
-              <label style="${lbl}">Serviço</label>
+              <label style="${lbl}">Serviços <span class="req" aria-hidden="true">*</span></label>
+              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Todos os serviços que este backup protege.</span>
+              <div id="backupServicosChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
               <div style="display:flex;gap:8px;align-items:center;">
-                <select id="backupServico" style="${inp}flex:1;"><option value="">Selecione...</option></select>
+                <select id="backupServicoAdd" onchange="adicionarServicoBackup()" style="${inp}flex:1;"><option value="">Adicionar serviço...</option></select>
                 <button type="button" onclick="abrirDrawerServicoDeBackup()" title="Cadastrar novo serviço" style="white-space:nowrap;padding:9px 14px;border:1.5px solid #d60014;border-radius:7px;background:white;color:#d60014;font-size:0.85em;font-weight:600;cursor:pointer;">+ Novo</button>
               </div>
             </div>
@@ -8053,12 +8194,26 @@ function _htmlDrawerBackup() {
               </div>
             </div>
             <div style="margin-bottom:16px;">
-              <label style="${lbl}">Stakeholder</label>
+              <label style="${lbl}">Ferramenta</label>
               <div style="display:flex;gap:8px;align-items:center;">
-                <select id="backupStakeholder" style="${inp}flex:1;"><option value="">Selecione...</option></select>
-                <button type="button" onclick="abrirModalPessoaDeBackup()" title="Cadastrar nova pessoa" style="white-space:nowrap;padding:9px 14px;border:1.5px solid #d60014;border-radius:7px;background:white;color:#d60014;font-size:0.85em;font-weight:600;cursor:pointer;">+ Nova</button>
+                <select id="backupFerramenta" onchange="_ajustarFerramentaOutraBackup()" style="${inp}flex:1;"><option value="">Selecione...</option></select>
+                <button type="button" onclick="novaFerramentaDeBackup()" title="Cadastrar nova ferramenta" style="white-space:nowrap;padding:9px 14px;border:1.5px solid #d60014;border-radius:7px;background:white;color:#d60014;font-size:0.85em;font-weight:600;cursor:pointer;">+ Nova</button>
+              </div>
+              <div id="backupFerramentaOutraBox" style="display:none;margin-top:8px;">
+                <input type="text" id="backupFerramentaOutra" placeholder="Qual ferramenta?" style="${inp}">
               </div>
             </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Modo de Backup</label>
+              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">O que é copiado. Full, Diferencial ou Incremental é de cada job, na aba Jobs.</span>
+              <input type="hidden" id="backupModo">
+              <div id="chips-backupModo" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            </div>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}" id="backupEscopoLabel">Escopo</label>
+              <textarea id="backupEscopo" rows="2" style="${inp}resize:vertical;font-family:inherit;"></textarea>
+            </div>
+            <div id="backupAvisosModo" style="display:none;"></div>
           </div>
 
           <div id="painel-backup-jobs" style="display:none;">
@@ -8096,7 +8251,7 @@ function _htmlDrawerBackup() {
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
                 <div>
                   <label style="${lbl}">Tipo de Backup</label>
-                  <select id="jobTipo" style="${inp}">
+                  <select id="jobTipo" onchange="_avisarTipoJobBackup()" style="${inp}">
                     <option value="Full">Full</option>
                     <option value="Diferencial">Diferencial</option>
                     <option value="Incremental">Incremental</option>
@@ -8125,6 +8280,7 @@ function _htmlDrawerBackup() {
                   </div>
                 </div>
               </div>
+              <div id="jobAvisoTipo" style="display:none;font-size:0.8em;color:#e65100;background:#fff3e0;border-radius:7px;padding:8px 12px;margin-bottom:10px;">Snapshots costumam ser Full ou Incrementais.</div>
               <div style="margin-bottom:10px;">
                 <label style="${lbl}">Destino</label>
                 <input type="text" id="jobDestino" placeholder="Ex: Nuvem - AWS S3, Fita local..." style="${inp}">
@@ -8159,14 +8315,18 @@ window.abrirDrawerBackup = (id) => {
   // Sem id (novo) e com um Serviço já filtrado na grade: pré-preenche --
   // normalmente se chega no "+ Novo Backup" filtrando por um serviço específico.
   const filtroServico = (document.getElementById('filtroBackupServico') || {}).value || '';
-  const servicoId = b ? b.servicoId : filtroServico;
+  window._backupServicoIds = b ? [...(b.servicoIds || [])] : (filtroServico ? [String(filtroServico)] : []);
   document.getElementById('backupId').value = b ? b.id : '';
   document.getElementById('backupNome').value = b ? (b.nome || '') : '';
   document.getElementById('backupDescricao').value = b ? (b.descricao || '') : '';
   document.getElementById('backupDrawerTitulo').textContent = b ? 'Editar Backup' : 'Novo Backup';
 
-  _popularSelectBackupServico(servicoId || '');
-  _popularSelectBackupStakeholder(b ? (b.stakeholderId || '') : '');
+  _renderServicosBackup();
+  _popularSelectFerramentaBackup(b ? (b.ferramentaId || '') : '');
+  document.getElementById('backupFerramentaOutra').value = b ? (b.ferramentaOutra || '') : '';
+  _ajustarFerramentaOutraBackup();
+  document.getElementById('backupModo').value = b ? (b.modo || '') : '';
+  document.getElementById('backupEscopo').value = b ? (b.escopo || '') : '';
   // Migração não-destrutiva: backups antigos gravaram vários servidores em
   // servidorItens[] (seletor por categoria, removido -- Servidor agora é 1
   // Dependência só, igual Stakeholder). Sem servidorId ainda, cai no primeiro
@@ -8177,6 +8337,7 @@ window.abrirDrawerBackup = (id) => {
   window._backupJobs = b && Array.isArray(b.jobs) ? [...b.jobs] : [];
   _limparFormularioJob();
   _renderBackupJobsTabela();
+  _renderModoBackupChips();
 
   trocarAbaBackup('dados');
   document.getElementById('drawerBackup').classList.add('open');
@@ -8202,36 +8363,139 @@ const _edBackup = criarRastreadorEdicao(() => _coletarFormularioBackup());
 function _coletarFormularioBackup() {
   const servidorId = document.getElementById('backupServidor').value;
   const servidorNome = servidorId ? ((window.dependenciasCatalogo || []).find((d) => String(d.id) === String(servidorId)) || {}).nome || '' : '';
-  const stakeholderId = document.getElementById('backupStakeholder').value;
-  const stakeholderNome = stakeholderId ? ((pessoasData || []).find((p) => String(p.id) === String(stakeholderId)) || {}).nome || '' : '';
+  const ferramentaId = document.getElementById('backupFerramenta').value;
+  const ferramenta = ferramentaId ? (ferramentasBackupData || []).find((f) => String(f.id) === String(ferramentaId)) : null;
   return {
     id: document.getElementById('backupId').value || null,
     nome: document.getElementById('backupNome').value.trim(),
     descricao: document.getElementById('backupDescricao').value.trim(),
-    servicoId: document.getElementById('backupServico').value,
+    servicoIds: [...(window._backupServicoIds || [])],
     servidorId, servidorNome,
-    stakeholderId, stakeholderNome,
+    ferramentaId,
+    // Cópia do nome: o backup continua legível se a ferramenta sair da lista.
+    ferramentaNome: ferramenta ? ferramenta.nome : '',
+    ferramentaOutra: _ehFerramentaOutra(ferramentaId) ? document.getElementById('backupFerramentaOutra').value.trim() : '',
+    modo: document.getElementById('backupModo').value,
+    escopo: document.getElementById('backupEscopo').value.trim(),
     jobs: window._backupJobs || [],
   };
 }
 
-/** Popula o <select> de Serviço do Backup a partir de servicosData; usado na abertura e depois de cadastrar um serviço novo por cima. */
-function _popularSelectBackupServico(valorSelecionado) {
-  const sel = document.getElementById('backupServico');
+// ---- Serviços do Backup (chips, mesmo molde de Áreas da Pessoa) ----
+window._backupServicoIds = [];
+
+function _renderServicosBackup() {
+  const cont = document.getElementById('backupServicosChips');
+  if (!cont) return;
+  const ids = window._backupServicoIds || [];
+  cont.innerHTML = ids.length ? ids.map((id, i) => {
+    const s = (servicosData || []).find((x) => String(x.id) === String(id));
+    return `<span style="display:inline-flex;align-items:center;gap:6px;background:${s ? '#d60014' : '#999'};color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(s ? s.nome : '(removido)')}<button type="button" onclick="removerServicoBackup(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
+  }).join('') : '<p class="vazio-inline">Nenhum serviço vinculado.</p>';
+  const sel = document.getElementById('backupServicoAdd');
+  if (sel) {
+    const ja = new Set(ids.map(String));
+    sel.innerHTML = '<option value="">Adicionar serviço...</option>' +
+      [...(servicosData || [])].filter((s) => !ja.has(String(s.id))).sort((a, c) => a.nome.localeCompare(c.nome, 'pt-BR'))
+        .map((s) => `<option value="${esc(s.id)}">${esc(s.nome)}</option>`).join('');
+    sel.value = '';
+  }
+}
+
+function _incluirServicoBackup(id) {
+  if (!id) return;
+  window._backupServicoIds = window._backupServicoIds || [];
+  if (!window._backupServicoIds.includes(String(id))) window._backupServicoIds.push(String(id));
+  _renderServicosBackup();
+}
+
+window.adicionarServicoBackup = () => {
+  const sel = document.getElementById('backupServicoAdd');
+  if (sel && sel.value) _incluirServicoBackup(sel.value);
+};
+
+window.removerServicoBackup = (i) => {
+  window._backupServicoIds.splice(i, 1);
+  _renderServicosBackup();
+};
+
+// ---- Ferramenta ----
+function _popularSelectFerramentaBackup(valorSelecionado) {
+  const sel = document.getElementById('backupFerramenta');
   if (!sel) return;
-  sel.innerHTML = '<option value="">Selecione...</option>' +
-    [...(servicosData || [])].sort((a, c) => a.nome.localeCompare(c.nome, 'pt-BR')).map((s) => `<option value="${esc(s.id)}">${esc(s.nome)}</option>`).join('');
+  sel.innerHTML = _optionsListaContrato(ferramentasBackupData, valorSelecionado);
   sel.value = valorSelecionado || '';
 }
 
-/** Popula o <select> de Stakeholder do Backup a partir de pessoasData; usado na abertura e depois de cadastrar uma pessoa nova por cima. */
-function _popularSelectBackupStakeholder(valorSelecionado) {
-  const sel = document.getElementById('backupStakeholder');
-  if (!sel) return;
-  sel.innerHTML = '<option value="">Selecione...</option>' +
-    [...(pessoasData || [])].sort((a, c) => (a.nome || '').localeCompare(c.nome || '', 'pt-BR')).map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('');
-  sel.value = valorSelecionado || '';
+window._ajustarFerramentaOutraBackup = () => {
+  const box = document.getElementById('backupFerramentaOutraBox');
+  if (box) box.style.display = _ehFerramentaOutra(document.getElementById('backupFerramenta').value) ? 'block' : 'none';
+};
+
+window.novaFerramentaDeBackup = () => _abrirCadastroRapido({
+  pai: 'drawerBackup', overlay: 'drawerOverlayBackup',
+  preparar: async () => {
+    // Mesmo drawer das listas de Contrato, recriado para a lista de ferramentas.
+    ['drawerListaContrato', 'drawerOverlayListaContrato'].forEach((id) => { const el = document.getElementById(id); if (el) el.remove(); });
+    document.getElementById('app').insertAdjacentHTML('beforeend', _htmlDrawerListaContrato('ferramentasBackup'));
+    _listaContratoChave = 'ferramentasBackup';
+    _listaContratoItens = await LISTAS_CONTRATO.ferramentasBackup.get();
+  },
+  abrir: () => abrirDrawerListaContrato(),
+  aoSalvar: (item) => {
+    ferramentasBackupData = _listaContratoItens;
+    _popularSelectFerramentaBackup(item.id);
+    _ajustarFerramentaOutraBackup();
+  },
+});
+
+// ---- Modo de Backup (cartões de valor único, mesmo molde de renderEstrategiaChips) ----
+function _renderModoBackupChips() {
+  const cont = document.getElementById('chips-backupModo');
+  if (!cont) return;
+  const atual = document.getElementById('backupModo').value;
+  const modo = BACKUP_MODOS.find((m) => m.valor === atual);
+  // Valor gravado que saiu da lista continua visível, marcado.
+  const opcoes = atual && !modo ? [...BACKUP_MODOS, { valor: atual, descricao: '(fora da lista)' }] : BACKUP_MODOS;
+  cont.innerHTML = opcoes.map((m) => {
+    const sel = m.valor === atual;
+    return `<button type="button" onclick="selecionarModoBackup('${escJs(m.valor)}')" style="text-align:left;padding:8px 12px;border-radius:10px;cursor:pointer;min-width:160px;max-width:220px;border:1.5px solid ${sel ? '#d60014' : '#c5cae9'};background:${sel ? '#fce8ea' : '#fff'};">
+      <div style="font-weight:700;color:#d60014;font-size:0.86em;">${esc(m.valor)}${sel ? ' ✓' : ''}</div>
+      <div style="font-size:0.76em;color:#666;margin-top:3px;">${esc(m.descricao)}</div>
+    </button>`;
+  }).join('');
+  document.getElementById('backupEscopoLabel').textContent = modo ? modo.escopo : 'Escopo';
+  document.getElementById('backupEscopo').placeholder = modo ? modo.exemplo : 'Escolha o Modo acima para ver o que descrever aqui.';
+  _avisosModoBackup();
+  _avisarTipoJobBackup();
 }
+
+window.selecionarModoBackup = (valor) => {
+  const campo = document.getElementById('backupModo');
+  campo.value = campo.value === valor ? '' : valor; // clicar de novo desmarca
+  _renderModoBackupChips();
+};
+
+/** Avisos (não bloqueiam) de coerência entre o Modo e os jobs já cadastrados. */
+function _avisosModoBackup() {
+  const cont = document.getElementById('backupAvisosModo');
+  if (!cont) return;
+  const avisos = [];
+  if ((document.getElementById('backupModo') || {}).value === 'Snapshot') {
+    const jobs = window._backupJobs || [];
+    if (jobs.some((j) => j.tipo === 'Diferencial')) avisos.push('Snapshots costumam ser Full ou Incrementais — confira os jobs Diferenciais.');
+    if (jobs.some((j) => !j.destino)) avisos.push('Snapshot fica no próprio storage ou hypervisor: informe o Destino dos jobs, ou garanta outra cópia fora do equipamento.');
+  }
+  cont.innerHTML = avisos.map((a) => `<div style="font-size:0.8em;color:#e65100;background:#fff3e0;border-radius:7px;padding:8px 12px;margin-bottom:8px;">⚠️ ${esc(a)}</div>`).join('');
+  cont.style.display = avisos.length ? 'block' : 'none';
+}
+
+window._avisarTipoJobBackup = () => {
+  const aviso = document.getElementById('jobAvisoTipo');
+  if (!aviso) return;
+  const snapshot = (document.getElementById('backupModo') || {}).value === 'Snapshot';
+  aviso.style.display = snapshot && document.getElementById('jobTipo').value === 'Diferencial' ? 'block' : 'none';
+};
 
 /**
  * Cadastro rápido de uma entidade referenciada (Serviço/Pessoa/Dependência) a
@@ -8473,15 +8737,12 @@ function _temDrawerPaiEmpilhado() {
   return !!(window._drawerPaiEmpilhados && window._drawerPaiEmpilhados.length);
 }
 
-window.abrirDrawerServicoDeBackup = () => {
-  _esconderDrawerPaiTemporariamente('drawerBackup', 'drawerOverlayBackup');
-  abrirDrawerServico();
-};
-
-window.abrirModalPessoaDeBackup = () => {
-  _esconderDrawerPaiTemporariamente('drawerBackup', 'drawerOverlayBackup');
-  abrirModalPessoa();
-};
+// O serviço criado entra na lista de Serviços do backup (salvarServico o entrega).
+window.abrirDrawerServicoDeBackup = () => _abrirCadastroRapido({
+  pai: 'drawerBackup', overlay: 'drawerOverlayBackup',
+  abrir: () => abrirDrawerServico(),
+  aoSalvar: (s) => _incluirServicoBackup(s.id),
+});
 
 window.abrirDrawerDependenciaDeBackup = () => {
   _esconderDrawerPaiTemporariamente('drawerBackup', 'drawerOverlayBackup');
@@ -8501,7 +8762,7 @@ window.abrirDrawerDependenciaDeServico = (categoria, nomeSeed) => {
  * Popula o <select> de Servidor do Backup com as Dependências técnicas (as 7
  * categorias, igual ao catálogo usado pelo "+ Novo") a partir de
  * window.dependenciasCatalogo; usado na abertura e depois de cadastrar uma
- * dependência nova por cima. Mesmo molde de _popularSelectBackupStakeholder.
+ * dependência nova por cima.
  */
 function _popularSelectBackupServidor(valorSelecionado) {
   const sel = document.getElementById('backupServidor');
@@ -8543,6 +8804,7 @@ function _limparFormularioJob() {
   document.getElementById('jobIntervalo').value = '1';
   document.getElementById('jobHorario').value = '';
   document.getElementById('jobTipo').value = 'Full';
+  _avisarTipoJobBackup();
   document.getElementById('jobDuracaoValor').value = '';
   document.getElementById('jobDuracaoUnidade').value = 'horas';
   document.getElementById('jobRetencaoValor').value = '';
@@ -8624,6 +8886,7 @@ window.editarJob = (idx) => {
   _ajustarCamposJobAgenda();
   document.getElementById('jobHorario').value = job.horarioInicio || '';
   document.getElementById('jobTipo').value = job.tipo;
+  _avisarTipoJobBackup();
   document.getElementById('jobDuracaoValor').value = job.duracaoValor != null ? job.duracaoValor : '';
   document.getElementById('jobDuracaoUnidade').value = job.duracaoUnidade || 'horas';
   document.getElementById('jobRetencaoValor').value = job.retencaoValor != null ? job.retencaoValor : '';
@@ -8654,6 +8917,7 @@ function _renderBackupJobsTabela() {
   const cont = document.getElementById('backupJobsTabela');
   if (!cont) return;
   const jobs = window._backupJobs || [];
+  _avisosModoBackup();
   if (!jobs.length) {
     cont.innerHTML = '<p class="vazio-inline">Nenhum job cadastrado ainda.</p>';
     return;
@@ -8697,8 +8961,8 @@ function _renderBackupJobsTabela() {
  */
 async function _gravarBackupAtual() {
   const payload = _coletarFormularioBackup();
-  if (!payload.nome) { showToast('Informe o nome do backup.', '#e65100'); return null; }
-  if (!payload.servicoId) { showToast('Selecione o serviço vinculado.', '#e65100'); return null; }
+  if (!payload.nome) { _avisarCampo('backupNome', 'Informe o nome do backup.'); return null; }
+  if (!payload.servicoIds.length) { _avisarCampo('backupServicoAdd', 'Vincule pelo menos um serviço.'); return null; }
   const id = payload.id;
 
   try {
@@ -21455,7 +21719,29 @@ const LISTAS_CONTRATO = {
     get: () => API.getStatusContrato(), salvar: (x) => API.salvarStatusContrato(x), excluir: (id) => API.excluirStatusContrato(id),
     padroes: () => ContratoCiclo.PADROES.status, tela: 'contratos-status',
   },
+  // DECISAO 21/10/2026: a lista de Ferramentas de Backup reaproveita esta fábrica
+  // (mesmo formato {nome, ativo, ordem}). Os campos abaixo de `tela` trocam o que
+  // nas listas de Contrato é fixo: quem edita, a volta, e onde se conta o uso.
+  ferramentasBackup: {
+    titulo: 'Ferramentas de Backup', sub: 'Com que software ou serviço cada backup é feito (campo Ferramenta do Catálogo do Backup)',
+    rotulo: 'Ferramenta', novo: '+ Nova Ferramenta', placeholder: 'Ex.: Veeam Backup & Replication', campoContrato: 'ferramentaId',
+    get: () => API.getFerramentasBackup(), salvar: (x) => API.salvarFerramentaBackup(x), excluir: (id) => API.excluirFerramentaBackup(id),
+    padroes: () => FERRAMENTAS_BACKUP_PADRAO, tela: 'catalogo-backup-ferramentas',
+    podeEditar: () => Perfis.podeVerTela(window.USER_PERFIS, 'catalogo-backup'),
+    voltar: { href: '#catalogo-backup', rotulo: '← Catálogo do Backup' },
+    usados: () => API.getBackups(), rotuloUso: 'Backups', noUso: 'backup(s)',
+  },
 };
+// Valores padrão do que nas listas de Contrato vem de `cfg` (ver ferramentasBackup acima).
+const _LISTA_PADRAO_CONTRATO = {
+  podeEditar: () => Perfis.podeEditarContratos(window.USER_PERFIS),
+  voltar: { href: '#contratos', rotulo: '← Contratos' },
+  usados: () => API.getContratos(), rotuloUso: 'Contratos', noUso: 'contrato(s)',
+};
+function _cfgListaContrato(chave) {
+  return { ..._LISTA_PADRAO_CONTRATO, ...LISTAS_CONTRATO[chave] };
+}
+function _podeEditarListaContrato() { return _cfgListaContrato(_listaContratoChave).podeEditar(); }
 const ROTULO_SITUACAO_CONTRATO = { pre: 'Antes da vigência', vigente: 'Vigente', expirada: 'Vigência expirada', encerrado: 'Encerrado' };
 
 let _listaContratoChave = 'tipos';
@@ -21468,12 +21754,13 @@ let _listaContratoOrdenacao = criarOrdenacao('nome', 'asc');
 function contratosTipos() { return _telaListaSimples('tipos'); }
 function contratosIndexadores() { return _telaListaSimples('indexadores'); }
 function contratosStatus() { return _telaListaSimples('status'); }
+function catalogoBackupFerramentas() { return _telaListaSimples('ferramentasBackup'); }
 
 /** Drawer de um item de lista de Contrato (Tipos, Status, Indexadores) -- o
  *  rótulo e o campo Situação dependem da lista. Usado na tela da lista e no
  *  cadastro rápido a partir do drawer de Contrato. */
 function _htmlDrawerListaContrato(chave) {
-  const cfg = LISTAS_CONTRATO[chave];
+  const cfg = _cfgListaContrato(chave);
   const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
   const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
   return `
@@ -21493,7 +21780,7 @@ function _htmlDrawerListaContrato(chave) {
           </select>
           <div style="font-size:0.74em;color:#888;margin-top:4px;">Só contratos em status de situação "Vigente" contam no custo, vencem e geram alertas. A renovação automática também só acontece para eles. "Vigência expirada" é para o contrato cujo prazo acabou sem renovação: deixa de contar e de alertar, mas ainda não foi encerrado formalmente.</div></div>` : ''}
         <label class="check-label"><input type="checkbox" id="listaContratoAtivo" checked> Ativo</label>
-        <div style="font-size:0.74em;color:#888;margin-top:4px;">Inativo sai das opções de contratos novos; os contratos que já usam continuam mostrando o nome.</div>
+        <div style="font-size:0.74em;color:#888;margin-top:4px;">Inativo sai das opções de ${esc(cfg.rotuloUso.toLowerCase())} novos; os que já usam continuam mostrando o nome.</div>
       </div>
       <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharDrawerListaContrato()">Fechar</button>
@@ -21503,17 +21790,17 @@ function _htmlDrawerListaContrato(chave) {
 }
 
 async function _telaListaSimples(chave) {
-  const cfg = LISTAS_CONTRATO[chave];
+  const cfg = _cfgListaContrato(chave);
   _listaContratoChave = chave;
   _listaContratoOrdenacao = criarOrdenacao('nome', 'asc');
-  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const podeEditar = cfg.podeEditar();
   const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
   const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
   app.innerHTML = `
     <div class="page-header">
       <div><h2>${esc(cfg.titulo)}</h2><p class="page-sub">${esc(cfg.sub)}</p></div>
       <div style="display:flex;gap:8px;">
-        <a href="#contratos" class="btn btn-ghost">← Contratos</a>
+        <a href="${esc(cfg.voltar.href)}" class="btn btn-ghost">${esc(cfg.voltar.rotulo)}</a>
         ${podeEditar ? `<button class="btn btn-primary" onclick="abrirDrawerListaContrato()">${esc(cfg.novo)}</button>` : ''}
       </div>
     </div>
@@ -21521,11 +21808,11 @@ async function _telaListaSimples(chave) {
     <div id="listaContratoItens"></div>
     ${_htmlDrawerListaContrato(chave)}`;
   try {
-    const [itens, contratosList] = await Promise.all([cfg.get(), API.getContratos().catch(() => [])]);
+    const [itens, usados] = await Promise.all([cfg.get(), cfg.usados().catch(() => [])]);
     _listaContratoItens = itens;
-    contratosData = contratosList;
+    if (chave === 'ferramentasBackup') backupsData = usados; else contratosData = usados;
     _listaContratoUso = {};
-    contratosList.forEach((c) => {
+    usados.forEach((c) => {
       const id = c[cfg.campoContrato];
       if (id) _listaContratoUso[id] = (_listaContratoUso[id] || 0) + 1;
     });
@@ -21542,8 +21829,8 @@ async function _telaListaSimples(chave) {
 window.ordenarListaContrato = (coluna) => { _listaContratoOrdenacao.ordenar(coluna); renderizarListaContrato(); };
 
 function renderizarListaContrato() {
-  const cfg = LISTAS_CONTRATO[_listaContratoChave];
-  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const cfg = _cfgListaContrato(_listaContratoChave);
+  const podeEditar = cfg.podeEditar();
   const cont = document.getElementById('listaContratoItens');
   if (!cont) return;
   if (!_listaContratoItens.length) {
@@ -21568,7 +21855,7 @@ function renderizarListaContrato() {
       <thead><tr>
         ${th('nome', esc(cfg.rotulo))}
         ${cfg.situacao ? th('situacao', 'Situação') : ''}
-        ${th('uso', 'Contratos', 'col-c')}
+        ${th('uso', esc(cfg.rotuloUso), 'col-c')}
         ${th('status', 'Ativo', 'col-c')}
         <th class="col-c">Ações</th>
       </tr></thead>
@@ -21594,7 +21881,7 @@ function renderizarListaContrato() {
 const _edListaContrato = criarRastreadorEdicao(() => _coletarItemListaContrato());
 
 function _coletarItemListaContrato() {
-  const cfg = LISTAS_CONTRATO[_listaContratoChave];
+  const cfg = _cfgListaContrato(_listaContratoChave);
   const item = {
     id: document.getElementById('listaContratoId').value || null,
     nome: document.getElementById('listaContratoNome').value.trim(),
@@ -21605,8 +21892,8 @@ function _coletarItemListaContrato() {
 }
 
 window.abrirDrawerListaContrato = (id) => {
-  const cfg = LISTAS_CONTRATO[_listaContratoChave];
-  const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
+  const cfg = _cfgListaContrato(_listaContratoChave);
+  const podeEditar = cfg.podeEditar();
   const x = id ? _listaContratoItens.find((i) => String(i.id) === String(id)) : null;
   document.getElementById('listaContratoDrawerTitulo').textContent = (x ? 'Editar ' : 'Novo ') + cfg.rotulo;
   document.getElementById('listaContratoId').value = x ? x.id : '';
@@ -21633,14 +21920,14 @@ window.fecharDrawerListaContrato = () => _fecharComRastreador({
   sujo: () => {
     const item = _coletarItemListaContrato();
     // Rascunho novo e vazio: nada a gravar.
-    return Perfis.podeEditarContratos(window.USER_PERFIS) && _edListaContrato.sujo() && !!(item.id || item.nome);
+    return _podeEditarListaContrato() && _edListaContrato.sujo() && !!(item.id || item.nome);
   },
   salvar: () => salvarItemListaContrato(),
   fecharSemSalvar: _fecharDrawerListaContratoSemSalvar,
 });
 
 window.salvarItemListaContrato = async () => {
-  const cfg = LISTAS_CONTRATO[_listaContratoChave];
+  const cfg = _cfgListaContrato(_listaContratoChave);
   const item = _coletarItemListaContrato();
   if (!item.nome) { showToast(`Informe o ${cfg.rotulo.toLowerCase()}.`, '#e65100'); return false; }
   return await comBotaoCarregando('btnSalvarListaContrato', async () => {
@@ -21669,12 +21956,12 @@ window.salvarItemListaContrato = async () => {
 };
 
 window.excluirItemListaContrato = async (id) => {
-  const cfg = LISTAS_CONTRATO[_listaContratoChave];
+  const cfg = _cfgListaContrato(_listaContratoChave);
   const x = _listaContratoItens.find((i) => String(i.id) === String(id));
   if (!x) return;
   const uso = _listaContratoUso[id] || 0;
   if (uso) {
-    return showToast(`"${x.nome}" está em ${uso} contrato(s). Desative em vez de excluir — assim ele sai das opções novas sem apagar o nome dos contratos.`, '#e65100');
+    return showToast(`"${x.nome}" está em ${uso} ${cfg.noUso}. Desative em vez de excluir — assim ele sai das opções novas sem apagar o nome de quem já usa.`, '#e65100');
   }
   if (!await confirmarAcao(`Excluir "${x.nome}"?`)) return;
   try {
@@ -21688,7 +21975,7 @@ window.excluirItemListaContrato = async (id) => {
 };
 
 window.cadastrarPadroesListaContrato = async () => {
-  const cfg = LISTAS_CONTRATO[_listaContratoChave];
+  const cfg = _cfgListaContrato(_listaContratoChave);
   await comBotaoCarregando('btnPadroesListaContrato', async () => {
     try {
       const padroes = cfg.padroes();
