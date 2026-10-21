@@ -41,7 +41,7 @@ function ambienteApi(docsIniciais) {
     _getAll: async (nome) => Object.entries(store[nome] || {}).map(([id, d]) => ({ id, ...d })),
   };
   vm.createContext(ctx);
-  ['_lerDependencias', '_salvarDependencia'].forEach((f) => { vm.runInContext(extrair(f) + `\nthis.${f} = ${f};`, ctx); });
+  ['_minutosOuNull', '_refsDependencia', '_lerDependencias', '_salvarDependencia'].forEach((f) => { vm.runInContext(extrair(f) + `\nthis.${f} = ${f};`, ctx); });
   return { ctx, store };
 }
 
@@ -131,7 +131,7 @@ async function carregar(perfis, extra) {
     },
   });
   ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
-    'cvss31.js', 'risco-consolidado.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
+    'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = (m) => { window.__toasts = (window.__toasts || []).concat(m); };');
   await w.fornecedores();

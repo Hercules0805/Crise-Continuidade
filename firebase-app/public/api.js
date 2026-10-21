@@ -319,6 +319,19 @@ async function _lerConfigRespostas() {
   return config;
 }
 
+// RTO/RPO/MTTR gravados em minutos: numero >= 0, ou null quando nao informado.
+function _minutosOuNull(v) {
+  if (v === null || v === undefined || v === '') return null;
+  const n = Number(v);
+  return isFinite(n) && n >= 0 ? Math.round(n) : null;
+}
+
+function _refsDependencia(lista) {
+  return (Array.isArray(lista) ? lista : [])
+    .filter((x) => x && x.id)
+    .map((x) => ({ id: String(x.id), nome: x.nome || '', categoria: x.categoria || '' }));
+}
+
 async function _lerDependencias() {
   const docs = await _getAll(COLLECTION.dependencias);
   return docs.map((d) => ({
@@ -384,6 +397,14 @@ async function _lerDependencias() {
     // (Fornecedores/Pessoas) esses campos nunca sao escritos.
     rto: d.rto || '',
     rpo: d.rpo || '',
+    // Composicao de Servicos (21/10/2026): RTO/RPO/MTTR em minutos (null = nao
+    // informado) e as dependencias logo abaixo desta ({id, nome, categoria}).
+    // Ver public/servico-composicao.js. O texto rto/rpo acima e legado e so e
+    // lido enquanto rtoMin/rpoMin nao existirem.
+    rtoMin: _minutosOuNull(d.rtoMin),
+    rpoMin: _minutosOuNull(d.rpoMin),
+    mttrMin: _minutosOuNull(d.mttrMin),
+    componentes: Array.isArray(d.componentes) ? d.componentes : [],
     estrategia: d.estrategia || '',
     responsavel: d.responsavel || '',
     // Aba DRP: listas guiadas (Criterios de Acionamento, Pre-requisitos,
@@ -436,16 +457,28 @@ async function _lerServicos() {
     // Pessoas (categoria Pessoas de dependencias) donas do serviço, {id, nome}.
     // DECISAO 21/10/2026: o Stakeholder saiu do Backup e veio pra cá.
     stakeholders: Array.isArray(s.stakeholders) ? s.stakeholders : [],
+    // Composicao de Servicos (21/10/2026): limites do servico em minutos e os
+    // Processos que ele suporta ({id, nome}) -- o nivel "servico abaixo de
+    // processo". Fica no servico (escrita Admin/SI), nao em processos.
+    rtoMin: _minutosOuNull(s.rtoMin),
+    rpoMin: _minutosOuNull(s.rpoMin),
+    mttrMin: _minutosOuNull(s.mttrMin),
+    processoIds: Array.isArray(s.processoIds) ? s.processoIds : [],
   })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
-const _CAMPOS_SERVICO = ['nome', 'descricao', 'dependenciaItens', 'stakeholders'];
+const _CAMPOS_SERVICO = ['nome', 'descricao', 'dependenciaItens', 'stakeholders', 'rtoMin', 'rpoMin', 'mttrMin', 'processoIds'];
 
 async function _salvarServico(s) {
   const data = {};
   _CAMPOS_SERVICO.forEach((campo) => {
     if (Object.prototype.hasOwnProperty.call(s, campo) && s[campo] !== undefined) data[campo] = s[campo];
   });
+  ['rtoMin', 'rpoMin', 'mttrMin'].forEach((c) => { if (c in data) data[c] = _minutosOuNull(data[c]); });
+  if ('processoIds' in data) {
+    data.processoIds = (Array.isArray(data.processoIds) ? data.processoIds : [])
+      .filter((p) => p && p.id).map((p) => ({ id: String(p.id), nome: p.nome || '' }));
+  }
   data.atualizadoEm = new Date().toISOString();
   data.atualizadoPor = (window.USER_EMAIL || '').toLowerCase();
 
@@ -1642,6 +1675,15 @@ async function _salvarDependencia(d) {
     data.pessoasRelacionadas = d.pessoasRelacionadas
       .filter((p) => p && (p.id != null || String(p.nome || '').trim()))
       .map((p) => ({ id: p.id != null ? p.id : null, nome: String(p.nome || '').trim(), papel: String(p.papel || '').trim() }));
+  }
+  // Composicao de Servicos (21/10/2026): mesma regra dos canais -- so o drawer
+  // de Dependencia tecnica manda estes campos; Fornecedor/Pessoa/DRP regravam
+  // o documento e nao podem zerar a hierarquia nem os parametros.
+  ['rtoMin', 'rpoMin', 'mttrMin'].forEach((c) => {
+    if (d[c] !== undefined) data[c] = _minutosOuNull(d[c]);
+  });
+  if (Array.isArray(d.componentes)) {
+    data.componentes = _refsDependencia(d.componentes).filter((x) => x.id !== String(d.id || ''));
   }
   if (Array.isArray(d.canaisSuporte)) {
     data.canaisSuporte = d.canaisSuporte.map((c) => ({

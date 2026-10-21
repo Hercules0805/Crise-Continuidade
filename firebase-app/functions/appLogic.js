@@ -1514,6 +1514,14 @@ async function salvarDrpDependencia(db, data, ctx) {
     if (data[campo] !== undefined) patch[campo] = String(data[campo] || '').trim();
   });
   if (!Object.keys(patch).length) throw new AppError('Nenhum campo informado.');
+  // Composicao de Servicos (21/10/2026): o texto vindo do PCN tambem atualiza
+  // rtoMin/rpoMin (minutos), que e o que a conta do caminho critico le. Texto
+  // ilegivel ou vazio zera o numero -- melhor "nao informado" que um valor velho.
+  ['rto', 'rpo'].forEach((campo) => {
+    if (patch[campo] === undefined) return;
+    const horas = contratoCiclo.horasDoRto(patch[campo]);
+    patch[campo + 'Min'] = horas === null ? null : Math.round(horas * 60);
+  });
 
   patch.atualizadoEm = new Date().toISOString();
   patch.atualizadoPor = ctx.email;

@@ -20,6 +20,8 @@ const pages = {
   'fornecedores-subcategorias': fornecedoresSubcategorias,
   'fornecedores-criticidade': fornecedoresCriticidadePerguntas,
   'catalogo-backup': catalogoBackup,
+  'servicos-relatorio': servicosRelatorio,
+  mapa: mapaContinuidade,
   'catalogo-backup-ferramentas': catalogoBackupFerramentas,
   'produtos-software': produtosSoftware,
   contratos,
@@ -168,7 +170,16 @@ function route() {
   }
 
   const pageFunc = pages[page] || pages[_paginaInicialDoPerfil()];
-  if (pageFunc) pageFunc();
+  const carregando = pageFunc ? pageFunc() : null;
+  // "Abrir cadastro" do Mapa de Continuidade (21/10/2026): espera a tela de
+  // destino terminar de carregar (as telas sao async) e so entao abre o registro.
+  const pendente = window._abrirAposCarregar;
+  if (pendente && pendente.pagina === page) {
+    window._abrirAposCarregar = null;
+    Promise.resolve(carregando).then(() => {
+      try { pendente.abrir(); } catch (e) { console.error('Abrir cadastro: falhou', e); }
+    });
+  }
   // Deep link: abrir processo na aba específica (aguarda dados carregarem)
   if (params.get('editar')) {
     const id = Number(params.get('editar'));
@@ -2730,6 +2741,7 @@ async function processos() {
       </div>
       <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharDrawerProcesso()">Fechar</button>
+        ${_seVeTela('mapa', '<button class="btn btn-ghost" onclick="verNoMapa(\'processo\')">🗺️ Ver no mapa</button>')}
         <button class="btn btn-ghost" onclick="gerarDossieProcesso()" style="color:#1565c0;border-color:#1565c0;">📄 Dossiê</button>
         <button class="btn btn-ghost" onclick="abrirPCNSalvo()" id="btnPcnSalvo" style="color:#2e7d32;border-color:#2e7d32;display:none;">📂 Abrir PCN</button>
         <button class="btn btn-ghost" onclick="gerarPCNProcesso()" id="btnGerarPcn" style="color:#2e7d32;border-color:#2e7d32;">🤖 Gerar PCN</button>
@@ -5190,6 +5202,158 @@ function renderDrpResumo() {
  * quanto na tela DRP (que também gerencia os Parâmetros DRP). Mesmos ids, então
  * abrirDrawerDependencia/salvarDep funcionam igual nas duas telas.
  */
+// ============================================================
+// Composicao de Servicos (21/10/2026): RTO/RPO/MTTR em minutos (valor +
+// unidade na tela) e a hierarquia de dependencias (componentes). A conta fica
+// em servico-composicao.js; aqui so o formulario.
+// ============================================================
+const _ROTULO_UNIDADE_DURACAO = { min: ['minuto', 'minutos'], h: ['hora', 'horas'], d: ['dia', 'dias'] };
+
+/** Campo de duração: número + unidade (min/h/dias). idBase -> #idBase (valor) e #idBaseUnidade. */
+function _htmlCampoDuracao(idBase, rotulo, dica, aoMudar) {
+  const handler = aoMudar ? ` oninput="${aoMudar}" onchange="${aoMudar}"` : '';
+  return `<div>
+    <label for="${idBase}" style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">${esc(rotulo)}</label>
+    <div style="display:flex;gap:6px;">
+      <input type="number" id="${idBase}" min="0" step="any" placeholder="—"${handler} style="flex:1;min-width:0;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+      <select id="${idBase}Unidade" aria-label="Unidade do ${esc(rotulo)}"${handler} style="width:92px;padding:9px 8px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+        <option value="min">min</option><option value="h">horas</option><option value="d">dias</option>
+      </select>
+    </div>
+    ${dica ? `<div style="font-size:0.72em;color:#999;margin-top:3px;">${esc(dica)}</div>` : ''}
+    <div id="${idBase}Legado" style="display:none;font-size:0.72em;color:#e65100;margin-top:3px;"></div>
+  </div>`;
+}
+
+/** Preenche o campo de duração com minutos (null = vazio). textoLegado: texto antigo não convertido, mostrado como aviso. */
+function _preencherCampoDuracao(idBase, min, textoLegado) {
+  const u = ServicoComposicao.paraUnidade(min);
+  document.getElementById(idBase).value = u.valor;
+  document.getElementById(idBase + 'Unidade').value = u.unidade;
+  const aviso = document.getElementById(idBase + 'Legado');
+  if (!aviso) return;
+  const mostrar = (min === null || min === undefined) && textoLegado;
+  aviso.style.display = mostrar ? '' : 'none';
+  aviso.textContent = mostrar ? `Valor anterior "${textoLegado}" não pôde ser convertido. Informe o número.` : '';
+}
+
+/** Minutos do campo de duração, ou null quando vazio/inválido. */
+function _lerCampoDuracao(idBase) {
+  return ServicoComposicao.deUnidade(document.getElementById(idBase).value, document.getElementById(idBase + 'Unidade').value);
+}
+
+/**
+ * Texto de compatibilidade ("4 horas", "30 minutos") gravado em rto/rpo junto
+ * com o número: DRP, PCN e o SLA dos contratos ainda leem o texto.
+ */
+function _textoCampoDuracao(idBase) {
+  const valor = String(document.getElementById(idBase).value || '').trim();
+  if (valor === '' || ServicoComposicao.deUnidade(valor, 'min') === null) return '';
+  const rot = _ROTULO_UNIDADE_DURACAO[document.getElementById(idBase + 'Unidade').value] || _ROTULO_UNIDADE_DURACAO.h;
+  return `${valor.replace('.', ',')} ${Number(valor) === 1 ? rot[0] : rot[1]}`;
+}
+
+/** Seção "Componentes abaixo" (aba Dados Gerais da Dependência). */
+function _htmlDepComponentes() {
+  return `
+    <div style="border-top:1px solid #eee;margin-top:18px;padding-top:14px;">
+      <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Componentes abaixo</label>
+      <p style="font-size:0.75em;color:#888;margin:0 0 8px;">Dependências que sustentam esta (ex.: Infraestrutura → Servidor → Banco de Dados). Formam a hierarquia usada no alerta de RTO/RPO/MTTR do Serviço e no mapa de conexões.</p>
+      <div id="depComp-tags" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
+      <div style="position:relative;">
+        <input type="text" id="depComp-input" placeholder="Digite para buscar..." autocomplete="off" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.9em;box-sizing:border-box;" oninput="depCompMostrarDropdown()" onfocus="depCompMostrarDropdown()" onblur="setTimeout(depCompFecharDropdown,300)">
+        <div id="depComp-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:220px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
+      </div>
+    </div>`;
+}
+
+window._depComponentesSel = [];
+
+/**
+ * Dependências técnicas que podem virar componente da que está aberta: fora
+ * ela mesma, quem já está acima dela (fecharia um ciclo) e as já escolhidas.
+ */
+function _depCompDisponiveis(filtro) {
+  const selfId = (document.getElementById('depId') || {}).value || '';
+  const bloqueados = new Set(ServicoComposicao.bloqueadosComoComponente(selfId, dependenciasData).map(String));
+  const termo = (filtro || '').toLowerCase();
+  return (dependenciasData || []).filter((d) =>
+    DEPENDENCIA_CATEGORIAS_TECNICAS.includes(d.categoria) &&
+    d.id && !String(d.id).startsWith('_tmp_') &&
+    !bloqueados.has(String(d.id)) &&
+    !window._depComponentesSel.some((s) => String(s.id) === String(d.id)) &&
+    (termo === '' || (d.nome || '').toLowerCase().includes(termo))
+  ).sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+}
+
+function renderDepComponentesTags() {
+  const cont = document.getElementById('depComp-tags');
+  if (!cont) return;
+  const sel = window._depComponentesSel || [];
+  cont.innerHTML = sel.length ? sel.map((item, i) =>
+    `<span style="display:inline-flex;align-items:center;gap:4px;background:#d60014;color:white;border:1.5px solid #d60014;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;" title="${esc(item.categoria || '')}">${esc(_iconeCategoriaDep(item.categoria))} ${esc(item.nome)}<button onclick="removerDepComponente(${i})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`
+  ).join(' ') : '<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum componente abaixo desta dependência.</span>';
+}
+
+window.depCompMostrarDropdown = () => {
+  const input = document.getElementById('depComp-input');
+  const dd = document.getElementById('depComp-dropdown');
+  if (!input || !dd) return;
+  const disp = _depCompDisponiveis(input.value.trim());
+  if (!disp.length) {
+    dd.innerHTML = '<div style="padding:8px 12px;font-size:0.84em;color:#999;">Nenhuma dependência disponível.</div>';
+    dd.style.display = 'block';
+    return;
+  }
+  dd.innerHTML = disp.slice(0, 30).map((d) =>
+    `<div onmousedown="event.preventDefault();selecionarDepComponente('${escJs(d.id)}');" style="padding:8px 12px;cursor:pointer;font-size:0.86em;border-bottom:1px solid #f0f0f0;" onmouseenter="this.style.background='#f5f6fa'" onmouseleave="this.style.background='white'">${esc(_iconeCategoriaDep(d.categoria))} ${esc(d.nome)} <span style="color:#999;font-size:0.85em;">(${esc(d.categoria)})</span></div>`
+  ).join('');
+  dd.style.display = 'block';
+};
+
+window.depCompFecharDropdown = () => {
+  const dd = document.getElementById('depComp-dropdown');
+  if (dd) dd.style.display = 'none';
+};
+
+window.selecionarDepComponente = (id) => {
+  const d = (dependenciasData || []).find((x) => String(x.id) === String(id));
+  if (!d) return;
+  window._depComponentesSel.push({ id: d.id, nome: d.nome, categoria: d.categoria });
+  document.getElementById('depComp-input').value = '';
+  depCompFecharDropdown();
+  renderDepComponentesTags();
+};
+
+window.removerDepComponente = (i) => {
+  window._depComponentesSel.splice(i, 1);
+  renderDepComponentesTags();
+};
+
+/**
+ * Bloco somente leitura "Está abaixo de": dependências que têm esta como
+ * componente e Serviços que a usam diretamente. A posse do vínculo é do lado
+ * de cima, então aqui só se mostra (e o clique leva até lá).
+ */
+async function _renderAcimaDaDependencia(d) {
+  const cont = document.getElementById('depAcimaDe');
+  if (!cont) return;
+  if (!d || !d.id) { cont.innerHTML = ''; return; }
+  let servicos = [];
+  try { servicos = await API.getServicos(); } catch (e) { servicos = []; }
+  if ((document.getElementById('depId') || {}).value !== String(d.id)) return; // drawer já trocou de registro
+  const acima = ServicoComposicao.acimaDe(d.id, dependenciasData, servicos);
+  const itens = [
+    ...acima.servicos.map((s) => `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.8em;background:white;border:1px solid #e0e0e0;color:#333;">🧩 ${esc(s.nome)} <span style="color:#999;">(Serviço)</span></span>`),
+    ...acima.dependencias.map((x) => `<span onclick="editarDep('${escJs(x.id)}')" style="cursor:pointer;display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.8em;background:white;border:1px solid #e0e0e0;color:#333;" title="Abrir ${esc(x.nome)}">${esc(_iconeCategoriaDep(x.categoria))} ${esc(x.nome)} <span style="color:#999;">(${esc(x.categoria)})</span></span>`),
+  ];
+  cont.innerHTML = `<div style="border-left:3px solid #d60014;background:#fffafa;padding:10px 14px;border-radius:0 6px 6px 0;">
+    <div style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px;">Está abaixo de</div>
+    ${itens.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">${itens.join('')}</div>` : '<div style="font-size:0.82em;color:#999;">Nenhum Serviço ou dependência usa esta como componente.</div>'}
+    <div style="font-size:0.72em;color:#999;margin-top:6px;">O vínculo é feito no item de cima (Serviço ou dependência).</div>
+  </div>`;
+}
+
 function _htmlDrawerDependencia() {
   return `
     <div class="drawer-overlay" id="drawerOverlayDependencia" onclick="fecharDrawerDependencia()"></div>
@@ -5227,20 +5391,18 @@ function _htmlDrawerDependencia() {
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Papel</label>
               <textarea id="depDetalhes" rows="3" placeholder="Papel ou função desta dependência" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;resize:vertical;font-family:inherit;"></textarea>
             </div>
+            ${_htmlDepComponentes()}
+            <div id="depAcimaDe" style="margin-top:18px;"></div>
           </div>
 
           <div id="painel-dep-drp" style="display:none;">
             <div id="depSlasContratados"></div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RTO</label>
-                <input type="text" id="depRto" placeholder="Ex: 4 horas" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-              </div>
-              <div>
-                <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO</label>
-                <input type="text" id="depRpo" placeholder="Ex: 1 hora" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-              </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:6px;">
+              ${_htmlCampoDuracao('depRto', 'RTO', 'Tempo para voltar a funcionar')}
+              ${_htmlCampoDuracao('depRpo', 'RPO', 'Perda de dados tolerada')}
+              ${_htmlCampoDuracao('depMttr', 'MTTR', 'Tempo médio de reparo')}
             </div>
+            <p style="font-size:0.75em;color:#888;margin:0 0 14px;">Entram na soma do caminho crítico dos Serviços acima desta dependência.</p>
             <div style="margin-bottom:14px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Estratégia de contingência</label>
               <input type="hidden" id="depEstrategia" value="">
@@ -5280,6 +5442,7 @@ function _htmlDrawerDependencia() {
       </div>
       <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharDrawerDependencia()">Fechar</button>
+        ${_seVeTela('mapa', '<button class="btn btn-ghost" onclick="verNoMapa(\'dependencia\')">🗺️ Ver no mapa</button>')}
         <button class="btn btn-primary" id="btnSalvarDep" onclick="salvarDep()">Salvar</button>
       </div>
     </div>
@@ -5299,8 +5462,18 @@ window.abrirDrawerDependencia = (d) => {
   document.getElementById('depCategoria').value = d ? d.categoria : '';
   document.getElementById('depNome').value = d ? d.nome : '';
   document.getElementById('depDetalhes').value = d ? (d.detalhes || '') : '';
-  document.getElementById('depRto').value = d ? (d.rto || '') : '';
-  document.getElementById('depRpo').value = d ? (d.rpo || '') : '';
+  // Sem rtoMin/rpoMin ainda (antes da migracao), o texto legado e convertido
+  // para a tela; o que nao converter aparece como aviso abaixo do campo.
+  _preencherCampoDuracao('depRto', d ? ServicoComposicao.valorMin(d, 'rto') : null, d ? d.rto : '');
+  _preencherCampoDuracao('depRpo', d ? ServicoComposicao.valorMin(d, 'rpo') : null, d ? d.rpo : '');
+  _preencherCampoDuracao('depMttr', d ? ServicoComposicao.valorMin(d, 'mttr') : null, '');
+  window._depComponentesSel = d && Array.isArray(d.componentes)
+    ? d.componentes.filter((x) => x && x.id).map((x) => ({ id: x.id, nome: x.nome || '', categoria: x.categoria || '' }))
+    : [];
+  document.getElementById('depComp-input').value = '';
+  depCompFecharDropdown();
+  renderDepComponentesTags();
+  _renderAcimaDaDependencia(d);
   document.getElementById('depEstrategia').value = d ? (d.estrategia || '') : '';
   renderEstrategiaChips();
   _popularSelectAreaResponsavelDep(d ? (d.responsavel || '') : '');
@@ -5449,8 +5622,10 @@ function _coletarFormularioDependencia() {
     categoria: document.getElementById('depCategoria').value.trim(),
     nome: document.getElementById('depNome').value.trim(),
     detalhes: document.getElementById('depDetalhes').value.trim(),
-    rto: document.getElementById('depRto').value.trim(),
-    rpo: document.getElementById('depRpo').value.trim(),
+    rtoMin: _lerCampoDuracao('depRto'),
+    rpoMin: _lerCampoDuracao('depRpo'),
+    mttrMin: _lerCampoDuracao('depMttr'),
+    componentes: (window._depComponentesSel || []).map((x) => ({ id: x.id, nome: x.nome, categoria: x.categoria })),
     estrategia: document.getElementById('depEstrategia').value,
     responsavel: document.getElementById('depResponsavel').value,
     drpCriteriosAcionamento: window._depDrpListas.drpCriteriosAcionamento || [],
@@ -5513,6 +5688,10 @@ window.salvarDep = async () => {
     // -- aqui só preserva o que já existe pra não sumir do objeto em memória
     // no merge otimista.
     drpSalvo: existente ? (existente.drpSalvo || '') : '',
+    // Texto de compatibilidade (DRP/PCN/SLA de contrato leem rto/rpo em texto).
+    // Campo vazio preserva o texto antigo que nao pode ser convertido.
+    rto: _textoCampoDuracao('depRto') || (estadoDoFormulario.rtoMin === null && existente ? (existente.rto || '') : ''),
+    rpo: _textoCampoDuracao('depRpo') || (estadoDoFormulario.rpoMin === null && existente ? (existente.rpo || '') : ''),
   };
   if (!d.categoria) return _avisarCampo('depCategoria', 'Informe a categoria.');
   if (!d.nome) return _avisarCampo('depNome', 'Informe o nome.');
@@ -5592,6 +5771,7 @@ window.salvarDep = async () => {
       window._servicoDependenciasCatalogoPorCategoria[d.categoria].push({ nome: d.nome, id: result.id });
       _renderServicoDependenciasPorCategoria();
       _renderServicoProcessosImpactados();
+      _renderComposicaoServico();
     }
     showToast('✅ Salvo!', '#2e7d32');
     return true;
@@ -5958,7 +6138,14 @@ ${corpo || '<p class="vazio">Nenhuma área selecionada.</p>'}
 const _TITULO_RELATORIO_EXECUTIVO = {
   vulnerabilidades: 'Relatório Executivo de Vulnerabilidades',
   riscos: 'Relatório Executivo de Riscos',
+  servicos: 'Relatório de Composição de Serviços',
+  'servicos-mapa': 'Mapa de Conexões de Serviços',
 };
+
+// Tipos de edição que cada tela de relatório lista em "Edições salvas" (a tela
+// de Serviços tem mais de um tipo de relatório).
+const _TIPOS_DA_TELA_RELATORIO = { servicos: ['servicos', 'servicos-mapa'] };
+const _tiposDaTelaRelatorio = (tela) => _TIPOS_DA_TELA_RELATORIO[tela] || [tela];
 
 // DECISÃO 20/10/2026 (usuário): relatório de um domínio fica no menu do
 // domínio. Cada relatório executivo tem tela própria no menu Riscos, na seção
@@ -6389,6 +6576,7 @@ window.gerarRelatorioExecutivo = async () => {
 window._relatoriosGerados = window._relatoriosGerados || {};
 
 function _htmlRelatorioExecutivoPorTipo(tipo, dados, opcoes, resumoIA, edicao) {
+  if (_tiposDaTelaRelatorio('servicos').includes(tipo)) return _htmlRelatorioServicosPorTipo(tipo, dados, opcoes, edicao);
   return tipo === 'riscos'
     ? _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao)
     : _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA, edicao);
@@ -6483,7 +6671,8 @@ function _renderRelatoriosSalvos() {
   if (!cont || !_relatoriosSalvos) return;
   const ehAdmin = Perfis.ehAdmin(window.USER_PERFIS);
   // Cada tela de relatório mostra só as próprias edições.
-  const lista = _relatoriosSalvos.filter((r) => r.tipo === window._relExecTipo);
+  const tipos = _tiposDaTelaRelatorio(window._relExecTipo);
+  const lista = _relatoriosSalvos.filter((r) => tipos.includes(r.tipo));
   const pag = relatoriosSalvosPaginacao.aplicar(lista);
   const quando = (iso) => (iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '–');
   const linhas = pag.itens.map((r) => `<tr>
@@ -6494,7 +6683,7 @@ function _renderRelatoriosSalvos() {
       <td class="col-c">${r.comIA ? 'Sim' : 'Não'}</td>
       <td class="col-c" style="white-space:nowrap;">
         <button class="btn btn-ghost" style="padding:4px 10px;font-size:0.85em;" onclick="abrirRelatorioExecutivoSalvo('${escJs(r.id)}')">Abrir</button>
-        ${_edicaoCompartilhavel(r)
+        ${!['vulnerabilidades', 'riscos'].includes(r.tipo) ? '' : _edicaoCompartilhavel(r)
     ? `<button class="btn btn-ghost" style="padding:4px 10px;font-size:0.85em;" onclick="abrirCompartilharRelatorio('${escJs(r.id)}')">Compartilhar</button>`
     : '<button class="btn btn-ghost" style="padding:4px 10px;font-size:0.85em;" disabled title="Edição anterior ao recorte por área — gere e salve de novo para compartilhar">Compartilhar</button>'}
         ${ehAdmin ? `<button class="btn-icon" title="Excluir" aria-label="Excluir" onclick="excluirRelatorioExecutivoSalvo('${escJs(r.id)}')">${SVG_EXCLUIR}</button>` : ''}
@@ -6679,6 +6868,307 @@ async function _dadosRelatorioExecutivoRiscos(opcoes) {
     d, processosCarregados: !!processos, indicadoresCarregados: !!inds, historicoCarregado: !!historico,
     destaques: RR.destaques(d), indicadoresIA: Object.assign({ escopo: opcoes.escopo || 'Empresa inteira' }, RR.indicadoresParaIA(d)), baseRecorte,
   };
+}
+
+// ============================================================
+// RELATÓRIOS DE SERVIÇOS (21/10/2026)
+// Mesmo padrão dos relatórios de Vulnerabilidades/Riscos (opções e escopo na
+// tela, documento em aba nova, Imprimir/PDF, edições salvas como retrato dos
+// dados), sem IA e sem compartilhar com gestores nesta fase (decisão do
+// usuário). A conta fica em ServicoComposicao.dadosRelatorio.
+// ============================================================
+const _TIPOS_RELATORIO_SERVICOS = [
+  { tipo: 'servicos', rotulo: 'Composição de Serviços', dica: 'RTO, RPO e MTTR de cada serviço contra o caminho crítico das dependências, as cadeias que estouram e o que falta informar.' },
+  { tipo: 'servicos-mapa', rotulo: 'Mapa de conexões', dica: 'Um mapa por serviço: processos que ele suporta, o serviço e as dependências em camadas, com RTO/RPO/MTTR em cada item e o caminho crítico em vermelho. Página em paisagem.' },
+];
+
+window._relSrvBase = null;
+
+async function servicosRelatorio() {
+  window._relExecTipo = 'servicos';
+  relatoriosSalvosPaginacao.reiniciar();
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Relatórios de Serviços</h2><p class="page-sub">Composição de RTO, RPO e MTTR dos serviços e das dependências abaixo deles — para imprimir, salvar em PDF ou guardar no sistema</p></div>
+    </div>
+    <div class="painel-card">
+      <div class="painel-card__titulo">Gerar relatório</div>
+      <div class="painel-card__sub">O relatório abre numa aba nova. Lá você revisa, imprime ou salva em PDF, e pode guardar a edição no sistema</div>
+      <div class="filters" style="margin-bottom:4px;">
+        <div class="field">
+          <label class="field-label" for="relSrvTipo">Tipo de relatório</label>
+          <select id="relSrvTipo" class="field-control" onchange="atualizarEscopoRelatorioServicos()">
+            ${_TIPOS_RELATORIO_SERVICOS.map((t) => `<option value="${t.tipo}">${esc(t.rotulo)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="relSrvTipoDica" style="font-size:13px;color:var(--ink-muted);"></div>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);">
+        <div class="painel-card__titulo" style="font-size:14px;">Escopo do relatório</div>
+        <div class="painel-card__sub" style="margin-bottom:10px;">Deixe em "Todos" para todos os serviços, ou filtre para um relatório mais específico</div>
+        <div id="relSrvEscopo"><div class="vazio-inline">Carregando os filtros…</div></div>
+        <div id="relSrvContagem" style="font-size:13px;color:var(--ink-muted);margin-top:8px;"></div>
+      </div>
+      <button class="btn btn-primary" id="btnGerarRelSrv" style="margin-top:14px;" onclick="gerarRelatorioServicos()">📄 Gerar relatório</button>
+    </div>
+    <div id="relatoriosSalvos"></div>`;
+  await Promise.all([_carregarEscopoRelatorioServicos(), _carregarRelatoriosSalvos()]);
+}
+
+async function _carregarEscopoRelatorioServicos() {
+  const cont = document.getElementById('relSrvEscopo');
+  if (!cont) return;
+  try {
+    const [servicos, deps, processos] = await Promise.all([API.getServicos(), API.getDependencias(), API.getProcessos()]);
+    window._relSrvBase = { servicos: servicos || [], deps: (deps || []).filter((d) => !['Pessoas', 'Pessoa'].includes(d.categoria)), processos: processos || [] };
+  } catch (e) {
+    console.error('Relatório de Serviços: dados não carregaram', e);
+    window._relSrvBase = null;
+    cont.innerHTML = _htmlErroCarga('Não foi possível carregar os serviços.', 'servicosRelatorio');
+    const btn = document.getElementById('btnGerarRelSrv');
+    if (btn) btn.disabled = true;
+    return;
+  }
+  const b = window._relSrvBase;
+  const opt = (valor, rotulo) => `<option value="${esc(valor)}">${esc(rotulo)}</option>`;
+  const campo = (id, rotulo, opcoes) => `<div class="field"><label class="field-label" for="${id}">${esc(rotulo)}</label>
+      <select id="${id}" class="field-control" onchange="atualizarEscopoRelatorioServicos()">${opt('', 'Todos')}${opcoes}</select></div>`;
+  const idsProcVinculados = new Set(b.servicos.flatMap((s) => (s.processoIds || []).map((p) => String(p.id))));
+  const procs = b.processos.filter((p) => idsProcVinculados.has(String(p.id)))
+    .map((p) => ({ id: p.id, nome: _nomeProcessoServico(p) })).sort((x, y) => x.nome.localeCompare(y.nome, 'pt-BR'));
+  cont.innerHTML = `<div class="filters" style="margin-bottom:0;">
+    ${campo('relSrvFiltroServico', 'Serviço', [...b.servicos].sort((x, y) => (x.nome || '').localeCompare(y.nome || '', 'pt-BR')).map((s) => opt(s.id, s.nome)).join(''))}
+    ${campo('relSrvFiltroProcesso', 'Processo suportado', procs.map((p) => opt(p.id, p.nome)).join(''))}
+    ${campo('relSrvFiltroStatus', 'Composição', ServicoComposicao.ORDEM_STATUS.map((k) => opt(k, ServicoComposicao.STATUS[k])).join(''))}
+    ${campo('relSrvFiltroCategoria', 'Com dependência de', DEPENDENCIA_CATEGORIAS_TECNICAS.map((c) => opt(c, c)).join(''))}
+  </div>`;
+  atualizarEscopoRelatorioServicos();
+}
+
+function _lerFiltrosRelatorioServicos() {
+  const v = (id) => ((document.getElementById(id) || {}).value || '');
+  return { servico: v('relSrvFiltroServico'), processo: v('relSrvFiltroProcesso'), status: v('relSrvFiltroStatus'), categoria: v('relSrvFiltroCategoria') };
+}
+
+function _descreverFiltrosRelatorioServicos(filtros) {
+  const b = window._relSrvBase || { servicos: [], processos: [] };
+  return ServicoComposicao.descreverFiltros(filtros, {
+    servico: (id) => ((b.servicos.find((s) => String(s.id) === String(id)) || {}).nome || id),
+    processo: (id) => { const p = b.processos.find((x) => String(x.id) === String(id)); return p ? _nomeProcessoServico(p) : id; },
+  });
+}
+
+/** Contagem ao vivo do escopo; com zero serviços, Gerar fica desabilitado. */
+window.atualizarEscopoRelatorioServicos = () => {
+  const tipo = (document.getElementById('relSrvTipo') || {}).value || 'servicos';
+  const dica = document.getElementById('relSrvTipoDica');
+  if (dica) dica.textContent = (_TIPOS_RELATORIO_SERVICOS.find((t) => t.tipo === tipo) || {}).dica || '';
+  const b = window._relSrvBase;
+  const cont = document.getElementById('relSrvContagem');
+  const btn = document.getElementById('btnGerarRelSrv');
+  if (!cont || !b) return;
+  const filtros = _lerFiltrosRelatorioServicos();
+  const escopo = ServicoComposicao.filtrarServicos(b.servicos, b.deps, filtros);
+  const total = escopo.length;
+  const alerta = escopo.filter((x) => x.avaliacao.status === 'alerta').length;
+  cont.innerHTML = `${total} serviço${total === 1 ? '' : 's'} no escopo (${alerta} em alerta) · <strong>${esc(_descreverFiltrosRelatorioServicos(filtros))}</strong>${total ? '' : ' — <span style="color:#e65100;">nada a relatar com estes filtros</span>'}`;
+  if (btn) {
+    btn.disabled = !total;
+    btn.title = total ? '' : 'Nenhum serviço no escopo escolhido: ajuste os filtros.';
+  }
+};
+
+/** Dados do documento, sempre lidos de novo (o cadastro pode ter mudado desde que a tela abriu). */
+async function _dadosRelatorioServicos(tipo, opcoes) {
+  const [servicos, deps, processos] = await Promise.all([API.getServicos(), API.getDependencias(), API.getProcessos()]);
+  const tecnicas = (deps || []).filter((d) => !['Pessoas', 'Pessoa'].includes(d.categoria));
+  if (tipo === 'servicos-mapa') {
+    const d = ServicoComposicao.dadosMapa(servicos || [], tecnicas, processos || [], opcoes.filtros);
+    return { d, destaques: ServicoComposicao.destaquesMapa(d) };
+  }
+  const d = ServicoComposicao.dadosRelatorio(servicos || [], tecnicas, processos || [], opcoes.filtros);
+  return { d, destaques: ServicoComposicao.destaques(d) };
+}
+
+window.gerarRelatorioServicos = async () => {
+  const tipo = (document.getElementById('relSrvTipo') || {}).value || 'servicos';
+  if (!_TITULO_RELATORIO_EXECUTIVO[tipo]) return;
+  const filtros = _lerFiltrosRelatorioServicos();
+  const opcoes = { filtros, escopo: _descreverFiltrosRelatorioServicos(filtros) };
+  // Aba aberta NO CLIQUE (antes de qualquer await), senão o navegador bloqueia.
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
+  const escrever = (html) => { win.document.open(); win.document.write(html); win.document.close(); };
+  escrever(_htmlAvisoDocumentoExecutivo(_TITULO_RELATORIO_EXECUTIVO[tipo], 'Gerando o relatório…'));
+  let dados;
+  try {
+    dados = await _dadosRelatorioServicos(tipo, opcoes);
+  } catch (e) {
+    console.error('Relatório de Serviços: falha ao carregar', e);
+    escrever(_htmlAvisoDocumentoExecutivo(_TITULO_RELATORIO_EXECUTIVO[tipo], 'Não foi possível carregar os dados: ' + _mensagemErro(e, 'erro desconhecido') + '. Feche esta aba e tente de novo.', true));
+    return;
+  }
+  const idTemp = 'rel' + Date.now() + Math.random().toString(36).slice(2, 7);
+  const edicao = { modo: 'gerado', idTemp, geradoEm: new Date().toISOString(), geradoPor: (window.USER_EMAIL || '').toLowerCase() };
+  window._relatoriosGerados[idTemp] = { tipo, dados, opcoes, resumoIA: null, edicao, win, salvo: null };
+  escrever(_htmlRelatorioExecutivoPorTipo(tipo, dados, opcoes, null, edicao));
+};
+
+function _htmlRelatorioServicosPorTipo(tipo, dados, opcoes, edicao) {
+  return tipo === 'servicos-mapa'
+    ? _htmlRelatorioMapaServicos(dados, opcoes, edicao)
+    : _htmlRelatorioComposicaoServicos(dados, opcoes, edicao);
+}
+
+/**
+ * Mapa de conexões de UM serviço (SVG estático, para o documento). Recebe o
+ * layout já calculado (ServicoComposicao.layoutCamadas, guardado no retrato).
+ * Cartão: ícone + nome, categoria, RTO/RPO/MTTR. Tracejado = falta valor;
+ * borda e linha vermelhas = caminho crítico.
+ */
+function _svgMapaConexoes(layout) {
+  const SC = ServicoComposicao;
+  const porId = {};
+  layout.nos.forEach((n) => { porId[n.id] = n; });
+  const corta = (t, max) => { t = String(t || ''); return t.length > max ? t.slice(0, max - 1) + '…' : t; };
+  const linhas = layout.arestas.map((e) => {
+    const a = porId[e.de], b = porId[e.para];
+    if (!a || !b) return '';
+    const x1 = a.x + a.w / 2, y1 = a.y + a.h, x2 = b.x + b.w / 2, y2 = b.y;
+    const meio = (y1 + y2) / 2;
+    const critica = e.criticos.length > 0;
+    const d = e.ciclo
+      ? `M${x1},${y1} C${x1 + 60},${y1 + 40} ${x2 + 60},${y2 - 40} ${x2},${y2}`
+      : `M${x1},${y1} C${x1},${meio} ${x2},${meio} ${x2},${y2}`;
+    const rotulo = critica ? `<text x="${(x1 + x2) / 2 + 4}" y="${meio - 3}" font-size="9" fill="#d60014" font-weight="700">${esc(e.criticos.map((k) => SC.ROTULO_ATRIBUTO[k]).join('·'))}</text>` : '';
+    return `<path d="${d}" fill="none" stroke="${critica ? '#d60014' : e.ciclo ? '#c62828' : '#bbb'}" stroke-width="${critica ? 2.5 : 1.3}"${e.ciclo ? ' stroke-dasharray="4 3"' : ''} marker-end="url(#seta${critica ? 'C' : ''})"/>${rotulo}`;
+  }).join('');
+  const cartoes = layout.nos.map((n) => {
+    const critico = n.criticos.length > 0;
+    const fundo = n.tipo === 'servico' ? '#fce8ea' : n.tipo === 'processo' ? '#f7f7f9' : '#fff';
+    const borda = n.ausente ? '#c62828' : critico || n.tipo === 'servico' ? '#d60014' : '#cfcfd6';
+    const icone = n.tipo === 'servico' ? '🧩' : n.tipo === 'processo' ? '🔄' : _iconeCategoriaDep(n.categoria);
+    const valores = n.tipo === 'processo' ? '' : SC.ATRIBUTOS.map((a) => `${SC.ROTULO_ATRIBUTO[a]} ${n.valores[a] === null || n.valores[a] === undefined ? '—' : SC.formatarDuracao(n.valores[a])}`).join(' · ');
+    return `<g>
+      <rect x="${n.x}" y="${n.y}" width="${n.w}" height="${n.h}" rx="8" fill="${fundo}" stroke="${borda}" stroke-width="${critico || n.tipo === 'servico' ? 2 : 1.2}"${n.semValor || n.ausente ? ' stroke-dasharray="5 3"' : ''}/>
+      <text x="${n.x + 10}" y="${n.y + 21}" font-size="11.5" font-weight="700" fill="#222">${esc(icone)} ${esc(corta(n.nome, 24))}</text>
+      <text x="${n.x + 10}" y="${n.y + 38}" font-size="9.5" fill="#888">${esc(n.ausente ? 'removida do catálogo' : n.tipo === 'servico' ? 'Serviço' : n.categoria || '—')}</text>
+      ${valores ? `<text x="${n.x + 10}" y="${n.y + 58}" font-size="9" fill="#444">${esc(valores)}</text>` : ''}
+      <title>${esc(n.nome)}</title>
+    </g>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${layout.largura} ${layout.altura}" width="100%" style="max-height:165mm;display:block;" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif" role="img">
+    <defs>
+      <marker id="seta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#bbb"/></marker>
+      <marker id="setaC" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#d60014"/></marker>
+    </defs>
+    ${linhas}${cartoes}
+  </svg>`;
+}
+
+function _htmlRelatorioMapaServicos(dados, opcoes, edicao) {
+  const SC = ServicoComposicao;
+  const d = dados.d;
+  const dur = (min) => esc(SC.formatarDuracao(min));
+  const faixa = (m) => SC.ATRIBUTOS.map((a) => {
+    const x = m.atributos[a];
+    const texto = `${SC.ROTULO_ATRIBUTO[a]}: limite ${x.semLimite ? '—' : dur(x.limite)} · caminho ${x.soma === null ? '—' : dur(x.soma)}${x.incompleto && x.soma !== null ? ' (mín.)' : ''}`;
+    return x.excede ? _chipDoc(texto + ' — excede', 'critical') : _chipDoc(texto, x.semLimite || x.soma === null ? 'null' : 'low');
+  }).join(' ');
+  const blocos = d.mapas.map((m, i) => `${i ? '<div class="quebra-antes"></div>' : ''}<div class="bloco">
+      <h3>${esc(m.nome)} ${_chipDoc(m.rotuloStatus, _NIVEL_DOC_STATUS_COMPOSICAO[m.status])}</h3>
+      <div style="margin-bottom:10px;">${faixa(m)}</div>
+      ${m.layout.nos.length > 1 ? _svgMapaConexoes(m.layout) : '<p class="vazio">Serviço sem dependências.</p>'}
+    </div>`).join('') || '<div class="bloco"><p class="vazio">Nenhum serviço no escopo.</p></div>';
+  const legenda = `<div class="legenda-doc" style="margin:-6px 0 12px;">
+      <span><i style="background:#fce8ea;border:2px solid #d60014;"></i>Serviço</span>
+      <span><i style="background:#f7f7f9;border:1px solid #cfcfd6;"></i>Processo suportado</span>
+      <span><i style="background:#fff;border:2px solid #d60014;"></i>No caminho crítico (linha vermelha; a sigla diz de qual atributo)</span>
+      <span><i style="background:#fff;border:1px dashed #888;"></i>Tracejado: falta RTO, RPO ou MTTR</span>
+    </div>`;
+  return _htmlDocumentoExecutivo({
+    titulo: _TITULO_RELATORIO_EXECUTIVO['servicos-mapa'],
+    subtitulo: `${opcoes.escopo && opcoes.escopo !== 'Empresa inteira' ? 'Escopo filtrado • ' : ''}${d.totais.servicos} serviço(s) • ${d.totais.alerta} em alerta`,
+    escopo: opcoes.escopo,
+    resumoIA: null,
+    edicao,
+    destaques: dados.destaques,
+    secoes: [{ titulo: 'Mapas por serviço', ref: 'ISO 22301 8.2.2 · NIST SP 800-34', html: `<style>@page{size:A4 landscape;margin:12mm}</style>${legenda}${blocos}` }],
+    notas: [
+      'Camadas de cima para baixo: processos que o serviço suporta, o serviço e as dependências pelo nível (uma dependência compartilhada aparece uma vez, no nível mais fundo).',
+      'Caminho crítico: para cada atributo, a cadeia de maior soma do serviço até a última dependência. As linhas vermelhas mostram essas cadeias, com a sigla do atributo.',
+      'Linha tracejada vermelha: vínculo que fecha um ciclo entre componentes — ignorado na conta.',
+    ],
+  });
+}
+
+// Status de composição no documento: mesma leitura do selo da grade.
+const _NIVEL_DOC_STATUS_COMPOSICAO = { alerta: 'critical', incompleto: 'medium', 'sem-parametros': 'null', 'sem-dependencias': 'null', ok: 'low' };
+
+function _htmlRelatorioComposicaoServicos(dados, opcoes, edicao) {
+  const SC = ServicoComposicao;
+  const d = dados.d;
+  const t = d.totais;
+  const dur = (min) => esc(SC.formatarDuracao(min));
+  const celulaAtributo = (x) => {
+    if (x.semLimite && x.soma === null) return '<span class="muted">–</span>';
+    const valor = `${x.semLimite ? '<span class="muted">sem limite</span>' : dur(x.limite)} / <strong>${x.soma === null ? '–' : dur(x.soma)}</strong>${x.incompleto && x.soma !== null ? ' <span class="muted">(mín.)</span>' : ''}`;
+    return x.excede ? `${valor}<br>${_chipDoc('Excede', 'critical')}` : valor;
+  };
+  const cadeiaDoc = (cadeia) => cadeia.map((c) => `${esc(c.nome)} <span class="muted">(${c.valor === null || c.valor === undefined ? 'sem valor' : dur(c.valor)})</span>`).join(' → ');
+
+  const s1 = `<div class="bloco">
+      <div class="kpis">
+        ${_kpiDoc('Serviços no escopo', t.servicos, '')}
+        ${_kpiDoc('Em alerta', t.porStatus.alerta, `RTO ${t.excedem.rto} · RPO ${t.excedem.rpo} · MTTR ${t.excedem.mttr}`)}
+        ${_kpiDoc('Composição incompleta', t.porStatus.incompleto, 'Falta valor, limite ou há ciclo')}
+        ${_kpiDoc('Sem parâmetros ou dependências', t.porStatus['sem-parametros'] + t.porStatus['sem-dependencias'], '')}
+      </div>
+      ${_tabelaDoc([{ t: 'Serviço' }, { t: 'Composição' }, { t: 'RTO (limite / caminho)' }, { t: 'RPO (limite / caminho)' }, { t: 'MTTR (limite / caminho)' }, { t: 'Processos suportados' }],
+        d.servicos.map((x) => [
+          `<strong>${esc(x.nome)}</strong><div class="muted">${x.dependencias} dependência(s)</div>`,
+          _chipDoc(x.rotuloStatus, _NIVEL_DOC_STATUS_COMPOSICAO[x.status]),
+          celulaAtributo(x.atributos.rto), celulaAtributo(x.atributos.rpo), celulaAtributo(x.atributos.mttr),
+          x.processos.length ? esc(x.processos.join(', ')) : '<span class="muted">–</span>',
+        ]), 'Nenhum serviço no escopo.')}
+    </div>`;
+
+  const s2 = d.excedentes.length
+    ? d.excedentes.map((e) => `<div class="bloco">
+        <h3>${esc(e.servico)} — ${SC.ROTULO_ATRIBUTO[e.atributo]}: ${dur(e.soma)}${e.incompleto ? ' (mín.)' : ''} contra limite de ${dur(e.limite)}</h3>
+        <div class="sub-bloco">Excede em ${dur(e.soma - e.limite)}. Cadeia de maior soma, do serviço para baixo:</div>
+        <div>${cadeiaDoc(e.cadeia)}</div>
+      </div>`).join('')
+    : '<div class="bloco"><p class="vazio">Nenhum serviço do escopo tem cadeia de dependências acima do limite.</p></div>';
+
+  const s3 = `<div class="bloco">
+      ${_tabelaDoc([{ t: 'Dependência' }, { t: 'Categoria' }, { t: 'Falta informar' }, { t: 'Serviços afetados' }],
+        d.semValores.map((x) => [`<strong>${esc(x.nome)}</strong>`, esc(x.categoria || '–'), esc(x.faltam.join(', ')), esc(x.servicos.join(', '))]),
+        'Todas as dependências do escopo têm RTO, RPO e MTTR informados.')}
+      ${d.ciclos.length ? `<h3 style="margin-top:14px;">Ciclos entre componentes</h3>
+        <ul class="lista">${d.ciclos.map((c) => `<li>${esc(c.servico)}: ${esc(c.de)} → ${esc(c.para)} fecha um ciclo — o vínculo foi ignorado na conta.</li>`).join('')}</ul>` : ''}
+    </div>`;
+
+  return _htmlDocumentoExecutivo({
+    titulo: _TITULO_RELATORIO_EXECUTIVO.servicos,
+    subtitulo: `${opcoes.escopo && opcoes.escopo !== 'Empresa inteira' ? 'Escopo filtrado • ' : ''}${t.servicos} serviço(s) • ${t.porStatus.alerta} em alerta`,
+    escopo: opcoes.escopo,
+    resumoIA: null,
+    edicao,
+    destaques: dados.destaques,
+    secoes: [
+      { titulo: 'Situação dos serviços', ref: 'ISO 22301 8.2.2 · NIST SP 800-34', html: s1 },
+      { titulo: 'Cadeias acima do limite', ref: '', html: s2 },
+      { titulo: 'O que falta informar', ref: '', html: s3 },
+    ],
+    notas: [
+      'Hierarquia: Processo → Serviço → dependências → componentes de cada dependência (cadastro de Dependências, "Componentes abaixo").',
+      'Caminho crítico: para cada atributo, soma-se o valor ao longo de cada cadeia do serviço até a última dependência; vale a cadeia de maior soma. Dependências lado a lado contam em paralelo.',
+      'Alerta: a soma do caminho crítico passa do valor definido no serviço. Uma soma que já passa do limite é alerta mesmo com dependências sem valor, porque a soma real só pode ser maior.',
+      '"(mín.)": alguma dependência do serviço não tem o valor informado; a soma mostrada é um mínimo.',
+      'Valores lidos em minutos; RTO/RPO antigos em texto foram convertidos quando possível.',
+    ],
+  });
 }
 
 // ---- Casca comum dos relatórios executivos (documento gerado: regras em ui-referencias.md) ----
@@ -7457,10 +7947,20 @@ async function servicos() {
   app.innerHTML = `
     <div class="page-header">
       <div><h2>Serviços</h2><p class="page-sub">Agrupe dependências técnicas num serviço só, para organização e visão consolidada</p></div>
-      <button class="btn btn-primary" onclick="abrirDrawerServico()">+ Novo Serviço</button>
+      <div style="display:flex;gap:8px;">
+        ${_seVeTela('servicos-relatorio', '<button class="btn btn-ghost" onclick="location.hash=\'#servicos-relatorio\'">📄 Relatórios</button>')}
+        <button class="btn btn-primary" onclick="abrirDrawerServico()">+ Novo Serviço</button>
+      </div>
     </div>
     <div class="filters">
       <input type="search" id="buscaServico" placeholder="Buscar serviço…" aria-label="Buscar serviço" oninput="renderizarServicos()" class="field-control field-control--busca">
+      <div class="field">
+        <label class="field-label" for="filtroComposicaoServico">Composição</label>
+        <select id="filtroComposicaoServico" class="field-control" onchange="renderizarServicos()">
+          <option value="">Todas</option>
+          ${Object.keys(ServicoComposicao.STATUS).map((k) => `<option value="${k}">${esc(ServicoComposicao.STATUS[k])}</option>`).join('')}
+        </select>
+      </div>
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table" id="listaServicos" style="display:none;">
@@ -7470,6 +7970,7 @@ async function servicos() {
             <th onclick="ordenarServicos('nome')" style="cursor:pointer;">Nome <span id="sort-servico-nome"></span></th>
             <th>Descrição</th>
             <th style="width:12%;text-align:center;">Dependências</th>
+            <th style="width:14%;text-align:center;">Composição</th>
             <th style="width:10%;text-align:center;">Backups</th>
             <th style="width:12%;text-align:center;">Ações</th>
           </tr>
@@ -7513,6 +8014,10 @@ function renderizarServicos() {
     const termo = busca.toLowerCase();
     data = data.filter((s) => (s.nome || '').toLowerCase().includes(termo) || (s.descricao || '').toLowerCase().includes(termo));
   }
+  // Composicao calculada na leitura, nunca gravada (DECISAO 21/10/2026).
+  const avaliacoes = new Map(data.map((s) => [s.id, ServicoComposicao.avaliarServico(s, dependenciasData)]));
+  const filtroComp = (document.getElementById('filtroComposicaoServico') || {}).value || '';
+  if (filtroComp) data = data.filter((s) => avaliacoes.get(s.id).status === filtroComp);
   data = servicosOrdenacao.aplicar(data);
   servicosOrdenacao.atualizarSetas('sort-servico-', ['nome']);
 
@@ -7521,6 +8026,7 @@ function renderizarServicos() {
         <td style="font-weight:600;">${esc(s.nome)}</td>
         <td>${esc(s.descricao || '')}</td>
         <td style="text-align:center;">${(s.dependenciaItens || []).length}</td>
+        <td style="text-align:center;">${_htmlStatusComposicao(avaliacoes.get(s.id))}</td>
         <td style="text-align:center;">${(backupsData || []).filter((b) => (b.servicoIds || []).includes(String(s.id))).length}</td>
         <td style="text-align:center;" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="abrirDrawerServico('${esc(s.id)}')" title="Editar">
@@ -7531,7 +8037,42 @@ function renderizarServicos() {
           </button>
         </td>
       </tr>`).join('')
-    : '<tr><td colspan="5" class="vazio">Nenhum serviço cadastrado.</td></tr>';
+    : `<tr><td colspan="6" class="vazio">${servicosData.length ? 'Nenhum serviço com estes filtros.' : 'Nenhum serviço cadastrado.'}</td></tr>`;
+}
+
+// Composicao do Servico (21/10/2026): cores de status do guia de UI --
+// alerta = perigo, incompleto = aviso, ok = sucesso, sem dado = neutro.
+const _COR_STATUS_COMPOSICAO = {
+  alerta: ['#c62828', '#ffebee'],
+  incompleto: ['#f57c00', '#fff3e0'],
+  'sem-parametros': ['#757575', '#f5f5f5'],
+  'sem-dependencias': ['#757575', '#f5f5f5'],
+  ok: ['#2e7d32', '#e8f5e9'],
+};
+
+/** Selo do status de composição; o title explica o porquê. */
+function _htmlStatusComposicao(av) {
+  const [cor, fundo] = _COR_STATUS_COMPOSICAO[av.status] || _COR_STATUS_COMPOSICAO.ok;
+  const titulo = _motivoStatusComposicao(av);
+  return `<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:0.74em;font-weight:700;color:${cor};background:${fundo};white-space:nowrap;" title="${esc(titulo)}">${av.status === 'alerta' ? '⚠️ ' : ''}${esc(av.rotuloStatus)}</span>`;
+}
+
+function _motivoStatusComposicao(av) {
+  const SC = ServicoComposicao;
+  if (av.status === 'alerta') return SC.mensagensAlerta(av).join('\n');
+  if (av.status === 'sem-dependencias') return 'O serviço não tem dependências.';
+  if (av.status === 'sem-parametros') return 'Informe RTO, RPO e MTTR do serviço para comparar com as dependências.';
+  if (av.status === 'incompleto') {
+    const partes = [];
+    const semLimite = SC.ATRIBUTOS.filter((a) => av.atributos[a].semLimite).map((a) => SC.ROTULO_ATRIBUTO[a]);
+    if (semLimite.length) partes.push('Serviço sem ' + semLimite.join(', ') + '.');
+    const semValor = new Set();
+    SC.ATRIBUTOS.forEach((a) => av.atributos[a].semValor.forEach((id) => semValor.add(id)));
+    if (semValor.size) partes.push(semValor.size + ' dependência(s) sem RTO/RPO/MTTR.');
+    if (av.grafo.ciclos.length) partes.push('Há um ciclo entre componentes.');
+    return partes.join(' ');
+  }
+  return 'Caminho crítico das dependências dentro dos limites do serviço.';
 }
 
 window.ordenarServicos = (coluna) => { servicosOrdenacao.ordenar(coluna); renderizarServicos(); };
@@ -7549,11 +8090,13 @@ function _htmlDrawerServico() {
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
         <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
           <button id="tab-servico-dados" onclick="trocarAbaServico('dados')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Dados</button>
+          <button id="tab-servico-composicao" onclick="trocarAbaServico('composicao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Composição</button>
           <button id="tab-servico-backups" onclick="trocarAbaServico('backups')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Backups</button>
         </div>
         <div style="flex:1;overflow-y:auto;padding:20px 24px;">
           <input type="hidden" id="servicoId">
 
+          <div id="servicoAlertaComposicao" style="display:none;"></div>
           <div id="painel-servico-dados">
             <div style="margin-bottom:16px;">
               <label style="${lbl}">Nome <span class="req" aria-hidden="true">*</span></label>
@@ -7562,6 +8105,18 @@ function _htmlDrawerServico() {
             <div style="margin-bottom:16px;">
               <label style="${lbl}">Descrição</label>
               <textarea id="servicoDescricao" rows="3" placeholder="O que esse serviço entrega, para quem" style="${inp}resize:vertical;font-family:inherit;"></textarea>
+            </div>
+            <div style="margin-bottom:6px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
+              ${_htmlCampoDuracao('servicoRto', 'RTO', 'Tempo para voltar a funcionar', '_renderComposicaoServico()')}
+              ${_htmlCampoDuracao('servicoRpo', 'RPO', 'Perda de dados tolerada', '_renderComposicaoServico()')}
+              ${_htmlCampoDuracao('servicoMttr', 'MTTR', 'Tempo médio de reparo', '_renderComposicaoServico()')}
+            </div>
+            <p style="font-size:0.75em;color:#888;margin:0 0 16px;">Limites do serviço. A soma do caminho crítico das dependências abaixo dele (veja a aba Composição) não pode passar destes valores.</p>
+            <div style="margin-bottom:16px;">
+              <label style="${lbl}">Processos que este serviço suporta</label>
+              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Processos de Negócio acima do serviço na hierarquia (Processo → Serviço → Dependências).</span>
+              <div id="servicoProcessosChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
+              <select id="servicoProcessoAdd" onchange="adicionarProcessoServico()" style="${inp}"><option value="">Adicionar processo...</option></select>
             </div>
             <div style="margin-bottom:16px;">
               <label style="${lbl}">Stakeholders</label>
@@ -7578,9 +8133,13 @@ function _htmlDrawerServico() {
             </div>
             <div style="margin-bottom:8px;padding-top:12px;border-top:1px solid #f0f0f0;">
               <label style="${lbl}">Processos Impactados</label>
-              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Processos de Negócio que dependem de alguma das dependências acima (calculado, não editável aqui).</span>
+              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Processos que o serviço suporta mais os que dependem de alguma das dependências acima (calculado, não editável aqui).</span>
               <div id="servicoProcessosImpactados"></div>
             </div>
+          </div>
+
+          <div id="painel-servico-composicao" style="display:none;">
+            <div id="servicoComposicao"></div>
           </div>
 
           <div id="painel-servico-backups" style="display:none;">
@@ -7591,13 +8150,14 @@ function _htmlDrawerServico() {
       </div>
       <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharDrawerServico()">Fechar</button>
+        ${_seVeTela('mapa', '<button class="btn btn-ghost" onclick="verNoMapa(\'servico\')">🗺️ Ver no mapa</button>')}
         <button class="btn btn-primary" id="btnSalvarServico" onclick="salvarServico()">Salvar</button>
       </div>
     </div>`;
 }
 
 window.trocarAbaServico = (aba) => {
-  ['dados', 'backups'].forEach((a) => {
+  ['dados', 'composicao', 'backups'].forEach((a) => {
     document.getElementById('painel-servico-' + a).style.display = a === aba ? 'block' : 'none';
     _marcarAba(document.getElementById('tab-servico-' + a), a === aba);
   });
@@ -7633,6 +8193,11 @@ window.abrirDrawerServico = (id) => {
   document.getElementById('servicoDrawerTitulo').textContent = s ? 'Editar Serviço' : 'Novo Serviço';
 
   window._servicoDependencias = s && Array.isArray(s.dependenciaItens) ? [...s.dependenciaItens] : [];
+  _preencherCampoDuracao('servicoRto', s ? s.rtoMin : null, '');
+  _preencherCampoDuracao('servicoRpo', s ? s.rpoMin : null, '');
+  _preencherCampoDuracao('servicoMttr', s ? s.mttrMin : null, '');
+  window._servicoProcessos = s && Array.isArray(s.processoIds) ? s.processoIds.map((p) => ({ id: String(p.id), nome: p.nome || '' })) : [];
+  _renderProcessosServico();
   // Antes do marcar() do rastreador: os stakeholders herdados dos backups contam
   // como estado inicial (Fechar sem mexer não pergunta nada; só grava ao Salvar).
   const stk = _stakeholdersDoServico(s, backupsData);
@@ -7653,6 +8218,7 @@ window.abrirDrawerServico = (id) => {
 
   _renderServicoDependenciasPorCategoria();
   _renderServicoProcessosImpactados();
+  _renderComposicaoServico();
   _renderServicoBackupsTab(s ? s.id : null);
   trocarAbaServico('dados');
   document.getElementById('drawerServico').classList.add('open');
@@ -7725,7 +8291,134 @@ function _coletarFormularioServico() {
     descricao: document.getElementById('servicoDescricao').value.trim(),
     dependenciaItens: window._servicoDependencias || [],
     stakeholders: window._servicoStakeholders || [],
+    rtoMin: _lerCampoDuracao('servicoRto'),
+    rpoMin: _lerCampoDuracao('servicoRpo'),
+    mttrMin: _lerCampoDuracao('servicoMttr'),
+    processoIds: (window._servicoProcessos || []).map((p) => ({ id: p.id, nome: p.nome })),
   };
+}
+
+// ---- Processos que o Serviço suporta (21/10/2026): chips + select, mesmo molde dos Stakeholders ----
+window._servicoProcessos = [];
+
+const _nomeProcessoServico = (p) => [p.area, p.processo].filter(Boolean).join(' · ');
+
+function _renderProcessosServico() {
+  const cont = document.getElementById('servicoProcessosChips');
+  if (!cont) return;
+  const processos = window.processosData || [];
+  const lista = window._servicoProcessos || [];
+  cont.innerHTML = lista.length ? lista.map((p, i) => {
+    const atual = processos.find((x) => String(x.id) === String(p.id));
+    const removido = processos.length && !atual;
+    const nome = atual ? _nomeProcessoServico(atual) : (p.nome || '(sem nome)');
+    return `<span style="display:inline-flex;align-items:center;gap:6px;background:${removido ? '#999' : '#d60014'};color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(nome)}${removido ? ' (removido)' : ''}<button type="button" onclick="removerProcessoServico(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
+  }).join('') : '<p class="vazio-inline">Nenhum processo vinculado.</p>';
+  const sel = document.getElementById('servicoProcessoAdd');
+  if (sel) {
+    const ja = new Set(lista.map((p) => String(p.id)));
+    sel.innerHTML = '<option value="">Adicionar processo...</option>' +
+      processos.filter((p) => !ja.has(String(p.id))).sort((a, c) => _nomeProcessoServico(a).localeCompare(_nomeProcessoServico(c), 'pt-BR'))
+        .map((p) => `<option value="${esc(p.id)}">${esc(_nomeProcessoServico(p))}</option>`).join('');
+    sel.value = '';
+  }
+}
+
+window.adicionarProcessoServico = () => {
+  const sel = document.getElementById('servicoProcessoAdd');
+  const p = sel && (window.processosData || []).find((x) => String(x.id) === String(sel.value));
+  if (!p) return;
+  window._servicoProcessos.push({ id: String(p.id), nome: _nomeProcessoServico(p) });
+  _renderProcessosServico();
+  _renderServicoProcessosImpactados();
+};
+
+window.removerProcessoServico = (i) => {
+  window._servicoProcessos.splice(i, 1);
+  _renderProcessosServico();
+  _renderServicoProcessosImpactados();
+};
+
+// ---- Composicao do Servico (21/10/2026): faixa de alerta + aba Composicao ----
+/**
+ * Recalcula com o que está no formulário (limites digitados e dependências
+ * escolhidas), contra o catálogo atual: a faixa laranja no topo e a aba.
+ */
+window._renderComposicaoServico = () => {
+  const form = _coletarFormularioServico();
+  const av = ServicoComposicao.avaliarServico(form, dependenciasData);
+  const faixa = document.getElementById('servicoAlertaComposicao');
+  if (faixa) {
+    const msgs = ServicoComposicao.mensagensAlerta(av);
+    faixa.style.display = msgs.length ? 'block' : 'none';
+    faixa.innerHTML = msgs.length ? `<div role="alert" style="background:#fff3e0;color:#e65100;border-left:3px solid #e65100;padding:10px 14px;border-radius:0 6px 6px 0;margin-bottom:16px;font-size:0.86em;">
+      <div style="font-weight:700;margin-bottom:4px;">⚠️ Dependências acima do limite do serviço</div>
+      ${msgs.map((m) => `<div>${esc(m)}</div>`).join('')}
+      <button type="button" class="link-acao" onclick="trocarAbaServico('composicao')" style="color:#e65100;margin-top:4px;">Ver composição →</button>
+    </div>` : '';
+  }
+  const cont = document.getElementById('servicoComposicao');
+  if (cont) cont.innerHTML = _htmlComposicaoServico(av);
+};
+
+const _celulaDuracao = (min) => (min === null || min === undefined)
+  ? '<span style="color:#e65100;" title="Não informado">—</span>'
+  : esc(ServicoComposicao.formatarDuracao(min));
+
+/** Aba Composição: limite x caminho crítico por atributo, e a árvore de componentes. */
+function _htmlComposicaoServico(av) {
+  const SC = ServicoComposicao;
+  const g = av.grafo;
+  if (!g.nos[g.raiz].filhos.length) {
+    return '<p class="vazio-inline">Adicione dependências ao serviço (aba Dados) para ver a composição.</p>';
+  }
+  const th = 'padding:8px 6px;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;';
+  const td = 'padding:8px 6px;border-bottom:1px solid #f0f0f0;vertical-align:top;';
+  const linhas = SC.ATRIBUTOS.map((a) => {
+    const x = av.atributos[a];
+    const situacao = x.excede ? '<span style="color:#c62828;font-weight:700;">⚠️ Excede</span>'
+      : x.semLimite ? '<span style="color:#757575;">Sem limite</span>'
+      : x.incompleto ? '<span style="color:#f57c00;font-weight:600;">Incompleto</span>'
+      : '<span style="color:#2e7d32;font-weight:600;">Dentro</span>';
+    const cadeia = x.caminho.map((id) => esc(g.nos[id].nome)).join(' → ');
+    return `<tr>
+      <td style="${td}font-weight:700;">${SC.ROTULO_ATRIBUTO[a]}</td>
+      <td style="${td}">${_celulaDuracao(x.limite)}</td>
+      <td style="${td}font-weight:600;">${_celulaDuracao(x.soma)}${x.incompleto ? ' <span style="font-size:0.8em;color:#f57c00;" title="Há dependências sem este valor: a soma é um mínimo">(mín.)</span>' : ''}</td>
+      <td style="${td}">${situacao}</td>
+      <td style="${td}font-size:0.85em;color:#555;">${cadeia || '—'}</td>
+    </tr>`;
+  }).join('');
+
+  // Nós em algum caminho crítico ganham a borda vermelha na árvore.
+  const critico = new Set();
+  SC.ATRIBUTOS.forEach((a) => av.atributos[a].caminho.forEach((id) => critico.add(id)));
+  const arvore = (id, profundidade, trilha) => {
+    const n = g.nos[id];
+    const ciclo = trilha.includes(id);
+    const valores = SC.ATRIBUTOS.map((a) => `<span style="display:inline-block;min-width:92px;font-size:0.8em;color:#555;">${SC.ROTULO_ATRIBUTO[a]} ${_celulaDuracao(n.valores[a])}</span>`).join('');
+    const linha = `<div style="display:flex;align-items:center;gap:10px;padding:6px 8px 6px ${8 + profundidade * 22}px;border-bottom:1px solid #f5f5f5;${critico.has(id) ? 'border-left:3px solid #d60014;background:#fffafa;' : 'border-left:3px solid transparent;'}">
+      <span style="flex:1;min-width:0;">${esc(_iconeCategoriaDep(n.categoria))} <span style="font-weight:600;">${esc(n.nome)}</span> <span style="color:#999;font-size:0.82em;">(${esc(n.categoria || '—')})</span>${n.ausente ? ' <span style="color:#c62828;font-size:0.8em;">(removida do catálogo)</span>' : ''}${ciclo ? ' <span style="color:#c62828;font-size:0.8em;font-weight:700;">↻ ciclo</span>' : ''}</span>
+      <span style="white-space:nowrap;">${valores}</span>
+    </div>`;
+    if (ciclo) return linha;
+    const filhos = n.filhos.concat(g.arestas.filter((e) => e.ciclo && e.de === id).map((e) => e.para));
+    return linha + filhos.map((f) => arvore(f, profundidade + 1, trilha.concat(id))).join('');
+  };
+
+  return `
+    <div style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px;">Limite do serviço x caminho crítico</div>
+    <p style="font-size:0.75em;color:#888;margin:0 0 8px;">Para cada atributo, soma-se o valor ao longo de cada cadeia de dependências; vale a cadeia de maior soma. Dependências lado a lado contam em paralelo.</p>
+    <table style="width:100%;border-collapse:collapse;font-size:0.88em;margin-bottom:22px;">
+      <thead><tr><th style="${th}">Atributo</th><th style="${th}">Limite</th><th style="${th}">Caminho crítico</th><th style="${th}">Situação</th><th style="${th}">Cadeia</th></tr></thead>
+      <tbody>${linhas}</tbody>
+    </table>
+    <div style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px;">Árvore de dependências</div>
+    <p style="font-size:0.75em;color:#888;margin:0 0 8px;">Borda vermelha = está em algum caminho crítico. "—" em laranja = valor não informado na dependência. Os componentes são editados no cadastro de cada Dependência.</p>
+    <div style="border:1px solid #eee;border-radius:6px;overflow:hidden;">
+      <div style="padding:8px;font-weight:700;background:#fafafa;border-bottom:1px solid #eee;">🧩 ${esc(g.nos[g.raiz].nome || 'Serviço')}</div>
+      ${g.nos[g.raiz].filhos.map((f) => arvore(f, 0, [g.raiz])).join('')}
+    </div>`;
 }
 
 // ---- Stakeholders do Serviço (chips de Pessoas, mesmo molde de Áreas da Pessoa) ----
@@ -7867,6 +8560,7 @@ window.selecionarDependenciaServicoCategoria = (nome, categoria, id) => {
     window._servicoDependencias.push({ categoria, nome, id: idReal });
     _renderServicoDependenciasPorCategoria();
     _renderServicoProcessosImpactados();
+    _renderComposicaoServico();
   }
 };
 
@@ -7874,6 +8568,7 @@ window.removerDependenciaServico = (idx) => {
   window._servicoDependencias.splice(idx, 1);
   _renderServicoDependenciasPorCategoria();
   _renderServicoProcessosImpactados();
+  _renderComposicaoServico();
 };
 
 /**
@@ -7887,16 +8582,19 @@ function _renderServicoProcessosImpactados() {
   if (!cont) return;
   const itens = window._servicoDependencias || [];
   const processos = window.processosData || [];
+  const suportados = (window._servicoProcessos || []).map((x) => processos.find((p) => String(p.id) === String(x.id))).filter(Boolean);
 
-  if (!itens.length) {
-    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:4px 0;">Adicione dependências ao serviço para ver os processos impactados.</p>';
+  if (!itens.length && !suportados.length) {
+    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:4px 0;">Vincule processos ou adicione dependências ao serviço para ver os processos impactados.</p>';
     return;
   }
 
+  // Origem: "Suportado" (vinculado no serviço) vence "Via dependência".
   const vistos = new Map();
+  suportados.forEach((p) => vistos.set(p.id, { p, origem: 'Suportado' }));
   itens.forEach((item) => {
     _processosVinculadosADependencia(item, processos).forEach((p) => {
-      if (!vistos.has(p.id)) vistos.set(p.id, p);
+      if (!vistos.has(p.id)) vistos.set(p.id, { p, origem: 'Via dependência' });
     });
   });
   const vinculados = [...vistos.values()];
@@ -7909,15 +8607,17 @@ function _renderServicoProcessosImpactados() {
     <thead><tr>
       <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Área</th>
       <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Processo</th>
-      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;width:30%;">Tier</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;width:24%;">Tier</th>
+      <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;width:20%;">Vínculo</th>
     </tr></thead>
     <tbody>
-      ${vinculados.map((p) => {
+      ${vinculados.map(({ p, origem }) => {
         const tier = Criticidade.tierDoProcesso(p);
         return `<tr>
           <td style="padding:8px 0;border-bottom:1px solid #f5f5f5;">${esc(p.area)}</td>
           <td style="padding:8px 0;border-bottom:1px solid #f5f5f5;font-weight:500;">${esc(p.processo)}</td>
           <td style="padding:8px 0;border-bottom:1px solid #f5f5f5;">${_htmlBadge(_nivelTierProcesso(tier), tier)}</td>
+          <td style="padding:8px 0;border-bottom:1px solid #f5f5f5;font-size:0.85em;color:${origem === 'Suportado' ? '#222' : '#888'};">${origem}</td>
         </tr>`;
       }).join('')}
     </tbody>
@@ -7926,14 +8626,14 @@ function _renderServicoProcessosImpactados() {
 
 window.salvarServico = async () => {
   const dados = _coletarFormularioServico();
-  const { id, nome, descricao } = dados;
+  const { id, nome } = dados;
   if (!nome) return _avisarCampo('servicoNome', 'Informe o nome do serviço.');
 
   return await comBotaoCarregando('btnSalvarServico', async () => {
     try {
       const r = await API.salvarServico(dados);
       _edServico.marcar({ ...dados, id: id || r.id });
-      const item = { id: r.id, nome, descricao, dependenciaItens: window._servicoDependencias || [], stakeholders: window._servicoStakeholders || [] };
+      const item = { ...dados, id: r.id };
       const idx = servicosData.findIndex((x) => String(x.id) === String(r.id));
       if (idx >= 0) servicosData[idx] = item; else servicosData.push(item);
       document.getElementById('servicoStakeholdersMigrados').style.display = 'none';
@@ -7972,6 +8672,353 @@ window.excluirServico = async (id) => {
   } catch (e) {
     showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
   }
+};
+
+// ============================================================
+// PÁGINA: MAPA DE CONTINUIDADE (21/10/2026)
+//
+// O núcleo do sistema é BIA/PCN/DRP: este mapa mental mostra como Processos,
+// Serviços, Dependências, Pessoas, Fornecedores, Contratos, Backups e Áreas se
+// conectam. Um item fica no centro com as conexões diretas em volta; clicar
+// numa conexão a seleciona, clicar de novo (ou "Centralizar") a traz para o
+// centro, e a trilha guarda o caminho. Nenhum vínculo novo: o índice sai dos
+// campos que já existem (MapaContinuidade.montarIndice). Admin, SI e TI.
+// ============================================================
+const _COR_TIPO_MAPA = {
+  processo: '#1565c0', servico: '#6a1b9a', dependencia: '#00838f', fornecedor: '#ef6c00',
+  contrato: '#5d4037', backup: '#455a64', pessoa: '#2e7d32', area: '#9e9d24',
+};
+const _ICONE_TIPO_MAPA = {
+  processo: '🔄', servico: '🧩', dependencia: '⚙️', fornecedor: '🏢', contrato: '📄', backup: '💾', pessoa: '👤', area: '🏛️',
+};
+
+window._mapa = null;
+
+async function mapaContinuidade() {
+  const params = new URLSearchParams((window.location.hash.split('?')[1]) || '');
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Mapa de Continuidade</h2><p class="page-sub">Como Processos, Serviços, Dependências, Pessoas, Fornecedores, Contratos e Backups se conectam — escolha um item e navegue pelas conexões</p></div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="mapaConteudo" style="display:none;">
+      <div id="mapaAviso"></div>
+      <div class="filters" style="align-items:flex-end;">
+        <div class="field" style="flex:1;min-width:260px;position:relative;">
+          <label class="field-label" for="mapaBusca">Buscar item</label>
+          <input type="search" id="mapaBusca" class="field-control field-control--busca" autocomplete="off" placeholder="Processo, pessoa, serviço, dependência, fornecedor…" oninput="mapaBuscar()" onfocus="mapaBuscar()" onblur="setTimeout(mapaFecharBusca,250)">
+          <div id="mapaBuscaResultados" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:320px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
+        </div>
+      </div>
+      <div id="mapaTipos" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px;"></div>
+      <div id="mapaTrilha" style="font-size:0.85em;margin-bottom:10px;"></div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:16px;align-items:start;">
+        <div class="painel-card" style="padding:10px;"><div id="mapaCanvas"></div><div id="mapaLegenda"></div></div>
+        <div class="painel-card" id="mapaPainel"></div>
+      </div>
+    </div>`;
+
+  let dados;
+  try {
+    const veContratos = Perfis.podeVerTela(window.USER_PERFIS, 'contratos');
+    const [processos, areas, deps, servicos, backups, contratos, statusContrato] = await Promise.all([
+      API.getProcessos(), API.getAreas(), API.getDependencias(), API.getServicos(), API.getBackups(),
+      veContratos ? API.getContratos().catch(() => null) : Promise.resolve(null),
+      veContratos ? API.getStatusContrato().catch(() => null) : Promise.resolve(null),
+    ]);
+    dados = { processos, areas, dependencias: deps, servicos, backups, contratos, statusContrato };
+  } catch (e) {
+    console.error('Mapa de Continuidade: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar o mapa.', 'mapaContinuidade');
+    return;
+  }
+  const tecnicas = (dados.dependencias || []).filter((d) => DEPENDENCIA_CATEGORIAS_TECNICAS.includes(d.categoria));
+  const indice = MapaContinuidade.montarIndice(dados, {
+    tierDe: (p) => Criticidade.tierDoProcesso(p),
+    avaliarServico: (s) => ServicoComposicao.avaliarServico(s, tecnicas),
+    situacaoContrato: (c) => ContratoCiclo.situacaoDoStatus(c.statusId, dados.statusContrato || []),
+    valorMin: ServicoComposicao.valorMin,
+  });
+  window._mapa = { indice, centro: null, selecionado: null, trilha: [], tipos: new Set(MapaContinuidade.TIPOS), expandidos: {} };
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('mapaConteudo').style.display = 'block';
+  document.getElementById('mapaAviso').innerHTML = indice.semContratos
+    ? '<div style="font-size:0.82em;color:#757575;background:#f5f5f5;border-radius:6px;padding:6px 12px;margin-bottom:10px;">Contratos não aparecem no mapa: o seu perfil não tem acesso a eles.</div>'
+    : '';
+  const no = params.get('no');
+  if (no && indice.nos[no]) mapaCentralizar(no);
+  else _renderMapa();
+}
+
+/** Atualiza o endereço (#mapa?no=...) sem recarregar a tela: o link do mapa pode ser compartilhado. */
+function _mapaAtualizarEndereco() {
+  const m = window._mapa;
+  const alvo = '#mapa' + (m && m.centro ? '?no=' + encodeURIComponent(m.centro) : '');
+  if (window.location.hash !== alvo && window.history && window.history.replaceState) window.history.replaceState(null, '', alvo);
+}
+
+window.mapaCentralizar = (id) => {
+  const m = window._mapa;
+  if (!m || !m.indice.nos[id]) return;
+  const pos = m.trilha.indexOf(id);
+  if (pos >= 0) m.trilha = m.trilha.slice(0, pos + 1); else m.trilha.push(id);
+  m.centro = id;
+  m.selecionado = id;
+  m.expandidos = {};
+  _mapaAtualizarEndereco();
+  _renderMapa();
+};
+
+window.mapaVoltarAoInicio = () => {
+  const m = window._mapa;
+  if (!m) return;
+  m.centro = null; m.selecionado = null; m.trilha = []; m.expandidos = {};
+  _mapaAtualizarEndereco();
+  _renderMapa();
+};
+
+/** 1º clique seleciona (painel ao lado); clique no já selecionado o traz para o centro. */
+window.mapaClicarNo = (id) => {
+  const m = window._mapa;
+  if (!m) return;
+  if (id.startsWith('mais:')) { m.expandidos[id.slice(5)] = true; return _renderMapa(); }
+  if (m.selecionado === id && id !== m.centro) return mapaCentralizar(id);
+  m.selecionado = id;
+  _renderMapa();
+};
+
+window.mapaAlternarTipo = (tipo) => {
+  const m = window._mapa;
+  if (!m) return;
+  if (m.tipos.has(tipo)) m.tipos.delete(tipo); else m.tipos.add(tipo);
+  _renderMapa();
+};
+
+window.mapaBuscar = () => {
+  const m = window._mapa;
+  const input = document.getElementById('mapaBusca');
+  const dd = document.getElementById('mapaBuscaResultados');
+  if (!m || !input || !dd) return;
+  const achados = MapaContinuidade.buscar(m.indice, input.value, 20);
+  if (!input.value.trim()) { dd.style.display = 'none'; return; }
+  dd.innerHTML = achados.length ? achados.map((n) => `<div onmousedown="event.preventDefault();mapaEscolherBusca('${escJs(n.id)}')" style="padding:8px 12px;cursor:pointer;font-size:0.86em;border-bottom:1px solid #f0f0f0;display:flex;gap:8px;align-items:center;" onmouseenter="this.style.background='#f5f6fa'" onmouseleave="this.style.background='white'">
+      <span style="width:8px;height:8px;border-radius:50%;background:${_COR_TIPO_MAPA[n.tipo]};flex-shrink:0;"></span>
+      <span style="flex:1;min-width:0;"><strong>${esc(n.nome)}</strong>${n.sub ? ` <span style="color:#999;">· ${esc(n.sub)}</span>` : ''}</span>
+      <span style="font-size:0.85em;color:${_COR_TIPO_MAPA[n.tipo]};font-weight:600;">${esc(MapaContinuidade.ROTULO_TIPO_SINGULAR[n.tipo])}</span>
+    </div>`).join('') : '<div style="padding:8px 12px;font-size:0.84em;color:#999;">Nada encontrado.</div>';
+  dd.style.display = 'block';
+};
+
+window.mapaFecharBusca = () => {
+  const dd = document.getElementById('mapaBuscaResultados');
+  if (dd) dd.style.display = 'none';
+};
+
+window.mapaEscolherBusca = (id) => {
+  const input = document.getElementById('mapaBusca');
+  if (input) input.value = '';
+  mapaFecharBusca();
+  const m = window._mapa;
+  if (m) m.trilha = [];
+  mapaCentralizar(id);
+};
+
+function _renderMapa() {
+  const m = window._mapa;
+  if (!m) return;
+  const MC = MapaContinuidade;
+  // Filtros por tipo.
+  document.getElementById('mapaTipos').innerHTML = MC.TIPOS.filter((t) => t !== 'contrato' || !m.indice.semContratos).map((t) => {
+    const ativo = m.tipos.has(t);
+    return `<button type="button" onclick="mapaAlternarTipo('${t}')" aria-pressed="${ativo}" style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:14px;font-size:0.8em;font-weight:600;cursor:pointer;border:1.5px solid ${_COR_TIPO_MAPA[t]};background:${ativo ? _COR_TIPO_MAPA[t] : '#fff'};color:${ativo ? '#fff' : _COR_TIPO_MAPA[t]};">${_ICONE_TIPO_MAPA[t]} ${esc(MC.ROTULO_TIPO[t])}</button>`;
+  }).join('');
+  // Trilha.
+  document.getElementById('mapaTrilha').innerHTML = m.centro
+    ? `<a href="javascript:void(0)" onclick="mapaVoltarAoInicio()" style="color:#d60014;">Início</a>` + m.trilha.map((id, i) => {
+      const n = m.indice.nos[id];
+      const ultimo = i === m.trilha.length - 1;
+      return ` <span style="color:#bbb;">›</span> ${ultimo ? `<strong>${esc(n.nome)}</strong>` : `<a href="javascript:void(0)" onclick="mapaCentralizar('${escJs(id)}')" style="color:#555;">${esc(n.nome)}</a>`}`;
+    }).join('')
+    : '<span style="color:#888;">Escolha um item na busca ou num dos pontos de partida abaixo.</span>';
+
+  const canvas = document.getElementById('mapaCanvas');
+  const legenda = document.getElementById('mapaLegenda');
+  if (!m.centro) {
+    canvas.innerHTML = _htmlMapaInicio(m.indice);
+    legenda.innerHTML = '';
+    document.getElementById('mapaPainel').innerHTML = _htmlPainelMapaResumo(m.indice);
+    return;
+  }
+  const grupos = MC.vizinhos(m.indice, m.centro, [...m.tipos]);
+  const layout = MC.layoutRadial(grupos, { maxPorGrupo: 8, expandidos: m.expandidos });
+  canvas.innerHTML = _svgMapaContinuidade(m, grupos, layout);
+  legenda.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:0.76em;color:#666;padding:6px 4px 0;">
+      ${MC.TIPOS.map((t) => `<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${_COR_TIPO_MAPA[t]};margin-right:4px;vertical-align:-1px;"></span>${esc(MC.ROTULO_TIPO[t])}</span>`).join('')}
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:2.5px solid #c62828;margin-right:4px;vertical-align:-2px;"></span>Lacuna (Tier 1/2 sem PCN, dependência sem DRP, serviço em alerta)</span>
+    </div>
+    <div style="font-size:0.74em;color:#999;padding:2px 4px;">Clique num item para ver os detalhes; clique de novo para trazê-lo ao centro.</div>`;
+  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, m.selecionado || m.centro, m.centro);
+}
+
+function _htmlMapaInicio(indice) {
+  const pp = MapaContinuidade.pontosDePartida(indice);
+  const chip = (n, extra) => `<button type="button" onclick="mapaCentralizar('${escJs(n.id)}')" style="display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:14px;font-size:0.84em;cursor:pointer;background:#fff;border:1.5px solid ${n.lacunas.length ? '#c62828' : '#e0e0e0'};color:#222;margin:0 6px 6px 0;">
+      <span style="width:8px;height:8px;border-radius:50%;background:${_COR_TIPO_MAPA[n.tipo]};"></span>${esc(n.nome)}${extra ? ` <span style="color:#c62828;font-size:0.85em;">${esc(extra)}</span>` : ''}</button>`;
+  return `<div style="padding:10px 8px;">
+      <div class="painel-card__titulo" style="font-size:14px;">Comece por um processo crítico</div>
+      <div class="painel-card__sub" style="margin-bottom:8px;">Processos Tier 1</div>
+      ${pp.tier1.length ? pp.tier1.map((n) => chip(n, n.lacunas.join(' · '))).join('') : '<p class="vazio-inline">Nenhum processo Tier 1.</p>'}
+      <div class="painel-card__titulo" style="font-size:14px;margin-top:16px;">Ou pelas lacunas</div>
+      <div class="painel-card__sub" style="margin-bottom:8px;">Processos Tier 1/2 sem PCN, dependências usadas sem DRP e serviços em alerta</div>
+      ${pp.lacunas.length ? pp.lacunas.map((n) => chip(n, n.lacunas.join(' · '))).join('') : '<p class="vazio-inline">Nenhuma lacuna encontrada.</p>'}
+    </div>`;
+}
+
+function _htmlPainelMapaResumo(indice) {
+  const MC = MapaContinuidade;
+  const cont = {};
+  Object.keys(indice.nos).forEach((k) => { const t = indice.nos[k].tipo; cont[t] = (cont[t] || 0) + 1; });
+  const lacunas = Object.keys(indice.nos).filter((k) => indice.nos[k].lacunas.length).length;
+  return `<div class="painel-card__titulo">No mapa</div>
+    <div style="font-size:0.86em;margin-top:8px;">${MC.TIPOS.filter((t) => cont[t]).map((t) => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #f5f5f5;"><span>${_ICONE_TIPO_MAPA[t]} ${esc(MC.ROTULO_TIPO[t])}</span><strong>${cont[t]}</strong></div>`).join('')}</div>
+    <div style="font-size:0.86em;margin-top:10px;color:${lacunas ? '#c62828' : '#2e7d32'};font-weight:600;">${lacunas ? `${lacunas} item(ns) com lacuna` : 'Nenhuma lacuna'}</div>`;
+}
+
+/** SVG do mapa mental: centro + vizinhos do layoutRadial. */
+function _svgMapaContinuidade(m, grupos, layout) {
+  const MC = MapaContinuidade;
+  const nos = m.indice.nos;
+  const centro = nos[m.centro];
+  const porId = {};
+  grupos.forEach((g) => g.itens.forEach((i) => { porId[i.id] = i; }));
+  const corta = (t, max) => { t = String(t || ''); return t.length > max ? t.slice(0, max - 1) + '…' : t; };
+  const W = 156, H = 46;
+  const comRotulo = layout.itens.length <= 14;
+  const linhas = layout.itens.map((it) => {
+    const cor = _COR_TIPO_MAPA[it.tipo];
+    const rel = it.mais ? '' : (porId[it.id] || {}).rels.join(', ');
+    const mx = layout.centro.x + (it.x - layout.centro.x) * 0.58, my = layout.centro.y + (it.y - layout.centro.y) * 0.58;
+    return `<line x1="${layout.centro.x}" y1="${layout.centro.y}" x2="${it.x}" y2="${it.y}" stroke="${cor}" stroke-opacity="0.45" stroke-width="1.6"${it.mais ? ' stroke-dasharray="4 3"' : ''}/>` +
+      (comRotulo && rel ? `<text x="${mx}" y="${my}" font-size="10" fill="#666" text-anchor="middle" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(corta(rel, 30))}</text>` : '');
+  }).join('');
+  const cartoes = layout.itens.map((it) => {
+    const cor = _COR_TIPO_MAPA[it.tipo];
+    const x = it.x - W / 2, y = it.y - H / 2;
+    if (it.mais) {
+      return `<g style="cursor:pointer;" onclick="mapaClicarNo('${escJs(it.id)}')" role="button">
+        <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="8" fill="#fafafa" stroke="${cor}" stroke-dasharray="4 3"/>
+        <text x="${it.x}" y="${it.y + 4}" font-size="11.5" font-weight="700" fill="${cor}" text-anchor="middle">+${it.mais} ${esc(MC.ROTULO_TIPO[it.tipo].toLowerCase())}</text>
+        <title>Mostrar todos</title></g>`;
+    }
+    const n = nos[it.id];
+    const sel = m.selecionado === it.id;
+    const lacuna = n.lacunas.length > 0;
+    return `<g style="cursor:pointer;" onclick="mapaClicarNo('${escJs(it.id)}')" role="button">
+      <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="8" fill="#fff" stroke="${lacuna ? '#c62828' : sel ? '#222' : '#d8d8de'}" stroke-width="${lacuna || sel ? 2.5 : 1.2}"/>
+      <rect x="${x}" y="${y}" width="6" height="${H}" rx="3" fill="${cor}"/>
+      <text x="${x + 14}" y="${y + 19}" font-size="11.5" font-weight="700" fill="#222">${esc(corta(n.nome, 20))}</text>
+      <text x="${x + 14}" y="${y + 35}" font-size="9.5" fill="#888">${esc(corta(n.sub || MC.ROTULO_TIPO_SINGULAR[n.tipo], 26))}</text>
+      ${lacuna ? `<circle cx="${x + W - 4}" cy="${y + 4}" r="8" fill="#c62828"/><text x="${x + W - 4}" y="${y + 8}" font-size="11" font-weight="800" fill="#fff" text-anchor="middle">!</text>` : ''}
+      <title>${esc(n.nome)} (${esc(MC.ROTULO_TIPO_SINGULAR[n.tipo])})${lacuna ? ' — ' + esc(n.lacunas.join(', ')) : ''}</title></g>`;
+  }).join('');
+  const CW = 230, CH = 64;
+  const cx = layout.centro.x - CW / 2, cy = layout.centro.y - CH / 2;
+  const corC = _COR_TIPO_MAPA[centro.tipo];
+  const lacunaC = centro.lacunas.length > 0;
+  const centroSvg = `<g style="cursor:pointer;" onclick="mapaClicarNo('${escJs(centro.id)}')">
+      <rect x="${cx}" y="${cy}" width="${CW}" height="${CH}" rx="10" fill="${corC}" stroke="${lacunaC ? '#c62828' : corC}" stroke-width="${lacunaC ? 4 : 2}"/>
+      <text x="${layout.centro.x}" y="${cy + 26}" font-size="14" font-weight="800" fill="#fff" text-anchor="middle">${esc(_ICONE_TIPO_MAPA[centro.tipo])} ${esc(corta(centro.nome, 24))}</text>
+      <text x="${layout.centro.x}" y="${cy + 46}" font-size="10.5" fill="#fff" fill-opacity="0.85" text-anchor="middle">${esc(MC.ROTULO_TIPO_SINGULAR[centro.tipo])}${centro.sub ? ' · ' + esc(corta(centro.sub, 22)) : ''}</text>
+      <title>${esc(centro.nome)}</title></g>`;
+  const vazio = layout.itens.length ? '' : `<text x="${layout.centro.x}" y="${layout.centro.y + 70}" font-size="12" fill="#999" text-anchor="middle">Nenhuma conexão${m.tipos.size < MC.TIPOS.length ? ' com os tipos selecionados' : ''}.</text>`;
+  return `<svg id="mapaSvg" viewBox="0 0 ${layout.largura} ${layout.altura}" width="100%" style="display:block;max-height:72vh;" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif" role="img" aria-label="Mapa de conexões de ${esc(centro.nome)}">
+    ${linhas}${cartoes}${centroSvg}${vazio}
+  </svg>`;
+}
+
+/** Painel do item selecionado: tipo, selos de continuidade, lacunas, vínculos e ações. */
+function _htmlPainelMapa(indice, id, centroId) {
+  const MC = MapaContinuidade;
+  const n = indice.nos[id];
+  if (!n) return '';
+  const linha = (rot, val) => `<div style="display:flex;justify-content:space-between;gap:8px;padding:5px 0;border-bottom:1px solid #f5f5f5;font-size:0.86em;"><span style="color:#666;">${esc(rot)}</span><span style="text-align:right;">${val}</span></div>`;
+  const simNao = (v) => v ? '<span style="color:#2e7d32;font-weight:700;">Sim</span>' : '<span style="color:#c62828;font-weight:700;">Não</span>';
+  let selos = '';
+  if (n.tipo === 'processo') {
+    selos = linha('Tier', n.selos.tier ? _htmlBadge(_nivelTierProcesso(n.selos.tier), n.selos.tier) : '–') + linha('PCN gerado', simNao(n.selos.pcn)) + linha('RTO', esc(n.selos.rto || '–'));
+  } else if (n.tipo === 'dependencia') {
+    const v = n.selos.valores || {};
+    selos = linha('DRP gerado', simNao(n.selos.drp)) + ServicoComposicao.ATRIBUTOS.map((a) => linha(ServicoComposicao.ROTULO_ATRIBUTO[a], esc(ServicoComposicao.formatarDuracao(v[a])))).join('');
+  } else if (n.tipo === 'servico' && n.selos.composicao) {
+    const [cor, fundo] = _COR_STATUS_COMPOSICAO[n.selos.composicao] || _COR_STATUS_COMPOSICAO.ok;
+    selos = linha('Composição', `<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:0.9em;font-weight:700;color:${cor};background:${fundo};">${esc(n.selos.rotuloComposicao)}</span>`);
+  } else if (n.tipo === 'contrato') {
+    selos = linha('Situação', esc(n.selos.situacao || '–'));
+  }
+  const cont = MC.contagemVinculos(indice, id);
+  const vinculos = MC.TIPOS.filter((t) => cont[t]).map((t) => linha(MC.ROTULO_TIPO[t], `<strong>${cont[t]}</strong>`)).join('') || '<p class="vazio-inline">Sem vínculos.</p>';
+  const abrir = _acaoAbrirCadastroMapa(n);
+  return `<div style="font-size:0.75em;font-weight:700;color:${_COR_TIPO_MAPA[n.tipo]};text-transform:uppercase;letter-spacing:0.4px;">${_ICONE_TIPO_MAPA[n.tipo]} ${esc(MC.ROTULO_TIPO_SINGULAR[n.tipo])}</div>
+    <div style="font-size:1.05em;font-weight:700;margin:4px 0 2px;color:#222;">${esc(n.nome)}</div>
+    ${n.sub ? `<div style="font-size:0.82em;color:#888;margin-bottom:8px;">${esc(n.sub)}</div>` : ''}
+    ${n.ausente ? '<div style="font-size:0.8em;color:#757575;margin-bottom:8px;">Citada nos cadastros, mas não cadastrada em Áreas.</div>' : ''}
+    ${n.lacunas.length ? `<div role="alert" style="background:#ffebee;color:#c62828;border-left:3px solid #c62828;padding:8px 10px;border-radius:0 6px 6px 0;font-size:0.84em;margin:8px 0;"><strong>Lacuna:</strong> ${esc(n.lacunas.join(' · '))}</div>` : ''}
+    ${selos ? `<div style="margin:8px 0;">${selos}</div>` : ''}
+    <div style="font-size:0.75em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin:12px 0 4px;">Vínculos</div>
+    ${vinculos}
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;">
+      ${id !== centroId ? `<button class="btn btn-primary" onclick="mapaCentralizar('${escJs(id)}')">Centralizar</button>` : ''}
+      ${abrir ? `<button class="btn btn-ghost" onclick="${abrir}">Abrir cadastro</button>` : ''}
+    </div>`;
+}
+
+/**
+ * Ação "Abrir cadastro" (código do onclick) ou '' quando o perfil não vê a tela
+ * de destino. Deep link existente quando há; senão o roteador abre o registro
+ * quando a tela terminar de carregar (window._abrirAposCarregar).
+ */
+function _acaoAbrirCadastroMapa(n) {
+  const ref = escJs(String(n.ref === undefined ? '' : n.ref));
+  const ve = (pagina) => Perfis.podeVerTela(window.USER_PERFIS, pagina);
+  switch (n.tipo) {
+    case 'processo': return ve('processos') ? `mapaAbrirCadastro('processo','${ref}')` : '';
+    case 'dependencia': return ve('dependencias') ? `mapaAbrirCadastro('dependencia','${ref}')` : '';
+    case 'servico': return ve('servicos') ? `mapaAbrirCadastro('servico','${ref}')` : '';
+    case 'backup': return ve('catalogo-backup') ? `mapaAbrirCadastro('backup','${ref}')` : '';
+    case 'area': return n.ausente || !ve('areas') ? '' : `mapaAbrirCadastro('area','${ref}')`;
+    case 'contrato': return ve('contratos') ? `location.hash='#contratos?contrato='+encodeURIComponent('${ref}')` : '';
+    case 'pessoa': return ve('pessoas') ? `location.hash='#pessoas?editPessoa='+encodeURIComponent('${ref}')` : '';
+    case 'fornecedor': return ve('fornecedores') ? `window._abrirFornecedorAoCarregar='${ref}';location.hash='#fornecedores'` : '';
+    default: return '';
+  }
+}
+
+/**
+ * "🗺️ Ver no mapa" dos drawers de Processo, Serviço e Dependência: fecha o
+ * drawer pelo fluxo normal (pergunta se houver alteração) e abre o mapa
+ * centrado no registro. Registro ainda não salvo não está no mapa.
+ */
+window.verNoMapa = async (tipo) => {
+  const campo = { processo: 'fId', servico: 'servicoId', dependencia: 'depId' }[tipo];
+  const fechar = { processo: () => fecharDrawerProcesso(), servico: () => fecharDrawerServico(), dependencia: () => fecharDrawerDependencia() }[tipo];
+  const id = ((document.getElementById(campo) || {}).value || '').trim();
+  if (!campo || !id || id.startsWith('_tmp_')) return showToast('Salve o cadastro antes de vê-lo no mapa.', '#e65100');
+  if (!(await fechar())) return;
+  window.location.hash = '#mapa?no=' + encodeURIComponent(tipo + ':' + id);
+};
+
+window.mapaAbrirCadastro = (tipo, ref) => {
+  const mesmo = (a) => String(a) === String(ref);
+  const destino = {
+    processo: { pagina: 'processos', abrir: () => { const p = (window.processosData || []).find((x) => mesmo(x.id)); if (p) editarProcesso(p.id); } },
+    dependencia: { pagina: 'dependencias', abrir: () => { const d = (dependenciasData || []).find((x) => mesmo(x.id)); if (d) editarDep(d.id); } },
+    servico: { pagina: 'servicos', abrir: () => abrirDrawerServico(ref) },
+    backup: { pagina: 'catalogo-backup', abrir: () => { if (window.abrirDrawerBackup) abrirDrawerBackup(ref); } },
+    area: { pagina: 'areas', abrir: () => { const a = (window.areasData || []).find((x) => mesmo(x.id)); if (a) editarArea(a.id); } },
+  }[tipo];
+  if (!destino) return;
+  window._abrirAposCarregar = destino;
+  window.location.hash = '#' + destino.pagina;
 };
 
 // ============================================================

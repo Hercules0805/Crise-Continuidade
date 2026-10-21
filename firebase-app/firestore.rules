@@ -474,8 +474,9 @@ service cloud.firestore {
     // redesenha com os geradores, que escapam tudo -- HTML vindo do banco
     // rodaria script na sessao de quem abrisse.
     // Imutavel (sem update); quem gerou e quem grava; so o Admin exclui.
+    // 'servicos' e 'servicos-mapa' (21/10/2026): Relatorios de Servicos.
     function relatorioExecutivoValido(d) {
-      return d.tipo in ['vulnerabilidades', 'riscos']
+      return d.tipo in ['vulnerabilidades', 'riscos', 'servicos', 'servicos-mapa']
         && d.geradoPor == request.auth.token.email.lower();
     }
     match /relatorios_executivos/{id} {

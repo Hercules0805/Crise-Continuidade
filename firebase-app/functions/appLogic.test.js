@@ -344,6 +344,9 @@ test('salvarDrpDependencia grava RTO/RPO/Estrategia/Responsavel na dependencia',
   assert.strictEqual(d.rto, '4 horas');
   assert.strictEqual(d.rpo, '1 hora');
   assert.strictEqual(d.responsavel, 'Time de Infraestrutura');
+  // Composicao de Servicos: o texto tambem vira minutos.
+  assert.strictEqual(d.rtoMin, 240);
+  assert.strictEqual(d.rpoMin, 60);
   assert.strictEqual(d.atualizadoPor, 'analista@fortestecnologia.com.br');
   // Nome/categoria da dependencia nao sao tocados por esta acao.
   assert.strictEqual(d.nome, 'SRV-01');

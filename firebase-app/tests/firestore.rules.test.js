@@ -695,6 +695,13 @@ describe('Security Rules — relatórios executivos salvos', () => {
     await assertSucceeds(db(SI_REL).doc('relatorios_executivos_conteudo/e1').get());
   });
 
+  test('segurança salva a edição do Relatório de Composição de Serviços (21/10/2026)', async () => {
+    await seedSi();
+    await assertSucceeds(db(SI_REL).doc('relatorios_executivos/s1').set(Object.assign(meta(SI_REL.email), { tipo: 'servicos' })));
+    await assertSucceeds(db(SI_REL).doc('relatorios_executivos_conteudo/s1').set(cont(SI_REL.email, { tipo: 'servicos' })));
+    await assertSucceeds(db(SI_REL).doc('relatorios_executivos/s2').set(Object.assign(meta(SI_REL.email), { tipo: 'servicos-mapa' })));
+  });
+
   test('não grava em nome de outra pessoa, nem tipo fora da lista, nem conteúdo grande', async () => {
     await seedSi();
     await assertFails(db(SI_REL).doc('relatorios_executivos/e2').set(meta(ADMIN.email)));

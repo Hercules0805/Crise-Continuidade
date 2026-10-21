@@ -71,7 +71,7 @@
   TELAS[PERFIL.SEGURANCA] = [
     'processos', 'pcns', 'drp', 'riscos', 'monitor', 'riscos-relatorio', 'vulnerabilidades', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
-    'dependencias', 'areas', 'pessoas', 'relatorios', 'servicos', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
+    'dependencias', 'areas', 'pessoas', 'relatorios', 'mapa', 'servicos', 'servicos-relatorio', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
     'admin',
@@ -84,8 +84,13 @@
   // propria ("catalogo-backup"), mesma posse de 'servicos' (Admin + Seguranca).
   // DECISAO 21/10/2026: 'catalogo-backup-ferramentas' (lista de Ferramentas de
   // Backup) tem a mesma posse do Catalogo do Backup.
+  // DECISAO 21/10/2026: 'servicos-relatorio' (Relatorios de Servicos) tem a
+  // mesma posse de 'servicos' -- sem Gestor, porque nao ha compartilhamento.
+  // DECISAO 21/10/2026: Mapa de Continuidade (tudo o que se conecta no nucleo
+  // BIA/PCN/DRP) para Admin, Seguranca e TI. O TI nao le contratos: o mapa
+  // dele vem sem Contratos, com aviso.
   TELAS[PERFIL.TI] = [
-    'drp', 'dependencias', 'relatorios',
+    'drp', 'dependencias', 'mapa', 'relatorios',
   ];
   // DECISAO 14/10/2026: Operador Administrativo (assistente administrativo de TI e
   // SI). Nao e tecnico: GERENCIA fornecedores (5 telas) e so CONSULTA Processos,
