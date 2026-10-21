@@ -8140,6 +8140,9 @@ function renderizarCatalogoBackup() {
           <button class="btn-icon" onclick="abrirDrawerBackup('${esc(b.id)}')" title="Editar">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
           </button>
+          <button class="btn-icon" onclick="clonarBackup('${esc(b.id)}')" title="Clonar (novo backup com os mesmos dados e jobs)">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          </button>
           <button class="btn-icon" onclick="excluirBackup('${esc(b.id)}')" title="Excluir">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
           </button>
@@ -8221,7 +8224,7 @@ function _htmlDrawerBackup() {
             <div id="backupJobsTabela"></div>
             <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:14px;margin-top:10px;">
               <div id="jobEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
-                ✎ Editando job — <a href="#" onclick="cancelarEdicaoJob();return false;" style="color:#1565c0;">cancelar edição</a>
+                <span id="jobEdicaoAvisoTexto">✎ Editando job</span> — <a href="#" onclick="cancelarEdicaoJob();return false;" style="color:#1565c0;">cancelar</a>
               </div>
               <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
                 <div>
@@ -8849,7 +8852,7 @@ window.adicionarJob = async () => {
   if (window._backupJobEditando !== null && window._backupJobEditando !== undefined) {
     window._backupJobs[window._backupJobEditando] = { ...window._backupJobs[window._backupJobEditando], ...dados };
   } else {
-    window._backupJobs.push({ id: 'job-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), ...dados });
+    window._backupJobs.push({ id: _novoIdJob(), ...dados });
   }
   _limparFormularioJob();
   _renderBackupJobsTabela();
@@ -8862,6 +8865,8 @@ window.adicionarJob = async () => {
   });
 };
 
+function _novoIdJob() { return 'job-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7); }
+
 /** Nome do job a partir dos próprios metadados: Tipo · Agenda · Horário. */
 function _nomearJob(dados) {
   const nomeBackup = (document.getElementById('backupNome') || {}).value || '';
@@ -8869,10 +8874,8 @@ function _nomearJob(dados) {
   return `${prefixo}${dados.tipo} · ${_descreverAgendaJob(dados.agenda)} · ${dados.horarioInicio}`;
 }
 
-window.editarJob = (idx) => {
-  const job = (window._backupJobs || [])[idx];
-  if (!job) return;
-  window._backupJobEditando = idx;
+/** Joga um job no formulário da aba Jobs (usado por Editar e por Duplicar). */
+function _preencherFormularioJob(job) {
   document.getElementById('jobFrequencia').value = job.agenda.frequencia;
   document.getElementById('jobIntervalo').value = job.agenda.intervalo;
   window._jobDiasSemanaSelecionados = [...(job.agenda.diasSemana || [])];
@@ -8892,8 +8895,26 @@ window.editarJob = (idx) => {
   document.getElementById('jobRetencaoValor').value = job.retencaoValor != null ? job.retencaoValor : '';
   document.getElementById('jobRetencaoUnidade').value = job.retencaoUnidade || 'dias';
   document.getElementById('jobDestino').value = job.destino || '';
+}
+
+window.editarJob = (idx) => {
+  const job = (window._backupJobs || [])[idx];
+  if (!job) return;
+  _preencherFormularioJob(job);
+  window._backupJobEditando = idx;
+  document.getElementById('jobEdicaoAvisoTexto').textContent = '✎ Editando job';
   document.getElementById('jobEdicaoAviso').style.display = 'block';
   document.getElementById('btnAdicionarJob').textContent = 'Salvar alteração';
+};
+
+/** Duplicar: o formulário vem preenchido com a cópia; "+ Adicionar" cria um job novo (id e nome próprios). */
+window.duplicarJob = (idx) => {
+  const job = (window._backupJobs || [])[idx];
+  if (!job) return;
+  _limparFormularioJob();
+  _preencherFormularioJob(job);
+  document.getElementById('jobEdicaoAvisoTexto').textContent = '⧉ Copiando job — ajuste e clique em + Adicionar';
+  document.getElementById('jobEdicaoAviso').style.display = 'block';
 };
 
 window.removerJob = (idx) => {
@@ -8930,7 +8951,7 @@ function _renderBackupJobsTabela() {
       <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Duração</th>
       <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Destino</th>
       <th style="padding:8px 0;text-align:left;font-weight:600;color:#555;font-size:0.8em;border-bottom:1.5px solid #e0e0e0;">Retenção</th>
-      <th style="width:70px;border-bottom:1.5px solid #e0e0e0;"></th>
+      <th style="width:100px;border-bottom:1.5px solid #e0e0e0;"></th>
     </tr></thead>
     <tbody>
       ${jobs.map((j, i) => `<tr>
@@ -8943,6 +8964,9 @@ function _renderBackupJobsTabela() {
         <td style="padding:7px 0;border-bottom:1px solid #f5f5f5;text-align:center;white-space:nowrap;">
           <button class="btn-icon" onclick="editarJob(${i})" title="Editar">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="duplicarJob(${i})" title="Duplicar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
           </button>
           <button class="btn-icon" onclick="removerJob(${i})" title="Remover">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -8994,6 +9018,32 @@ window.salvarBackup = async () => {
     }
     return !!id;
   });
+};
+
+/**
+ * Clonar: abre um backup NOVO já preenchido com os dados e jobs de outro (ids
+ * novos, nomes de job recalculados). Nada grava sozinho -- o rastreador marcou o
+ * formulário em branco, então Salvar cria o documento e Fechar pergunta.
+ * Stakeholder legado e datas de criação não vêm junto.
+ */
+window.clonarBackup = (id) => {
+  const b = (backupsData || []).find((x) => String(x.id) === String(id));
+  if (!b) return;
+  abrirDrawerBackup();
+  document.getElementById('backupNome').value = (b.nome || '') + ' (cópia)';
+  document.getElementById('backupDescricao').value = b.descricao || '';
+  window._backupServicoIds = [...(b.servicoIds || [])];
+  _renderServicosBackup();
+  _popularSelectBackupServidor(b.servidorId || '');
+  _popularSelectFerramentaBackup(b.ferramentaId || '');
+  document.getElementById('backupFerramentaOutra').value = b.ferramentaOutra || '';
+  _ajustarFerramentaOutraBackup();
+  document.getElementById('backupModo').value = b.modo || '';
+  document.getElementById('backupEscopo').value = b.escopo || '';
+  window._backupJobs = (b.jobs || []).map((j) => ({ ...JSON.parse(JSON.stringify(j)), id: _novoIdJob(), nome: j.agenda ? _nomearJob(j) : (j.nome || '') }));
+  _renderBackupJobsTabela();
+  _renderModoBackupChips();
+  document.getElementById('backupDrawerTitulo').textContent = `Novo Backup (cópia de ${b.nome || 'backup'})`;
 };
 
 window.excluirBackup = async (id) => {

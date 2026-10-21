@@ -241,6 +241,30 @@ window.__rodar = async () => {
   await fecharDrawerBackup();
   ok(n('salvarBackup') === 0, 'backup: aviso de modo nao suja o formulario');
 
+  // Duplicar job (mesmo backup) e clonar o backup inteiro.
+  backupsData = [{ id: 'b1', nome: 'Bk', descricao: 'd', servicoIds: ['s1', 's2'], servidorId: '', ferramentaId: 'f1', modo: 'Volume / Disco', escopo: 'C:',
+    jobs: [{ id: 'j1', nome: 'Bk · Full · Diário · 22:00', agenda: { frequencia: 'Diário', intervalo: 1, diasSemana: [] }, horarioInicio: '22:00', tipo: 'Full',
+      duracaoValor: 2, duracaoUnidade: 'horas', destino: 'NAS', retencaoValor: 30, retencaoUnidade: 'dias' }] }];
+  const origemBackup = JSON.stringify(backupsData[0]);
+  zera(); abrirDrawerBackup('b1'); duplicarJob(0);
+  ok(document.getElementById('jobHorario').value === '22:00' && document.getElementById('jobDestino').value === 'NAS' && window._backupJobEditando === null,
+    'job: duplicar preenche o formulario como job novo');
+  set('jobHorario', '03:00'); await adicionarJob();
+  const jobsDup = window._backupJobs;
+  ok(jobsDup.length === 2 && jobsDup[0].id === 'j1' && jobsDup[0].horarioInicio === '22:00' && jobsDup[1].id !== 'j1'
+    && jobsDup[1].horarioInicio === '03:00' && jobsDup[1].destino === 'NAS' && jobsDup[1].retencaoValor === 30, 'job: + Adicionar depois de duplicar cria um 2o job com id proprio');
+  ok(n('salvarBackup') === 1, 'job: o duplicado grava o backup ao adicionar, como qualquer job');
+  await fecharDrawerBackup();
+  backupsData = [JSON.parse(origemBackup)];
+  zera(); clonarBackup('b1');
+  ok(document.getElementById('backupId').value === '' && document.getElementById('backupNome').value === 'Bk (cópia)', 'clonar: abre backup novo com "(cópia)" no nome');
+  ok(window._backupJobs.length === 1 && window._backupJobs[0].id !== 'j1' && /^Bk \(cópia\) · Full/.test(window._backupJobs[0].nome), 'clonar: jobs com id novo e nome recalculado');
+  await fecharDrawerBackup();
+  const pClone = ((calls.salvarBackup || [])[0] || [])[0] || {};
+  ok(n('salvarBackup') === 1 && !pClone.id && JSON.stringify(pClone.servicoIds) === '["s1","s2"]' && pClone.ferramentaId === 'f1'
+    && pClone.modo === 'Volume / Disco' && pClone.escopo === 'C:' && pClone.descricao === 'd', 'clonar: Fechar grava 1 backup novo com servicos, ferramenta, modo e escopo');
+  ok(JSON.stringify(backupsData.find((x) => x.id === 'b1')) === origemBackup, 'clonar: backup de origem fica intacto');
+
   // Stakeholders no Servico: herdados dos backups sem sujar o Fechar; salvar grava a lista.
   pessoasData = [{ id: 'p1', nome: 'Ana', categoria: 'Pessoas' }, { id: 'p2', nome: 'Bia', categoria: 'Pessoas' }];
   servicosData = [{ id: 's1', nome: 'Serv', descricao: 'd', dependenciaItens: [], stakeholders: [] }];
