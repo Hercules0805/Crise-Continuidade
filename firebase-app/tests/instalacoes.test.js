@@ -189,3 +189,44 @@ test('Pessoa: select "Instalação (lotação)" com as instalações; salvar gra
   const html = ctx.w._buildRelatorioPessoaPage(ana, { processos: [], deps: [ana], riscos: [], indicadores: [], backups: [], perfis: [], areas: [], servicos: [] });
   assert.match(html, /Instalação \(lotação\):<\/b> Sede SP/);
 });
+
+// ---- Etapa 5: Mapa de Continuidade e composicao do Servico ----
+test('mapa centrado numa Instalação: pessoas lotadas, processos, o que ela hospeda e a contingência; painel com tipo e endereço', async () => {
+  const ana = { id: 'pAna', categoria: 'Pessoas', nome: 'Ana', instalacao: { id: 'sede', nome: 'Sede SP' } };
+  const ctx = await carregar(['admin'], {
+    getDependencias: DEPS.filter((d) => d.id !== 'pAna').concat([ana]),
+    getProcessos: [{ id: 'p1', area: 'TI', processo: 'Faturamento', tierManual: 'Tier 1 (Crítico)', dependenciaItens: [{ id: 'dc', nome: 'Data center', categoria: 'Instalações' }] }],
+    getContratos: [], getStatusContrato: [], getPerguntas: [],
+  });
+  await ctx.w.mapaContinuidade();
+  ctx.w.mapaCentralizar('instalacao:sede');
+  const svg = ctx.doc.getElementById('mapaSvg').textContent;
+  assert.match(svg, /Ana/);
+  assert.match(svg, /pessoa lotada/);
+  assert.match(svg, /Filial RJ/);
+  assert.match(svg, /contingência/);
+  const painel = ctx.doc.getElementById('mapaPainel').textContent.replace(/\s+/g, ' ');
+  assert.match(painel, /Instalação/);
+  assert.match(painel, /Tipo\s*Sede/);
+  assert.match(painel, /Endereço\s*Av\. Paulista, 1000/);
+  assert.match(painel, /Contingência\s*Filial RJ/);
+  ctx.w.mapaCentralizar('instalacao:dc');
+  assert.match(ctx.doc.getElementById('mapaSvg').textContent, /SRV-01/);
+  assert.match(ctx.doc.getElementById('mapaPainel').textContent, /Sem instalação alternativa/);
+  assert.match(ctx.doc.getElementById('mapaTipos').textContent, /Instalações/);
+});
+
+test('"Ver no mapa" no drawer de uma Instalação abre o mapa no tipo instalacao', async () => {
+  const { w } = await abrirDep(['admin'], SEDE);
+  await w.verNoMapa('dependencia');
+  assert.strictEqual(w.location.hash, '#mapa?no=instalacao%3Asede');
+});
+
+test('composicao: instalação como componente entra no caminho crítico do Serviço', () => {
+  const SC = require('../public/servico-composicao.js');
+  const servico = { rtoMin: 120, dependenciaItens: [{ id: 'srv', nome: 'SRV-01', categoria: 'Servidor' }] };
+  const av = SC.avaliarServico(servico, DEPS);
+  assert.strictEqual(av.atributos.rto.soma, 60 + 480, 'SRV-01 (1 h) -> Data center (8 h)');
+  assert.deepStrictEqual(av.atributos.rto.caminho, ['srv', 'dc']);
+  assert.strictEqual(av.status, 'alerta');
+});

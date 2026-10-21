@@ -8812,10 +8812,10 @@ window.excluirServico = async (id) => {
 // ============================================================
 const _COR_TIPO_MAPA = {
   processo: '#1565c0', servico: '#6a1b9a', dependencia: '#00838f', fornecedor: '#ef6c00',
-  contrato: '#5d4037', backup: '#455a64', pessoa: '#2e7d32', area: '#9e9d24',
+  contrato: '#5d4037', backup: '#455a64', pessoa: '#2e7d32', instalacao: '#ad1457', area: '#9e9d24',
 };
 const _ICONE_TIPO_MAPA = {
-  processo: '🔄', servico: '🧩', dependencia: '⚙️', fornecedor: '🏢', contrato: '📄', backup: '💾', pessoa: '👤', area: '🏛️',
+  processo: '🔄', servico: '🧩', dependencia: '⚙️', fornecedor: '🏢', contrato: '📄', backup: '💾', pessoa: '👤', instalacao: '📍', area: '🏛️',
 };
 
 /** Tom claro da cor do tipo (fundo dos cartões do mapa): mistura com o branco. */
@@ -8835,7 +8835,7 @@ async function mapaContinuidade() {
   const params = new URLSearchParams((window.location.hash.split('?')[1]) || '');
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Mapa de Continuidade</h2><p class="page-sub">Como Processos, Serviços, Dependências, Pessoas, Fornecedores, Contratos e Backups se conectam — escolha um item e navegue pelas conexões</p></div>
+      <div><h2>Mapa de Continuidade</h2><p class="page-sub">Como Processos, Serviços, Dependências, Pessoas, Instalações, Fornecedores, Contratos e Backups se conectam — escolha um item e navegue pelas conexões</p></div>
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div id="mapaConteudo" style="display:none;">
@@ -8843,7 +8843,7 @@ async function mapaContinuidade() {
       <div class="filters" style="align-items:flex-end;">
         <div class="field" style="flex:1;min-width:260px;position:relative;">
           <label class="field-label" for="mapaBusca">Buscar item</label>
-          <input type="search" id="mapaBusca" class="field-control field-control--busca" autocomplete="off" placeholder="Processo, pessoa, serviço, dependência, fornecedor…" oninput="mapaBuscar()" onfocus="mapaBuscar()" onblur="setTimeout(mapaFecharBusca,250)">
+          <input type="search" id="mapaBusca" class="field-control field-control--busca" autocomplete="off" placeholder="Processo, pessoa, instalação, serviço, dependência, fornecedor…" oninput="mapaBuscar()" onfocus="mapaBuscar()" onblur="setTimeout(mapaFecharBusca,250)">
           <div id="mapaBuscaResultados" style="display:none;position:absolute;top:100%;left:0;right:0;background:#fff;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:320px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
         </div>
         <div class="field">
@@ -9117,7 +9117,7 @@ function _htmlLegendaMapa() {
   const MC = MapaContinuidade;
   return `<div style="display:flex;flex-wrap:wrap;gap:6px 14px;font-size:0.76em;color:#666;padding:6px 4px 0;">
       ${MC.TIPOS.map((t) => `<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${_COR_TIPO_MAPA[t]};margin-right:4px;vertical-align:-1px;"></span>${esc(MC.ROTULO_TIPO[t])}</span>`).join('')}
-      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:2.5px solid #c62828;margin-right:4px;vertical-align:-2px;"></span>Lacuna (Tier 1/2 sem PCN, dependência sem DRP, serviço em alerta)</span>
+      <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;border:2.5px solid #c62828;margin-right:4px;vertical-align:-2px;"></span>Lacuna (Tier 1/2 sem PCN, dependência sem DRP, serviço em alerta, instalação crítica sem alternativa)</span>
     </div>`;
 }
 
@@ -9210,6 +9210,11 @@ function _htmlPainelMapa(indice, id, centroId) {
   } else if (n.tipo === 'dependencia') {
     const v = n.selos.valores || {};
     selos = linha('DRP gerado', simNao(n.selos.drp)) + ServicoComposicao.ATRIBUTOS.map((a) => linha(ServicoComposicao.ROTULO_ATRIBUTO[a], esc(ServicoComposicao.formatarDuracao(v[a])))).join('');
+  } else if (n.tipo === 'instalacao') {
+    const v = n.selos.valores || {};
+    selos = linha('Tipo', esc(n.selos.tipoInstalacao || '–')) + linha('Endereço', esc(n.selos.endereco || '–'))
+      + linha('Contingência', n.selos.alternativa ? esc(n.selos.alternativa) : '<span style="color:#c62828;font-weight:700;">Sem alternativa</span>')
+      + ServicoComposicao.ATRIBUTOS.map((a) => linha(ServicoComposicao.ROTULO_ATRIBUTO[a], esc(ServicoComposicao.formatarDuracao(v[a])))).join('');
   } else if (n.tipo === 'servico' && n.selos.composicao) {
     const [cor, fundo] = _COR_STATUS_COMPOSICAO[n.selos.composicao] || _COR_STATUS_COMPOSICAO.ok;
     selos = linha('Composição', `<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:0.9em;font-weight:700;color:${cor};background:${fundo};">${esc(n.selos.rotuloComposicao)}</span>`);
@@ -9243,7 +9248,8 @@ function _acaoAbrirCadastroMapa(n) {
   const ve = (pagina) => Perfis.podeVerTela(window.USER_PERFIS, pagina);
   switch (n.tipo) {
     case 'processo': return ve('processos') ? `mapaAbrirCadastro('processo','${ref}')` : '';
-    case 'dependencia': return ve('dependencias') ? `mapaAbrirCadastro('dependencia','${ref}')` : '';
+    case 'dependencia':
+    case 'instalacao': return ve('dependencias') ? `mapaAbrirCadastro('dependencia','${ref}')` : '';
     case 'servico': return ve('servicos') ? `mapaAbrirCadastro('servico','${ref}')` : '';
     case 'backup': return ve('catalogo-backup') ? `mapaAbrirCadastro('backup','${ref}')` : '';
     case 'area': return n.ausente || !ve('areas') ? '' : `mapaAbrirCadastro('area','${ref}')`;
@@ -9264,8 +9270,10 @@ window.verNoMapa = async (tipo) => {
   const fechar = { processo: () => fecharDrawerProcesso(), servico: () => fecharDrawerServico(), dependencia: () => fecharDrawerDependencia() }[tipo];
   const id = ((document.getElementById(campo) || {}).value || '').trim();
   if (!campo || !id || id.startsWith('_tmp_')) return showToast('Salve o cadastro antes de vê-lo no mapa.', '#e65100');
+  // No mapa a Instalação é um tipo próprio, embora use o drawer de Dependência.
+  const tipoNoMapa = tipo === 'dependencia' && _ehInstalacao((document.getElementById('depCategoria') || {}).value) ? 'instalacao' : tipo;
   if (!(await fechar())) return;
-  window.location.hash = '#mapa?no=' + encodeURIComponent(tipo + ':' + id);
+  window.location.hash = '#mapa?no=' + encodeURIComponent(tipoNoMapa + ':' + id);
 };
 
 window.mapaAbrirCadastro = (tipo, ref) => {

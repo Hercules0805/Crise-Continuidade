@@ -22,18 +22,20 @@
   'use strict';
 
   // Ordem dos grupos em volta do centro e rotulos.
-  var TIPOS = ['processo', 'servico', 'dependencia', 'fornecedor', 'contrato', 'backup', 'pessoa', 'area'];
+  // Instalacoes (21/10/2026): o "P" de Premises dos 4 Ps do BIA.
+  var TIPOS = ['processo', 'servico', 'dependencia', 'fornecedor', 'contrato', 'backup', 'pessoa', 'instalacao', 'area'];
   var ROTULO_TIPO = {
     processo: 'Processos', servico: 'Serviços', dependencia: 'Dependências', fornecedor: 'Fornecedores',
-    contrato: 'Contratos', backup: 'Backups', pessoa: 'Pessoas', area: 'Áreas',
+    contrato: 'Contratos', backup: 'Backups', pessoa: 'Pessoas', instalacao: 'Instalações', area: 'Áreas',
   };
   var ROTULO_TIPO_SINGULAR = {
     processo: 'Processo', servico: 'Serviço', dependencia: 'Dependência', fornecedor: 'Fornecedor',
-    contrato: 'Contrato', backup: 'Backup', pessoa: 'Pessoa', area: 'Área',
+    contrato: 'Contrato', backup: 'Backup', pessoa: 'Pessoa', instalacao: 'Instalação', area: 'Área',
   };
   var CATEGORIAS_FORNECEDOR = ['Fornecedores', 'Fornecedor'];
   var CATEGORIAS_PESSOA = ['Pessoas', 'Pessoa'];
   var CATEGORIAS_PROCESSO = ['Processos Internos', 'Processo Interno'];
+  var CATEGORIAS_INSTALACAO = ['Instalações', 'Instalação'];
 
   function _texto(v) {
     return v === null || v === undefined ? '' : String(v).trim();
@@ -113,6 +115,7 @@
       var tipo = CATEGORIAS_PESSOA.indexOf(x.categoria) >= 0 ? 'pessoa'
         : CATEGORIAS_FORNECEDOR.indexOf(x.categoria) >= 0 ? 'fornecedor'
         : CATEGORIAS_PROCESSO.indexOf(x.categoria) >= 0 ? null
+        : CATEGORIAS_INSTALACAO.indexOf(x.categoria) >= 0 ? 'instalacao'
         : 'dependencia';
       if (!tipo) return;
       var id = tipo + ':' + x.id;
@@ -124,6 +127,13 @@
         no(id, 'pessoa', x.nome, { ref: x.id, sub: (x.areas && x.areas.length ? x.areas : [x.setor]).filter(Boolean).join(', ') });
       } else if (tipo === 'fornecedor') {
         no(id, 'fornecedor', x.nomeFantasia || x.nome, { ref: x.id, sub: x.categoriaFornecedor || 'Fornecedor' });
+      } else if (tipo === 'instalacao') {
+        var valoresI = {};
+        ['rto', 'rpo', 'mttr'].forEach(function (a) { valoresI[a] = op.valorMin ? op.valorMin(x, a) : null; });
+        no(id, 'instalacao', x.nome, { ref: x.id, sub: x.tipoInstalacao || 'Instalação', selos: {
+          tipoInstalacao: _texto(x.tipoInstalacao), endereco: _texto(x.endereco), valores: valoresI,
+          alternativa: x.instalacaoAlternativa && x.instalacaoAlternativa.id ? _texto(x.instalacaoAlternativa.nome) : '',
+        } });
       } else {
         var valores = {};
         ['rto', 'rpo', 'mttr'].forEach(function (a) { valores[a] = op.valorMin ? op.valorMin(x, a) : null; });
@@ -206,11 +216,19 @@
         var areasP = (x.areas && x.areas.length ? x.areas : [x.setor]).filter(Boolean);
         areasP.forEach(function (a) { ligar(id, areaId(a), 'membro da área', 'membro'); });
         ligar(id, pessoaPor(x.liderImediato), 'líder imediato', 'liderado');
+        if (x.instalacao && x.instalacao.id) ligar(id, depPorId[String(x.instalacao.id)], 'lotada em', 'pessoa lotada');
       } else if (tipo === 'fornecedor') {
         (x.pessoasRelacionadas || []).forEach(function (r) { ligar(id, pessoaPor(r.id) || pessoaPor(r.nome), r.papel || 'pessoa relacionada', 'relacionada ao fornecedor'); });
         (x.areasRelacionadas || []).forEach(function (a) { ligar(id, areaId(a), 'área relacionada', 'fornecedor relacionado'); });
       } else {
-        (x.componentes || []).forEach(function (r) { ligar(id, resolverDep(r), 'componente abaixo', 'está abaixo de'); });
+        (x.componentes || []).forEach(function (r) {
+          var alvo = resolverDep(r);
+          if (alvo && tipoDoId(alvo) === 'instalacao') ligar(id, alvo, 'instalada em', 'hospeda');
+          else ligar(id, alvo, 'componente abaixo', 'está abaixo de');
+        });
+        if (tipo === 'instalacao' && x.instalacaoAlternativa && x.instalacaoAlternativa.id) {
+          ligar(id, depPorId[String(x.instalacaoAlternativa.id)], 'contingência', 'contingência de');
+        }
         (x.drpDependencias || []).forEach(function (r) { ligar(id, resolverDep(r), 'precisa para recuperar', 'necessário para recuperar'); });
         if (x.responsavel) ligar(id, areaId(x.responsavel), 'área responsável', 'responsável pela dependência');
       }
@@ -246,6 +264,19 @@
       if (n.tipo !== 'dependencia' || n.selos.drp) return;
       var usada = adj[id].some(function (x) { var t = tipoDoId(x.para); return t === 'processo' || t === 'servico'; });
       if (usada) n.lacunas.push('Sem DRP');
+    });
+
+    // Lacuna de Instalacao: usada por processo Tier 1/2 e sem instalacao alternativa.
+    Object.keys(nos).forEach(function (id) {
+      var n = nos[id];
+      if (n.tipo !== 'instalacao') return;
+      var temAlternativa = adj[id].some(function (x) { return x.rel === 'contingência'; });
+      if (temAlternativa) return;
+      var critico = adj[id].some(function (x) {
+        var v = nos[x.para];
+        return v && v.tipo === 'processo' && /^Tier [12]\b/.test(v.selos.tier || '');
+      });
+      if (critico) n.lacunas.push('Sem instalação alternativa');
     });
 
     return { nos: nos, adj: adj, semContratos: semContratos };

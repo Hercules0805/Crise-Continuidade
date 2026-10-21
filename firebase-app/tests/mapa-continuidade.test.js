@@ -150,3 +150,48 @@ test('elementosGrafo (visao completa): um no por item, uma ligacao por par, filt
   assert.ok(soProc.nos.every((n) => ['processo', 'area'].includes(n.tipo)));
   assert.ok(soProc.arestas.every((e) => /^(processo|area):/.test(e.de) && /^(processo|area):/.test(e.para)));
 });
+
+// ---- Instalacoes (21/10/2026): o "P" de Premises ----
+const DADOS_INST = {
+  areas: [{ id: 'a1', nome: 'TI' }],
+  dependencias: [
+    { id: 'sede', categoria: 'Instalações', nome: 'Sede SP', tipoInstalacao: 'Sede', endereco: 'Av. Paulista', rtoMin: 1440, instalacaoAlternativa: { id: 'filial', nome: 'Filial RJ' } },
+    { id: 'filial', categoria: 'Instalações', nome: 'Filial RJ', tipoInstalacao: 'Filial' },
+    { id: 'dc', categoria: 'Instalações', nome: 'Data center', tipoInstalacao: 'Data center' },
+    { id: 'srv', categoria: 'Servidor', nome: 'SRV-01', componentes: [{ id: 'dc', nome: 'Data center', categoria: 'Instalações' }, { id: 'db', nome: 'Oracle', categoria: 'Banco de Dados' }] },
+    { id: 'db', categoria: 'Banco de Dados', nome: 'Oracle' },
+    { id: 'pAna', categoria: 'Pessoas', nome: 'Ana', instalacao: { id: 'sede', nome: 'Sede SP' } },
+  ],
+  processos: [
+    { id: 'p1', area: 'TI', processo: 'Faturamento', tierManual: 'Tier 1 (Crítico)', dependenciaItens: [{ id: 'sede', nome: 'Sede SP', categoria: 'Instalações' }, { id: 'dc', nome: 'Data center', categoria: 'Instalações' }] },
+    { id: 'p3', area: 'TI', processo: 'Arquivo', tierManual: 'Tier 3 (Suporte)', dependenciaItens: [{ id: 'filial', nome: 'Filial RJ', categoria: 'Instalações' }] },
+  ],
+  servicos: [], contratos: [], backups: [],
+};
+const idxInst = () => MC.montarIndice(DADOS_INST, OPCOES);
+
+test('instalacao: no proprio (tipo, endereco, contingencia, RTO) e os vinculos dos 4 Ps', () => {
+  const i = idxInst();
+  const sede = i.nos['instalacao:sede'];
+  assert.strictEqual(sede.tipo, 'instalacao');
+  assert.strictEqual(sede.sub, 'Sede');
+  assert.deepStrictEqual([sede.selos.endereco, sede.selos.alternativa, sede.selos.valores.rto], ['Av. Paulista', 'Filial RJ', 1440]);
+  assert.deepStrictEqual(rels(i, 'processo:p1', 'instalacao:sede'), ['depende de']);
+  assert.deepStrictEqual(rels(i, 'pessoa:pAna', 'instalacao:sede'), ['lotada em']);
+  assert.deepStrictEqual(rels(i, 'instalacao:sede', 'pessoa:pAna'), ['pessoa lotada']);
+  assert.deepStrictEqual(rels(i, 'dependencia:srv', 'instalacao:dc'), ['instalada em']);
+  assert.deepStrictEqual(rels(i, 'instalacao:dc', 'dependencia:srv'), ['hospeda']);
+  assert.deepStrictEqual(rels(i, 'dependencia:srv', 'dependencia:db'), ['componente abaixo'], 'componente tecnico segue com o rotulo de sempre');
+  assert.deepStrictEqual(rels(i, 'instalacao:sede', 'instalacao:filial'), ['contingência']);
+  assert.deepStrictEqual(rels(i, 'instalacao:filial', 'instalacao:sede'), ['contingência de']);
+});
+
+test('instalacao: lacuna "Sem instalação alternativa" so quando um processo Tier 1/2 depende dela', () => {
+  const i = idxInst();
+  assert.deepStrictEqual(i.nos['instalacao:dc'].lacunas, ['Sem instalação alternativa'], 'Tier 1 depende e nao ha alternativa');
+  assert.deepStrictEqual(i.nos['instalacao:sede'].lacunas, [], 'tem alternativa');
+  assert.deepStrictEqual(i.nos['instalacao:filial'].lacunas, [], 'so Tier 3 depende');
+  assert.ok(!i.nos['instalacao:dc'].lacunas.includes('Sem DRP'), 'DRP nao e cobrado de instalacao');
+  assert.ok(MC.TIPOS.includes('instalacao'));
+  assert.deepStrictEqual(MC.vizinhos(i, 'instalacao:sede').map((g) => g.tipo), ['processo', 'pessoa', 'instalacao']);
+});
