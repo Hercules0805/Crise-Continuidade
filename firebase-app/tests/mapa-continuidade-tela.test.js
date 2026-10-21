@@ -253,3 +253,22 @@ test('visao completa: filtros por tipo refazem o grafo; deep link ?modo=completo
   await esperar(40);
   assert.match(semLib.doc.getElementById('mapaCy').textContent, /Não foi possível abrir a visão completa/);
 });
+
+test('cartoes na cor da familia: fundo claro, borda e nome na cor do tipo; lacuna e selecionado se destacam', async () => {
+  const { w, doc } = await carregar(['admin']);
+  w.mapaCentralizar('dependencia:db');
+  const cartao = (nome) => [...doc.querySelectorAll('#mapaSvg g')].find((g) => (g.querySelector('title') || {}).textContent && g.querySelector('title').textContent.startsWith(nome));
+  const fundo = (g) => g.querySelector('rect');
+  const contrato = cartao('CT-0001');
+  assert.strictEqual(fundo(contrato).getAttribute('fill'), w._corClaraMapa('#5d4037'));
+  assert.strictEqual(fundo(contrato).getAttribute('stroke'), '#5d4037');
+  assert.strictEqual(contrato.querySelector('text').getAttribute('fill'), '#5d4037');
+  assert.strictEqual(w._corClaraMapa('#2e7d32'), '#e6efe6');
+  w.mapaCentralizar('servico:s1');
+  const pessoa = cartao('Ana Souza');
+  assert.strictEqual(fundo(pessoa).getAttribute('fill'), '#e6efe6');
+  assert.strictEqual(fundo(pessoa).getAttribute('stroke'), '#2e7d32');
+  assert.strictEqual(fundo(cartao('Faturamento')).getAttribute('stroke'), '#c62828', 'lacuna vence a cor do tipo');
+  w.mapaClicarNo('pessoa:pAna');
+  assert.strictEqual(fundo(cartao('Ana Souza')).getAttribute('stroke'), '#222', 'selecionado');
+});

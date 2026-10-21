@@ -8698,6 +8698,17 @@ const _ICONE_TIPO_MAPA = {
   processo: '🔄', servico: '🧩', dependencia: '⚙️', fornecedor: '🏢', contrato: '📄', backup: '💾', pessoa: '👤', area: '🏛️',
 };
 
+/** Tom claro da cor do tipo (fundo dos cartões do mapa): mistura com o branco. */
+function _corClaraMapa(hex, quanto) {
+  const k = quanto === undefined ? 0.88 : quanto;
+  const h = String(hex || '').replace('#', '');
+  if (!/^[0-9a-f]{6}$/i.test(h)) return '#ffffff';
+  return '#' + [0, 2, 4].map((i) => {
+    const c = parseInt(h.slice(i, i + 2), 16);
+    return Math.round(c + (255 - c) * k).toString(16).padStart(2, '0');
+  }).join('');
+}
+
 window._mapa = null;
 
 async function mapaContinuidade() {
@@ -9035,7 +9046,7 @@ function _svgMapaContinuidade(m, grupos, layout) {
     const x = it.x - W / 2, y = it.y - H / 2;
     if (it.mais) {
       return `<g style="cursor:pointer;" onclick="mapaClicarNo('${escJs(it.id)}')" role="button">
-        <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="8" fill="#fafafa" stroke="${cor}" stroke-dasharray="4 3"/>
+        <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="8" fill="${_corClaraMapa(cor)}" stroke="${cor}" stroke-width="1.4" stroke-dasharray="4 3"/>
         <text x="${it.x}" y="${it.y + 4}" font-size="11.5" font-weight="700" fill="${cor}" text-anchor="middle">+${it.mais} ${esc(MC.ROTULO_TIPO[it.tipo].toLowerCase())}</text>
         <title>Mostrar todos</title></g>`;
     }
@@ -9043,10 +9054,10 @@ function _svgMapaContinuidade(m, grupos, layout) {
     const sel = m.selecionado === it.id;
     const lacuna = n.lacunas.length > 0;
     return `<g style="cursor:pointer;" onclick="mapaClicarNo('${escJs(it.id)}')" role="button">
-      <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="8" fill="#fff" stroke="${lacuna ? '#c62828' : sel ? '#222' : '#d8d8de'}" stroke-width="${lacuna || sel ? 2.5 : 1.2}"/>
+      <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="8" fill="${_corClaraMapa(cor)}" stroke="${lacuna ? '#c62828' : sel ? '#222' : cor}" stroke-width="${lacuna ? 3 : sel ? 2.5 : 1.4}"/>
       <rect x="${x}" y="${y}" width="6" height="${H}" rx="3" fill="${cor}"/>
-      <text x="${x + 14}" y="${y + 19}" font-size="11.5" font-weight="700" fill="#222">${esc(corta(n.nome, 20))}</text>
-      <text x="${x + 14}" y="${y + 35}" font-size="9.5" fill="#888">${esc(corta(n.sub || MC.ROTULO_TIPO_SINGULAR[n.tipo], 26))}</text>
+      <text x="${x + 14}" y="${y + 19}" font-size="11.5" font-weight="700" fill="${cor}">${esc(corta(n.nome, 20))}</text>
+      <text x="${x + 14}" y="${y + 35}" font-size="9.5" fill="#666">${esc(corta(n.sub || MC.ROTULO_TIPO_SINGULAR[n.tipo], 26))}</text>
       ${lacuna ? `<circle cx="${x + W - 4}" cy="${y + 4}" r="8" fill="#c62828"/><text x="${x + W - 4}" y="${y + 8}" font-size="11" font-weight="800" fill="#fff" text-anchor="middle">!</text>` : ''}
       <title>${esc(n.nome)} (${esc(MC.ROTULO_TIPO_SINGULAR[n.tipo])})${lacuna ? ' — ' + esc(n.lacunas.join(', ')) : ''}</title></g>`;
   }).join('');
