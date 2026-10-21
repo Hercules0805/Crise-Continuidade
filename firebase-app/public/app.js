@@ -2082,7 +2082,7 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
   processos.filter((p) => nomesAreasDona.has(p.area)).forEach((p) => adicionarVinculo(p, 'Dono do Processo'));
   processos.filter((p) => Array.isArray(p.bcpContatos) && p.bcpContatos.includes(pessoa.id))
     .forEach((p) => adicionarVinculo(p, 'Contato de Crise'));
-  _processosVinculadosADependencia(pessoa, processos).forEach((p) => adicionarVinculo(p, 'Dependência Crítica'));
+  _processosVinculadosADependencia(pessoa, processos, false).forEach((p) => adicionarVinculo(p, 'Dependência Crítica'));
   // Por área e depois por processo: um dono de área grande não pode virar uma lista embaralhada.
   const processosDaPessoa = [...porProcesso.values()].sort((a, b) =>
     (a.p.area || '').localeCompare(b.p.area || '', 'pt-BR') || (a.p.processo || '').localeCompare(b.p.processo || '', 'pt-BR'));
@@ -2748,7 +2748,7 @@ async function processos() {
             </div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Dependências Críticas</label>
-              <p style="font-size:0.78em;color:#888;margin-bottom:8px;">Pense: <em>"Se esse recurso falhar, meu processo para?"</em> — se sim, ele é uma dependência crítica. Clique nas opções disponíveis ou digite para adicionar.</p>
+              <p style="font-size:0.78em;color:#888;margin-bottom:8px;">Pense: <em>"Se esse recurso falhar, meu processo para?"</em> — se sim, ele é uma dependência crítica. Aponte o <strong>Serviço</strong> que o processo usa (servidores, bancos e APIs vêm da composição dele) e os 4 Ps: pessoas, instalações, fornecedores e outros processos.</p>
               <div id="fDependenciaTabela"></div>
               <input type="hidden" id="fDependencia">
               <div style="margin-top:12px;text-align:right;display:flex;gap:8px;justify-content:flex-end;">
@@ -2896,6 +2896,8 @@ async function processos() {
   window.processosPerguntas = perguntas.filter(p => p.ativa);
   try { window.configRespostas = await API.getConfigRespostas(); } catch(e) { window.configRespostas = null; }
   try { window.dependenciasCatalogo = await API.getDependencias(); } catch(e) { window.dependenciasCatalogo = []; }
+  // Serviços: o processo aponta o Serviço (aba BIA); o técnico vem da composição dele.
+  try { window.servicosCatalogoProcesso = await API.getServicos(); } catch(e) { window.servicosCatalogoProcesso = []; }
 
   // Preencher filtro de áreas
   const filtroArea = document.getElementById('filtroArea');
@@ -3127,11 +3129,13 @@ window.abrirDrawerProcessosLote = () => {
   // um processo que já está no próprio lote -- não faz sentido um processo
   // selecionado virar dependência de outro que também está sendo editado
   // na mesma leva.
+  // Só os 4 Ps e os Serviços (21/10/2026): o técnico vem da composição do Serviço.
   const porCategoria = {};
-  (window.dependenciasCatalogo || []).forEach((d) => {
+  (window.dependenciasCatalogo || []).filter((d) => CadeiaDependencias.categoriaPermitidaNoProcesso(d.categoria)).forEach((d) => {
     if (!porCategoria[d.categoria]) porCategoria[d.categoria] = [];
     porCategoria[d.categoria].push({ nome: d.nome, id: d.id || null });
   });
+  porCategoria[CadeiaDependencias.CATEGORIA_SERVICO] = (window.servicosCatalogoProcesso || []).map((s) => ({ nome: s.nome, id: String(s.id) }));
   (window.processosData || [])
     .filter((p) => !processosSelecionados.has(p.id))
     .forEach((p) => {
@@ -3163,10 +3167,10 @@ function _renderLoteDependenciasPorCategoria() {
   const porCategoria = window._loteDependenciasCatalogoPorCategoria || {};
   const selecionadas = window._loteDependencias || [];
 
-  const categoriasSet = new Set(Object.keys(porCategoria));
-  ['Fornecedores', 'Pessoas', DEPENDENCIA_CATEGORIA_INSTALACAO, 'Processos Internos', ...DEPENDENCIA_CATEGORIAS_TECNICAS.filter((c) => c !== 'Outros')].forEach((c) => categoriasSet.add(c));
-  selecionadas.forEach((item) => categoriasSet.add(item.categoria || 'Outros'));
-  const categorias = [...categoriasSet].sort();
+  const categorias = [CadeiaDependencias.CATEGORIA_SERVICO, 'Fornecedores', 'Pessoas', DEPENDENCIA_CATEGORIA_INSTALACAO, 'Processos Internos'];
+  Object.keys(porCategoria).concat(selecionadas.map((item) => item.categoria)).forEach((c) => {
+    if (c && CadeiaDependencias.categoriaPermitidaNoProcesso(c) && !categorias.includes(c)) categorias.push(c);
+  });
 
   cont.innerHTML = categorias.map((cat) => {
     const icon = DEPENDENCIA_CAT_ICONES[cat] || '📦';
@@ -3232,6 +3236,7 @@ window.mostrarDropdownLoteCategoria = (input, categoria) => {
 
 window.selecionarDependenciaLoteCategoria = (nome, categoria, id) => {
   const idReal = id || null;
+  if (!CadeiaDependencias.categoriaPermitidaNoProcesso(categoria)) return;
   window._loteDependencias = window._loteDependencias || [];
   const jaSelecionado = idReal
     ? window._loteDependencias.some((d) => d.id === idReal)
@@ -3401,24 +3406,19 @@ function renderDependenciaTabela() {
   const tabelaContainer = document.getElementById('fDependenciaTabela');
   if (!tabelaContainer) return;
   const catalogo = window.dependenciasCatalogo || [];
+  const servicosCat = window.servicosCatalogoProcesso || [];
   const selecionadas = window._dependenciaSelecionadas || [];
   const catIcons = DEPENDENCIA_CAT_ICONES;
 
-  // Obter categorias do catálogo
-  const categoriasSet = new Set(catalogo.map(d => d.categoria));
-  // Garantir que as categorias sempre apareçam, mesmo sem nenhum item ainda:
-  // Fornecedores/Pessoas/Processos Internos (outras entidades) + as 7
-  // categorias técnicas de Dependência (absorveram o antigo catálogo de
-  // Componentes do Serviço). "Outros" fica fora da lista fixa pra não virar
-  // uma seção vazia por padrão -- se algum processo já tiver algo nela, a
-  // linha abaixo (selecionadas.forEach) garante que ela aparece do mesmo
-  // jeito, nunca escondendo dado já selecionado.
-  ['Fornecedores', 'Pessoas', DEPENDENCIA_CATEGORIA_INSTALACAO, 'Processos Internos', ...DEPENDENCIA_CATEGORIAS_TECNICAS.filter(c => c !== 'Outros')].forEach(c => categoriasSet.add(c));
-  // Cada item ja carrega sua propria categoria (dependenciaItens, ou adivinhada
-  // uma unica vez por _adivinharDependenciaLegada) -- sem precisar comparar
-  // nome com o catalogo de novo a cada render.
-  selecionadas.forEach((item) => categoriasSet.add(item.categoria || 'Outros'));
-  const categorias = [...categoriasSet].sort();
+  // Hierarquia (21/10/2026): o processo aponta os Serviços e os 4 Ps. O técnico
+  // granular (Banco, Servidor, API...) vem da composição do Serviço -- as 7
+  // categorias técnicas saíram das linhas. Item técnico já gravado vai para o
+  // bloco "Ligações técnicas diretas (legado)" abaixo da tabela, nunca some.
+  const categorias = [CadeiaDependencias.CATEGORIA_SERVICO, 'Fornecedores', 'Pessoas', DEPENDENCIA_CATEGORIA_INSTALACAO, 'Processos Internos'];
+  selecionadas.forEach((item) => {
+    if (CadeiaDependencias.categoriaPermitidaNoProcesso(item.categoria) && !categorias.includes(item.categoria)) categorias.push(item.categoria);
+  });
+  const legados = selecionadas.filter((item) => !CadeiaDependencias.categoriaPermitidaNoProcesso(item.categoria));
 
   if (!categorias.length) {
     tabelaContainer.innerHTML = '<p class="vazio-inline">Nenhuma dependência cadastrada no catálogo.</p>';
@@ -3431,9 +3431,7 @@ function renderDependenciaTabela() {
   const grupos = {};
   categorias.forEach(cat => { grupos[cat] = []; });
   selecionadas.forEach((item) => {
-    const cat = item.categoria || 'Outros';
-    if (!grupos[cat]) grupos[cat] = [];
-    grupos[cat].push(item);
+    if (grupos[item.categoria]) grupos[item.categoria].push(item);
   });
   
   let html = `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
@@ -3454,16 +3452,19 @@ function renderDependenciaTabela() {
     const tags = recursos.map((item) => {
       const globalIdx = selecionadas.indexOf(item);
       const ehProcesso = item.categoria === 'Processos Internos' || item.categoria === 'Processo Interno';
-      const dep = item.id && !ehProcesso ? catalogo.find(d => d.id === item.id) : null;
+      const ehServico = CadeiaDependencias.ehServico(item);
+      const servico = ehServico && item.id ? servicosCat.find(s => String(s.id) === String(item.id)) : null;
+      const dep = item.id && !ehProcesso && !ehServico ? catalogo.find(d => d.id === item.id) : null;
       const semVinculo = item.id === null || item.id === undefined;
       // Vinculo cujo cadastro sumiu: o Mapa de Continuidade descarta esse item
       // em silencio; aqui ele aparece cinza, "(removida)", para ser tirado.
       // So com o catalogo carregado -- lista vazia nao prova que sumiu.
       const removida = !semVinculo && (ehProcesso
         ? (window.processosData || []).length > 0 && !(window.processosData || []).some(p => String(p.id) === String(item.id))
-        : catalogo.length > 0 && !dep);
+        : ehServico ? servicosCat.length > 0 && !servico
+          : catalogo.length > 0 && !dep);
       const isProcessoLink = ehProcesso && item.id && !removida;
-      const tooltipBase = (dep ? [dep.empresa, dep.detalhes, dep.telefone].filter(Boolean).join(' • ') : '') || item.nome;
+      const tooltipBase = (dep ? [dep.empresa, dep.detalhes, dep.telefone].filter(Boolean).join(' • ') : servico ? (servico.descricao || '') : '') || item.nome;
       const tooltip = tooltipBase + (semVinculo ? ' (sem vínculo com o cadastro -- remova e adicione de novo pra linkar)' : removida ? ' (o cadastro foi removido -- não aparece no Mapa de Continuidade)' : isProcessoLink ? ' (clique para abrir o processo)' : '');
       const apagada = semVinculo || removida;
       const corFundo = removida ? '#f0f0f0' : semVinculo ? '#fff' : '#d60014';
@@ -3473,6 +3474,18 @@ function renderDependenciaTabela() {
       const sufixo = removida ? ' <span style="opacity:0.8;">(removida)</span>' : semVinculo ? ' <span style="opacity:0.7;">⚠</span>' : '';
       return `<span class="dep-tag-item${removida ? ' dep-tag-item--removida' : ''}"${onclickTag} style="display:inline-flex;align-items:center;gap:3px;background:${corFundo};color:${corTexto};border:${borda};${isProcessoLink ? 'cursor:pointer;' : 'cursor:default;'}padding:4px 10px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;" title="${esc(tooltip)}">${esc(item.nome)}${sufixo}<button onclick="event.stopPropagation();removerDependenciaTag(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:${apagada ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.7)'};line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
     }).join(' ');
+    // Serviços: o que cada um contém e a situação da composição -- é por aqui
+    // que o processo chega ao Servidor/Banco, sem apontá-los direto.
+    const resumoServicos = cat === CadeiaDependencias.CATEGORIA_SERVICO
+      ? recursos.map((item) => servicosCat.find(s => String(s.id) === String(item.id))).filter(Boolean).map((s) => {
+          const cadeia = CadeiaDependencias.cadeiaDoProcesso({ processo: { id: '', dependenciaItens: [{ categoria: CadeiaDependencias.CATEGORIA_SERVICO, id: s.id, nome: s.nome }] }, servicos: [s], dependencias: catalogo });
+          const nomes = cadeia.map((it) => it.nome);
+          const av = ServicoComposicao.avaliarServico(s, catalogo);
+          const rtoProc = ServicoComposicao.valorMin({ rto: (document.getElementById('fRTO') || {}).value || '' }, 'rto');
+          const excede = rtoProc !== null && Number.isFinite(s.rtoMin) && s.rtoMin > rtoProc;
+          return `<div class="servico-resumo-bia" style="font-size:0.78em;color:#888;line-height:1.5;"><strong style="color:#555;">${esc(s.nome)}</strong> · ${nomes.length ? esc(nomes.slice(0, 3).join(', ')) + (nomes.length > 3 ? ' +' + (nomes.length - 3) : '') : 'sem dependências na composição'} · <span class="chip-status" style="height:18px;font-size:10px;">${esc(av.rotuloStatus)}</span>${excede ? ` <span style="color:#e65100;">⚠ RTO do serviço (${esc(ServicoComposicao.formatarDuracao(s.rtoMin))}) acima do RTO do processo</span>` : ''}</div>`;
+        }).join('')
+      : '';
 
     const emptyMsg = !count ? `<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum recurso mapeado</span>` : '';
 
@@ -3480,13 +3493,17 @@ function renderDependenciaTabela() {
     // Internos vem sempre de processosData (o cadastro real), nunca do
     // catalogo de dependencias -- e ali que a "referencia fantasma" acontecia.
     const isProcessosCat = (cat === 'Processos Internos' || cat === 'Processo Interno');
+    const isServicosCat = cat === CadeiaDependencias.CATEGORIA_SERVICO;
     const currentId = (document.getElementById('fId') || {}).value || '';
     const currentProcessoNome = (document.getElementById('fProcesso') || {}).value || '';
     const disponiveisNaCat = isProcessosCat
       ? (window.processosData || [])
           .filter(p => String(p.id) !== String(currentId) && p.processo !== currentProcessoNome && !selecionadas.some(s => s.id && s.id === p.id))
           .map(p => ({ id: p.id, nome: p.processo, categoria: cat, empresa: p.area, detalhes: '' }))
-      : catalogo.filter(d => d.categoria === cat && !selecionadas.some(s => s.id && s.id === d.id));
+      : isServicosCat
+        ? servicosCat.filter(s => !selecionadas.some(x => CadeiaDependencias.ehServico(x) && String(x.id) === String(s.id)))
+            .map(s => ({ id: s.id, nome: s.nome, categoria: cat, empresa: '', detalhes: s.descricao || '' }))
+        : catalogo.filter(d => d.categoria === cat && !selecionadas.some(s => s.id && s.id === d.id));
     const chips = disponiveisNaCat.map(d => {
       const label = d.empresa ? d.empresa + ' - ' + d.nome : d.nome;
       return `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.78em;font-weight:500;background:#f5f6fa;color:#d60014;cursor:pointer;border:1px solid #e0e0e0;transition:all 0.15s;" onmouseenter="this.style.background='#c5cae9';this.style.borderColor='#d60014'" onmouseleave="this.style.background='#f5f6fa';this.style.borderColor='#e0e0e0'" onclick="selecionarDependenciaCategoria('${escJs(d.nome)}','${escJs(d.categoria)}','${escJs(d.id)}')" title="${[d.detalhes, d.telefone].filter(Boolean).join(' • ') || d.nome}">${label}</span>`;
@@ -3502,11 +3519,12 @@ function renderDependenciaTabela() {
           <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">
             ${tags}
             ${emptyMsg}
-            <div style="position:relative;flex:1;min-width:180px;display:flex;align-items:center;gap:4px;">
+            ${isServicosCat ? (Perfis.podeVerTela(window.USER_PERFIS, 'servicos') && (Perfis.ehAdmin(window.USER_PERFIS) || Perfis.ehSeguranca(window.USER_PERFIS)) ? '<button type="button" class="link-acao" onclick="novoServicoDoProcesso()">+ Novo serviço</button>' : '') : `<div style="position:relative;flex:1;min-width:180px;display:flex;align-items:center;gap:4px;">
               <input type="text" class="dep-cat-input" data-categoria="${cat}" placeholder="Digite para buscar ou criar..." autocomplete="off" style="border:none;border-bottom:1.5px solid #fce8ea;outline:none;font-size:0.88em;padding:5px 2px;width:100%;background:transparent;transition:border-color 0.2s;" onfocus="this.style.borderColor='#d60014';mostrarDropdownCategoria(this,'${escJs(cat)}')" oninput="mostrarDropdownCategoria(this,'${escJs(cat)}')" onblur="this.style.borderColor='#fce8ea';setTimeout(()=>{const dd=this.parentElement.querySelector('.dep-cat-dropdown');if(dd)dd.style.display='none';},300)">
               <div class="dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:200px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
-            </div>
+            </div>`}
           </div>
+          ${resumoServicos ? `<div style="margin-top:4px;">${resumoServicos}</div>` : ''}
           ${chips ? `<div style="margin-top:6px;padding-top:6px;border-top:1px dashed #f0f0f0;">
             <span style="font-size:0.7em;color:#999;">Disponíveis:</span>
             <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;max-height:64px;overflow-y:auto;margin-top:4px;padding-right:2px;">${chips}</div>
@@ -3516,6 +3534,7 @@ function renderDependenciaTabela() {
   });
   
   html += `</tbody></table>`;
+  html += _htmlLegadoTecnicoProcesso(legados, selecionadas, servicosCat, catalogo);
   tabelaContainer.innerHTML = html;
   
   // Atualizar hidden input
@@ -3630,6 +3649,9 @@ window.mostrarDropdownCategoria = (input, categoria) => {
 window.selecionarDependenciaCategoria = (nome, categoria, id) => {
   const idReal = id || null;
   const cat = categoria || 'Outros';
+  if (!CadeiaDependencias.categoriaPermitidaNoProcesso(cat)) {
+    return showToast('Banco, Servidor, API e outros itens técnicos entram pelo Serviço que os contém.', '#e65100');
+  }
   const jaSelecionado = idReal
     ? window._dependenciaSelecionadas.some((s) => s.id === idReal)
     : window._dependenciaSelecionadas.some((s) => s.nome === nome && s.categoria === cat);
@@ -3645,6 +3667,7 @@ window.selecionarDependenciaCategoria = (nome, categoria, id) => {
 // verdade.
 window.adicionarDependenciaCategoria = (nome, categoria) => {
   if (window._dependenciaSelecionadas.some((s) => s.nome === nome && s.categoria === categoria)) return;
+  if (!CadeiaDependencias.categoriaPermitidaNoProcesso(categoria) || CadeiaDependencias.ehServico({ categoria })) return;
   const item = { categoria, nome, id: null };
   window._dependenciaSelecionadas.push(item);
   // Verificar se existe no catálogo COM esta categoria específica
@@ -3685,6 +3708,64 @@ window.removerDependenciaTag = (idx) => {
   window._dependenciaSelecionadas.splice(idx, 1);
   renderDependenciaTabela();
 };
+
+/**
+ * "Ligações técnicas diretas (legado)": item técnico apontado direto pelo
+ * processo, de antes da hierarquia Processo -> Serviço (21/10/2026). Continua
+ * valendo (Mapa, DRP, vulnerabilidades) até ser trocado; a troca é sempre um
+ * clique, nunca automática.
+ */
+function _htmlLegadoTecnicoProcesso(legados, selecionadas, servicosCat, catalogo) {
+  if (!legados.length) return '';
+  const podeCriarServico = Perfis.ehAdmin(window.USER_PERFIS) || Perfis.ehSeguranca(window.USER_PERFIS);
+  const linhas = legados.map((item) => {
+    const idx = selecionadas.indexOf(item);
+    const dep = item.id ? catalogo.find((d) => String(d.id) === String(item.id)) : null;
+    const sugeridos = dep ? CadeiaDependencias.servicosQueContem(dep.id, servicosCat, catalogo) : [];
+    const acoes = sugeridos.length
+      ? sugeridos.map((s) => `<button type="button" class="btn btn-ghost" style="padding:3px 9px;font-size:0.8em;color:#2e7d32;border-color:#2e7d32;" onclick="trocarLegadoPorServico(${idx},'${escJs(s.id)}')">Trocar por ${esc(s.nome)}</button>`).join(' ')
+      : `<span style="font-size:0.78em;color:#888;">${dep ? 'Nenhum Serviço contém este item — inclua-o num Serviço (Admin/Segurança).' : 'Cadastro removido.'}</span>${podeCriarServico && dep ? ' <button type="button" class="link-acao" onclick="novoServicoDoProcesso()">+ Novo serviço</button>' : ''}`;
+    return `<li class="legado-tecnico-item" style="padding:6px 0;border-bottom:1px solid #f5e3cf;">
+        <span>${DEPENDENCIA_CAT_ICONES[item.categoria] || '📦'} <strong>${esc(item.nome)}</strong> <span style="color:#888;">(${esc(item.categoria || 'Outros')})</span></span>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:4px;">${acoes}
+          <button type="button" class="btn btn-ghost" style="padding:3px 9px;font-size:0.8em;" onclick="removerDependenciaTag(${idx})">Remover</button></div>
+      </li>`;
+  }).join('');
+  return `<div class="legado-tecnico" style="margin-top:14px;padding:10px 14px;border-left:3px solid #e65100;background:#fff3e0;border-radius:6px;">
+      <div style="font-size:0.85em;font-weight:700;color:#e65100;">Ligações técnicas diretas (legado) — ${legados.length}</div>
+      <div style="font-size:0.78em;color:#6d4c41;margin:2px 0 6px;">O processo aponta o Serviço; servidores, bancos e APIs vêm da composição dele. Estes itens continuam valendo até você trocá-los.</div>
+      <ul style="list-style:none;margin:0;padding:0;font-size:0.85em;">${linhas}</ul>
+    </div>`;
+}
+
+window.trocarLegadoPorServico = (idx, servicoId) => {
+  const lista = window._dependenciaSelecionadas || [];
+  const s = (window.servicosCatalogoProcesso || []).find((x) => String(x.id) === String(servicoId));
+  if (!lista[idx] || !s) return;
+  lista.splice(idx, 1);
+  if (!lista.some((x) => CadeiaDependencias.ehServico(x) && String(x.id) === String(s.id))) {
+    lista.push({ categoria: CadeiaDependencias.CATEGORIA_SERVICO, nome: s.nome, id: String(s.id) });
+  }
+  renderDependenciaTabela();
+};
+
+/** "+ Novo serviço" (Admin/Segurança): cadastro completo do Serviço por cima; o criado entra no processo. */
+window.novoServicoDoProcesso = () => _abrirCadastroRapido({
+  pai: 'drawerProcesso',
+  overlay: 'drawerOverlayProcesso',
+  preparar: async () => {
+    _garantirHtmlCadastro('drawerServico', _htmlDrawerServico);
+    if (!window.dependenciasCatalogo || !window.dependenciasCatalogo.length) window.dependenciasCatalogo = await API.getDependencias();
+    if (!servicosData || !servicosData.length) servicosData = await API.getServicos();
+  },
+  abrir: () => abrirDrawerServico(),
+  aoSalvar: (s) => {
+    if (!s || !s.id) return;
+    const cat = window.servicosCatalogoProcesso || (window.servicosCatalogoProcesso = []);
+    if (!cat.some((x) => String(x.id) === String(s.id))) cat.push(s);
+    selecionarDependenciaCategoria(s.nome, CadeiaDependencias.CATEGORIA_SERVICO, String(s.id));
+  },
+});
 
 /** Título do drawer de Processo, com badge de tier/score quando já avaliado -- reaproveitado por abrirModalProcesso e, sem fechar, por salvarProcesso (depois de um "Salvar" que criou o registro). */
 function _atualizarTituloDrawerProcesso(p) {
@@ -3789,7 +3870,7 @@ window.abrirModalProcesso = (p) => {
     scoreInfo.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;"><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div><div style="font-size:1.8em;font-weight:700;color:${cor};">${p.score}</div></div><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div><div style="font-size:0.95em;font-weight:700;">${_htmlBadge(_nivelTierProcesso(tierLabel), tierLabel)}</div></div></div>`;
   } else if (scoreInfo) { scoreInfo.innerHTML = ''; }
   // Preencher RTO/RPO/MTD
-  const fRTO = document.getElementById('fRTO'); if (fRTO) fRTO.value = p ? (p.rto || '') : '';
+  const fRTO = document.getElementById('fRTO'); if (fRTO) { fRTO.value = p ? (p.rto || '') : ''; fRTO.onchange = () => renderDependenciaTabela(); }
   const fRPO = document.getElementById('fRPO'); if (fRPO) fRPO.value = p ? (p.rpo || '') : '';
   const fMTD = document.getElementById('fMTD'); if (fMTD) fMTD.value = p ? (p.mtd || '') : '';
   iniciarDrawerResize();
@@ -4136,6 +4217,7 @@ const _ehInstalacao = (categoria) => categoria === DEPENDENCIA_CATEGORIA_INSTALA
 // estático puro, sem comportamento; hoisted pra módulo pra não duplicar a
 // mesma lista de 12 categorias em dois lugares.
 const DEPENDENCIA_CAT_ICONES = {
+  'Serviços': '⚙️', 'Serviço': '⚙️',
   'Fornecedores': '🏢', 'Fornecedor': '🏢',
   'Pessoas': '👤', 'Pessoa': '👤',
   'Processos Internos': '🔄', 'Processo Interno': '🔄',
@@ -4149,6 +4231,7 @@ const DEPENDENCIA_CAT_ICONES = {
   'Outros': '📦',
 };
 const DEPENDENCIA_CAT_EXEMPLOS = {
+  'Serviços': 'Ex: Portal do cliente, ERP, emissão de NF-e, e-mail — servidores, bancos e APIs vêm da composição do serviço',
   'Fornecedores': 'Ex: Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado',
   'Fornecedor': 'Ex: Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado',
   'Pessoas': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
@@ -5592,7 +5675,33 @@ window.abrirDrawerDependencia = (d) => {
  * "Processos" do drawer de Dependência e pelo relatório "Processos por
  * Dependência" -- mesma regra de vínculo, um único lugar.
  */
-function _processosVinculadosADependencia(dependencia, processos) {
+/**
+ * Rede para a cadeia Processo -> Serviço -> componentes: os serviços e o
+ * catálogo que a tela já tem carregados, ou null (aí só o vínculo direto).
+ */
+function _redeCadeiaCarregada(dependencias) {
+  const servicos = (window.servicosCatalogoProcesso && window.servicosCatalogoProcesso.length) ? window.servicosCatalogoProcesso
+    : (typeof servicosData !== 'undefined' && servicosData && servicosData.length ? servicosData : null);
+  const deps = dependencias || ((window.dependenciasCatalogo && window.dependenciasCatalogo.length) ? window.dependenciasCatalogo : null);
+  return servicos && deps ? { servicos, dependencias: deps } : null;
+}
+
+/**
+ * Processos que dependem da dependência. Com a rede (serviços + catálogo),
+ * pela cadeia inteira -- direto, por um item acima dela nos componentes ou por
+ * um Serviço que a usa (CadeiaDependencias.processosQueDependemDe). `rede`:
+ * objeto explícito, `false` para só o vínculo direto (Pessoa, 4 P), ou
+ * omitido para usar o que a tela já carregou.
+ */
+function _processosVinculadosADependencia(dependencia, processos, rede) {
+  const r = rede === false ? null : (rede || _redeCadeiaCarregada());
+  if (r && dependencia && dependencia.id && (r.dependencias || []).some((d) => String(d.id) === String(dependencia.id))) {
+    return CadeiaDependencias.processosQueDependemDe(dependencia.id, { processos, servicos: r.servicos, dependencias: r.dependencias }).map((x) => x.processo);
+  }
+  return _processosVinculadosDiretos(dependencia, processos);
+}
+
+function _processosVinculadosDiretos(dependencia, processos) {
   return (processos || []).filter((p) => Array.isArray(p.dependenciaItens) && p.dependenciaItens.some((item) =>
     item.id ? item.id === dependencia.id : (item.nome === dependencia.nome && (!item.categoria || item.categoria === dependencia.categoria))
   ));
@@ -5611,14 +5720,20 @@ async function _renderProcessosDaDependencia(d) {
     return;
   }
   cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">⏳ Carregando...</p>';
-  let processos;
+  let processos, servicos;
   try {
-    processos = await API.getProcessos();
+    [processos, servicos] = await Promise.all([API.getProcessos(), API.getServicos().catch(() => [])]);
   } catch (e) {
     cont.innerHTML = '<p style="font-size:0.85em;color:#c62828;padding:8px 0;">Não foi possível carregar os processos.</p>';
     return;
   }
-  const vinculados = _processosVinculadosADependencia(d, processos);
+  // Pela cadeia (21/10/2026): direto, via Serviço ou via um item acima nos componentes.
+  const catalogo = (dependenciasData && dependenciasData.length) ? dependenciasData : (window.dependenciasCatalogo || []);
+  const comOrigem = catalogo.some((x) => String(x.id) === String(d.id))
+    ? CadeiaDependencias.processosQueDependemDe(d.id, { processos, servicos, dependencias: catalogo })
+    : _processosVinculadosDiretos(d, processos).map((p) => ({ processo: p, origens: ['Direta'] }));
+  const vinculados = comOrigem.map((x) => x.processo);
+  const origemDe = new Map(comOrigem.map((x) => [String(x.processo.id), x.origens.join('; ')]));
   if (!vinculados.length) {
     cont.innerHTML = '<p class="vazio-inline">Nenhum processo vinculado a esta dependência.</p>';
     return;
@@ -5636,7 +5751,7 @@ async function _renderProcessosDaDependencia(d) {
         const tier = Criticidade.tierDoProcesso(p);
         return `<tr style="cursor:pointer;" onclick="window.location.hash='processos'" title="Ir para a tela Processos">
           <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;color:#222;">${esc(p.area)}</td>
-          <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;color:#222;font-weight:500;">${esc(p.processo)}</td>
+          <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;color:#222;font-weight:500;">${esc(p.processo)}<div class="origem-vinculo" style="font-size:0.78em;color:#888;font-weight:400;">${esc(origemDe.get(String(p.id)) || '')}</div></td>
           <td style="padding:10px 0;border-bottom:1px solid #f0f0f0;">${_htmlBadge(_nivelTierProcesso(tier), tier)}</td>
         </tr>`;
       }).join('')}
@@ -6803,6 +6918,20 @@ window.excluirRelatorioExecutivoSalvo = async (id) => {
   }
 };
 
+/**
+ * Serviços e dependências para seguir a cadeia Processo -> Serviço ->
+ * componentes (cadeia-dependencias.js). null se não carregar: quem usa cai no
+ * vínculo direto, como antes.
+ */
+async function _carregarRedeDeDependencias() {
+  try {
+    const [servicos, dependencias] = await Promise.all([API.getServicos(), API.getDependencias()]);
+    return { servicos: servicos || [], dependencias: dependencias || [] };
+  } catch (e) {
+    return null;
+  }
+}
+
 /** Nome do produto no documento: o congelado na geração (edição salva) ou o do catálogo. */
 function _nomeProdutoDoc(v) {
   return (v && v.produtoNome) || _nomeProdutoVuln(v);
@@ -6810,13 +6939,14 @@ function _nomeProdutoDoc(v) {
 
 async function _dadosRelatorioExecutivoVulnerabilidades(opcoes) {
   const VP = VulnerabilidadePainel;
-  const [vulns, processos, produtos, cfg, fotos, riscos] = await Promise.all([
+  const [vulns, processos, produtos, cfg, fotos, riscos, rede] = await Promise.all([
     API.getVulnerabilidades(),
     API.getProcessos().catch(() => null),
     API.getProdutosSoftware().catch(() => null),
     API.getConfigVulnerabilidade().catch(() => ({ limiarCvss: 7 })),
     API.getFotosPainelVulnerabilidades().catch(() => []),
     API.getRiscos().catch(() => null),
+    _carregarRedeDeDependencias(),
   ]);
   if (produtos) produtosSoftwareData = produtos;
   // Nome do produto congelado em cada vulnerabilidade: a edição salva reabre
@@ -6832,7 +6962,7 @@ async function _dadosRelatorioExecutivoVulnerabilidades(opcoes) {
   const comFiltro = VP.temFiltro(filtros);
   const escopo = VP.filtrar(vulns || [], filtros, { nomeProduto: _nomeProdutoDoc });
   const d = VP.dadosRelatorio(escopo, {
-    meses: opcoes.meses, fotos: comFiltro ? [] : (fotos || []), processos: processos || [], limiar, riscoAberto, nomeProduto: _nomeProdutoDoc,
+    meses: opcoes.meses, fotos: comFiltro ? [] : (fotos || []), processos: processos || [], rede, limiar, riscoAberto, nomeProduto: _nomeProdutoDoc,
   });
   return {
     d, vulns: escopo, limiar, processosCarregados: !!processos, riscosCarregados: !!riscos,
@@ -6985,7 +7115,7 @@ async function _carregarEscopoRelatorioServicos() {
   const opt = (valor, rotulo) => `<option value="${esc(valor)}">${esc(rotulo)}</option>`;
   const campo = (id, rotulo, opcoes) => `<div class="field"><label class="field-label" for="${id}">${esc(rotulo)}</label>
       <select id="${id}" class="field-control" onchange="atualizarEscopoRelatorioServicos()">${opt('', 'Todos')}${opcoes}</select></div>`;
-  const idsProcVinculados = new Set(b.servicos.flatMap((s) => (s.processoIds || []).map((p) => String(p.id))));
+  const idsProcVinculados = new Set(b.servicos.flatMap((s) => ServicoComposicao.processosDoServico(s, b.processos).map((p) => p.id)));
   const procs = b.processos.filter((p) => idsProcVinculados.has(String(p.id)))
     .map((p) => ({ id: p.id, nome: _nomeProcessoServico(p) })).sort((x, y) => x.nome.localeCompare(y.nome, 'pt-BR'));
   cont.innerHTML = `<div class="filters" style="margin-bottom:0;">
@@ -7020,7 +7150,7 @@ window.atualizarEscopoRelatorioServicos = () => {
   const btn = document.getElementById('btnGerarRelSrv');
   if (!cont || !b) return;
   const filtros = _lerFiltrosRelatorioServicos();
-  const escopo = ServicoComposicao.filtrarServicos(b.servicos, b.deps, filtros);
+  const escopo = ServicoComposicao.filtrarServicos(b.servicos, b.deps, filtros, b.processos);
   const total = escopo.length;
   const alerta = escopo.filter((x) => x.avaliacao.status === 'alerta').length;
   cont.innerHTML = `${total} serviço${total === 1 ? '' : 's'} no escopo (${alerta} em alerta) · <strong>${esc(_descreverFiltrosRelatorioServicos(filtros))}</strong>${total ? '' : ' — <span style="color:#e65100;">nada a relatar com estes filtros</span>'}`;
@@ -8248,7 +8378,15 @@ window.abrirDrawerServico = (id) => {
   _preencherCampoDuracao('servicoRto', s ? s.rtoMin : null, '');
   _preencherCampoDuracao('servicoRpo', s ? s.rpoMin : null, '');
   _preencherCampoDuracao('servicoMttr', s ? s.mttrMin : null, '');
-  window._servicoProcessos = s && Array.isArray(s.processoIds) ? s.processoIds.map((p) => ({ id: String(p.id), nome: p.nome || '' })) : [];
+  // Processos suportados (21/10/2026): o vínculo mora no PROCESSO (item
+  // 'Serviços' em dependenciaItens); servico.processoIds antigo ainda é lido.
+  // Salvar grava nos processos que mudaram (_sincronizarProcessosDoServico).
+  window._servicoProcessos = s ? ServicoComposicao.processosDoServico(s, window.processosData || []).map((p) => {
+    const atual = (window.processosData || []).find((x) => String(x.id) === p.id);
+    return { id: p.id, nome: atual ? _nomeProcessoServico(atual) : p.nome };
+  }) : [];
+  window._servicoProcessosAntes = (window._servicoProcessos || []).map((p) => p.id);
+  window._servicoProcessosLegado = !!(s && Array.isArray(s.processoIds) && s.processoIds.length);
   _renderProcessosServico();
   // Antes do marcar() do rastreador: os stakeholders herdados dos backups contam
   // como estado inicial (Fechar sem mexer não pergunta nada; só grava ao Salvar).
@@ -8683,9 +8821,19 @@ window.salvarServico = async () => {
 
   return await comBotaoCarregando('btnSalvarServico', async () => {
     try {
-      const r = await API.salvarServico(dados);
+      // processoIds não é mais gravado no serviço: o vínculo vai para os
+      // processos logo abaixo. Serviço que ainda tinha a lista antiga a perde
+      // aqui, já com cada processo apontando para ele.
+      const payload = { ...dados };
+      delete payload.processoIds;
+      if (window._servicoProcessosLegado) payload.processoIds = [];
+      const r = await API.salvarServico(payload);
+      const falhas = await _sincronizarProcessosDoServico({ id: String(id || r.id), nome }, window._servicoProcessosAntes || [], window._servicoProcessos || []);
+      window._servicoProcessosAntes = (window._servicoProcessos || []).map((p) => p.id);
+      window._servicoProcessosLegado = false;
       _edServico.marcar({ ...dados, id: id || r.id });
-      const item = { ...dados, id: r.id };
+      const item = { ...payload, processoIds: [], id: r.id };
+      if (falhas) showToast(`⚠️ Serviço salvo, mas ${falhas} processo(s) não foram atualizados. Tente salvar de novo.`, '#e65100');
       const idx = servicosData.findIndex((x) => String(x.id) === String(r.id));
       if (idx >= 0) servicosData[idx] = item; else servicosData.push(item);
       document.getElementById('servicoStakeholdersMigrados').style.display = 'none';
@@ -8699,7 +8847,7 @@ window.salvarServico = async () => {
         document.getElementById('servicoDrawerTitulo').textContent = 'Editar Serviço';
       }
       if (document.getElementById('servicoRows')) renderizarServicos();
-      showToast('✅ Salvo!', '#2e7d32');
+      if (!falhas) showToast('✅ Salvo!', '#2e7d32');
       return true;
     } catch (e) {
       showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
@@ -8707,6 +8855,35 @@ window.salvarServico = async () => {
     }
   });
 };
+
+/**
+ * Grava o vínculo Processo -> Serviço nos processos (onde ele mora desde
+ * 21/10/2026): acrescenta o item 'Serviços' nos que entraram, tira dos que
+ * saíram e garante o item nos que só estavam no processoIds antigo. Só os que
+ * precisam mudar são gravados. Devolve quantos falharam.
+ */
+async function _sincronizarProcessosDoServico(servico, idsAntes, listaAgora) {
+  const processos = window.processosData || [];
+  const agora = new Set(listaAgora.map((p) => String(p.id)));
+  const ehDeste = (it) => CadeiaDependencias.ehServico(it) && String(it.id) === String(servico.id);
+  const gravacoes = [];
+  new Set([...idsAntes.map(String), ...agora]).forEach((pid) => {
+    const p = processos.find((x) => String(x.id) === pid);
+    if (!p) return;
+    const itens = Array.isArray(p.dependenciaItens) ? p.dependenciaItens : [];
+    const tem = itens.some(ehDeste);
+    let novos = null;
+    if (agora.has(pid) && !tem) novos = [...itens, { categoria: CadeiaDependencias.CATEGORIA_SERVICO, nome: servico.nome, id: String(servico.id) }];
+    if (!agora.has(pid) && tem) novos = itens.filter((it) => !ehDeste(it));
+    if (!novos) return;
+    gravacoes.push(API.salvarProcesso({ id: pid, dependenciaItens: novos, dependencia: novos.map((it) => it.nome).join(', ') })
+      .then(() => { p.dependenciaItens = novos; p.dependencia = novos.map((it) => it.nome).join(', '); return true; })
+      .catch((e) => { console.error('Serviço: falha ao atualizar o processo ' + pid, e); return false; }));
+  });
+  const res = await Promise.all(gravacoes);
+  if (res.length) API.invalidate('getProcessos');
+  return res.filter((ok) => !ok).length;
+}
 
 window.excluirServico = async (id) => {
   const s = servicosData.find((x) => String(x.id) === String(id));
@@ -10901,7 +11078,7 @@ async function vulnerabilidadesPainel() {
 
   const podeVerLista = Perfis.podeVerTela(window.USER_PERFIS, 'vulnerabilidades');
   try {
-    const [vulns, processos, produtos, cfg, fotos, riscos] = await Promise.all([
+    const [vulns, processos, produtos, cfg, fotos, riscos, rede0] = await Promise.all([
       API.getVulnerabilidades(),
       API.getProcessos().catch((e) => { console.error('Painel de Vulnerabilidades: processos não carregaram', e); return null; }),
       API.getProdutosSoftware().catch(() => null),
@@ -10910,11 +11087,13 @@ async function vulnerabilidadesPainel() {
       // O Gestor só lê os riscos da própria área (regra do banco): sem a lista
       // inteira, o critério "acima do limiar sem risco" mentiria para ele.
       podeVerLista ? API.getRiscos().catch(() => null) : Promise.resolve(null),
+      _carregarRedeDeDependencias(),
     ]);
     if (produtos) produtosSoftwareData = produtos;
     _painelVuln = {
       vulns: vulns || [],
       processos,
+      rede: rede0,
       fotos: fotos || [],
       riscos,
       limiar: cfg && Number.isFinite(Number(cfg.limiarCvss)) ? Number(cfg.limiarCvss) : 7,
@@ -11176,7 +11355,7 @@ function _htmlPainelVulnAcao(vulns) {
   const riscoAberto = d.riscos
     ? (id) => d.riscos.some((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(id) && r.status !== 'Encerrado')
     : null;
-  const itens = VP.acaoImediata(vulns, { processos: d.processos || [], limiar: d.limiar, riscoAberto });
+  const itens = VP.acaoImediata(vulns, { processos: d.processos || [], rede: d.rede, limiar: d.limiar, riscoAberto });
   const criterios = 'Em aberto e: Crítica, Alta com exploit disponível, prazo vencido, atinge processo Tier 1'
     + (riscoAberto ? `, ou severidade no limiar de risco (${d.limiar}) sem risco aberto` : '');
   const linhas = itens.slice(0, _LIMITE_ACAO_PAINEL_VULN).map((it) => {
@@ -11262,7 +11441,7 @@ function _htmlPainelVulnCriticos(vulns) {
   if (!d.processos) {
     blocoProcessos = `<div class="painel-card">${_htmlErroCarga('Não foi possível carregar os processos de negócio.', 'vulnerabilidadesPainel')}</div>`;
   } else {
-    const exp = VP.processosExpostos(vulns, d.processos);
+    const exp = VP.processosExpostos(vulns, d.processos, d.rede);
     const totalProc = exp.processos.length;
     const linhasTier = [T.T1, T.T2, T.T3, T.PENDENTE].map((t) => {
       const n = exp.porTier[t] || 0;
@@ -17218,7 +17397,7 @@ window.gerarDossieProcesso = async () => {
   // Depois do window.open (senão o navegador bloqueia o popup): os Serviços
   // entram no DRP do processo, igual à aba DRP do drawer.
   const servicosDossie = await API.getServicos().catch(() => []);
-  const drpItens = MapaContinuidade.dependenciasDoProcesso({ processo: p, dependencias: catalogo, servicos: servicosDossie });
+  const drpItens = CadeiaDependencias.cadeiaDoProcesso({ processo: p, dependencias: catalogo, servicos: servicosDossie });
   win.document.write('<html><head><title>Dossiê - ' + p.processo + '</title><style>:root{--risk-critical:#d60014;--risk-high:#b64a12;--risk-medium:#9a6700;--risk-low:#38bb0e}body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6}h1{color:#d60014}h2{color:#d60014;border-bottom:2px solid #fce8ea;padding-bottom:6px;margin-top:24px}table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt}th{background:#d60014;color:white;padding:8px 10px;text-align:left}td{padding:7px 10px;border:1px solid #e0e0e0}.badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:9pt;font-weight:700;color:white;background:' + Criticidade.corDoTier(tier) + '}.header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px}.header .sub{font-size:9pt;color:#888;margin-top:4px;font-weight:400}.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}.btn-print:hover{opacity:.9}@media print{.btn-print{display:none!important}}</style></head><body>');
   win.document.write('<div class="header"><div><img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display=\'none\'"><div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div><h1>' + p.processo + '</h1><div class="sub">' + p.area + ' — ' + responsavel + ' • ' + new Date().toLocaleDateString('pt-BR') + ' • Fortes Tecnologia</div></div><button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button></div><span class="badge">' + tier + ' • Score ' + score + '</span>');
   win.document.write('<h2>Identificação</h2><p><b>Descrição:</b> ' + (p.descricaoFuncional || '-') + '</p>');
@@ -18321,7 +18500,7 @@ window.renderDrpDoProcesso = async () => {
   // O usuário pode ter trocado de processo enquanto carregava.
   if (((document.getElementById('fId') || {}).value || '') !== fIdAntes) return;
 
-  const lista = MapaContinuidade.dependenciasDoProcesso({ processo: p, dependencias: window.dependenciasCatalogo || [], servicos });
+  const lista = CadeiaDependencias.cadeiaDoProcesso({ processo: p, dependencias: window.dependenciasCatalogo || [], servicos });
   const rtoProc = ServicoComposicao.valorMin({ rto: p.rto }, 'rto');
   const podeAbrir = Perfis.podeOperarDRP(window.USER_PERFIS);
   const podeGerenciar = podeAbrir && Perfis.podeVerTela(window.USER_PERFIS, 'drp');
@@ -18422,7 +18601,7 @@ window.renderVinculosProcesso = async () => {
   if (((document.getElementById('fId') || {}).value || '') !== p.id) return;
   const catalogo = window.dependenciasCatalogo || [];
 
-  const servDoProc = (servicos || []).filter((s) => (s.processoIds || []).some((x) => x && String(x.id) === String(p.id)));
+  const servDoProc = CadeiaDependencias.servicosDoProcesso(p, servicos || []);
   const linkServ = Perfis.podeVerTela(window.USER_PERFIS, 'servicos');
   const htmlServ = servicos === null
     ? '<span style="color:#c62828;">não foi possível carregar</span>'
@@ -18432,7 +18611,7 @@ window.renderVinculosProcesso = async () => {
         const nome = linkServ ? `<a href="javascript:void(0)" onclick="abrirVinculoDoProcesso('servico','${escJs(s.id)}')">${esc(s.nome)}</a>` : esc(s.nome);
         return `${nome} <span class="chip-status" style="height:20px;font-size:11px;">${esc(av.rotuloStatus)}</span>`;
       }).join(' &nbsp; ')
-      : '<span style="color:#888;">nenhum — o Serviço é que aponta para o processo (cadastro de Serviços)</span>';
+      : '<span style="color:#888;">nenhum — aponte o Serviço na aba BIA</span>';
 
   const riscosAbertos = (riscos || []).filter((r) => r.status !== 'Encerrado');
   const htmlRiscos = !veRiscos ? '' : riscos === null
@@ -21769,6 +21948,8 @@ let _contratoRiscos = [];
 // de onde vem o RTO/RPO exigido das cobertas.
 let _contratoDepsCatalogo = [];
 let _contratoDependenciasTodas = [];
+let _contratoServicos = [];
+const _redeContrato = () => (_contratoDependenciasTodas.length ? { servicos: _contratoServicos, dependencias: _contratoDependenciasTodas } : null);
 window._contratoDependencias = [];
 window._contratoDocumentos = [];
 window._contratoEventos = [];
@@ -21821,7 +22002,7 @@ function _alvosSlaContrato(c) {
   const fornecedor = (_contratoFornecedores || []).find((f) => String(f.id) === String(c.fornecedorId));
   const processos = new Map();
   cobertas.concat(fornecedor ? [fornecedor] : []).forEach((d) => {
-    _processosVinculadosADependencia(d, _contratoProcessos).forEach((p) => processos.set(String(p.id || (p.area + '|' + p.processo)), p));
+    _processosVinculadosADependencia(d, _contratoProcessos, _redeContrato()).forEach((p) => processos.set(String(p.id || (p.area + '|' + p.processo)), p));
   });
   processos.forEach((p) => alvos.push({ origem: `Processo ${p.processo || ''}${p.area ? ' (' + p.area + ')' : ''}`, tipo: 'processo', rto: p.rto, rpo: p.rpo }));
   return alvos;
@@ -21950,7 +22131,7 @@ async function contratos() {
     ${_htmlDrawerContrato()}`;
 
   try {
-    const [lista, tipos, indexadores, status, deps, areasList, avals, processosList, riscosList] = await Promise.all([
+    const [lista, tipos, indexadores, status, deps, areasList, avals, processosList, riscosList, servicosList] = await Promise.all([
       API.getContratos(),
       API.getTiposContrato(),
       API.getIndexadoresReajuste(),
@@ -21962,8 +22143,10 @@ async function contratos() {
       API.getAvaliacoesFornecedor().catch(() => null),
       API.getProcessos().catch(() => null),
       API.getRiscos().catch(() => null),
+      API.getServicos().catch(() => null),
     ]);
     contratosData = lista;
+    if (servicosList) _contratoServicos = servicosList;
     tiposContratoData = tipos;
     indexadoresReajusteData = indexadores;
     statusContratoData = status;
@@ -23193,7 +23376,7 @@ function _renderVinculosContrato() {
       </div>`
     : vazio(esc(c.fornecedorNome || 'Fornecedor não encontrado no catálogo.'));
 
-  const processos = forn ? _processosVinculadosADependencia(forn, _contratoProcessos) : [];
+  const processos = forn ? _processosVinculadosADependencia(forn, _contratoProcessos, _redeContrato()) : [];
   const ordemTier = { 'Tier 1 (Crítico)': 1, 'Tier 2 (Essencial)': 2, 'Tier 3 (Suporte)': 3 };
   const blocoProc = processos.length
     ? `<div class="data-table"><table><thead><tr><th>Processo</th><th>Área</th><th>Criticidade (BIA)</th></tr></thead><tbody>

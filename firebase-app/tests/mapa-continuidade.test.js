@@ -53,7 +53,7 @@ test('nos de todos os tipos, com ids tipados; Processos Internos de dependencias
 test('vinculos do processo: area, dependencia por id, fornecedor por nome (legado), processo interno e contato de crise', () => {
   const i = idx();
   assert.deepStrictEqual(rels(i, 'processo:p1', 'area:financeiro'), ['pertence à área']);
-  assert.deepStrictEqual(rels(i, 'processo:p1', 'dependencia:infra'), ['depende de']);
+  assert.deepStrictEqual(rels(i, 'processo:p1', 'dependencia:infra'), ['depende de (direto, legado)'], 'tecnico direto no processo e legado');
   assert.deepStrictEqual(rels(i, 'processo:p1', 'fornecedor:fX'), ['depende de']);
   assert.deepStrictEqual(rels(i, 'processo:p1', 'processo:p2'), ['depende do processo']);
   assert.deepStrictEqual(rels(i, 'processo:p2', 'processo:p1'), ['processo dependente']);
@@ -82,7 +82,7 @@ test('vinculos de area, pessoa, fornecedor, dependencia, servico, contrato e bac
 
 test('selos e lacunas: Tier 1 sem PCN, dependencia usada sem DRP, servico em alerta', () => {
   const i = idx();
-  assert.deepStrictEqual(i.nos['processo:p1'].lacunas, ['Tier 1 sem PCN']);
+  assert.deepStrictEqual(i.nos['processo:p1'].lacunas, ['Tier 1 sem PCN', '1 ligação técnica direta']);
   assert.deepStrictEqual(i.nos['processo:p2'].lacunas, [], 'Tier 2 com PCN');
   assert.deepStrictEqual(i.nos['processo:p3'].lacunas, [], 'Tier 3 sem PCN nao e lacuna');
   assert.strictEqual(i.nos['processo:p2'].selos.pcn, true);
@@ -229,36 +229,15 @@ test('instalacao: lacuna tambem quando o processo Tier 1/2 chega nela por servic
   assert.deepStrictEqual(i.nos['instalacao:filial'].lacunas, [], 'nao esta no caminho do processo');
 });
 
-test('dependenciasDoProcesso: diretas, via servico e componentes, sem pessoas/processos, sem repetir, removidas marcadas', () => {
-  const lista = MC.dependenciasDoProcesso({
-    processo: { id: 'p1', dependenciaItens: [
-      { id: 'srv', nome: 'SRV-01', categoria: 'Servidor' },
-      { id: 'pAna', nome: 'Ana', categoria: 'Pessoas' },
-      { id: 'p2', nome: 'Cobrança', categoria: 'Processos Internos' },
-      { id: 'sumiu', nome: 'Velho', categoria: 'Servidor' },
-    ] },
-    dependencias: DADOS_INST.dependencias,
-    servicos: [
-      { id: 's1', nome: 'Portal', processoIds: [{ id: 'p1' }], dependenciaItens: [{ id: 'db', nome: 'Oracle', categoria: 'Banco de Dados' }] },
-      { id: 's2', nome: 'Outro', processoIds: [{ id: 'p7' }], dependenciaItens: [{ id: 'sede', nome: 'Sede SP', categoria: 'Instalações' }] },
-    ],
-  });
-  assert.deepStrictEqual(lista.map((x) => [x.nome, x.origens]), [
-    ['SRV-01', ['Direta (BIA)']],
-    ['Velho', ['Direta (BIA)']],
-    ['Oracle', ['Via serviço Portal', 'Componente de SRV-01']],
-    ['Data center', ['Componente de SRV-01']],
-  ]);
-  assert.strictEqual(lista[1].ausente, true);
-  assert.strictEqual(lista[1].dep, null);
-  assert.strictEqual(lista[0].dep.id, 'srv');
-});
-
-test('dependenciasDoProcesso: componentes em ciclo nao travam', () => {
-  const deps = [
-    { id: 'a', categoria: 'Servidor', nome: 'A', componentes: [{ id: 'b' }] },
-    { id: 'b', categoria: 'Servidor', nome: 'B', componentes: [{ id: 'a' }] },
-  ];
-  const lista = MC.dependenciasDoProcesso({ processo: { id: 'p', dependenciaItens: [{ id: 'a', categoria: 'Servidor', nome: 'A' }] }, dependencias: deps, servicos: [] });
-  assert.deepStrictEqual(lista.map((x) => x.nome), ['A', 'B']);
+test('processo aponta o Servico (item Serviços no processo): aresta sem repetir a do servico.processoIds legado', () => {
+  const dados = JSON.parse(JSON.stringify(DADOS));
+  dados.processos[1].dependenciaItens = [{ categoria: 'Serviços', id: 's1', nome: 'Portal' }];
+  const i = MC.montarIndice(dados, OPCOES);
+  assert.deepStrictEqual(rels(i, 'processo:p2', 'servico:s1'), ['suportado pelo serviço']);
+  assert.deepStrictEqual(rels(i, 'servico:s1', 'processo:p2'), ['suporta']);
+  // p1 e ligado pelos dois lados (item no processo + processoIds legado): uma aresta so.
+  dados.processos[0].dependenciaItens.push({ categoria: 'Serviços', id: 's1', nome: 'Portal' });
+  const j = MC.montarIndice(dados, OPCOES);
+  assert.deepStrictEqual(rels(j, 'servico:s1', 'processo:p1'), ['suporta']);
+  assert.deepStrictEqual(j.nos['processo:p2'].lacunas, [], 'sem tecnico direto, sem lacuna');
 });

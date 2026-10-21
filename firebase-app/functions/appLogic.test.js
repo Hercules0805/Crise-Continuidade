@@ -1284,3 +1284,50 @@ test('gerarPCN de processo renomeado usa o score do nome antigo e contatos grava
   assert.match(corpo, /Fulano/);
   assert.match(corpo, /Tier 1/);
 });
+
+// ---- Processo -> Servico -> componentes (21/10/2026) ----
+function capturarPrompt() {
+  const original = global.fetch;
+  const ref = { texto: '' };
+  global.fetch = async (_url, opts) => {
+    ref.texto = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<p>ok</p>' }] } }] }) };
+  };
+  ref.restaurar = () => { global.fetch = original; };
+  return ref;
+}
+
+test('gerarDRP: processo ligado so via Servico (e componente) aparece em Processos impactados, com a ligacao', async () => {
+  const s = seedAdmin(seed());
+  s.dependencias = {
+    srv: { nome: 'SRV-01', categoria: 'Servidor', componentes: [{ id: 'db', nome: 'Oracle', categoria: 'Banco de Dados' }] },
+    db: { nome: 'Oracle', categoria: 'Banco de Dados' },
+  };
+  s.servicos = { s1: { nome: 'Portal', dependenciaItens: [{ id: 'srv', nome: 'SRV-01', categoria: 'Servidor' }] } };
+  s.processos.ti__backup.dependenciaItens = [{ categoria: 'Serviços', id: 's1', nome: 'Portal' }];
+  const db = makeDb(s);
+  const p = capturarPrompt();
+  try {
+    await WRITE_ACTIONS.gerarDRP(db, { id: 'db' }, ctx({ geminiApiKey: 'chave-teste' }));
+  } finally { p.restaurar(); }
+  assert.match(p.texto, /Backup \(TI\) — .*\| Ligação: Via serviço Portal \(via SRV-01\)/);
+});
+
+test('gerarPCN: Servicos do processo e a cadeia tecnica deles entram nas Dependencias Criticas', async () => {
+  const s = seed();
+  s.dependencias = {
+    srv: { nome: 'SRV-01', categoria: 'Servidor', rto: '2 horas', componentes: [{ id: 'db', nome: 'Oracle', categoria: 'Banco de Dados' }] },
+    db: { nome: 'Oracle', categoria: 'Banco de Dados', estrategia: 'Backup & Restore' },
+  };
+  s.servicos = { s1: { nome: 'Portal', descricao: 'Portal do cliente', dependenciaItens: [{ id: 'srv', nome: 'SRV-01', categoria: 'Servidor' }] } };
+  s.processos.ti__backup.dependenciaItens = [{ categoria: 'Serviços', id: 's1', nome: 'Portal' }];
+  const db = makeDb(s);
+  const p = capturarPrompt();
+  try {
+    await WRITE_ACTIONS.gerarPCN(db, { id: 'ti__backup' }, ctx({ geminiApiKey: 'chave-teste' }));
+  } finally { p.restaurar(); }
+  assert.match(p.texto, /\*\*Servidor:\*\* SRV-01.*RTO: 2 horas.*Ligação: Via serviço Portal/);
+  assert.match(p.texto, /\*\*Banco de Dados:\*\* Oracle.*Estratégia: Backup & Restore.*Ligação: Componente de SRV-01/);
+  assert.match(p.texto, /### Serviços que suportam o processo[^#]*\*\*Portal\*\* — Portal do cliente/);
+  assert.doesNotMatch(p.texto, /\*\*Serviços:\*\* Portal/, 'o servico nao vira linha de dependencia');
+});

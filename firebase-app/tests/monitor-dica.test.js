@@ -14,7 +14,7 @@ function carregar() {
   w.firebase = { auth: () => ({ currentUser: { getIdToken: async () => 't' } }) };
   w.GRC360 = {}; w.APP_API_URL = ''; w.USER_PERFIS = ['admin'];
   w.API = new Proxy({}, { get: () => async () => [] });
-  ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js']
+  ['util.js', 'perfis.js', 'criticidade.js', 'cadeia-dependencias.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;window.__t = { svg: _svgLinhaTempoRisco, dica: _conteudoDicaMonitor };');
   return w;

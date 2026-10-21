@@ -24,6 +24,7 @@ const notificacoes = require('./notificacoes');
 const transporteEmail = require('./transporteEmail');
 const historicoRisco = require('./historicoRisco');
 const retratoRisco = require('./retratoRisco');
+const cadeiaDependencias = require('./cadeiaDependencias');
 
 const COLLECTION = {
   processos: 'processos',
@@ -36,6 +37,7 @@ const COLLECTION = {
   riscos: 'riscos',
   vulnerabilidades: 'vulnerabilidades',
   contratos: 'contratos',
+  servicos: 'servicos',
   statusContrato: 'status_contrato',
 };
 
@@ -288,10 +290,27 @@ async function _scoreDoProcesso(db, p, id) {
  * dependenciaItens[].id quando existe, senao por nome (com categoria como
  * desempate quando o item legado ja tiver uma gravada).
  */
-function _processosLigadosADependencia(depId, depNome, depCategoria, processos) {
+function _processosLigadosADependencia(depId, depNome, depCategoria, processos, rede) {
+  // Com a rede (servicos + catalogo), pela cadeia inteira -- direto, por um
+  // item acima nos componentes ou por um Servico que usa a dependencia
+  // (cadeiaDependencias.js, a mesma regra do app). `_origem` diz por onde.
+  if (rede) {
+    return cadeiaDependencias.processosQueDependemDe(String(depId), { processos, servicos: rede.servicos, dependencias: rede.dependencias })
+      .map((x) => ({ ...x.processo, _origem: x.origens.join('; ') }));
+  }
   return (processos || []).filter((p) => Array.isArray(p.dependenciaItens) && p.dependenciaItens.some((item) =>
     item.id ? item.id === depId : (item.nome === depNome && (!item.categoria || item.categoria === depCategoria))
   ));
+}
+
+/** Servicos (para a cadeia); falha de leitura vira lista vazia -- fica so o vinculo direto. */
+async function _lerServicos(db) {
+  try {
+    const snap = await db.collection(COLLECTION.servicos).get();
+    return snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  } catch (e) {
+    return [];
+  }
 }
 
 /**
@@ -391,6 +410,22 @@ async function gerarPCN(db, data, ctx) {
     });
   }
 
+  // Processo -> Servico -> componentes (21/10/2026): o tecnico granular vem
+  // pela composicao dos Servicos do processo. Os itens 'Serviços' viram secao
+  // propria; o que eles usam (e os componentes abaixo) entra em Dependencias
+  // Criticas com a origem, para a tabela de Estrategia Tecnica cobrir a cadeia.
+  const servicos = await _lerServicos(db);
+  const procComId = { ...p, id: snap.id };
+  const servicosDoProc = cadeiaDependencias.servicosDoProcesso(procComId, servicos);
+  depsDetalhadas = depsDetalhadas.filter((d) => !cadeiaDependencias.ehServico(d));
+  const jaListados = new Set(depsDetalhadas.map((d) => String(d.nome || '').toLowerCase()));
+  cadeiaDependencias.cadeiaDoProcesso({ processo: procComId, servicos, dependencias }).forEach((it) => {
+    if (!it.dep || it.direta || jaListados.has(it.nome.toLowerCase())) return;
+    const dep = it.dep;
+    jaListados.add(it.nome.toLowerCase());
+    depsDetalhadas.push({ nome: dep.nome, categoria: dep.categoria, empresa: dep.empresa, papel: dep.detalhes, rto: dep.rto, rpo: dep.rpo, estrategia: dep.estrategia, responsavel: dep.responsavel, origem: it.origens.join('; ') });
+  });
+
   // Instalações (21/10/2026): o "P" de Premises dos 4 Ps do BIA. Para cada
   // instalação do processo: tipo, endereço, quantas pessoas estão lotadas nela
   // e a instalação alternativa (contingência) -- ou a ausência dela.
@@ -430,7 +465,10 @@ Onde houver dados disponíveis, preencha com informações reais. Onde não houv
 **Descrição do Impacto:** ${p.descricao || 'Não informada'}
 
 ### Dependências Críticas
-${depsDetalhadas.length ? depsDetalhadas.map((d) => `- **${d.categoria || 'Outros'}:** ${d.nome}${d.empresa ? ' (' + d.empresa + ')' : ''}${d.papel ? ' — ' + d.papel : ''}${d.estrategia ? ' | Estratégia: ' + d.estrategia : ''}${d.rto ? ' | RTO: ' + d.rto : ''}${d.rpo ? ' | RPO: ' + d.rpo : ''}${d.responsavel ? ' | Responsável: ' + d.responsavel : ''}`).join('\n') : 'Nenhuma dependência mapeada.'}
+${depsDetalhadas.length ? depsDetalhadas.map((d) => `- **${d.categoria || 'Outros'}:** ${d.nome}${d.empresa ? ' (' + d.empresa + ')' : ''}${d.papel ? ' — ' + d.papel : ''}${d.estrategia ? ' | Estratégia: ' + d.estrategia : ''}${d.rto ? ' | RTO: ' + d.rto : ''}${d.rpo ? ' | RPO: ' + d.rpo : ''}${d.responsavel ? ' | Responsável: ' + d.responsavel : ''}${d.origem ? ' | Ligação: ' + d.origem : ''}`).join('\n') : 'Nenhuma dependência mapeada.'}
+
+### Serviços que suportam o processo (a tecnologia acima vem da composição deles)
+${servicosDoProc.length ? servicosDoProc.map((s) => `- **${s.nome}**${s.descricao ? ' — ' + s.descricao : ''}${Number.isFinite(s.rtoMin) ? ' | RTO do serviço: ' + s.rtoMin + ' min' : ''}`).join('\n') : 'Nenhum serviço vinculado.'}
 
 ### Instalações (4 Ps do BIA — locais físicos do processo)
 ${instalacoesPCN.length ? instalacoesPCN.map((i) => `- **${i.nome}**${i.tipo ? ' (' + i.tipo + ')' : ''}${i.endereco ? ' — ' + i.endereco : ''} | Pessoas lotadas: ${i.pessoasLotadas} | ${i.alternativa ? 'Instalação alternativa (contingência): ' + i.alternativa.nome + (i.alternativa.tipo ? ' (' + i.alternativa.tipo + ')' : '') + (i.alternativa.endereco ? ' — ' + i.alternativa.endereco : '') : 'SEM instalação alternativa definida'}`).join('\n') : 'Nenhuma instalação mapeada.'}
@@ -803,7 +841,8 @@ async function obterSlasDependencia(db, query, ctx) {
   ]);
   const catalogo = catSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
   const processos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-  const ligados = _processosLigadosADependencia(String(id), dep.nome, dep.categoria, processos);
+  const servicos = await _lerServicos(db);
+  const ligados = _processosLigadosADependencia(String(id), dep.nome, dep.categoria, processos, { servicos, dependencias: catalogo });
   const slas = await _slasDaDependencia(db, String(id), dep, catalogo, ligados);
   return { success: true, ...slas };
 }
@@ -955,7 +994,8 @@ async function gerarDRP(db, data, ctx) {
   try {
     const procSnap = await db.collection(COLLECTION.processos).get();
     const todosProcessos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-    processosLigados = _processosLigadosADependencia(String(id), dep.nome, dep.categoria, todosProcessos);
+    const servicos = await _lerServicos(db);
+    processosLigados = _processosLigadosADependencia(String(id), dep.nome, dep.categoria, todosProcessos, catalogo.length ? { servicos, dependencias: catalogo } : null);
   } catch (e) { processosLigados = []; }
 
   const processosComTier = await Promise.all(processosLigados.map(async (p) => {
@@ -973,7 +1013,7 @@ async function gerarDRP(db, data, ctx) {
   const slasTexto = _slasTextoPrompt(slas);
 
   const processosImpactadosTexto = processosComTier.length
-    ? processosComTier.map((p) => `- ${p.processo} (${p.area || 'Área não informada'}) — ${p.tier}${p.descricao ? ' | Impacto: ' + p.descricao : ''}`).join('\n')
+    ? processosComTier.map((p) => `- ${p.processo} (${p.area || 'Área não informada'}) — ${p.tier}${p._origem ? ' | Ligação: ' + p._origem : ''}${p.descricao ? ' | Impacto: ' + p.descricao : ''}`).join('\n')
     : 'Nenhum processo de negócio vinculado a esta dependência na base.';
 
   // Estratégias de teste (lista nova) com fallback ao drpTestes antigo.

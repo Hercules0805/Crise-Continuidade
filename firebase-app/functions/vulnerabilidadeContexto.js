@@ -36,6 +36,21 @@ async function lerProcessosPorId(db) {
 }
 
 /**
+ * Servicos e dependencias: a cadeia Processo -> Servico -> componentes pela
+ * qual uma dependencia afetada chega ao processo (cadeiaDependencias.js).
+ */
+async function lerRede(db) {
+  const [srvSnap, depSnap] = await Promise.all([
+    db.collection('servicos').get(),
+    db.collection('dependencias').get(),
+  ]);
+  return {
+    servicos: srvSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())),
+    dependencias: depSnap.docs.map((d) => Object.assign({ id: d.id }, d.data())),
+  };
+}
+
+/**
  * { limiar, produtoNome, processosAfetados }. `cache` (opcional) evita reler
  * limiar e processos quando varias vulnerabilidades sao tratadas em sequencia.
  * Falha de leitura do produto/processos nao impede a decisao: segue sem eles.
@@ -57,10 +72,11 @@ async function contextoDaVulnerabilidade(db, v, cache) {
   if (temDeps) {
     try {
       if (!c.processosPorId) c.processosPorId = await lerProcessosPorId(db);
-      processosAfetados = vulnerabilidadeRisco.processosAfetados(v, c.processosPorId);
+      if (!c.rede) c.rede = await lerRede(db);
+      processosAfetados = vulnerabilidadeRisco.processosAfetados(v, c.processosPorId, c.rede);
     } catch (e) { /* segue sem a cadeia: impacto pela severidade */ }
   }
   return { limiar: c.limiar, produtoNome, processosAfetados };
 }
 
-module.exports = { lerLimiar, lerProcessosPorId, contextoDaVulnerabilidade };
+module.exports = { lerLimiar, lerProcessosPorId, lerRede, contextoDaVulnerabilidade };

@@ -35,7 +35,7 @@ async function carregar(perfis, extra) {
     },
   });
   ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
-    'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
+    'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = (m) => { window.__toasts = (window.__toasts || []).concat(m); };');
   return { w, doc: w.document, gravacoes };
@@ -177,7 +177,13 @@ test('servico: processos suportados + via dependencia, e o salvar grava limites 
   const g = gravacoes.find((x) => x.nome === 'salvarServico').arg;
   assert.strictEqual(g.rtoMin, 240);
   assert.strictEqual(g.mttrMin, 4320);
-  assert.deepStrictEqual(g.processoIds.map((p) => p.id), ['p1', 'p2']);
+  // O vinculo mora no processo (21/10/2026): o servico zera o processoIds
+  // antigo e cada processo ganha o item 'Serviços'.
+  assert.deepStrictEqual(g.processoIds, []);
+  const procs = gravacoes.filter((x) => x.nome === 'salvarProcesso').map((x) => x.arg);
+  assert.deepStrictEqual(procs.map((p) => p.id).sort(), ['p1', 'p2']);
+  procs.forEach((p) => assert.ok(p.dependenciaItens.some((it) => it.categoria === 'Serviços' && it.id === 's1'), p.id));
+  assert.ok(!('area' in procs[0]) && !('processo' in procs[0]), 'so as dependencias do processo, nada mais');
 });
 
 // ---- Relatorios de Servicos (tela propria no menu Servicos) ----

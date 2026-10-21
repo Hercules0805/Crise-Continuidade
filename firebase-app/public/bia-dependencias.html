@@ -70,13 +70,15 @@
     let PROCESSO_INFO = {};
     let CATALOGO = {};
     // Cada item vira {nome, id} -- id preenchido quando vinculado a um
-    // cadastro real (Fornecedores/Pessoas/Processos, ou uma das 7 categorias
-    // tecnicas de Dependencia), null quando e so texto digitado (Processos e
-    // a unica que nunca aceita isso -- ver addManual).
-    const DEPS = {
-      fornecedores: [], pessoas: [], instalacoes: [], processos: [],
-      api: [], bancodedados: [], infraestrutura: [], 'segurança': [], servidor: [], sistemas: [], outros: [],
-    };
+    // cadastro real, null quando e so texto digitado (Processos e Servicos
+    // nunca aceitam isso -- ver addManual).
+    // 21/10/2026: o processo aponta os 4 Ps e os Servicos. O tecnico granular
+    // (Banco, Servidor, API...) vem da composicao do Servico -- as 7
+    // categorias tecnicas sairam daqui; as que o processo ja tinha ficam
+    // gravadas (o servidor preserva) para a SI trocar pelo Servico.
+    const DEPS = { servicos: [], fornecedores: [], pessoas: [], instalacoes: [], processos: [] };
+    const SO_DA_LISTA = ['processos', 'servicos'];
+    let TECNICOS_LEGADOS = 0;
 
     function chaveDaCategoria(categoria) {
       const c = String(categoria || '').trim();
@@ -84,13 +86,7 @@
       if (c === 'Pessoas' || c === 'Pessoa') return 'pessoas';
       if (c === 'Instalações' || c === 'Instalação') return 'instalacoes';
       if (c === 'Processos Internos' || c === 'Processo Interno') return 'processos';
-      if (c === 'API') return 'api';
-      if (c === 'Banco de Dados') return 'bancodedados';
-      if (c === 'Infraestrutura') return 'infraestrutura';
-      if (c === 'Segurança') return 'segurança';
-      if (c === 'Servidor') return 'servidor';
-      if (c === 'Sistema' || c === 'Sistemas') return 'sistemas';
-      if (c === 'Outros') return 'outros';
+      if (c === 'Serviços' || c === 'Serviço') return 'servicos';
       return null;
     }
 
@@ -117,6 +113,7 @@
           data.dependenciaItens.forEach((it) => {
             const key = chaveDaCategoria(it.categoria);
             if (key && DEPS[key]) DEPS[key].push({ nome: it.nome, id: it.id || null });
+            else TECNICOS_LEGADOS++;
           });
         } else if (data.dependencias) {
           data.dependencias.split(',').map(s => s.trim()).filter(Boolean).forEach((nome) => {
@@ -124,10 +121,9 @@
               const achado = (CATALOGO[key] || []).find((d) => d.nome === nome);
               if (achado) { DEPS[key].push({ nome: achado.nome, id: achado.id || null }); return; }
             }
-            // Nao achou em nenhum catalogo -- nunca esconde o valor, so entra
-            // sem vinculo em Fornecedores (mesmo destino de sempre pra quem
-            // nao bate com nada).
-            DEPS.fornecedores.push({ nome, id: null });
+            // Nao achou nos 4 Ps/Servicos: e tecnico (ou solto). Nao vira mais
+            // um Fornecedor inventado -- fica como estava (o servidor preserva).
+            TECNICOS_LEGADOS++;
           });
         }
         renderForm();
@@ -202,21 +198,16 @@
           </div>
         </div>
 
-        ${renderCategoryCard('fornecedores', '2. Fornecedores e Parceiros', 'Quais empresas ou prestadores de serviço são essenciais para o seu processo funcionar?', 'Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado, empresa de telecom')}
-        ${renderCategoryCard('pessoas', '3. Pessoas-chave', 'Quem são as pessoas sem as quais o processo não funciona?', 'DBA (administrador de banco de dados), analista financeiro responsável, gerente aprovador, operador do sistema, técnico de infraestrutura')}
-        ${renderCategoryCard('instalacoes', '4. Instalações', 'Em quais locais físicos o processo acontece? (os 4 Ps do BIA: Pessoas, Instalações, Processos e Fornecedores/Tecnologia)', 'Sede, filial, escritório de atendimento, data center, site alternativo')}
-        ${renderCategoryCard('processos', '5. Processos Internos', 'O seu processo depende de algum outro processo da empresa funcionar antes?', 'Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente, emissão de NF')}
-        ${renderCategoryCard('api', '6. APIs e Integrações', 'Quais APIs ou integrações externas são essenciais para o processo?', 'API de pagamento (PIX/cartão), API de CEP, integração com Receita Federal, webhook de terceiros')}
-        ${renderCategoryCard('bancodedados', '7. Bancos de Dados', 'Quais bancos de dados o processo depende para funcionar?', 'PostgreSQL de produção, banco Oracle financeiro, réplica de leitura, data warehouse')}
-        ${renderCategoryCard('infraestrutura', '8. Infraestrutura e Utilidades', 'Quais recursos físicos ou de infraestrutura são indispensáveis?', 'Internet, energia elétrica (rede pública + UPS + gerador), climatização, switches e roteadores, cluster, telefonia, impressora fiscal')}
-        ${renderCategoryCard('segurança', '9. Segurança', 'Quais controles ou sistemas de segurança são indispensáveis?', 'Firewall, VPN, certificado digital, antivírus corporativo, controle de acesso')}
-        ${renderCategoryCard('servidor', '10. Servidores', 'Quais servidores físicos ou virtuais são essenciais para o processo?', 'Servidor de aplicação, servidor de arquivos, cluster de virtualização')}
-        ${renderCategoryCard('sistemas', '11. Sistemas e Aplicações', 'Quais softwares ou sistemas são necessários para executar o processo?', 'ERP Fortes, e-mail corporativo, Active Directory, sistema bancário, portal do cliente, Zabbix')}
-        ${renderCategoryCard('outros', '12. Outros', 'Algum outro recurso técnico essencial que não se encaixa nas categorias acima?', 'Qualquer recurso técnico não coberto pelas categorias anteriores')}
+        ${renderCategoryCard('servicos', '2. Serviços', 'Quais serviços de TI o seu processo usa para funcionar? Os servidores, bancos de dados e integrações por trás de cada serviço já estão cadastrados pela equipe de TI/Segurança — escolha só o serviço.', 'Portal do cliente, ERP, e-mail corporativo, emissão de NF-e, folha de pagamento')}
+        ${TECNICOS_LEGADOS ? `<div class="card"><p class="desc" style="margin:0;">ℹ️ Este processo tem ${TECNICOS_LEGADOS} recurso(s) técnico(s) ligado(s) diretamente (servidor, banco de dados...). Eles continuam registrados; a equipe de Segurança da Informação vai associá-los ao Serviço certo.</p></div>` : ''}
+        ${renderCategoryCard('fornecedores', '3. Fornecedores e Parceiros', 'Quais empresas ou prestadores de serviço são essenciais para o seu processo funcionar?', 'Provedor de internet, empresa de energia, gráfica, banco, transportadora, software terceirizado, empresa de telecom')}
+        ${renderCategoryCard('pessoas', '4. Pessoas-chave', 'Quem são as pessoas sem as quais o processo não funciona?', 'DBA (administrador de banco de dados), analista financeiro responsável, gerente aprovador, operador do sistema, técnico de infraestrutura')}
+        ${renderCategoryCard('instalacoes', '5. Instalações', 'Em quais locais físicos o processo acontece? (os 4 Ps do BIA: Pessoas, Instalações, Processos e Fornecedores/Tecnologia)', 'Sede, filial, escritório de atendimento, data center, site alternativo')}
+        ${renderCategoryCard('processos', '6. Processos Internos', 'O seu processo depende de algum outro processo da empresa funcionar antes?', 'Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente, emissão de NF')}
 
         <div class="card">
-          <h2>13. Observações (opcional)</h2>
-          <p class="desc">Algo mais que considere importante sobre as dependências do processo?</p>
+          <h2>7. Observações (opcional)</h2>
+          <p class="desc">Algo mais que considere importante sobre as dependências do processo? Não achou o serviço na lista? Descreva aqui (ex.: "usamos o sistema X no servidor Y").</p>
           <div class="campo">
             <textarea id="fObs" rows="3" placeholder="Ex: O processo depende de aprovação manual do diretor financeiro em valores acima de R$50k..."></textarea>
           </div>
@@ -260,7 +251,7 @@
       // Processos Internos so aceita vincular um Processo que ja existe --
       // sem campo de texto livre, pra nunca mais criar uma referencia
       // fantasma (nome digitado que nao vira um Processo de verdade).
-      const podeAdicionarLivre = key !== 'processos';
+      const podeAdicionarLivre = !SO_DA_LISTA.includes(key);
 
       return `<div class="card" id="card-${key}">
         <h2>${title}</h2>
@@ -278,13 +269,14 @@
               ${renderChipsHtml(key, catalogItems, selected)}
             </div>
           </div>
-        ` : (key === 'processos' ? '<p style="font-size:0.82em;color:#999;font-style:italic;">Nenhum outro processo cadastrado no sistema ainda.</p>' : '')}
+        ` : (key === 'processos' ? '<p style="font-size:0.82em;color:#999;font-style:italic;">Nenhum outro processo cadastrado no sistema ainda.</p>'
+          : key === 'servicos' ? '<p style="font-size:0.82em;color:#999;font-style:italic;">Nenhum serviço cadastrado ainda — use as Observações.</p>' : '')}
 
         ${podeAdicionarLivre ? `
         <div class="add-input-row">
           <input type="text" id="input-${key}" placeholder="Não encontrou? Digite o nome aqui..." onkeydown="if(event.key==='Enter'){event.preventDefault();addManual('${key}');}">
           <button onclick="addManual('${key}')">+ Adicionar</button>
-        </div>` : '<p style="font-size:0.78em;color:#999;margin-top:8px;">Só é possível vincular processos já cadastrados no sistema.</p>'}
+        </div>` : `<p style="font-size:0.78em;color:#999;margin-top:8px;">Só é possível vincular ${key === 'servicos' ? 'serviços' : 'processos'} já cadastrados no sistema.</p>`}
       </div>`;
     }
 
@@ -305,7 +297,7 @@
     }
 
     function addManual(category) {
-      if (category === 'processos') return; // sem criacao livre pra Processos Internos
+      if (SO_DA_LISTA.includes(category)) return; // sem criacao livre pra Processos Internos e Servicos
       const input = document.getElementById('input-' + category);
       const val = input.value.trim();
       if (!val) return;
@@ -351,13 +343,7 @@
         pessoas: JSON.stringify(DEPS.pessoas),
         instalacoes: JSON.stringify(DEPS.instalacoes),
         processos: JSON.stringify(DEPS.processos),
-        api: JSON.stringify(DEPS.api),
-        bancoDados: JSON.stringify(DEPS.bancodedados),
-        infraestrutura: JSON.stringify(DEPS.infraestrutura),
-        seguranca: JSON.stringify(DEPS['segurança']),
-        servidor: JSON.stringify(DEPS.servidor),
-        sistemas: JSON.stringify(DEPS.sistemas),
-        outros: JSON.stringify(DEPS.outros)
+        servicos: JSON.stringify(DEPS.servicos)
       };
 
       try {

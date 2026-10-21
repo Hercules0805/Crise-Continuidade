@@ -221,7 +221,7 @@ async function carregarTela(perfil, api) {
     },
     set: () => true,
   });
-  ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'vulnerabilidade-painel.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'app.js']
+  ['util.js', 'perfis.js', 'criticidade.js', 'cadeia-dependencias.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'vulnerabilidade-painel.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'app.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   await w.vulnerabilidadesPainel();
   return { w, doc: w.document, chamadas };
@@ -332,4 +332,21 @@ test('descreverFiltros: frase do escopo; sem filtro = Empresa inteira', () => {
   assert.ok(!VP.temFiltro({ produto: '', tipo: '' }));
   assert.strictEqual(VP.descreverFiltros({ produto: 'ERP', equipe: VP.SEM, severidadeMinima: 'Alta', detectadoDe: '2026-07-01', detectadoAte: '2026-09-30' }),
     'Produto: ERP · Equipe: sem equipe · Alta ou mais grave · Detectadas de 01/07/2026 até 30/09/2026');
+});
+
+// ---- Processo -> Servico -> componentes (21/10/2026) ----
+test('processosExpostos/acaoImediata com a rede: vulnerabilidade no Banco expoe o processo ligado so via Servico', () => {
+  const rede = {
+    servicos: [{ id: 's1', nome: 'Portal', dependenciaItens: [{ id: 'srv', nome: 'SRV-01', categoria: 'Servidor' }] }],
+    dependencias: [
+      { id: 'srv', nome: 'SRV-01', categoria: 'Servidor', componentes: [{ id: 'db', nome: 'Oracle', categoria: 'Banco de Dados' }] },
+      { id: 'db', nome: 'Oracle', categoria: 'Banco de Dados' },
+    ],
+  };
+  const processos = [{ id: 'p1', processo: 'Folha', area: 'RH', tierManual: 'Tier 1 (Crítico)', dependenciaItens: [{ categoria: 'Serviços', id: 's1', nome: 'Portal' }] }];
+  const vulns = [{ id: 'v1', status: 'Pendente', severidadeManual: 'Média', dependenciasAfetadas: [{ id: 'db', nome: 'Oracle' }] }];
+  assert.deepStrictEqual(VP.processosExpostos(vulns, processos, rede).processos.map((p) => p.id), ['p1']);
+  assert.deepStrictEqual(VP.processosExpostos(vulns, processos).processos, [], 'sem a rede, so o vinculo direto');
+  const acao = VP.acaoImediata(vulns, { processos, rede, hoje: '2026-10-21' });
+  assert.ok(acao.length && acao[0].processosTier1.length === 1, 'atinge processo Tier 1 pela cadeia');
 });

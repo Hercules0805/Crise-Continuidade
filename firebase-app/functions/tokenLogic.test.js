@@ -145,14 +145,14 @@ test('salvarDependenciasBIA cria catálogo, vincula por id e atualiza processo',
   const res = await WRITE_ACTIONS.salvarDependenciasBIA(db, {
     token: 'b1',
     fornecedores: JSON.stringify([{ nome: 'AWS', id: null }]),
-    sistemas: JSON.stringify([{ nome: 'ERP', id: null }]),
+    pessoas: JSON.stringify([{ nome: 'Ana', id: null }]),
     impacto: 'Parada total',
     rto: '2h',
   });
   assert.strictEqual(res.success, true);
 
   const deps = Object.values(db._store.dependencias).map((d) => d.nome).sort();
-  assert.deepStrictEqual(deps, ['AWS', 'ERP']);
+  assert.deepStrictEqual(deps, ['AWS', 'Ana']);
   const proc = db._store.processos['ti__backup'];
   assert.ok(proc.dependencia.includes('AWS'));
   assert.strictEqual(proc.descricao, 'Parada total');
@@ -199,32 +199,48 @@ test('salvarDependenciasBIA: Processos Internos nunca cria entrada no catálogo,
   assert.strictEqual(item.id, null, 'sem processo real correspondente, fica sem vinculo -- nunca vira entrada solta');
 });
 
-test('salvarDependenciasBIA cria itens nas 7 categorias técnicas (Componentes fundido em Dependências)', async () => {
+// 21/10/2026: o processo aponta o Servico; o tecnico granular vem da
+// composicao dele. O formulario nao envia mais as 7 categorias tecnicas.
+test('salvarDependenciasBIA: categorias tecnicas sao ignoradas (nao cria nada) e as ja gravadas no processo sao preservadas', async () => {
   const seed = baseSeed();
   seed.tokens['b6'] = { token: 'b6', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  seed.processos.ti__backup.dependenciaItens = [
+    { categoria: 'Banco de Dados', nome: 'Oracle', id: 'db-legado' },
+    { categoria: 'Fornecedores', nome: 'Antigo', id: 'f-antigo' },
+  ];
   const db = makeDb(seed);
-
   await WRITE_ACTIONS.salvarDependenciasBIA(db, {
     token: 'b6',
-    api: JSON.stringify([{ nome: 'API de Pagamentos', id: null }]),
     bancoDados: JSON.stringify([{ nome: 'PostgreSQL Prod', id: null }]),
-    infraestrutura: JSON.stringify([{ nome: 'Link de Internet', id: null }]),
-    seguranca: JSON.stringify([{ nome: 'Firewall Perimetral', id: null }]),
-    servidor: JSON.stringify([{ nome: 'SRV-01', id: null }]),
-    sistemas: JSON.stringify([{ nome: 'ERP Fortes', id: null }]),
-    outros: JSON.stringify([{ nome: 'Item Diverso', id: null }]),
+    fornecedores: JSON.stringify([{ nome: 'AWS', id: null }]),
   });
-
   const proc = db._store.processos['ti__backup'];
-  const porNome = Object.fromEntries(proc.dependenciaItens.map((it) => [it.nome, it.categoria]));
-  assert.strictEqual(porNome['API de Pagamentos'], 'API');
-  assert.strictEqual(porNome['PostgreSQL Prod'], 'Banco de Dados');
-  assert.strictEqual(porNome['Link de Internet'], 'Infraestrutura');
-  assert.strictEqual(porNome['Firewall Perimetral'], 'Segurança');
-  assert.strictEqual(porNome['SRV-01'], 'Servidor');
-  assert.strictEqual(porNome['ERP Fortes'], 'Sistemas');
-  assert.strictEqual(porNome['Item Diverso'], 'Outros');
-  assert.strictEqual(Object.keys(db._store.dependencias).length, 7);
+  const itens = proc.dependenciaItens.map((it) => [it.categoria, it.nome]);
+  assert.deepStrictEqual(itens, [['Fornecedores', 'AWS'], ['Banco de Dados', 'Oracle']], 'fornecedor antigo sai (o form o mostrou e ele foi tirado); tecnico legado fica');
+  assert.ok(!Object.values(db._store.dependencias).some((d) => d.nome === 'PostgreSQL Prod'), 'nao cria item tecnico');
+});
+
+test('salvarDependenciasBIA: Servicos so por id existente, sem duplicar e sem criar servico', async () => {
+  const seed = baseSeed();
+  seed.tokens['b7'] = { token: 'b7', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  seed.servicos = { s1: { nome: 'Portal' } };
+  const db = makeDb(seed);
+  await WRITE_ACTIONS.salvarDependenciasBIA(db, {
+    token: 'b7',
+    servicos: JSON.stringify([{ id: 's1', nome: 'x' }, { id: 's1', nome: 'Portal' }, { id: 'nao-existe', nome: 'Fantasma' }, { id: null, nome: 'Digitado' }]),
+  });
+  const proc = db._store.processos['ti__backup'];
+  assert.deepStrictEqual(proc.dependenciaItens, [{ categoria: 'Serviços', nome: 'Portal', id: 's1' }]);
+  assert.deepStrictEqual(Object.keys(db._store.servicos), ['s1']);
+});
+
+test('validarTokenBIA devolve os Servicos para escolha', async () => {
+  const seed = baseSeed();
+  seed.tokens['b8'] = { token: 'b8', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  seed.servicos = { s1: { nome: 'Portal', descricao: 'Portal do cliente' } };
+  const db = makeDb(seed);
+  const r = await READ_ACTIONS.validarTokenBIA(db, 'b8');
+  assert.deepStrictEqual(r.catalogo.servicos, [{ id: 's1', nome: 'Portal', empresa: 'Portal do cliente' }]);
 });
 
 test('validarTokenBIA exige prefixo _BIA_', async () => {

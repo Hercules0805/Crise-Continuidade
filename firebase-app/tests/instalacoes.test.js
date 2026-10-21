@@ -35,7 +35,7 @@ async function carregar(perfis, extra) {
     },
   });
   ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
-    'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
+    'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = (m) => { window.__toasts = (window.__toasts || []).concat(m); };');
   return { w, doc: w.document, gravacoes };
@@ -156,18 +156,18 @@ test('api: lê e grava os campos da instalação e a lotação; só o que vem no
 // ---- Etapa 3: Processo (BIA) e formulario do gestor ----
 test('Processo: linha Instalações sempre presente na aba de dependências, depois de Pessoas', () => {
   const src = fs.readFileSync(path.join(PUB, 'app.js'), 'utf8');
-  const linhas = src.split('\n').filter((l) => /\['Fornecedores', 'Pessoas', DEPENDENCIA_CATEGORIA_INSTALACAO, 'Processos Internos'/.test(l));
+  const linhas = src.split('\n').filter((l) => /\[CadeiaDependencias\.CATEGORIA_SERVICO, 'Fornecedores', 'Pessoas', DEPENDENCIA_CATEGORIA_INSTALACAO, 'Processos Internos'\]/.test(l));
   assert.strictEqual(linhas.length, 2, 'aba BIA do drawer e edicao em lote');
 });
 
 test('formulario do gestor (bia-dependencias.html): cartao 4. Instalações, chave e payload', () => {
   const html = fs.readFileSync(path.join(PUB, 'bia-dependencias.html'), 'utf8');
-  assert.match(html, /renderCategoryCard\('instalacoes', '4\. Instalações'/);
+  assert.match(html, /renderCategoryCard\('instalacoes', '5\. Instalações'/);
   assert.match(html, /if \(c === 'Instalações' \|\| c === 'Instalação'\) return 'instalacoes';/);
   assert.match(html, /instalacoes: JSON\.stringify\(DEPS\.instalacoes\)/);
-  assert.match(html, /13\. Observações/);
+  assert.match(html, /7\. Observações/);
   const numeros = [...html.matchAll(/renderCategoryCard\('[^']+', '(\d+)\./g)].map((m) => Number(m[1]));
-  assert.deepStrictEqual(numeros, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], 'numeracao continua');
+  assert.deepStrictEqual(numeros, [2, 3, 4, 5, 6], 'numeracao continua (Servicos + 4 Ps; o tecnico vem do Servico desde 21/10/2026)');
 });
 
 // ---- Etapa 4: lotacao da Pessoa ----

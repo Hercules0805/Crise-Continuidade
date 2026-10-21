@@ -33,6 +33,7 @@
 
 const historicoRisco = require('./historicoRisco');
 const escalaRisco = require('./escalaRisco');
+const cadeiaDependencias = require('./cadeiaDependencias');
 
 /** A partir daqui a vulnerabilidade abre risco. Bandas NVD: 7.0 = piso de "Alta". */
 const LIMIAR_CVSS_PADRAO = 7.0;
@@ -178,17 +179,32 @@ function severidadeDaVulnerabilidade(v) {
 }
 
 /**
- * Processos de negocio afetados: os que dependem (dependenciaItens[].id) de
- * alguma dependencia afetada pela vulnerabilidade. `processosPorId` ja vem com
+ * Processos de negocio afetados: os que dependem de alguma dependencia
+ * afetada pela vulnerabilidade -- direto (dependenciaItens[].id) ou, com
+ * `rede` = { servicos, dependencias }, por Servico e componentes. `processosPorId` ja vem com
  * score/avaliado unidos do BIA (historicoRisco.resolverProcessosComBia).
  * Ordem: maior Tier primeiro, depois nome.
  */
-function processosAfetados(v, processosPorId) {
+function processosAfetados(v, processosPorId, rede) {
   const ids = new Set((Array.isArray(v && v.dependenciasAfetadas) ? v.dependenciasAfetadas : [])
     .map((d) => d && d.id).filter(Boolean).map(String));
   if (!ids.size) return [];
-  return Object.values(processosPorId || {})
-    .filter((p) => p && Array.isArray(p.dependenciaItens) && p.dependenciaItens.some((d) => d && d.id && ids.has(String(d.id))))
+  const processos = Object.values(processosPorId || {}).filter(Boolean);
+  let afetados;
+  if (rede) {
+    // Pela cadeia inteira (21/10/2026): o processo aponta o Servico, e o
+    // Banco/Servidor afetado esta na composicao dele -- sem isso a
+    // vulnerabilidade deixaria de pesar no processo ligado so via Servico.
+    const porId = new Map();
+    ids.forEach((id) => {
+      cadeiaDependencias.processosQueDependemDe(id, { processos, servicos: rede.servicos, dependencias: rede.dependencias })
+        .forEach((x) => porId.set(String(x.processo.id), x.processo));
+    });
+    afetados = [...porId.values()];
+  } else {
+    afetados = processos.filter((p) => Array.isArray(p.dependenciaItens) && p.dependenciaItens.some((d) => d && d.id && ids.has(String(d.id))));
+  }
+  return afetados
     .map((p) => ({ id: p.id, processo: p.processo || '', area: p.area || '', tier: historicoRisco.tierDoProcesso(p) }))
     .sort((a, b) => ((ORDEM_TIER[b.tier] || 0) - (ORDEM_TIER[a.tier] || 0)) || a.processo.localeCompare(b.processo, 'pt-BR'));
 }

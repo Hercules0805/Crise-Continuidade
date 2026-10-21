@@ -334,19 +334,43 @@
     return !!(f && (f.servico || f.processo || f.status || f.categoria));
   }
 
-  function _passa(servico, av, f) {
+  /**
+   * Processos que o servico suporta, {id, nome}: os que apontam o servico
+   * (item 'Serviços' em processo.dependenciaItens, onde o vinculo mora desde
+   * 21/10/2026) e, ate a migracao, o legado servico.processoIds. Mesma regra
+   * de CadeiaDependencias.processosDoServico.
+   */
+  function processosDoServico(servico, processos) {
+    var saida = [], visto = {};
+    function por(id, nome) {
+      var k = String(id);
+      if (visto[k]) return;
+      visto[k] = true;
+      saida.push({ id: k, nome: _texto(nome) });
+    }
+    (processos || []).forEach(function (p) {
+      var aponta = (Array.isArray(p && p.dependenciaItens) ? p.dependenciaItens : []).some(function (it) {
+        return it && (it.categoria === 'Serviços' || it.categoria === 'Serviço') && String(it.id) === String(servico.id);
+      });
+      if (aponta) por(p.id, p.processo);
+    });
+    (servico && servico.processoIds || []).forEach(function (p) { if (p && p.id !== undefined && p.id !== null) por(p.id, p.nome); });
+    return saida;
+  }
+
+  function _passa(servico, av, f, processos) {
     if (!f) return true;
     if (f.servico && String(servico.id) !== String(f.servico)) return false;
-    if (f.processo && !(servico.processoIds || []).some(function (p) { return String(p.id) === String(f.processo); })) return false;
+    if (f.processo && !processosDoServico(servico, processos).some(function (p) { return p.id === String(f.processo); })) return false;
     if (f.status && av.status !== f.status) return false;
     if (f.categoria && !nosDependencia(av.grafo).some(function (n) { return n.categoria === f.categoria; })) return false;
     return true;
   }
 
   /** [{ servico, avaliacao }] dos servicos no escopo, do mais grave ao OK e por nome. */
-  function filtrarServicos(servicos, deps, filtros) {
+  function filtrarServicos(servicos, deps, filtros, processos) {
     return (servicos || []).map(function (s) { return { servico: s, avaliacao: avaliarServico(s, deps) }; })
-      .filter(function (x) { return _passa(x.servico, x.avaliacao, filtros); })
+      .filter(function (x) { return _passa(x.servico, x.avaliacao, filtros, processos); })
       .sort(function (a, b) {
         return (ORDEM_STATUS.indexOf(a.avaliacao.status) - ORDEM_STATUS.indexOf(b.avaliacao.status)) ||
           _texto(a.servico.nome).localeCompare(_texto(b.servico.nome), 'pt-BR');
@@ -372,7 +396,7 @@
   function dadosRelatorio(servicos, deps, processos, filtros) {
     var nomeProc = {};
     (processos || []).forEach(function (p) { nomeProc[String(p.id)] = [p.area, p.processo].filter(Boolean).join(' · '); });
-    var escopo = filtrarServicos(servicos, deps, filtros);
+    var escopo = filtrarServicos(servicos, deps, filtros, processos);
     var porStatus = {};
     ORDEM_STATUS.forEach(function (k) { porStatus[k] = 0; });
     var excedem = { rto: 0, rpo: 0, mttr: 0 };
@@ -402,7 +426,7 @@
       linhas.push({
         id: s.id, nome: _texto(s.nome), status: av.status, rotuloStatus: av.rotuloStatus,
         dependencias: nosDependencia(g).length,
-        processos: (s.processoIds || []).map(function (p) { return nomeProc[String(p.id)] || _texto(p.nome); }),
+        processos: processosDoServico(s, processos).map(function (p) { return nomeProc[p.id] || p.nome; }),
         atributos: atributos,
       });
     });
@@ -535,10 +559,10 @@
   function dadosMapa(servicos, deps, processos, filtros) {
     var nomeProc = {};
     (processos || []).forEach(function (p) { nomeProc[String(p.id)] = [p.area, p.processo].filter(Boolean).join(' · '); });
-    var escopo = filtrarServicos(servicos, deps, filtros);
+    var escopo = filtrarServicos(servicos, deps, filtros, processos);
     var mapas = escopo.map(function (x) {
       var av = x.avaliacao;
-      var procs = (x.servico.processoIds || []).map(function (p) { return { id: String(p.id), nome: nomeProc[String(p.id)] || _texto(p.nome) }; });
+      var procs = processosDoServico(x.servico, processos).map(function (p) { return { id: p.id, nome: nomeProc[p.id] || p.nome }; });
       var atributos = {};
       ATRIBUTOS.forEach(function (a) {
         var at = av.atributos[a];
@@ -571,6 +595,7 @@
     destaquesMapa: destaquesMapa,
     temFiltro: temFiltro,
     filtrarServicos: filtrarServicos,
+    processosDoServico: processosDoServico,
     descreverFiltros: descreverFiltros,
     dadosRelatorio: dadosRelatorio,
     destaques: destaques,

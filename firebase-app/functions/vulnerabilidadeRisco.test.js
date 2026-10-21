@@ -506,3 +506,18 @@ test('o risco nasce com a Data de identificacao = data de deteccao da vulnerabil
   assert.strictEqual(decidir({ vulnerabilidade: vuln({ dataDeteccao: '2026-02-03' }) }).risco.dataIdentificacao, '2026-02-03');
   assert.strictEqual(decidir({ vulnerabilidade: vuln({ dataDeteccao: '' }) }).risco.dataIdentificacao, HOJE.slice(0, 10), 'sem deteccao: hoje');
 });
+
+// ---- Processo -> Servico -> componentes (21/10/2026) ----
+test('processosAfetados com a rede: vulnerabilidade no Banco atinge o processo ligado so via Servico', () => {
+  const rede = {
+    servicos: [{ id: 's1', nome: 'Portal', dependenciaItens: [{ id: 'srv', nome: 'SRV-01', categoria: 'Servidor' }] }],
+    dependencias: [
+      { id: 'srv', nome: 'SRV-01', categoria: 'Servidor', componentes: [{ id: 'db', nome: 'Oracle', categoria: 'Banco de Dados' }] },
+      { id: 'db', nome: 'Oracle', categoria: 'Banco de Dados' },
+    ],
+  };
+  const procs = { p1: { id: 'p1', processo: 'Folha', area: 'RH', tierManual: 'Tier 1 (Crítico)', dependenciaItens: [{ categoria: 'Serviços', id: 's1', nome: 'Portal' }] } };
+  const v = { dependenciasAfetadas: [{ id: 'db', nome: 'Oracle' }] };
+  assert.deepStrictEqual(VR.processosAfetados(v, procs, rede).map((p) => p.id), ['p1']);
+  assert.deepStrictEqual(VR.processosAfetados(v, procs), [], 'sem a rede, so o vinculo direto (comportamento antigo)');
+});

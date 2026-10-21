@@ -23,7 +23,12 @@ const COLLECTION = {
   respostas: 'respostas_bia',
   tokens: 'tokens',
   dependencias: 'dependencias',
+  servicos: 'servicos',
 };
+
+// O que o processo aponta direto no BIA (21/10/2026): os 4 Ps e os Servicos.
+// O tecnico granular vem pela composicao do Servico.
+const CATEGORIAS_DIRETAS_PROCESSO = ['Serviços', 'Serviço', 'Fornecedores', 'Fornecedor', 'Pessoas', 'Pessoa', 'Instalações', 'Instalação', 'Processos Internos', 'Processo Interno'];
 
 class TokenError extends Error {}
 
@@ -145,9 +150,10 @@ async function validarTokenBIA(db, token) {
   const procSnap = procId ? await db.collection(COLLECTION.processos).doc(procId).get() : null;
   const p = procSnap && procSnap.exists ? procSnap.data() : {};
 
-  const [depSnap, procsSnap] = await Promise.all([
+  const [depSnap, procsSnap, srvSnap] = await Promise.all([
     db.collection(COLLECTION.dependencias).get(),
     db.collection(COLLECTION.processos).get(),
+    db.collection(COLLECTION.servicos).get(),
   ]);
   const catalogoPorCategoria = {};
   depSnap.docs.forEach((d) => {
@@ -165,6 +171,12 @@ async function validarTokenBIA(db, token) {
   catalogoPorCategoria.processos = procsSnap.docs
     .filter((d) => d.id !== procId)
     .map((d) => ({ id: d.id, nome: d.data().processo || '', empresa: d.data().area || '' }));
+  // Servicos (21/10/2026): o processo aponta o Servico; o tecnico granular
+  // (Banco, Servidor...) vem da composicao dele. So escolha da lista -- o
+  // formulario nunca cria servico.
+  catalogoPorCategoria.servicos = srvSnap.docs
+    .map((d) => ({ id: d.id, nome: d.data().nome || '', empresa: String(d.data().descricao || '').slice(0, 80) }))
+    .filter((s) => s.nome);
 
   return {
     area,
@@ -322,20 +334,18 @@ async function salvarDependenciasBIA(db, data) {
   // As 7 categorias tecnicas (API/Banco de Dados/Infraestrutura/Segurança/
   // Servidor/Sistema/Outros) absorveram o antigo catalogo de Componentes do
   // Servico -- mesmas 7 opcoes que Cadastros > Dependencias usa.
+  // 21/10/2026: o formulario so manda os 4 Ps e os Servicos -- as 7
+  // categorias tecnicas sairam (vem da composicao do Servico). Itens tecnicos
+  // que o processo ja tinha (legado) sao preservados abaixo, nunca apagados
+  // por um envio que nem os mostrou.
   const grupos = {
     Fornecedores: parseMaybeJson(data.fornecedores, []),
     Pessoas: parseMaybeJson(data.pessoas, []),
     // Instalações (21/10/2026): o "P" de Premises dos 4 Ps do BIA.
     'Instalações': parseMaybeJson(data.instalacoes, []),
     'Processos Internos': parseMaybeJson(data.processos, []),
-    API: parseMaybeJson(data.api, []),
-    'Banco de Dados': parseMaybeJson(data.bancoDados, []),
-    Infraestrutura: parseMaybeJson(data.infraestrutura, []),
-    'Segurança': parseMaybeJson(data.seguranca, []),
-    Servidor: parseMaybeJson(data.servidor, []),
-    Sistemas: parseMaybeJson(data.sistemas, []),
-    Outros: parseMaybeJson(data.outros, []),
   };
+  const servicosEnviados = parseMaybeJson(data.servicos, []);
 
   const depSnap = await db.collection(COLLECTION.dependencias).get();
   const porNomeCategoria = new Map();
@@ -374,10 +384,30 @@ async function salvarDependenciasBIA(db, data) {
       dependenciaItens.push({ categoria, nome, id });
     }
   }
-  const todasDeps = [...new Set(dependenciaItens.map((it) => it.nome))];
+  // Servicos: so por id de servico que existe (nunca cria).
+  if (Array.isArray(servicosEnviados) && servicosEnviados.length) {
+    const srvSnap = await db.collection(COLLECTION.servicos).get();
+    const porId = new Map(srvSnap.docs.map((d) => [d.id, d.data() || {}]));
+    const vistos = new Set();
+    servicosEnviados.forEach((item) => {
+      const id = item && item.id ? String(item.id) : '';
+      if (!id || !porId.has(id) || vistos.has(id)) return;
+      vistos.add(id);
+      dependenciaItens.unshift({ categoria: 'Serviços', nome: String(porId.get(id).nome || item.nome || ''), id });
+    });
+  }
 
   // Atualizar o processo (só campos presentes).
   const procId = await _acharProcessoId(db, area, processo);
+  if (procId) {
+    const atualSnap = await db.collection(COLLECTION.processos).doc(procId).get();
+    const atual = atualSnap.exists ? (atualSnap.data() || {}) : {};
+    (Array.isArray(atual.dependenciaItens) ? atual.dependenciaItens : [])
+      .filter((it) => it && !CATEGORIAS_DIRETAS_PROCESSO.includes(it.categoria))
+      .forEach((it) => dependenciaItens.push(it));
+  }
+  const todasDeps = [...new Set(dependenciaItens.map((it) => it.nome))];
+
   if (procId) {
     const patch = {};
     if (todasDeps.length) {

@@ -28,11 +28,11 @@
  */
 (function (root, factory) {
   if (typeof module === 'object' && module.exports) {
-    module.exports = factory(require('./vulnerabilidade-severidade.js'), require('./criticidade.js'));
+    module.exports = factory(require('./vulnerabilidade-severidade.js'), require('./criticidade.js'), require('./cadeia-dependencias.js'));
   } else {
-    root.VulnerabilidadePainel = factory(root.VulnerabilidadeSeveridade, root.Criticidade);
+    root.VulnerabilidadePainel = factory(root.VulnerabilidadeSeveridade, root.Criticidade, root.CadeiaDependencias);
   }
-}(typeof self !== 'undefined' ? self : this, function (Sev, Criticidade) {
+}(typeof self !== 'undefined' ? self : this, function (Sev, Criticidade, Cadeia) {
   'use strict';
 
   var SEVERIDADES = ['Crítica', 'Alta', 'Média', 'Baixa'];
@@ -339,13 +339,26 @@
 
   // ------------------------------------------------- 3. acao imediata
 
-  /** Processos de negocio que dependem de alguma dependencia afetada (mesma cadeia de vulnerabilidadeRisco.processosAfetados). */
-  function processosDaVulnerabilidade(v, processos) {
+  /**
+   * Processos de negocio que dependem de alguma dependencia afetada (mesma
+   * cadeia de vulnerabilidadeRisco.processosAfetados). Com `rede` =
+   * { servicos, dependencias }, pela cadeia inteira (Processo -> Servico ->
+   * componentes); sem ela, so o vinculo direto.
+   */
+  function processosDaVulnerabilidade(v, processos, rede) {
     var ids = {};
     (Array.isArray(v && v.dependenciasAfetadas) ? v.dependenciasAfetadas : []).forEach(function (d) {
       if (d && d.id) ids[String(d.id)] = true;
     });
     if (!Object.keys(ids).length) return [];
+    if (rede && Cadeia) {
+      var achados = {};
+      Object.keys(ids).forEach(function (id) {
+        Cadeia.processosQueDependemDe(id, { processos: processos, servicos: rede.servicos, dependencias: rede.dependencias })
+          .forEach(function (x) { achados[String(x.processo.id)] = true; });
+      });
+      return (processos || []).filter(function (p) { return p && achados[String(p.id)]; });
+    }
     return (processos || []).filter(function (p) {
       return p && Array.isArray(p.dependenciaItens) && p.dependenciaItens.some(function (d) { return d && d.id && ids[String(d.id)]; });
     });
@@ -369,7 +382,7 @@
       var prioridade = PESO[s] || 0;
       if (s === 'Crítica') { motivos.push(MOTIVO.CRITICA); prioridade += 100; }
       if (s === 'Alta' && v.exploitDisponivel === 'Sim') { motivos.push(MOTIVO.EXPLOIT); prioridade += 50; }
-      var t1 = processosDaVulnerabilidade(v, c.processos).filter(function (p) {
+      var t1 = processosDaVulnerabilidade(v, c.processos, c.rede).filter(function (p) {
         return Criticidade.tierDoProcesso(p) === Criticidade.TIER.T1;
       });
       if (t1.length) { motivos.push(MOTIVO.TIER1); prioridade += 60; }
@@ -462,11 +475,11 @@
    * critico primeiro (Tier, depois indice). E `porTier`: quantos processos
    * expostos em cada Tier.
    */
-  function processosExpostos(vulns, processos) {
+  function processosExpostos(vulns, processos, rede) {
     var mapa = {};
     (vulns || []).filter(emAberto).forEach(function (v) {
       var s = severidade(v);
-      processosDaVulnerabilidade(v, processos).forEach(function (p) {
+      processosDaVulnerabilidade(v, processos, rede).forEach(function (p) {
         var g = mapa[p.id] || (mapa[p.id] = {
           id: p.id, processo: p.processo || '', area: p.area || '', tier: Criticidade.tierDoProcesso(p),
           vulnerabilidades: [], severidades: [], porSeveridade: _contagemVazia(),
@@ -625,11 +638,11 @@
       mttrAtual: mttr(vulns, j.atual.de, j.atual.ate),
       mttrAnterior: mttr(vulns, j.anterior.de, j.anterior.ate),
       movimento: movimento(vulns, j.atual.de, j.atual.ate),
-      acao: acaoImediata(vulns, { hoje: hoje, processos: c.processos || [], limiar: c.limiar, riscoAberto: c.riscoAberto }),
+      acao: acaoImediata(vulns, { hoje: hoje, processos: c.processos || [], rede: c.rede, limiar: c.limiar, riscoAberto: c.riscoAberto }),
       cumprimento: cumprimentoPrazo(vulns, j.atual.de, j.atual.ate),
       atraso: atraso(vulns, hoje),
       equipes: porEquipe(vulns, j.atual.de, j.atual.ate, hoje),
-      processosExpostos: processosExpostos(vulns, c.processos || []),
+      processosExpostos: processosExpostos(vulns, c.processos || [], c.rede),
       dados: exposicaoDados(vulns),
       semVinculo: semVinculo(vulns),
     };

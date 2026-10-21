@@ -48,7 +48,7 @@ async function carregar(perfis, extra) {
     },
   });
   ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
-    'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
+    'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = (m) => { window.__toasts = (window.__toasts || []).concat(m); };');
   await w.processos();
@@ -135,9 +135,9 @@ test('DRP: gestor ve a situacao, mas nao previa nem abrir (conteudo e de Admin/S
 });
 
 test('BIA: dependencia cujo cadastro foi removido vira chip cinza "(removida)"; Vinculos mostra servico e instalacao', async () => {
-  const { w, doc } = await carregar(['seguranca']);
+  const { w, doc } = await carregar(['seguranca'], { getProcessos: [{ ...P1, dependenciaItens: P1.dependenciaItens.concat([{ id: 'sumiu-f', nome: 'Fornecedor Velho', categoria: 'Fornecedores' }]) }, P2] });
   w.editarProcesso('p1');
-  const chip = [...doc.querySelectorAll('#fDependenciaTabela .dep-tag-item')].find((el) => /Sistema Antigo/.test(el.textContent));
+  const chip = [...doc.querySelectorAll('#fDependenciaTabela .dep-tag-item')].find((el) => /Fornecedor Velho/.test(el.textContent));
   assert.ok(chip.classList.contains('dep-tag-item--removida'));
   assert.match(chip.textContent, /\(removida\)/);
   await esperar();
@@ -146,7 +146,51 @@ test('BIA: dependencia cujo cadastro foi removido vira chip cinza "(removida)"; 
   assert.match(vinc, /Sede/);
   assert.match(vinc, /1 pessoa lotada/);
   assert.match(vinc, /sem instalação alternativa/);
-  assert.match(vinc, /1 dependência da aba BIA aponta para cadastro removido/);
+  assert.match(vinc, /2 dependências da aba BIA apontam para cadastro removido/);
+});
+
+// ---- Hierarquia Processo -> Servico -> componentes (21/10/2026) ----
+
+test('BIA: linhas so dos Servicos e dos 4 Ps; Servico mostra o que contem; tecnico direto vai para o bloco legado', async () => {
+  const { w, doc } = await carregar(['seguranca']);
+  w.editarProcesso('p1');
+  const tabela = doc.getElementById('fDependenciaTabela');
+  const linhas = [...tabela.querySelectorAll('tbody > tr > td:first-child')].map((td) => td.textContent.replace(/\s+/g, ' ').trim());
+  const esperadas = ['Serviços', 'Fornecedores', 'Pessoas', 'Instalações', 'Processos Internos'];
+  assert.strictEqual(linhas.length, esperadas.length);
+  esperadas.forEach((cat, i) => assert.ok(linhas[i].includes(cat), cat + ' em ' + linhas[i]));
+  // Portal RH suporta o processo pelo processoIds legado -> aparece como disponivel? Nao: ainda nao esta no processo.
+  assert.match(tabela.textContent, /Portal RH/, 'servico disponivel para escolha');
+  const legado = tabela.querySelector('.legado-tecnico');
+  assert.ok(legado, 'bloco de legado');
+  assert.match(legado.textContent, /Ligações técnicas diretas \(legado\) — 2/);
+  assert.match(legado.textContent, /SRV-01/);
+  assert.match(legado.textContent, /Sistema Antigo/);
+  assert.match(legado.textContent, /Nenhum Serviço contém este item/, 'SRV-01 nao esta em nenhum servico do catalogo');
+});
+
+test('BIA: "Trocar por Servico X" tira o item tecnico e poe o Servico que o contem; salvar leva no payload', async () => {
+  const PORTAL = { id: 's9', nome: 'Folha Web', dependenciaItens: [ref(SRV)] };
+  const { w, doc, gravacoes } = await carregar(['seguranca'], { getServicos: [PORTAL] });
+  w.editarProcesso('p1');
+  const botao = [...doc.querySelectorAll('.legado-tecnico button')].find((b) => /Trocar por Folha Web/.test(b.textContent));
+  assert.ok(botao, 'sugestao do servico que contem o SRV-01');
+  w.eval(botao.getAttribute('onclick')); // jsdom (outside-only) nao roda onclick inline
+  const tabela = doc.getElementById('fDependenciaTabela');
+  assert.match(tabela.querySelector('.servico-resumo-bia').textContent, /Folha Web · SRV-01, Oracle/);
+  assert.doesNotMatch(tabela.querySelector('.legado-tecnico').textContent, /SRV-01/);
+  await w.salvarProcesso();
+  const g = gravacoes.find((x) => x.nome === 'salvarProcesso').arg;
+  assert.ok(g.dependenciaItens.some((it) => it.categoria === 'Serviços' && it.id === 's9'));
+  assert.ok(!g.dependenciaItens.some((it) => it.id === 'srv'));
+});
+
+test('BIA: categoria tecnica nao entra mais pelo processo', async () => {
+  const { w } = await carregar(['seguranca']);
+  w.editarProcesso('p2');
+  w.selecionarDependenciaCategoria('Oracle', 'Banco de Dados', 'db');
+  assert.strictEqual(w._dependenciaSelecionadas.length, 0);
+  assert.match((w.__toasts || []).join(' '), /entram pelo Serviço/);
 });
 
 test('detalhe somente leitura mostra MTD (campo do formulario), nao o antigo MTPD', async () => {

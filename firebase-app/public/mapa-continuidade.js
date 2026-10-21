@@ -36,6 +36,7 @@
   var CATEGORIAS_PESSOA = ['Pessoas', 'Pessoa'];
   var CATEGORIAS_PROCESSO = ['Processos Internos', 'Processo Interno'];
   var CATEGORIAS_INSTALACAO = ['Instalações', 'Instalação'];
+  var CATEGORIAS_SERVICO = ['Serviços', 'Serviço'];
 
   function _texto(v) {
     return v === null || v === undefined ? '' : String(v).trim();
@@ -81,7 +82,7 @@
   // Relacoes, no sentido de quem parte do processo, do caminho tecnico ate o
   // que o sustenta: servico que o suporta, o que ele/o servico usa,
   // componentes abaixo e a instalacao onde estao.
-  var REL_CAMINHO_TECNICO = ['depende de', 'suportado pelo serviço', 'usa', 'componente abaixo', 'instalada em'];
+  var REL_CAMINHO_TECNICO = ['depende de', 'depende de (direto, legado)', 'suportado pelo serviço', 'usa', 'componente abaixo', 'instalada em'];
 
   function _alcancaveis(adj, origem, rels) {
     var visto = {}, fila = [origem], saida = [];
@@ -234,14 +235,29 @@
       var id = procPorId[String(p.id)];
       if (!id) return;
       ligar(id, areaId(p.area), 'pertence à área', 'processo da área');
+      var tecnicasDiretas = 0;
       _lista(p.dependenciaItens).forEach(function (it) {
         if (!it) return;
         if (CATEGORIAS_PROCESSO.indexOf(it.categoria) >= 0) {
           ligar(id, procPorId[String(it.id)], 'depende do processo', 'processo dependente');
           return;
         }
-        ligar(id, resolverDep(it), 'depende de', 'processo dependente');
+        // Processo -> Servico (21/10/2026): o vinculo mora no processo; o
+        // servico.processoIds antigo continua ligando la embaixo, sem repetir.
+        if (CATEGORIAS_SERVICO.indexOf(it.categoria) >= 0) {
+          ligar(id, it.id ? 'servico:' + it.id : null, 'suportado pelo serviço', 'suporta');
+          return;
+        }
+        var alvo = resolverDep(it);
+        // Tecnico granular direto no processo e legado: devia vir por um Servico.
+        if (alvo && tipoDoId(alvo) === 'dependencia') {
+          tecnicasDiretas++;
+          ligar(id, alvo, 'depende de (direto, legado)', 'processo dependente (legado)');
+          return;
+        }
+        ligar(id, alvo, 'depende de', 'processo dependente');
       });
+      if (tecnicasDiretas) nos[id].lacunas.push(tecnicasDiretas + (tecnicasDiretas > 1 ? ' ligações técnicas diretas' : ' ligação técnica direta'));
       _lista(p.bcpContatos).forEach(function (pid) { ligar(id, pessoaPor(pid), 'contato de crise', 'contato de crise do processo'); });
     });
 
@@ -454,98 +470,8 @@
     return { nos: nos, arestas: arestas };
   }
 
-  /**
-   * Aba DRP do Processo (21/10/2026): o que tem (ou deveria ter) DRP e
-   * sustenta este processo. Mesmo caminho do mapa -- dependenciaItens do
-   * processo, os servicos que o suportam (servico.processoIds) e o que eles
-   * usam, e os componentes abaixo de cada item, em qualquer profundidade.
-   * Pessoas e Processos Internos ficam de fora (nao tem DRP). Fornecedores e
-   * Instalacoes entram, como na tela de DRP.
-   *
-   * dados = { processo, dependencias, servicos }
-   * Devolve [{ id, nome, categoria, dep|null, ausente, direta, origens:[texto] }]
-   * na ordem: diretas, via servico, componentes; depois por nome.
-   */
-  function dependenciasDoProcesso(dados) {
-    var d = dados || {};
-    var p = d.processo || {};
-    var deps = d.dependencias || [];
-    var porId = {}, porNome = {};
-    var repetidos = _nomesRepetidos(deps);
-    deps.forEach(function (x) {
-      if (!x || !x.id) return;
-      porId[String(x.id)] = x;
-      var n = normalizar(x.nome);
-      if (!repetidos.porCategoria[n + '|' + x.categoria]) porNome[n + '|' + x.categoria] = x;
-      if (!repetidos.geral[n]) porNome[n] = x;
-    });
-    function semDrp(categoria) {
-      return CATEGORIAS_PESSOA.indexOf(categoria) >= 0 || CATEGORIAS_PROCESSO.indexOf(categoria) >= 0;
-    }
-    function resolver(ref) {
-      if (!ref) return null;
-      var temId = ref.id !== undefined && ref.id !== null && ref.id !== '';
-      if (temId) return porId[String(ref.id)] || null;
-      if (_texto(ref.categoria)) return porNome[normalizar(ref.nome) + '|' + ref.categoria] || null;
-      return porNome[normalizar(ref.nome)] || null;
-    }
-
-    var itens = {}, ordem = [];
-    var PESO = { direta: 0, servico: 1, componente: 2 };
-    function registrar(ref, tipoOrigem, texto) {
-      var dep = resolver(ref);
-      var categoria = dep ? dep.categoria : _texto(ref && ref.categoria);
-      if (semDrp(categoria)) return null;
-      var chave = dep ? 'id:' + dep.id : 'nome:' + normalizar(ref && ref.nome) + '|' + categoria;
-      if (chave === 'nome:|') return null;
-      var it = itens[chave];
-      if (!it) {
-        it = itens[chave] = {
-          id: dep ? String(dep.id) : '', nome: dep ? _texto(dep.nome) : _texto(ref.nome), categoria: categoria,
-          dep: dep, ausente: !dep, direta: false, peso: PESO[tipoOrigem], origens: [],
-        };
-        ordem.push(chave);
-      }
-      if (tipoOrigem === 'direta') it.direta = true;
-      it.peso = Math.min(it.peso, PESO[tipoOrigem]);
-      if (it.origens.indexOf(texto) < 0) it.origens.push(texto);
-      return it;
-    }
-
-    var fila = [];
-    _lista(p.dependenciaItens).forEach(function (ref) {
-      var it = registrar(ref, 'direta', 'Direta (BIA)');
-      if (it && it.dep) fila.push(it.dep);
-    });
-    (d.servicos || []).forEach(function (s) {
-      var suporta = (s.processoIds || []).some(function (x) { return x && String(x.id) === String(p.id); });
-      if (!suporta) return;
-      (s.dependenciaItens || []).forEach(function (ref) {
-        var it = registrar(ref, 'servico', 'Via serviço ' + (_texto(s.nome) || '(sem nome)'));
-        if (it && it.dep) fila.push(it.dep);
-      });
-    });
-    var expandido = {};
-    while (fila.length) {
-      var pai = fila.shift();
-      if (expandido[pai.id]) continue;
-      expandido[pai.id] = true;
-      (pai.componentes || []).forEach(function (ref) {
-        var it = registrar(ref, 'componente', 'Componente de ' + (_texto(pai.nome) || '(sem nome)'));
-        if (it && it.dep && !expandido[it.dep.id]) fila.push(it.dep);
-      });
-    }
-
-    return ordem.map(function (k) { return itens[k]; })
-      .sort(function (a, b) { return (a.peso - b.peso) || a.nome.localeCompare(b.nome, 'pt-BR'); })
-      .map(function (it) {
-        return { id: it.id, nome: it.nome, categoria: it.categoria, dep: it.dep, ausente: it.ausente, direta: it.direta, origens: it.origens };
-      });
-  }
-
   return {
     TIPOS: TIPOS,
-    dependenciasDoProcesso: dependenciasDoProcesso,
     elementosGrafo: elementosGrafo,
     ROTULO_TIPO: ROTULO_TIPO,
     ROTULO_TIPO_SINGULAR: ROTULO_TIPO_SINGULAR,

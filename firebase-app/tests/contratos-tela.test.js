@@ -50,7 +50,7 @@ async function carregar(perfis, extra) {
     },
   });
   ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
-    'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
+    'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   // Pergunta "Há alterações não salvas" (16/10/2026): o teste escolhe a resposta (padrão Salvar) e conta as perguntas.
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = (m) => { window.__toasts = (window.__toasts || []).concat(m); }; window.__respostaFechar = "salvar"; window.__perguntasFechar = 0; _perguntarAlteracoesNaoSalvas = async () => { window.__perguntasFechar++; return window.__respostaFechar; };');
