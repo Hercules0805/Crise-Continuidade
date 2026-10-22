@@ -504,3 +504,10 @@ a.btn { text-decoration: none; }
 #mapaConteudo.mapa--tela-cheia .mm-arvore { max-height: none; height: calc(100vh - 230px); }
 #mapaConteudo.mapa--tela-cheia #mapaCyCompleto { height: calc(100vh - 270px) !important; min-height: 360px !important; }
 #mapaConteudo.mapa--tela-cheia #mapaPainel { max-height: calc(100vh - 200px); overflow: auto; }
+
+/* Grupos por tipo recolhidos por padrão (22/10/2026): o cabeçalho é botão. */
+button.mm-grupo__rotulo { display: block; background: none; border: none; padding: 4px 6px; margin: 6px 0 2px -6px; border-radius: 6px; cursor: pointer; text-align: left; font-family: var(--font-sans); }
+button.mm-grupo__rotulo:hover { background: var(--brand-tint); }
+.mm-grupo__rotulo .mm-grupo__seta { display: inline-block; width: 12px; color: inherit; }
+.mm-grupo__rotulo .mm-grupo__total { color: #999; font-weight: 600; }
+.mm-grupo__rotulo .mm-grupo__lacunas { color: #c62828; font-weight: 700; text-transform: none; letter-spacing: 0; }

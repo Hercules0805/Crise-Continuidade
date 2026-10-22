@@ -9084,7 +9084,7 @@ window.mapaExplorarDe = (id) => {
   if (!m || !m.indice.nos[id]) return;
   if (m.cy) { m.cy.destroy(); m.cy = null; m.cyModo = null; }
   m.modo = 'explorar';
-  m.exploracao = { raiz: id, abertos: new Set([id]), gruposAbertos: new Set() };
+  m.exploracao = { raiz: id, abertos: new Set([id]), gruposAbertos: new Set(), gruposExpandidos: new Set() };
   m.selecionado = id;
   _mapaAtualizarEndereco();
   _renderMapa();
@@ -9119,11 +9119,32 @@ window.mapaAlternarNo = (chave) => {
   if (e.abertos.has(chave)) {
     // Recolher tira também o que estava aberto abaixo dele.
     [...e.abertos].forEach((k) => { if (k === chave || k.startsWith(chave + '>')) e.abertos.delete(k); });
-    [...e.gruposAbertos].forEach((k) => { if (k.startsWith(chave + '|') || k.startsWith(chave + '>')) e.gruposAbertos.delete(k); });
+    [e.gruposAbertos, e.gruposExpandidos].forEach((conj) => [...conj].forEach((k) => { if (k.startsWith(chave + '|') || k.startsWith(chave + '>')) conj.delete(k); }));
   } else {
     e.abertos.add(chave);
   }
   m.selecionado = chave;
+  _renderMapa();
+};
+
+/** Opções de montarArvore a partir do estado da exploração. */
+function _opcoesArvoreMapa(m) {
+  return { gruposAbertos: m.exploracao.gruposAbertos, gruposExpandidos: m.exploracao.gruposExpandidos };
+}
+
+/** Cabeçalho do grupo (Processos, Pessoas…): abre ou recolhe os cartões daquele tipo. */
+window.mapaAlternarGrupo = (chave, tipo) => {
+  const m = window._mapa;
+  if (!m || !m.exploracao) return;
+  const e = m.exploracao;
+  const k = chave + '|' + tipo;
+  if (e.gruposExpandidos.has(k)) {
+    e.gruposExpandidos.delete(k);
+    // O que estava aberto dentro do grupo sai junto.
+    [...e.abertos].forEach((a) => { if (a.startsWith(chave + '>' + tipo + ':')) e.abertos.delete(a); });
+  } else {
+    e.gruposExpandidos.add(k);
+  }
   _renderMapa();
 };
 
@@ -9140,16 +9161,24 @@ window.mapaRecolherTudo = () => {
   if (!m || !m.exploracao) return;
   m.exploracao.abertos = new Set([m.exploracao.raiz]);
   m.exploracao.gruposAbertos = new Set();
+  m.exploracao.gruposExpandidos = new Set();
   m.selecionado = m.exploracao.raiz;
   _renderMapa();
 };
 
-/** Abre de uma vez os itens do último nível que ainda têm vínculos fechados. */
+/**
+ * Abre o próximo nível: primeiro os grupos ainda recolhidos dos itens abertos;
+ * quando não houver nenhum, os itens do último nível que têm vínculos fechados.
+ */
 window.mapaAbrirProximoNivel = () => {
   const m = window._mapa;
   if (!m || !m.exploracao) return;
-  const arvore = MapaContinuidade.montarArvore(m.indice, m.exploracao.raiz, m.exploracao.abertos, [...m.tipos], { gruposAbertos: m.exploracao.gruposAbertos });
-  MapaContinuidade.nosDaArvore(arvore).filter((n) => !n.aberto && n.nFilhos > 0).forEach((n) => m.exploracao.abertos.add(n.chave));
+  const arvore = MapaContinuidade.montarArvore(m.indice, m.exploracao.raiz, m.exploracao.abertos, [...m.tipos], _opcoesArvoreMapa(m));
+  const nos = MapaContinuidade.nosDaArvore(arvore);
+  const fechados = [];
+  nos.forEach((n) => n.grupos.forEach((g) => { if (!g.expandido) fechados.push(n.chave + '|' + g.tipo); }));
+  if (fechados.length) fechados.forEach((k) => m.exploracao.gruposExpandidos.add(k));
+  else nos.filter((n) => !n.aberto && n.nFilhos > 0).forEach((n) => m.exploracao.abertos.add(n.chave));
   _renderMapa();
 };
 
@@ -9213,7 +9242,7 @@ function _renderMapa() {
     document.getElementById('mapaPainel').innerHTML = _htmlPainelMapaResumo(m.indice);
     return;
   }
-  const arvore = MC.montarArvore(m.indice, m.exploracao.raiz, m.exploracao.abertos, [...m.tipos], { gruposAbertos: m.exploracao.gruposAbertos });
+  const arvore = MC.montarArvore(m.indice, m.exploracao.raiz, m.exploracao.abertos, [...m.tipos], _opcoesArvoreMapa(m));
   m.arvore = arvore;
   const raiz = m.indice.nos[m.exploracao.raiz];
   document.getElementById('mapaTrilha').innerHTML = `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
@@ -9226,7 +9255,7 @@ function _renderMapa() {
     </div>`;
   canvas.innerHTML = `<div class="mm-arvore" role="tree" aria-label="Vínculos de ${esc(raiz.nome)}">${_htmlNoArvoreMapa(arvore.raiz, true)}</div>`;
   legenda.innerHTML = `${_htmlLegendaMapa()}
-    <div style="font-size:0.74em;color:#999;padding:2px 4px;">▸ abre os vínculos do item (o número diz quantos) · ▾ recolhe · duplo clique no cartão faz o mesmo · clique mostra os detalhes ao lado.</div>`;
+    <div style="font-size:0.74em;color:#999;padding:2px 4px;">▸ abre os vínculos do item (o número diz quantos), agrupados por tipo · clique no tipo para ver os itens · ▾ recolhe · duplo clique no cartão faz o mesmo · clique mostra os detalhes ao lado.</div>`;
   const chaves = new Set(MC.nosDaArvore(arvore).map((n) => n.chave));
   if (!chaves.has(m.selecionado)) m.selecionado = arvore.raiz.chave;
   _renderPainelExplorar();
@@ -9261,12 +9290,14 @@ function _htmlNoArvoreMapa(no, ehRaiz) {
     </div>`;
   if (!no.aberto) return `<div class="mm-no">${cartao}</div>`;
   const grupos = no.grupos.length
-    ? no.grupos.map((g) => `<div class="mm-grupo" style="--cor:${_COR_TIPO_MAPA[g.tipo]};">
-        <div class="mm-grupo__rotulo">${_ICONE_TIPO_MAPA[g.tipo]} ${esc(g.rotulo)} <span>(${g.total})</span></div>
-        <div class="mm-itens">
+    ? no.grupos.map((g) => `<div class="mm-grupo${g.expandido ? ' mm-grupo--aberto' : ''}" style="--cor:${_COR_TIPO_MAPA[g.tipo]};">
+        <button type="button" class="mm-grupo__rotulo" onclick="mapaAlternarGrupo('${chaveJs}','${g.tipo}')" aria-expanded="${g.expandido}" title="${g.expandido ? 'Recolher' : 'Mostrar'} ${esc(g.rotulo.toLowerCase())}">
+          <span class="mm-grupo__seta">${g.expandido ? '▾' : '▸'}</span> ${_ICONE_TIPO_MAPA[g.tipo]} ${esc(g.rotulo)} <span class="mm-grupo__total">(${g.total})</span>${g.lacunas ? ` <span class="mm-grupo__lacunas">· ${g.lacunas} com lacuna</span>` : ''}
+        </button>
+        ${g.expandido ? `<div class="mm-itens">
           ${g.nos.map((f) => _htmlNoArvoreMapa(f, false)).join('')}
           ${g.ocultos ? `<button type="button" class="mm-mais" onclick="mapaMostrarMais('${chaveJs}','${g.tipo}')">mostrar mais ${g.ocultos}</button>` : ''}
-        </div>
+        </div>` : ''}
       </div>`).join('')
     : `<div class="mm-vazio">Nenhum outro vínculo${m.tipos.size < MC.TIPOS.length ? ' com os tipos selecionados' : ''}.</div>`;
   return `<div class="mm-no mm-no--aberto">${cartao}<div class="mm-filhos" role="group">${grupos}</div></div>`;

@@ -113,6 +113,15 @@ test('inicio: pontos de partida (Tier 1 e lacunas) e o resumo do mapa', async ()
 test('explorar: arvore abre na raiz com o 1o nivel por tipo, relacao com o pai, lacuna e o endereco', async () => {
   const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('processo:p1');
+  // Grupos por tipo comecam recolhidos: so os cabecalhos.
+  assert.ok(!cartao(doc, 'processo:p1>servico:s1'), 'cartoes so com o grupo aberto');
+  assert.ok([...doc.querySelectorAll('#mapaCanvas button.mm-grupo__rotulo')].every((b) => b.getAttribute('aria-expanded') === 'false'));
+  assert.match(txt(doc.getElementById('mapaCanvas')), /Dependências \(1\) · 1 com lacuna/);
+  w.mapaAlternarGrupo('processo:p1', 'servico');
+  assert.ok(cartao(doc, 'processo:p1>servico:s1'), 'abriu o grupo de Servicos');
+  w.mapaAlternarGrupo('processo:p1', 'servico');
+  assert.ok(!cartao(doc, 'processo:p1>servico:s1'), 'e recolheu');
+  w.mapaAbrirProximoNivel(); // abre todos os grupos
   const raiz = cartao(doc, 'processo:p1');
   assert.ok(raiz.classList.contains('mm-cartao--raiz'));
   assert.ok(raiz.classList.contains('mm-cartao--lacuna'));
@@ -136,7 +145,9 @@ test('explorar: arvore abre na raiz com o 1o nivel por tipo, relacao com o pai, 
 test('explorar: ▸ abre os vinculos a direita, ▾ recolhe (com o que estava aberto abaixo); o caminho nao volta como filho', async () => {
   const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('processo:p1');
+  w.mapaAbrirProximoNivel();
   w.mapaAlternarNo('processo:p1>dependencia:infra');
+  w.mapaAbrirProximoNivel(); // grupos do Cluster
   assert.ok(chavesNaArvore(doc).includes('processo:p1>dependencia:infra>dependencia:db'), 'Oracle abaixo do Cluster');
   assert.ok(!chavesNaArvore(doc).includes('processo:p1>dependencia:infra>processo:p1'), 'nao volta ao processo');
   assert.ok(chavesNaArvore(doc).includes('processo:p1>dependencia:infra>servico:s1'), 'mesmo item em outro ramo');
@@ -145,12 +156,14 @@ test('explorar: ▸ abre os vinculos a direita, ▾ recolhe (com o que estava ab
   w.mapaAlternarNo('processo:p1>dependencia:infra');
   assert.ok(!chavesNaArvore(doc).includes('processo:p1>dependencia:infra>dependencia:db'));
   assert.ok(!w._mapa.exploracao.abertos.has('processo:p1>dependencia:infra>dependencia:db'), 'recolheu em cascata');
+  assert.ok(![...w._mapa.exploracao.gruposExpandidos].some((k) => k.startsWith('processo:p1>dependencia:infra')), 'e esqueceu os grupos abaixo');
   assert.ok(cartao(doc, 'processo:p1>dependencia:infra'), 'o proprio item fica');
 });
 
 test('explorar: clique seleciona e mostra o painel com Abrir vinculos, Comecar daqui e "Tambem ligado a"', async () => {
   const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('processo:p1');
+  w.mapaAbrirProximoNivel();
   w.mapaClicarNo('processo:p1>servico:s1');
   assert.ok(cartao(doc, 'processo:p1>servico:s1').classList.contains('mm-cartao--selecionado'));
   const painel = doc.getElementById('mapaPainel');
@@ -170,12 +183,16 @@ test('explorar: grupo grande mostra 8 e "mostrar mais"; Abrir proximo nivel e Re
   const muitos = Array.from({ length: 11 }, (_, k) => ({ id: 'pp' + k, area: 'Financeiro', processo: 'Proc ' + String(k).padStart(2, '0') }));
   const { w, doc } = await carregar(['admin'], { getProcessos: PROCESSOS.concat(muitos) });
   w.mapaExplorarDe('area:financeiro');
+  w.mapaAlternarGrupo('area:financeiro', 'processo');
   const procs = () => chavesNaArvore(doc).filter((k) => k.split('>').length === 2 && k.endsWith(k.split('>')[1]) && k.split('>')[1].startsWith('processo:'));
   assert.strictEqual(procs().length, 8);
   assert.match(txt(doc.getElementById('mapaCanvas')), /mostrar mais 5/);
   w.mapaMostrarMais('area:financeiro', 'processo');
   assert.strictEqual(procs().length, 13);
-  w.mapaAbrirProximoNivel();
+  w.mapaAbrirProximoNivel(); // 1o: os grupos ainda fechados (Pessoas)
+  assert.ok(!chavesNaArvore(doc).some((k) => k.split('>').length === 3), 'grupos antes dos itens');
+  w.mapaAbrirProximoNivel(); // 2o: os itens
+  w.mapaAbrirProximoNivel(); // 3o: os grupos deles
   assert.ok(chavesNaArvore(doc).some((k) => k.split('>').length === 3), 'abriu o nivel seguinte');
   w.mapaRecolherTudo();
   assert.ok(!chavesNaArvore(doc).some((k) => k.split('>').length === 3));
@@ -184,6 +201,7 @@ test('explorar: grupo grande mostra 8 e "mostrar mais"; Abrir proximo nivel e Re
 test('explorar: filtros por tipo tiram o grupo (a raiz fica)', async () => {
   const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('processo:p1');
+  w.mapaAbrirProximoNivel();
   w.mapaAlternarTipo('pessoa');
   assert.ok(!idsNaArvore(doc).some((id) => id.startsWith('pessoa:')));
   w.mapaAlternarTipo('processo');
@@ -202,8 +220,9 @@ test('busca leva a explorar o item escolhido', async () => {
 });
 
 test('deep link #mapa?no= abre explorando o item', async () => {
-  const { doc } = await carregar(['admin'], {}, '#mapa?no=servico%3As1');
+  const { w, doc } = await carregar(['admin'], {}, '#mapa?no=servico%3As1');
   assert.match(txt(doc.getElementById('mapaTrilha')), /Início › Portal/);
+  w.mapaAbrirProximoNivel();
   assert.ok(cartao(doc, 'servico:s1>dependencia:infra'));
 });
 
@@ -221,6 +240,7 @@ test('TI: sem contratos (nem chama a API), aviso, e "Abrir cadastro" so onde ve 
 test('admin ve contratos; abrir cadastro do servico navega e abre o drawer quando a tela carrega', async () => {
   const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('dependencia:db');
+  w.mapaAbrirProximoNivel();
   assert.match(txt(cartao(doc, 'dependencia:db>contrato:c1')), /CT-0001/);
   // Como no navegador: a troca de hash dispara o route() (hashchange).
   w._perfilCarregado = true;
@@ -310,6 +330,7 @@ test('visao completa: filtros por tipo refazem o grafo; deep link ?modo=completo
 test('cartoes na cor da familia: fundo claro e borda na cor do tipo; raiz cheia; lacuna e selecionado se destacam', async () => {
   const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('dependencia:db');
+  w.mapaAbrirProximoNivel();
   const contrato = cartao(doc, 'dependencia:db>contrato:c1');
   assert.match(contrato.getAttribute('style'), /--cor:#5d4037;/);
   assert.match(contrato.getAttribute('style'), new RegExp(`--fundo:${w._corClaraMapa('#5d4037')};`));
@@ -317,6 +338,7 @@ test('cartoes na cor da familia: fundo claro e borda na cor do tipo; raiz cheia;
   const raiz = cartao(doc, 'dependencia:db');
   assert.match(raiz.getAttribute('style'), /--cor:#00838f;--fundo:#00838f;/, 'raiz cheia na cor do tipo');
   w.mapaExplorarDe('servico:s1');
+  w.mapaAbrirProximoNivel();
   assert.match(cartao(doc, 'servico:s1>pessoa:pAna').getAttribute('style'), /--fundo:#e6efe6;/);
   assert.ok(cartao(doc, 'servico:s1>processo:p1').classList.contains('mm-cartao--lacuna'));
   w.mapaClicarNo('servico:s1>pessoa:pAna');

@@ -218,6 +218,7 @@ test('mapa (Explorar) numa Instalação: pessoas lotadas, processos, o que ela h
   });
   await ctx.w.mapaContinuidade();
   ctx.w.mapaExplorarDe('instalacao:sede');
+  ctx.w.mapaAbrirProximoNivel(); // grupos por tipo comecam recolhidos
   const arvore = ctx.doc.getElementById('mapaCanvas').textContent.replace(/\s+/g, ' ');
   assert.match(arvore, /pessoa lotada.*Ana/);
   assert.match(arvore, /contingência.*Filial RJ/);
@@ -227,6 +228,7 @@ test('mapa (Explorar) numa Instalação: pessoas lotadas, processos, o que ela h
   assert.match(painel, /Endereço\s*Av\. Paulista, 1000/);
   assert.match(painel, /Contingência\s*Filial RJ/);
   ctx.w.mapaExplorarDe('instalacao:dc');
+  ctx.w.mapaAbrirProximoNivel();
   assert.match(ctx.doc.getElementById('mapaCanvas').textContent, /SRV-01/);
   assert.match(ctx.doc.getElementById('mapaPainel').textContent, /Sem instalação alternativa/);
   assert.match(ctx.doc.getElementById('mapaTipos').textContent, /Instalações/);

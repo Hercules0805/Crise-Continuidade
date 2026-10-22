@@ -238,10 +238,12 @@ test('instalacao dentro de instalacao (gravado antes da restricao) nao vira "ins
 });
 
 // ---- Explorar (22/10/2026): mind map em arvore ----
+// Grupos por tipo comecam recolhidos; nestes testes, todos abertos.
+const TODOS_GRUPOS = { gruposExpandidos: { has: () => true } };
 test('arvore: abre a raiz com os vinculos agrupados por tipo; o caminho nao volta como filho; numero do botao', () => {
   const i = idx();
   const raiz = 'processo:p1';
-  const a = MC.montarArvore(i, raiz, new Set([raiz]), MC.TIPOS);
+  const a = MC.montarArvore(i, raiz, new Set([raiz]), MC.TIPOS, TODOS_GRUPOS);
   assert.strictEqual(a.raiz.chave, raiz);
   assert.ok(a.raiz.aberto);
   const tipos = a.raiz.grupos.map((g) => g.tipo);
@@ -252,7 +254,7 @@ test('arvore: abre a raiz com os vinculos agrupados por tipo; o caminho nao volt
   assert.ok(!servico.aberto);
   assert.ok(servico.nFilhos > 0);
   // Abrir o servico: o processo (no caminho) nao reaparece; infra aparece de novo (outro ramo).
-  const b = MC.montarArvore(i, raiz, new Set([raiz, 'processo:p1>servico:s1']), MC.TIPOS);
+  const b = MC.montarArvore(i, raiz, new Set([raiz, 'processo:p1>servico:s1']), MC.TIPOS, TODOS_GRUPOS);
   const s1 = b.raiz.grupos.find((g) => g.tipo === 'servico').nos[0];
   const ids = s1.grupos.flatMap((g) => g.nos.map((n) => n.id));
   assert.ok(!ids.includes('processo:p1'));
@@ -277,9 +279,9 @@ test('arvore: grupo grande mostra 8 (lacunas primeiro) e diz quantos faltam; abe
 test('arvore: filtro de tipo some com o grupo; ligacoes cruzadas so com outros ramos (fora pai e filhos)', () => {
   const i = idx();
   const raiz = 'processo:p1';
-  const semPessoa = MC.montarArvore(i, raiz, new Set([raiz]), MC.TIPOS.filter((t) => t !== 'pessoa'));
+  const semPessoa = MC.montarArvore(i, raiz, new Set([raiz]), MC.TIPOS.filter((t) => t !== 'pessoa'), TODOS_GRUPOS);
   assert.ok(!semPessoa.raiz.grupos.some((g) => g.tipo === 'pessoa'));
-  const a = MC.montarArvore(i, raiz, new Set([raiz]), MC.TIPOS);
+  const a = MC.montarArvore(i, raiz, new Set([raiz]), MC.TIPOS, TODOS_GRUPOS);
   // servico s1 e infra sao irmaos (filhos do processo) e ligados entre si: cruzada.
   const cruz = MC.ligacoesCruzadas(i, a, 'processo:p1>servico:s1');
   const infra = cruz.find((c) => c.id === 'dependencia:infra');
@@ -288,4 +290,23 @@ test('arvore: filtro de tipo some com o grupo; ligacoes cruzadas so com outros r
   assert.deepStrictEqual(infra.rels, ['usa']);
   assert.ok(!cruz.some((c) => c.id === 'processo:p1'), 'o pai nao conta');
   assert.deepStrictEqual(MC.caminhoDaChave('processo:p1>servico:s1'), ['processo:p1', 'servico:s1']);
+});
+
+test('arvore: grupos recolhidos por padrao (sem nos, com total e lacunas do grupo inteiro); grupo unico abre sozinho', () => {
+  const i = idx();
+  const raiz = 'processo:p1';
+  const a = MC.montarArvore(i, raiz, new Set([raiz]), MC.TIPOS);
+  assert.ok(a.raiz.grupos.length > 1);
+  a.raiz.grupos.forEach((g) => { assert.strictEqual(g.expandido, false, g.tipo); assert.deepStrictEqual(g.nos, []); assert.ok(g.total > 0); });
+  assert.strictEqual(a.total, 1, 'so a raiz desenhada');
+  const dep = a.raiz.grupos.find((g) => g.tipo === 'dependencia');
+  assert.strictEqual(dep.lacunas, 1, 'Cluster sem DRP');
+  const b = MC.montarArvore(i, raiz, new Set([raiz]), MC.TIPOS, { gruposExpandidos: new Set(['processo:p1|servico']) });
+  assert.strictEqual(b.raiz.grupos.find((g) => g.tipo === 'servico').nos.length, 1);
+  assert.deepStrictEqual(b.raiz.grupos.find((g) => g.tipo === 'pessoa').nos, []);
+  // So o tipo Processo visivel: Beto tem um unico grupo, que ja abre.
+  const unico = MC.montarArvore(i, 'pessoa:pBeto', new Set(['pessoa:pBeto']), ['processo']);
+  assert.strictEqual(unico.raiz.grupos.length, 1);
+  assert.strictEqual(unico.raiz.grupos[0].expandido, true, 'grupo unico ja aberto');
+  assert.strictEqual(unico.raiz.grupos[0].nos[0].id, 'processo:p1');
 });

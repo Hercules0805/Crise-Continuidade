@@ -408,6 +408,8 @@
       var mostrados = aberto ? todos : todos.slice(0, limite);
       return {
         tipo: g.tipo, rotulo: g.rotulo, total: todos.length, ocultos: todos.length - mostrados.length,
+        // Sobre o grupo inteiro (nao so os mostrados): o cabecalho recolhido avisa.
+        lacunas: todos.filter(function (i) { return i.lacunas.length > 0; }).length,
         itens: mostrados.map(function (i) {
           return { id: i.id, nome: i.nome, sub: i.sub, tipo: g.tipo, rels: i.rels, lacunas: i.lacunas,
             nFilhos: _contarFilhos(indice, caminho.concat([i.id]), tipos) };
@@ -418,7 +420,7 @@
 
   /**
    * Arvore aberta a partir da raiz. No: { id, chave, tipo, nome, sub, lacunas,
-   * relComPai, nFilhos, aberto, grupos:[{ tipo, rotulo, total, ocultos, nos:[no] }] }.
+   * relComPai, nFilhos, aberto, grupos:[{ tipo, rotulo, total, ocultos, lacunas, expandido, nos:[no] }] }.
    * Devolve { raiz: no, total } -- total = itens desenhados.
    */
   function montarArvore(indice, raiz, abertos, tipos, opcoes) {
@@ -431,10 +433,15 @@
       var chave = chaveDoCaminho(caminho);
       total++;
       var aberto = !!(abertos && abertos.has && abertos.has(chave)) && caminho.length <= maxProf;
-      var grupos = aberto ? filhosNaArvore(indice, caminho, tipos, op).map(function (g) {
-        return { tipo: g.tipo, rotulo: g.rotulo, total: g.total, ocultos: g.ocultos,
-          nos: g.itens.map(function (i) { return no(caminho.concat([i.id]), i.rels); }) };
-      }) : [];
+      // Grupos por tipo recolhidos por padrao (22/10/2026): so mostram os
+      // cartoes quando estao em `gruposExpandidos` -- ou quando sao o unico
+      // grupo do no (um clique a mais nao faria sentido).
+      var filhos = aberto ? filhosNaArvore(indice, caminho, tipos, op) : [];
+      var grupos = filhos.map(function (g) {
+        var expandido = filhos.length === 1 || !!(op.gruposExpandidos && op.gruposExpandidos.has && op.gruposExpandidos.has(chave + '|' + g.tipo));
+        return { tipo: g.tipo, rotulo: g.rotulo, total: g.total, ocultos: g.ocultos, lacunas: g.lacunas, expandido: expandido,
+          nos: expandido ? g.itens.map(function (i) { return no(caminho.concat([i.id]), i.rels); }) : [] };
+      });
       return { id: id, chave: chave, tipo: n.tipo, nome: n.nome, sub: n.sub, lacunas: n.lacunas, relComPai: relComPai || [],
         nFilhos: _contarFilhos(indice, caminho, tipos), aberto: aberto, grupos: grupos };
     }
