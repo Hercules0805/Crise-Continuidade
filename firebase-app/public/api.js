@@ -1831,6 +1831,11 @@ async function _salvarRisco(r) {
     }
   });
   data.atualizadoEm = new Date().toISOString();
+  // Quem gravou (22/10/2026): o aviso por e-mail separa o que uma pessoa fez
+  // (e-mail na hora) do que a automacao fez (resumo diario). `r.automacao`
+  // ('indicador') marca a gravacao feita pelo sistema em nome do usuario.
+  const automacao = String(r.automacao || '').trim();
+  data.atualizadoPor = automacao ? `automacao:${automacao}` : (window.USER_EMAIL || '').toLowerCase();
 
   if (r.id) {
     await _db.collection(COLLECTION.riscos).doc(String(r.id)).set(data, { merge: true });
@@ -1838,6 +1843,7 @@ async function _salvarRisco(r) {
   }
   data.criadoEm = data.atualizadoEm;
   data.criadoPor = (window.USER_EMAIL || '').toLowerCase();
+  if (automacao) data.criadoPelaAutomacao = true;
   const ref = await _db.collection(COLLECTION.riscos).add(data);
   return { success: true, id: ref.id };
 }
@@ -2257,6 +2263,11 @@ const _CONFIG_NOTIFICACOES_PADRAO = {
   responderPara: '',
   grupos: { prazos: true, renovacaoReajuste: true, resumoMensal: true },
   destinatarios: { gestor: true, area: true, operadores: true },
+  // Riscos registrados/encerrados (22/10/2026) -- functions/notificacoesRisco.js.
+  riscos: {
+    novo: true, encerrado: true, resumoAutomaticos: true,
+    destinatarios: { responsavel: true, area: true, seguranca: true },
+  },
   // SMTP (16/10/2026: SendGrid). Usuario e senha ficam nos segredos do Firebase.
   servidor: { provedor: 'sendgrid', host: '', porta: null, remetenteEmail: '' },
 };
@@ -2276,6 +2287,14 @@ function _servidorNotificacoes(sv) {
   };
 }
 
+/** Bloco `riscos` da configuracao; `bools(obj, padrao)` decide o que falta. */
+function _riscosNotificacoes(r, bools) {
+  const p = _CONFIG_NOTIFICACOES_PADRAO.riscos;
+  const x = r || {};
+  const { destinatarios, ...eventos } = p;
+  return Object.assign(bools(x, eventos), { destinatarios: bools(x.destinatarios, destinatarios) });
+}
+
 async function _lerConfigNotificacoes() {
   const snap = await _db.collection(COLLECTION.configNotificacoes).doc('contratos').get();
   const d = snap.exists ? (snap.data() || {}) : {};
@@ -2287,6 +2306,7 @@ async function _lerConfigNotificacoes() {
     responderPara: d.responderPara || '',
     grupos: bools(d.grupos, p.grupos),
     destinatarios: bools(d.destinatarios, p.destinatarios),
+    riscos: _riscosNotificacoes(d.riscos, (obj, padrao) => bools(obj, padrao)),
     servidor: _servidorNotificacoes(d.servidor),
     atualizadoEm: d.atualizadoEm || '',
     atualizadoPor: d.atualizadoPor || '',
@@ -2307,6 +2327,8 @@ async function _salvarConfigNotificacoes(c) {
     responderPara: resp,
     grupos: Object.fromEntries(Object.keys(p.grupos).map((k) => [k, !!(c.grupos || {})[k]])),
     destinatarios: Object.fromEntries(Object.keys(p.destinatarios).map((k) => [k, !!(c.destinatarios || {})[k]])),
+    // Sem o bloco no payload, fica o padrao (ligado) -- nao desliga por omissao.
+    riscos: _riscosNotificacoes(c.riscos, (obj, padrao) => Object.fromEntries(Object.keys(padrao).map((k) => [k, typeof (obj || {})[k] === 'boolean' ? obj[k] : padrao[k]]))),
     servidor: _servidorNotificacoes(sv),
     atualizadoEm: new Date().toISOString(),
     atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),

@@ -26,6 +26,7 @@ const painelVulnerabilidades = require('./painelVulnerabilidades');
 const retratoRisco = require('./retratoRisco');
 const contratoCiclo = require('./contratoCiclo');
 const notificacoes = require('./notificacoes');
+const notificacoesRisco = require('./notificacoesRisco');
 const { criarEnviador } = require('./transporteEmail');
 const {
   READ_ACTIONS: APP_READ,
@@ -354,6 +355,8 @@ exports.riscoDeFornecedor = onDocumentCreated(
           criadoEm: agora,
           atualizadoEm: agora,
           criadoPor: String(avaliacao.avaliadoPor || ''),
+          // Marca para o aviso por e-mail: risco da automacao vai no resumo diario.
+          criadoPelaAutomacao: true,
         }));
         logger.info('riscoDeFornecedor: risco aberto', { fornecedorId, nota: avaliacao.nota });
         return;
@@ -363,7 +366,7 @@ exports.riscoDeFornecedor = onDocumentCreated(
         const lote = db.batch();
         decisao.ids.forEach((id) => {
           lote.set(db.collection('riscos').doc(id),
-            Object.assign({}, decisao.patch, { atualizadoEm: new Date().toISOString() }),
+            Object.assign({}, decisao.patch, { atualizadoEm: new Date().toISOString(), atualizadoPor: 'automacao:fornecedor' }),
             { merge: true });
         });
         await lote.commit();
@@ -415,6 +418,7 @@ async function sincronizarRiscoDaVulnerabilidade(id, dados, excluida, cache) {
       criadoEm: agora,
       atualizadoEm: agora,
       criadoPor: String((dados && dados.atualizadoPor) || ''),
+      criadoPelaAutomacao: true,
     }));
   } else if (decisao.acao === 'encerrar' || decisao.acao === 'atualizar') {
     const lote = db.batch();
@@ -422,7 +426,7 @@ async function sincronizarRiscoDaVulnerabilidade(id, dados, excluida, cache) {
       ? decisao.ids.map((rid) => ({ id: rid, patch: decisao.patch }))
       : decisao.atualizacoes;
     alvos.forEach((a) => {
-      lote.set(db.collection('riscos').doc(a.id), Object.assign({}, a.patch, { atualizadoEm: agora }), { merge: true });
+      lote.set(db.collection('riscos').doc(a.id), Object.assign({}, a.patch, { atualizadoEm: agora, atualizadoPor: 'automacao:vulnerabilidade' }), { merge: true });
     });
     await lote.commit();
   }
@@ -513,9 +517,11 @@ async function _contextoNotificacao() {
   const nomes = (snap) => Object.fromEntries(snap.docs.map((d) => [d.id, (d.data() || {}).nome || '']));
   return {
     config,
-    pessoas: pessoasSnap.docs.map((d) => ({ id: d.id, email: (d.data() || {}).email || '' })),
+    pessoas: pessoasSnap.docs.map((d) => ({ id: d.id, nome: (d.data() || {}).nome || '', email: (d.data() || {}).email || '' })),
     areas: areasSnap.docs.map((d) => ({ nome: (d.data() || {}).nome || '', email: (d.data() || {}).email || '' })),
     operadores: notificacoes.emailsDeOperadores(perfisSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }))),
+    // Perfis crus: os avisos de risco procuram Gestor da area e Seguranca.
+    perfis: perfisSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) })),
     nomesTipo: nomes(tiposSnap),
     nomesIndexador: nomes(indexSnap),
   };
@@ -755,6 +761,91 @@ exports.avisoDeRelatorioCompartilhado = onDocumentCreated(
       });
     } catch (err) {
       logger.error('avisoDeRelatorioCompartilhado: falha ao enfileirar', { id: event.params.id, erro: err.message });
+    }
+  }
+);
+
+// Risco registrado ou encerrado -> e-mail (22/10/2026, ver notificacoesRisco.js).
+// Feito por uma pessoa: um e-mail por destinatario, na hora (chave
+// risco:{id}:novo / risco:{id}:encerrado:{dia} -- a mesma escrita nunca gera
+// dois). Feito pela automacao: so registra em eventos_risco, e o resumo
+// diario (resumoDiarioRiscos) junta tudo num e-mail por destinatario.
+exports.notificacaoDeRisco = onDocumentWritten(
+  { region: 'us-central1', document: 'riscos/{id}' },
+  async (event) => {
+    const depois = event.data && event.data.after && event.data.after.exists ? event.data.after.data() : null;
+    const antes = event.data && event.data.before && event.data.before.exists ? event.data.before.data() : null;
+    const evento = notificacoesRisco.decidirEventoRisco(event.params.id, antes, depois);
+    if (!evento) return;
+    try {
+      const cfgSnap = await db.collection('config_notificacoes').doc('contratos').get();
+      const config = notificacoes.normalizarConfig(cfgSnap.exists ? cfgSnap.data() : null);
+      if (config.modo === notificacoes.MODO.DESLIGADO || !config.riscos[evento.tipo]) return;
+      const resumo = notificacoesRisco.resumoDoRisco(event.params.id, depois);
+
+      if (evento.automatico) {
+        if (!config.riscos.resumoAutomaticos) return;
+        const dia = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+        await db.collection('eventos_risco').doc(notificacoes.idNaFila(evento.chave, '')).set({
+          tipo: evento.tipo, chave: evento.chave, riscoId: event.params.id, risco: resumo,
+          dia, resumido: false, criadoEm: new Date().toISOString(),
+        }, { merge: true });
+        return;
+      }
+
+      const ctxN = await _contextoNotificacao();
+      const destinatarios = notificacoesRisco.resolverDestinatariosRisco(depois, ctxN);
+      const base = {
+        tipo: 'risco', evento: evento.tipo === notificacoesRisco.TIPO.NOVO ? 'riscoNovo' : 'riscoEncerrado',
+        chave: evento.chave, riscoId: event.params.id, riscoTitulo: resumo.titulo,
+        remetenteNome: notificacoesRisco.REMETENTE,
+      };
+      // Sem destinatario fica registrado (status sem_destinatario no envio).
+      const alvos = destinatarios.length ? destinatarios : [{ email: '', motivos: [] }];
+      for (const dest of alvos) {
+        const m = notificacoesRisco.montarEmailRisco(depois, evento, { id: event.params.id, baseUrl: BASE_URL, motivos: dest.motivos });
+        await _enfileirarEmail(Object.assign({}, base, { para: dest.email, motivos: dest.motivos, assunto: m.assunto, html: m.html, texto: m.texto }));
+      }
+      logger.info('notificacaoDeRisco: e-mail enfileirado', { riscoId: event.params.id, tipo: evento.tipo, destinatarios: destinatarios.length });
+    } catch (err) {
+      logger.error('notificacaoDeRisco: falha', { riscoId: event.params.id, erro: err.message });
+    }
+  }
+);
+
+// Resumo diario dos riscos da automacao (07:00). Um e-mail por destinatario
+// com o que a automacao abriu/encerrou desde o ultimo resumo; quem nao tem
+// nada nao recebe. Os eventos ficam marcados como resumidos (nao repetem).
+exports.resumoDiarioRiscos = onSchedule(
+  { region: 'us-central1', schedule: '0 7 * * *', timeZone: 'America/Sao_Paulo' },
+  async () => {
+    const pendentesSnap = await db.collection('eventos_risco').where('resumido', '==', false).get();
+    if (pendentesSnap.empty) return;
+    const ctxN = await _contextoNotificacao();
+    const dia = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    if (ctxN.config.modo !== notificacoes.MODO.DESLIGADO && ctxN.config.riscos.resumoAutomaticos) {
+      const eventos = pendentesSnap.docs.map((d) => d.data());
+      const por = notificacoesRisco.agruparResumoPorDestinatario(eventos,
+        (risco) => notificacoesRisco.resolverDestinatariosRisco(risco, ctxN));
+      let n = 0;
+      for (const [email, x] of por) {
+        const m = notificacoesRisco.montarResumoDiarioRiscos(x.eventos, { dia, baseUrl: BASE_URL, motivos: x.motivos });
+        if (await _enfileirarEmail({
+          tipo: 'risco', evento: 'riscosResumo', chave: `riscos:resumo:${dia}`,
+          riscoId: '', riscoTitulo: `${x.eventos.length} risco(s)`, remetenteNome: notificacoesRisco.REMETENTE,
+          para: email, motivos: x.motivos, assunto: m.assunto, html: m.html, texto: m.texto,
+        })) n++;
+      }
+      logger.info('resumoDiarioRiscos: concluido', { eventos: eventos.length, destinatarios: por.size, enfileirados: n });
+    } else {
+      logger.info('resumoDiarioRiscos: desligado na configuracao; eventos descartados', { eventos: pendentesSnap.size });
+    }
+    // Marca mesmo desligado: ligar depois nao deve despejar semanas de eventos velhos.
+    const docs = pendentesSnap.docs;
+    for (let i = 0; i < docs.length; i += 400) {
+      const lote = db.batch();
+      docs.slice(i, i + 400).forEach((d) => lote.set(d.ref, { resumido: true, resumidoEm: dia }, { merge: true }));
+      await lote.commit();
     }
   }
 );

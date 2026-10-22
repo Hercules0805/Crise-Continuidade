@@ -46,6 +46,11 @@ const CONFIG_PADRAO = {
   responderPara: '',
   grupos: { prazos: true, renovacaoReajuste: true, resumoMensal: true },
   destinatarios: { gestor: true, area: true, operadores: true },
+  // Riscos registrados/encerrados (22/10/2026) -- ver notificacoesRisco.js.
+  riscos: {
+    novo: true, encerrado: true, resumoAutomaticos: true,
+    destinatarios: { responsavel: true, area: true, seguranca: true },
+  },
   // Servidor SMTP (16/10/2026: SendGrid). Usuario/senha ficam nos segredos.
   servidor: { provedor: 'sendgrid', host: '', porta: null, remetenteEmail: '' },
 };
@@ -56,6 +61,7 @@ function normalizarConfig(c) {
   const x = c && typeof c === 'object' ? c : {};
   const bool = (v, padrao) => (typeof v === 'boolean' ? v : padrao);
   const g = x.grupos || {}, d = x.destinatarios || {};
+  const rk = x.riscos || {}, rd = rk.destinatarios || {};
   const resp = String(x.responderPara || '').trim().toLowerCase();
   const sv = x.servidor || {};
   const provedor = PROVEDORES_SMTP.includes(sv.provedor) ? sv.provedor : 'sendgrid';
@@ -74,6 +80,16 @@ function normalizarConfig(c) {
       gestor: bool(d.gestor, true),
       area: bool(d.area, true),
       operadores: bool(d.operadores, true),
+    },
+    riscos: {
+      novo: bool(rk.novo, true),
+      encerrado: bool(rk.encerrado, true),
+      resumoAutomaticos: bool(rk.resumoAutomaticos, true),
+      destinatarios: {
+        responsavel: bool(rd.responsavel, true),
+        area: bool(rd.area, true),
+        seguranca: bool(rd.seguranca, true),
+      },
     },
     servidor: {
       provedor,
@@ -442,7 +458,8 @@ async function processarEnvio(doc, config, enviar) {
   const tentativas = (Number(d.tentativas) || 0) + 1;
   try {
     await enviar({
-      de: cfg.remetenteNome, para: d.para, responderPara: cfg.responderPara,
+      // O documento pode trazer o proprio nome de remetente ("GRC360 · Riscos").
+      de: String(d.remetenteNome || '').trim() || cfg.remetenteNome, para: d.para, responderPara: cfg.responderPara,
       assunto: d.assunto, html: d.html, texto: d.texto,
     });
     return { status: STATUS.ENVIADO, enviadoEm: agora, processadoEm: agora, tentativas, erro: '' };
@@ -463,4 +480,6 @@ module.exports = {
   decidirUrgentes, resolverDestinatarios, emailsDeOperadores,
   montarEmailUrgente, itensDoResumo, montarResumoMensal, mesPorExtenso, mesAnterior, montarEmailRelatorioCompartilhado,
   linkContrato, processarEnvio, podeReenviar,
+  // Modelo visual compartilhado com notificacoesRisco.js.
+  esc, _cabecalhoHtml, _envelopeHtml, _botao,
 };

@@ -177,3 +177,39 @@ test('servidor: Host e Porta so aparecem em "Outro"; sem host nao salva', async 
   w._renderServidorNotificacoes();
   assert.strictEqual(doc.getElementById('notifRemetenteObrig').style.display, 'none', 'no Gmail o remetente e opcional');
 });
+
+// ---- Riscos registrados/encerrados (22/10/2026) ----
+
+test('riscos: carrega as chaves do bloco riscos e salvar devolve o que foi marcado', async () => {
+  const riscos = { novo: true, encerrado: false, resumoAutomaticos: true, destinatarios: { responsavel: true, area: false, seguranca: true } };
+  const { w, doc, gravacoes } = await carregar({ getConfigNotificacoes: Object.assign({}, CONFIG, { riscos }) });
+  await w.notificacoesEmail();
+  assert.strictEqual(doc.getElementById('notifRiscoNovo').checked, true);
+  assert.strictEqual(doc.getElementById('notifRiscoEncerrado').checked, false);
+  assert.strictEqual(doc.getElementById('notifRiscoDestArea').checked, false);
+  doc.getElementById('notifRiscoEncerrado').checked = true;
+  doc.getElementById('notifRiscoDestSeguranca').checked = false;
+  await w.salvarConfigNotificacoesTela();
+  const g = gravacoes.find((x) => x.nome === 'salvarConfigNotificacoes').arg;
+  assert.deepStrictEqual(g.riscos, {
+    novo: true, encerrado: true, resumoAutomaticos: true,
+    destinatarios: { responsavel: true, area: false, seguranca: false },
+  });
+});
+
+test('riscos: log mostra o tipo e o titulo do risco; o drawer leva ao risco', async () => {
+  const fila = [{
+    id: 'r0', tipo: 'risco', evento: 'riscoNovo', riscoId: 'abc', riscoTitulo: 'Vazamento de dados',
+    para: 'si@fortestecnologia.com.br', motivos: ['seguranca'], assunto: '[Riscos] Novo risco registrado: Vazamento de dados',
+    html: '<p>x</p>', texto: 'x', status: 'simulado', criadoEm: '2026-10-22T10:00:00.000Z',
+  }];
+  const { w, doc } = await carregar({ getNotificacoesEmail: fila });
+  await w.notificacoesEmail();
+  const linha = doc.querySelector('#notificacoesRows tr').textContent;
+  assert.match(linha, /Risco: novo/);
+  assert.match(linha, /Vazamento de dados/);
+  w.abrirDrawerNotificacao('r0');
+  const det = doc.getElementById('notificacaoDetalhes');
+  assert.match(det.textContent, /Segurança da Informação/);
+  assert.ok(det.querySelector('a[href="#riscos?risco=abc"]'));
+});

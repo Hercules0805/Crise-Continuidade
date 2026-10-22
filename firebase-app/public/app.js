@@ -16347,6 +16347,7 @@ async function _lancarResultadosIndicador(indicador, novasEntradas, arquivoOrige
           status: 'Encerrado',
           dataEncerramento: new Date().toISOString().slice(0, 10),
           justificativaEncerramento: `Encerrado automaticamente: o indicador "${indicador.nome}" voltou para dentro da meta em ${_formatMes(ultimoComDado ? ultimoComDado.mes : '')}.`,
+          automacao: 'indicador',
         });
       }
       if (abertos.length) API.invalidate('getRiscos');
@@ -16379,6 +16380,8 @@ async function _lancarResultadosIndicador(indicador, novasEntradas, arquivoOrige
         // KRI ligado ao proprio indicador: o Monitoramento do risco mostra o
         // resultado de cada lancamento sem ninguem redigitar.
         kris: [{ indicadorId: indicador.id, indicador: indicador.nome, frequencia: 'Mensal' }],
+        // Aviso por e-mail: risco da automacao vai no resumo diario.
+        automacao: 'indicador',
       });
       riscoGerado = true;
       API.invalidate('getRiscos');
@@ -23966,6 +23969,8 @@ const NOTIF_STATUS = {
 const NOTIF_EVENTO = {
   vence30: 'Vence em 30 dias', vencido: 'Vencido', janela: 'Janela de aviso aberta', janela7: 'Últimos dias para avisar',
   avisoPerdido: 'Prazo de aviso encerrado', renovado: 'Renovação automática', resumoMensal: 'Resumo mensal',
+  relatorioCompartilhado: 'Relatório compartilhado',
+  riscoNovo: 'Risco: novo', riscoEncerrado: 'Risco: encerrado', riscosResumo: 'Riscos: resumo diário',
 };
 const NOTIF_MODOS = [
   { valor: 'desligado', rotulo: 'Desligado', descricao: 'Nada é enfileirado nem enviado.', cor: '#757575', fundo: '#f5f5f5' },
@@ -23991,7 +23996,7 @@ async function notificacoesEmail() {
   const chk = (id, rotulo, dica) => `<label class="check-label" style="margin-bottom:8px;"><input type="checkbox" id="${id}"> <span><strong style="font-weight:600;">${rotulo}</strong>${dica ? `<span style="display:block;font-size:0.8em;color:#888;">${dica}</span>` : ''}</span></label>`;
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Notificações por e-mail</h2><p class="page-sub">Alertas de contratos enviados pela conta SMTP do Google Workspace: prazos, renovação automática e resumo mensal</p></div>
+      <div><h2>Notificações por e-mail</h2><p class="page-sub">Alertas de contratos (prazos, renovação automática e resumo mensal) e avisos de riscos registrados e encerrados</p></div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-ghost" id="btnEmailTeste" onclick="enviarEmailTesteNotificacoes()">✉️ Enviar e-mail de teste</button>
         <button class="btn btn-primary" id="btnSalvarConfigNotificacoes" onclick="salvarConfigNotificacoesTela()">Salvar configuração</button>
@@ -24031,6 +24036,22 @@ async function notificacoesEmail() {
             <div style="font-size:0.74em;color:#888;">Só endereços @fortestecnologia.com.br. Os e-mails não levam valores do contrato.</div>
           </div>
         </div>
+        <div style="${lbl}margin-top:22px;padding-top:16px;border-top:1px solid #eee;">Riscos</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;">
+          <div>
+            <div style="${lbl}">O que envia</div>
+            ${chk('notifRiscoNovo', 'Risco registrado', 'Registrado por uma pessoa: e-mail na hora.')}
+            ${chk('notifRiscoEncerrado', 'Risco encerrado', 'Encerrado por uma pessoa: e-mail na hora, com a justificativa.')}
+            ${chk('notifRiscoResumo', 'Resumo diário da automação (07:00)', 'Riscos abertos ou encerrados automaticamente (vulnerabilidade, fornecedor, indicador) num e-mail por destinatário.')}
+          </div>
+          <div>
+            <div style="${lbl}">Para quem</div>
+            ${chk('notifRiscoDestResponsavel', 'Responsável pelo risco', 'E-mail do cadastro de Pessoas, pelo nome do responsável.')}
+            ${chk('notifRiscoDestArea', 'Responsável e gestor da área', 'E-mail cadastrado na Área do risco e os usuários com perfil Gestor dela.')}
+            ${chk('notifRiscoDestSeguranca', 'Segurança da Informação', 'Todos os usuários com esse perfil.')}
+            <div style="font-size:0.74em;color:#888;">Levam título, área, nível, responsável, origem, status e o link. Sem impacto financeiro, descrição ou plano de ação.</div>
+          </div>
+        </div>
         <div style="${lbl}margin-top:22px;padding-top:16px;border-top:1px solid #eee;">Servidor de envio</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;">
           <div>
@@ -24062,7 +24083,7 @@ async function notificacoesEmail() {
       <div class="filters">
         <div class="field">
           <label class="field-label">&nbsp;</label>
-          <input type="search" id="buscaNotificacoes" placeholder="Buscar por contrato, destinatário ou assunto…" aria-label="Buscar notificação" oninput="notificacoesPaginacao.reiniciar(); renderizarNotificacoesEmail()" class="field-control field-control--busca">
+          <input type="search" id="buscaNotificacoes" placeholder="Buscar por contrato, risco, destinatário ou assunto…" aria-label="Buscar notificação" oninput="notificacoesPaginacao.reiniciar(); renderizarNotificacoesEmail()" class="field-control field-control--busca">
         </div>
         <div class="field">
           <label class="field-label">Status</label>
@@ -24080,7 +24101,7 @@ async function notificacoesEmail() {
       <div class="data-table">
         <table style="min-width:1080px;">
           <colgroup><col style="width:140px"><col style="width:190px"><col style="width:120px"><col style="width:230px"><col style="width:300px"><col style="width:140px"></colgroup>
-          <thead><tr><th>Data</th><th>Tipo</th><th>Contrato</th><th>Para</th><th>Assunto</th><th>Status</th></tr></thead>
+          <thead><tr><th>Data</th><th>Tipo</th><th>Referência</th><th>Para</th><th>Assunto</th><th>Status</th></tr></thead>
           <tbody id="notificacoesRows"></tbody>
         </table>
         <div id="notificacoesPaginacao"></div>
@@ -24129,6 +24150,13 @@ function _popularConfigNotificacoes(c) {
   document.getElementById('notifDestGestor').checked = !!c.destinatarios.gestor;
   document.getElementById('notifDestArea').checked = !!c.destinatarios.area;
   document.getElementById('notifDestOperadores').checked = !!c.destinatarios.operadores;
+  const rk = c.riscos || { destinatarios: {} };
+  document.getElementById('notifRiscoNovo').checked = !!rk.novo;
+  document.getElementById('notifRiscoEncerrado').checked = !!rk.encerrado;
+  document.getElementById('notifRiscoResumo').checked = !!rk.resumoAutomaticos;
+  document.getElementById('notifRiscoDestResponsavel').checked = !!rk.destinatarios.responsavel;
+  document.getElementById('notifRiscoDestArea').checked = !!rk.destinatarios.area;
+  document.getElementById('notifRiscoDestSeguranca').checked = !!rk.destinatarios.seguranca;
   const sv = c.servidor || { provedor: 'sendgrid' };
   document.getElementById('notifProvedor').value = sv.provedor || 'sendgrid';
   document.getElementById('notifRemetenteEmail').value = sv.remetenteEmail || '';
@@ -24180,6 +24208,16 @@ function _coletarConfigNotificacoes() {
       area: document.getElementById('notifDestArea').checked,
       operadores: document.getElementById('notifDestOperadores').checked,
     },
+    riscos: {
+      novo: document.getElementById('notifRiscoNovo').checked,
+      encerrado: document.getElementById('notifRiscoEncerrado').checked,
+      resumoAutomaticos: document.getElementById('notifRiscoResumo').checked,
+      destinatarios: {
+        responsavel: document.getElementById('notifRiscoDestResponsavel').checked,
+        area: document.getElementById('notifRiscoDestArea').checked,
+        seguranca: document.getElementById('notifRiscoDestSeguranca').checked,
+      },
+    },
     servidor: {
       provedor: document.getElementById('notifProvedor').value,
       remetenteEmail: document.getElementById('notifRemetenteEmail').value.trim(),
@@ -24203,7 +24241,7 @@ window.salvarConfigNotificacoesTela = async () => {
   }
   if (sv.provedor === 'outro' && !sv.host) return showToast('Informe o host do servidor SMTP.', '#e65100');
   if (c.modo === 'ativo' && configNotificacoesData && configNotificacoesData.modo !== 'ativo'
-      && !await confirmarAcao('Ligar o envio de verdade?\n\nA partir da próxima varredura (05:00), os alertas de contrato saem por e-mail para os destinatários marcados. Recomendado: enviar antes um e-mail de teste e conferir o log em simulação.')) return;
+      && !await confirmarAcao('Ligar o envio de verdade?\n\nA partir de agora, os alertas de contrato e os avisos de risco saem por e-mail para os destinatários marcados. Recomendado: enviar antes um e-mail de teste e conferir o log em simulação.')) return;
   await comBotaoCarregando('btnSalvarConfigNotificacoes', async () => {
     try {
       await API.salvarConfigNotificacoes(c);
@@ -24242,7 +24280,7 @@ window.irParaPaginaNotificacoes = (delta) => { notificacoesPaginacao.mover(delta
 function renderizarNotificacoesEmail() {
   let data = [...notificacoesEmailData];
   const busca = ((document.getElementById('buscaNotificacoes') || {}).value || '').trim().toLowerCase();
-  if (busca) data = data.filter((n) => [n.contratoCodigo, n.para, n.assunto].some((t) => String(t || '').toLowerCase().includes(busca)));
+  if (busca) data = data.filter((n) => [n.contratoCodigo, n.riscoTitulo, n.para, n.assunto].some((t) => String(t || '').toLowerCase().includes(busca)));
   const status = (document.getElementById('filtroNotificacaoStatus') || {}).value || '';
   if (status) data = data.filter((n) => n.status === status);
 
@@ -24258,7 +24296,7 @@ function renderizarNotificacoesEmail() {
       <tr style="cursor:pointer;" onclick="abrirDrawerNotificacao('${escJs(n.id)}')">
         <td class="col-nw muted">${esc(_dataHoraBR(n.criadoEm))}</td>
         <td>${esc(NOTIF_EVENTO[n.evento] || n.evento || '–')}</td>
-        <td class="title col-nw">${esc(n.contratoCodigo || '–')}</td>
+        <td class="title" title="${esc(n.contratoCodigo || n.riscoTitulo || '')}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(n.contratoCodigo || n.riscoTitulo || '–')}</td>
         <td title="${esc(n.para)}">${n.para ? esc(n.para) : '<span class="muted">—</span>'}</td>
         <td title="${esc(n.assunto)}" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(n.assunto)}</td>
         <td>${_pillStatusNotificacao(n.status)}${n.status === 'erro' ? `<div class="muted" style="font-size:0.75em;">${n.tentativas} tentativa(s)</div>` : ''}</td>
@@ -24275,15 +24313,19 @@ function renderizarNotificacoesEmail() {
 window.abrirDrawerNotificacao = (id) => {
   const n = notificacoesEmailData.find((x) => String(x.id) === String(id));
   if (!n) return;
-  const motivo = { gestor: 'Gestor do contrato', area: 'Responsável da área', operador: 'Operador Administrativo' };
+  const risco = n.tipo === 'risco';
+  const motivo = risco
+    ? { responsavel: 'Responsável pelo risco', area: 'Responsável da área', gestor: 'Gestor da área', seguranca: 'Segurança da Informação' }
+    : { gestor: 'Gestor do contrato', area: 'Responsável da área', operador: 'Operador Administrativo' };
   const linha = (k, v) => (v ? `<div style="margin-bottom:4px;"><span style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;">${esc(k)}:</span> ${v}</div>` : '');
   document.getElementById('notificacaoDrawerTitulo').textContent = n.assunto || 'E-mail';
   document.getElementById('notificacaoDetalhes').innerHTML =
     linha('Status', _pillStatusNotificacao(n.status))
-    + linha('Para', esc(n.para || 'sem destinatário (cadastre o gestor ou o e-mail da área)'))
+    + linha('Para', esc(n.para || (risco ? 'sem destinatário (cadastre o e-mail do responsável ou da área)' : 'sem destinatário (cadastre o gestor ou o e-mail da área)')))
     + linha('Motivo', esc((n.motivos || []).map((m) => motivo[m] || m).join(', ')))
     + linha('Tipo', esc(NOTIF_EVENTO[n.evento] || n.evento))
     + (n.contratoId ? linha('Contrato', `<a href="#contratos?contrato=${encodeURIComponent(n.contratoId)}" onclick="fecharDrawerNotificacao()" style="color:#d60014;font-weight:600;">${esc(n.contratoCodigo || n.contratoId)}</a>`) : '')
+    + (n.riscoId ? linha('Risco', `<a href="#riscos?risco=${encodeURIComponent(n.riscoId)}" onclick="fecharDrawerNotificacao()" style="color:#d60014;font-weight:600;">${esc(n.riscoTitulo || n.riscoId)}</a>`) : '')
     + linha('Criado em', esc(_dataHoraBR(n.criadoEm)))
     + linha('Enviado em', n.enviadoEm ? esc(_dataHoraBR(n.enviadoEm)) : '')
     + (n.erro ? `<div style="margin-top:6px;padding:8px 10px;border-radius:7px;background:#ffebee;color:#c62828;font-size:0.85em;">${esc(n.erro)}${n.tentativas ? ` (${n.tentativas} tentativa(s))` : ''}</div>` : '');

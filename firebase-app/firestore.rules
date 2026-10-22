@@ -442,6 +442,13 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Eventos de risco da automacao esperando o resumo diario (22/10/2026,
+    // functions/notificacoesRisco.js). So o servidor le e grava; o que chega
+    // a alguem e o e-mail na fila acima.
+    match /eventos_risco/{id} {
+      allow read, write: if false;
+    }
+
     match /medicoes/{id} {
       allow read: if isAdmin() || isGestorDaArea(resource.data.area);
       allow write: if false;
