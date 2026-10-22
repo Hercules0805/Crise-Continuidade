@@ -218,22 +218,16 @@ test('mapa (Explorar) numa Instalação: pessoas lotadas, processos, o que ela h
   });
   await ctx.w.mapaContinuidade();
   ctx.w.mapaExplorarDe('instalacao:sede');
-  // O grafo (cytoscape) carrega à parte; aqui basta o que a exploração abriu.
-  const m = ctx.w._mapa;
-  const g = ctx.w.MapaContinuidade.elementosExploracao(m.exploracao, m.indice, [...m.tipos]);
-  const nomes = g.nos.map((n) => n.nome);
-  assert.ok(nomes.includes('Ana') && nomes.includes('Filial RJ'));
-  const rels = g.arestas.map((e) => e.rels.join(',')).join(' | ');
-  assert.match(rels, /pessoa lotada/);
-  assert.match(rels, /contingência/);
+  const arvore = ctx.doc.getElementById('mapaCanvas').textContent.replace(/\s+/g, ' ');
+  assert.match(arvore, /pessoa lotada.*Ana/);
+  assert.match(arvore, /contingência.*Filial RJ/);
   const painel = ctx.doc.getElementById('mapaPainel').textContent.replace(/\s+/g, ' ');
   assert.match(painel, /Instalação/);
   assert.match(painel, /Tipo\s*Sede/);
   assert.match(painel, /Endereço\s*Av\. Paulista, 1000/);
   assert.match(painel, /Contingência\s*Filial RJ/);
   ctx.w.mapaExplorarDe('instalacao:dc');
-  const g2 = ctx.w.MapaContinuidade.elementosExploracao(m.exploracao, m.indice, [...m.tipos]);
-  assert.ok(g2.nos.some((n) => n.nome === 'SRV-01'));
+  assert.match(ctx.doc.getElementById('mapaCanvas').textContent, /SRV-01/);
   assert.match(ctx.doc.getElementById('mapaPainel').textContent, /Sem instalação alternativa/);
   assert.match(ctx.doc.getElementById('mapaTipos').textContent, /Instalações/);
 });

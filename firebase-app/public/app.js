@@ -9001,9 +9001,10 @@ async function mapaContinuidade() {
     situacaoContrato: (c) => ContratoCiclo.situacaoDoStatus(c.statusId, dados.statusContrato || []),
     valorMin: ServicoComposicao.valorMin,
   });
-  // Explorar (21/10/2026): o mapa mental cresce na mesma tela -- cada nó abre
-  // os vínculos dele (MapaContinuidade.expandir/recolher). `exploracao` é o
-  // estado puro; `cy` o grafo da visão aberta (explorar ou completa).
+  // Explorar (22/10/2026): mind map em árvore -- a raiz à esquerda e os
+  // vínculos de cada item, por tipo, à direita (MapaContinuidade.montarArvore).
+  // `exploracao` = { raiz, abertos: Set de chaves de caminho, gruposAbertos };
+  // `selecionado` é a chave do cartão escolhido. `cy` só existe na visão completa.
   window._mapa = { indice, exploracao: null, selecionado: null, tipos: new Set(MapaContinuidade.TIPOS), modo: 'explorar', cy: null, cyModo: null };
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('mapaConteudo').style.display = 'block';
@@ -9024,12 +9025,13 @@ function _mapaAtualizarEndereco() {
   if (window.location.hash !== alvo && window.history && window.history.replaceState) window.history.replaceState(null, '', alvo);
 }
 
-/** Começa a exploração neste item (raiz), com os vínculos dele já abertos. */
+/** Começa a exploração neste item (raiz), com o 1º nível de vínculos aberto. */
 window.mapaExplorarDe = (id) => {
   const m = window._mapa;
   if (!m || !m.indice.nos[id]) return;
+  if (m.cy) { m.cy.destroy(); m.cy = null; m.cyModo = null; }
   m.modo = 'explorar';
-  m.exploracao = MapaContinuidade.iniciarExploracao(m.indice, id, [...m.tipos]);
+  m.exploracao = { raiz: id, abertos: new Set([id]), gruposAbertos: new Set() };
   m.selecionado = id;
   _mapaAtualizarEndereco();
   _renderMapa();
@@ -9045,37 +9047,57 @@ window.mapaVoltarAoInicio = () => {
   _renderMapa();
 };
 
-/** Clique num nó: seleciona e mostra o painel (Expandir / Recolher / Começar daqui). */
-window.mapaClicarNo = (id) => {
+/** Clique no cartão: seleciona (painel ao lado), sem abrir nem fechar nada. */
+window.mapaClicarNo = (chave) => {
   const m = window._mapa;
-  if (!m || !m.indice.nos[id]) return;
-  m.selecionado = id;
-  _mapaDestacarSelecionado();
-  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, id);
+  if (!m || !m.exploracao) return;
+  m.selecionado = chave;
+  document.querySelectorAll('#mapaCanvas .mm-cartao--selecionado').forEach((el) => el.classList.remove('mm-cartao--selecionado'));
+  const cartao = document.querySelector(`#mapaCanvas .mm-cartao[data-chave="${CSS.escape ? CSS.escape(chave) : chave}"]`);
+  if (cartao) cartao.classList.add('mm-cartao--selecionado');
+  _renderPainelExplorar();
 };
 
-window.mapaExpandir = (id) => {
+/** ▸ / ▾ (e duplo clique): abre ou recolhe os vínculos daquele cartão. */
+window.mapaAlternarNo = (chave) => {
   const m = window._mapa;
-  if (!m || !m.exploracao || !(id in m.exploracao.presentes)) return;
-  MapaContinuidade.expandir(m.exploracao, m.indice, id, [...m.tipos]);
-  m.selecionado = id;
+  if (!m || !m.exploracao) return;
+  const e = m.exploracao;
+  if (e.abertos.has(chave)) {
+    // Recolher tira também o que estava aberto abaixo dele.
+    [...e.abertos].forEach((k) => { if (k === chave || k.startsWith(chave + '>')) e.abertos.delete(k); });
+    [...e.gruposAbertos].forEach((k) => { if (k.startsWith(chave + '|') || k.startsWith(chave + '>')) e.gruposAbertos.delete(k); });
+  } else {
+    e.abertos.add(chave);
+  }
+  m.selecionado = chave;
   _renderMapa();
 };
 
-window.mapaRecolher = (id) => {
+/** "mostrar mais N" de um grupo grande. */
+window.mapaMostrarMais = (chave, tipo) => {
   const m = window._mapa;
   if (!m || !m.exploracao) return;
-  MapaContinuidade.recolher(m.exploracao, m.indice, id);
-  m.selecionado = id in m.exploracao.presentes ? id : m.exploracao.raiz;
+  m.exploracao.gruposAbertos.add(chave + '|' + tipo);
   _renderMapa();
 };
 
-/** Duplo clique: abre o que falta; se já está tudo aberto, recolhe. */
-window.mapaAlternarExpansao = (id) => {
+window.mapaRecolherTudo = () => {
   const m = window._mapa;
   if (!m || !m.exploracao) return;
-  if (MapaContinuidade.pendentes(m.exploracao, m.indice, id, [...m.tipos]) > 0) mapaExpandir(id);
-  else if (m.exploracao.abertos[id]) mapaRecolher(id);
+  m.exploracao.abertos = new Set([m.exploracao.raiz]);
+  m.exploracao.gruposAbertos = new Set();
+  m.selecionado = m.exploracao.raiz;
+  _renderMapa();
+};
+
+/** Abre de uma vez os itens do último nível que ainda têm vínculos fechados. */
+window.mapaAbrirProximoNivel = () => {
+  const m = window._mapa;
+  if (!m || !m.exploracao) return;
+  const arvore = MapaContinuidade.montarArvore(m.indice, m.exploracao.raiz, m.exploracao.abertos, [...m.tipos], { gruposAbertos: m.exploracao.gruposAbertos });
+  MapaContinuidade.nosDaArvore(arvore).filter((n) => !n.aberto && n.nFilhos > 0).forEach((n) => m.exploracao.abertos.add(n.chave));
+  _renderMapa();
 };
 
 window.mapaAlternarTipo = (tipo) => {
@@ -9127,120 +9149,74 @@ function _renderMapa() {
     return `<button type="button" class="btn ${ativo ? 'btn-primary' : 'btn-ghost'}" aria-pressed="${ativo}" onclick="mapaModo('${k}')" style="padding:6px 14px;font-size:0.85em;border-radius:${i ? '0 7px 7px 0' : '7px 0 0 7px'};${i ? 'margin-left:-1px;' : ''}">${rot}</button>`;
   }).join('');
   if (m.modo === 'completo') return _renderMapaCompleto();
-  if (m.cy && m.cyModo !== 'explorar') { m.cy.destroy(); m.cy = null; m.cyModo = null; }
+  if (m.cy) { m.cy.destroy(); m.cy = null; m.cyModo = null; }
 
   const canvas = document.getElementById('mapaCanvas');
   const legenda = document.getElementById('mapaLegenda');
   if (!m.exploracao) {
-    if (m.cy) { m.cy.destroy(); m.cy = null; m.cyModo = null; }
     document.getElementById('mapaTrilha').innerHTML = '<span style="color:#888;">Escolha um item na busca ou num dos pontos de partida abaixo.</span>';
     canvas.innerHTML = _htmlMapaInicio(m.indice);
     legenda.innerHTML = '';
     document.getElementById('mapaPainel').innerHTML = _htmlPainelMapaResumo(m.indice);
     return;
   }
-  const g = MC.elementosExploracao(m.exploracao, m.indice, [...m.tipos]);
+  const arvore = MC.montarArvore(m.indice, m.exploracao.raiz, m.exploracao.abertos, [...m.tipos], { gruposAbertos: m.exploracao.gruposAbertos });
+  m.arvore = arvore;
   const raiz = m.indice.nos[m.exploracao.raiz];
-  document.getElementById('mapaTrilha').innerHTML = `<a href="javascript:void(0)" onclick="mapaVoltarAoInicio()" style="color:#d60014;">Início</a>
-    <span style="color:#bbb;">›</span> <strong>${esc(raiz.nome)}</strong>
-    <span style="color:#555;"> · ${g.nos.length} ${g.nos.length === 1 ? 'item' : 'itens'} no mapa</span>
-    <span style="color:#999;"> — clique num item para os detalhes; duplo clique abre ou recolhe os vínculos dele.</span>`;
-  if (!document.getElementById('mapaCy')) {
-    canvas.innerHTML = `
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:6px;">
-        <button type="button" class="btn btn-ghost" style="padding:4px 12px;font-size:0.82em;" onclick="mapaAjustarTela()">Ajustar à tela</button>
-      </div>
-      <div id="mapaCy" style="height:68vh;min-height:460px;border:1px solid #eee;border-radius:8px;background:#fcfcfd;"><div class="loading" style="padding:20px;">⏳ Montando o mapa…</div></div>`;
-  }
+  document.getElementById('mapaTrilha').innerHTML = `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;">
+      <span><a href="javascript:void(0)" onclick="mapaVoltarAoInicio()" style="color:#d60014;">Início</a>
+        <span style="color:#bbb;">›</span> <strong>${esc(raiz.nome)}</strong>
+        <span style="color:#555;"> · ${arvore.total} ${arvore.total === 1 ? 'item aberto' : 'itens abertos'}</span></span>
+      <span style="flex:1;"></span>
+      <button type="button" class="btn btn-ghost" style="padding:4px 12px;font-size:0.82em;" onclick="mapaAbrirProximoNivel()">Abrir próximo nível</button>
+      <button type="button" class="btn btn-ghost" style="padding:4px 12px;font-size:0.82em;" onclick="mapaRecolherTudo()">Recolher tudo</button>
+    </div>`;
+  canvas.innerHTML = `<div class="mm-arvore" role="tree" aria-label="Vínculos de ${esc(raiz.nome)}">${_htmlNoArvoreMapa(arvore.raiz, true)}</div>`;
   legenda.innerHTML = `${_htmlLegendaMapa()}
-    <div style="font-size:0.74em;color:#999;padding:2px 4px;">"+N" no item: vínculos ainda fechados.</div>`;
-  if (!m.exploracao.presentes[m.selecionado] && m.selecionado !== m.exploracao.raiz) m.selecionado = m.exploracao.raiz;
-  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, m.selecionado || m.exploracao.raiz);
-  _desenharExploracao(g);
+    <div style="font-size:0.74em;color:#999;padding:2px 4px;">▸ abre os vínculos do item (o número diz quantos) · ▾ recolhe · duplo clique no cartão faz o mesmo · clique mostra os detalhes ao lado.</div>`;
+  const chaves = new Set(MC.nosDaArvore(arvore).map((n) => n.chave));
+  if (!chaves.has(m.selecionado)) m.selecionado = arvore.raiz.chave;
+  _renderPainelExplorar();
 }
 
-/** Elemento do cytoscape de um nó da exploração (cor da família; raiz cheia). */
-function _elementoNoExplorar(n) {
-  const corta = (t, max) => { t = String(t || ''); return t.length > max ? t.slice(0, max - 1) + '…' : t; };
-  const cor = _COR_TIPO_MAPA[n.tipo];
-  return { data: {
-    id: n.id, cor, fundo: n.raiz ? cor : _corClaraMapa(cor), texto: n.raiz ? '#ffffff' : cor,
-    rotulo: `${_ICONE_TIPO_MAPA[n.tipo]} ${corta(n.nome, 26)}${n.pendentes ? `\n+${n.pendentes}` : ''}`,
-    lacuna: n.lacuna ? 1 : 0, raiz: n.raiz ? 1 : 0, pendentes: n.pendentes,
-  } };
-}
-
-const _ESTILO_EXPLORAR = [
-  { selector: 'node', style: {
-    shape: 'round-rectangle', 'background-color': 'data(fundo)', 'border-color': 'data(cor)', 'border-width': 1.5,
-    label: 'data(rotulo)', color: 'data(texto)', 'font-size': 11, 'font-weight': 700, 'text-valign': 'center', 'text-halign': 'center',
-    'text-wrap': 'wrap', 'text-max-width': 170, width: 'label', height: 'label', padding: 10,
-  } },
-  { selector: 'node[raiz = 1]', style: { 'font-size': 13, padding: 14, 'border-width': 2 } },
-  { selector: 'node[lacuna = 1]', style: { 'border-color': '#c62828', 'border-width': 3 } },
-  { selector: 'node.selecionado', style: { 'border-color': '#222', 'border-width': 3 } },
-  { selector: 'edge', style: { width: 1.4, 'line-color': '#c9c9d2', 'curve-style': 'bezier', opacity: 0.9 } },
-  { selector: 'edge.foco', style: { 'line-color': '#555', width: 2, label: 'data(rels)', 'font-size': 9, color: '#555', 'text-outline-color': '#fff', 'text-outline-width': 2 } },
-];
-
-/**
- * Monta (1ª vez) ou atualiza o grafo da exploração sem recriá-lo: tira o que
- * saiu, põe o que entrou (nascendo no lugar do nó que o abriu) e refaz o layout
- * radial a partir da raiz -- zoom e arrasto do usuário ficam.
- */
-async function _desenharExploracao(g) {
+/** Painel do cartão selecionado no Explorar (chave do caminho). */
+function _renderPainelExplorar() {
   const m = window._mapa;
-  let cytoscape;
-  try {
-    cytoscape = await _carregarCytoscape();
-  } catch (e) {
-    console.error('Mapa de Continuidade: explorar', e);
-    const alvo = document.getElementById('mapaCy');
-    if (alvo) alvo.innerHTML = `<div style="padding:20px;">${_htmlErroCarga('Não foi possível abrir o mapa (' + _mensagemErro(e, 'erro desconhecido') + ').', 'mapaContinuidade')}</div>`;
-    return;
-  }
-  const container = document.getElementById('mapaCy');
-  if (!container || m.modo !== 'explorar' || !m.exploracao) return; // trocou de visão enquanto carregava
-  const nos = g.nos.map(_elementoNoExplorar);
-  const arestas = g.arestas.map((e) => ({ data: { id: e.id, source: e.de, target: e.para, rels: e.rels.join(', ') } }));
-  // Seletor por atributo: o id tem ":" (processo:abc), que no seletor "#id" precisaria de escape.
-  const seletorRaiz = `[id = "${String(m.exploracao.raiz).replace(/"/g, '')}"]`;
-  const layout = (primeira) => ({ name: 'breadthfirst', circle: true, directed: false, roots: seletorRaiz, spacingFactor: 1.15,
-    animate: !primeira, animationDuration: 350, fit: primeira, padding: 30 });
-  if (!m.cy || m.cyModo !== 'explorar') {
-    if (m.cy) m.cy.destroy();
-    container.innerHTML = '';
-    m.cy = cytoscape({ container, elements: [...nos, ...arestas], style: _ESTILO_EXPLORAR, layout: layout(true), minZoom: 0.1, maxZoom: 3, wheelSensitivity: 0.3 });
-    m.cyModo = 'explorar';
-    m.cy.on('tap', 'node', (ev) => mapaClicarNo(ev.target.id()));
-    m.cy.on('dbltap', 'node', (ev) => mapaAlternarExpansao(ev.target.id()));
-    _mapaDestacarSelecionado();
-    return;
-  }
-  const cy = m.cy;
-  const ficam = new Set([...nos, ...arestas].map((el) => el.data.id));
-  cy.elements().filter((el) => !ficam.has(el.id())).remove();
-  const pos = (id) => { const pai = m.exploracao.presentes[id]; const elPai = pai ? cy.getElementById(pai) : null; return elPai && elPai.length ? Object.assign({}, elPai.position()) : undefined; };
-  const novosNos = nos.filter((el) => !cy.getElementById(el.data.id).length).map((el) => Object.assign(el, { position: pos(el.data.id) }));
-  if (novosNos.length) cy.add(novosNos);
-  // Campo a campo (valores simples): selo +N, raiz e lacuna mudam sem recriar o nó.
-  nos.forEach((el) => { const no = cy.getElementById(el.data.id); Object.keys(el.data).forEach((k) => { if (k !== 'id') no.data(k, el.data[k]); }); });
-  const novasArestas = arestas.filter((el) => !cy.getElementById(el.data.id).length);
-  if (novasArestas.length) cy.add(novasArestas);
-  cy.layout(layout(false)).run();
-  _mapaDestacarSelecionado();
+  const chave = m.selecionado;
+  const id = MapaContinuidade.caminhoDaChave(chave).pop();
+  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, id, chave);
 }
 
-/** Borda escura no selecionado e as ligações dele com o rótulo da relação. */
-function _mapaDestacarSelecionado() {
+/** Um nó da árvore: cartão + (se aberto) os grupos de filhos, à direita. */
+function _htmlNoArvoreMapa(no, ehRaiz) {
   const m = window._mapa;
-  if (!m || !m.cy || m.cyModo !== 'explorar') return;
-  m.cy.elements().removeClass('selecionado foco');
-  if (!m.selecionado) return;
-  const no = m.cy.getElementById(m.selecionado);
-  if (!no.length) return;
-  no.addClass('selecionado');
-  no.connectedEdges().addClass('foco');
+  const MC = MapaContinuidade;
+  const cor = _COR_TIPO_MAPA[no.tipo];
+  const lacuna = no.lacunas.length > 0;
+  const sel = m.selecionado === no.chave;
+  const chaveJs = escJs(no.chave);
+  const botao = no.nFilhos || no.aberto
+    ? `<button type="button" class="mm-alternar" onclick="event.stopPropagation();mapaAlternarNo('${chaveJs}')" title="${no.aberto ? 'Recolher os vínculos' : 'Abrir os vínculos'}" aria-expanded="${no.aberto}">${no.aberto ? '▾' : '▸'}${!no.aberto && no.nFilhos ? ` <span>${no.nFilhos}</span>` : ''}</button>`
+    : '';
+  const cartao = `<div class="mm-cartao${ehRaiz ? ' mm-cartao--raiz' : ''}${lacuna ? ' mm-cartao--lacuna' : ''}${sel ? ' mm-cartao--selecionado' : ''}" role="treeitem" aria-selected="${sel}"
+      data-chave="${esc(no.chave)}" style="--cor:${cor};--fundo:${ehRaiz ? cor : _corClaraMapa(cor)};"
+      onclick="mapaClicarNo('${chaveJs}')" ondblclick="mapaAlternarNo('${chaveJs}')" title="${esc(no.nome)}${lacuna ? ' — ' + esc(no.lacunas.join(', ')) : ''}">
+      ${no.relComPai.length ? `<div class="mm-cartao__rel">${esc(no.relComPai.join(', '))}</div>` : ''}
+      <div class="mm-cartao__nome">${_ICONE_TIPO_MAPA[no.tipo]} ${esc(no.nome)}${lacuna ? ' <span class="mm-cartao__lacuna" aria-label="Lacuna">!</span>' : ''}</div>
+      <div class="mm-cartao__sub">${esc(no.sub || MC.ROTULO_TIPO_SINGULAR[no.tipo])}</div>
+      ${botao}
+    </div>`;
+  if (!no.aberto) return `<div class="mm-no">${cartao}</div>`;
+  const grupos = no.grupos.length
+    ? no.grupos.map((g) => `<div class="mm-grupo" style="--cor:${_COR_TIPO_MAPA[g.tipo]};">
+        <div class="mm-grupo__rotulo">${_ICONE_TIPO_MAPA[g.tipo]} ${esc(g.rotulo)} <span>(${g.total})</span></div>
+        <div class="mm-itens">
+          ${g.nos.map((f) => _htmlNoArvoreMapa(f, false)).join('')}
+          ${g.ocultos ? `<button type="button" class="mm-mais" onclick="mapaMostrarMais('${chaveJs}','${g.tipo}')">mostrar mais ${g.ocultos}</button>` : ''}
+        </div>
+      </div>`).join('')
+    : `<div class="mm-vazio">Nenhum outro vínculo${m.tipos.size < MC.TIPOS.length ? ' com os tipos selecionados' : ''}.</div>`;
+  return `<div class="mm-no mm-no--aberto">${cartao}<div class="mm-filhos" role="group">${grupos}</div></div>`;
 }
 
 window.mapaModo = (modo) => {
@@ -9341,7 +9317,7 @@ function _mapaFocarNoCompleto(id) {
   const vizinhanca = no.closedNeighborhood();
   m.cy.elements().not(vizinhanca).addClass('apagado');
   vizinhanca.addClass('foco');
-  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, id);
+  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, id, null);
 }
 window._mapaFocarNoCompleto = _mapaFocarNoCompleto;
 
@@ -9383,7 +9359,7 @@ function _htmlPainelMapaResumo(indice) {
 }
 
 /** Painel do item selecionado: tipo, selos de continuidade, lacunas, vínculos e ações. */
-function _htmlPainelMapa(indice, id) {
+function _htmlPainelMapa(indice, id, chave) {
   const MC = MapaContinuidade;
   const n = indice.nos[id];
   if (!n) return '';
@@ -9417,27 +9393,36 @@ function _htmlPainelMapa(indice, id) {
     ${selos ? `<div style="margin:8px 0;">${selos}</div>` : ''}
     <div style="font-size:0.75em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin:12px 0 4px;">Vínculos</div>
     ${vinculos}
+    ${chave ? _htmlCruzadasMapa(indice, chave) : ''}
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;">
-      ${_htmlAcoesExploracaoMapa(indice, id)}
+      ${_htmlAcoesExploracaoMapa(indice, id, chave)}
       ${abrir ? `<button class="btn btn-ghost" onclick="${abrir}">Abrir cadastro</button>` : ''}
     </div>`;
 }
 
-/** Expandir / Recolher / Começar daqui (Explorar) ou "Explorar a partir daqui" (visão completa). */
-function _htmlAcoesExploracaoMapa(indice, id) {
+/** Abrir/Recolher vínculos e Começar daqui (Explorar) ou "Explorar a partir daqui" (visão completa). */
+function _htmlAcoesExploracaoMapa(indice, id, chave) {
   const m = window._mapa;
-  const alvo = escJs(id);
-  if (!m || m.modo !== 'explorar' || !m.exploracao || !(id in m.exploracao.presentes)) {
-    return `<button class="btn btn-primary" onclick="mapaExplorarDe('${alvo}')">Explorar a partir daqui</button>`;
+  if (!m || m.modo !== 'explorar' || !m.exploracao || !chave || !m.arvore) {
+    return `<button class="btn btn-primary" onclick="mapaExplorarDe('${escJs(id)}')">Explorar a partir daqui</button>`;
   }
-  const e = m.exploracao;
-  const faltam = MapaContinuidade.pendentes(e, indice, id, [...m.tipos]);
-  const trouxe = Object.keys(e.presentes).some((k) => e.presentes[k] === id);
+  const no = MapaContinuidade.nosDaArvore(m.arvore).find((n) => n.chave === chave);
+  const k = escJs(chave);
   return [
-    faltam ? `<button class="btn btn-primary" onclick="mapaExpandir('${alvo}')">➕ ${e.abertos[id] ? 'Expandir mais' : 'Expandir vínculos'} (${faltam})</button>` : '',
-    e.abertos[id] && trouxe ? `<button class="btn btn-ghost" onclick="mapaRecolher('${alvo}')">➖ Recolher</button>` : '',
-    id !== e.raiz ? `<button class="btn btn-ghost" onclick="mapaExplorarDe('${alvo}')">Começar daqui</button>` : '',
+    no && !no.aberto && no.nFilhos ? `<button class="btn btn-primary" onclick="mapaAlternarNo('${k}')">▸ Abrir vínculos (${no.nFilhos})</button>` : '',
+    no && no.aberto && chave !== m.exploracao.raiz ? `<button class="btn btn-ghost" onclick="mapaAlternarNo('${k}')">▾ Recolher</button>` : '',
+    id !== m.exploracao.raiz ? `<button class="btn btn-ghost" onclick="mapaExplorarDe('${escJs(id)}')">Começar daqui</button>` : '',
   ].join('');
+}
+
+/** "Também ligado a": vínculos do item com outros ramos já abertos (as ligações cruzadas). */
+function _htmlCruzadasMapa(indice, chave) {
+  const m = window._mapa;
+  if (!m || !m.arvore) return '';
+  const cruz = MapaContinuidade.ligacoesCruzadas(indice, m.arvore, chave);
+  if (!cruz.length) return '';
+  return `<div style="font-size:0.75em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin:12px 0 4px;">Também ligado a</div>
+    <div class="mm-cruzadas">${cruz.map((c) => `<button type="button" onclick="mapaClicarNo('${escJs(c.chave)}')" title="${esc(c.rels.join(', '))}" style="--cor:${_COR_TIPO_MAPA[c.tipo]};">${_ICONE_TIPO_MAPA[c.tipo]} ${esc(c.nome)} <span>${esc(c.rels.join(', '))}</span></button>`).join('')}</div>`;
 }
 
 /**

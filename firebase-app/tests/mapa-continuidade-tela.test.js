@@ -85,8 +85,10 @@ async function carregar(perfis, extra, hash, semCytoscape) {
   return { w, doc: w.document, chamadas };
 }
 const txt = (el) => el.textContent.replace(/\s+/g, ' ');
-const nosNoMapa = (w) => w._mapa.cy.nodes().map((n) => n.id()).sort();
-const rotulo = (w, id) => w._mapa.cy.getElementById(id).data('rotulo');
+// Explorar (arvore): cartoes por chave de caminho.
+const cartao = (doc, chave) => doc.querySelector(`#mapaCanvas .mm-cartao[data-chave="${chave}"]`);
+const chavesNaArvore = (doc) => [...doc.querySelectorAll('#mapaCanvas .mm-cartao')].map((c) => c.getAttribute('data-chave'));
+const idsNaArvore = (doc) => chavesNaArvore(doc).map((k) => k.split('>').pop());
 
 test('acesso: Admin, Seguranca e TI; menu no grupo Continuidade', () => {
   const Perfis = require('../public/perfis.js');
@@ -108,84 +110,84 @@ test('inicio: pontos de partida (Tier 1 e lacunas) e o resumo do mapa', async ()
   assert.doesNotMatch(doc.getElementById('mapaCanvas').innerHTML, /<img src=x/);
 });
 
-test('explorar: abre no item com os vinculos dele, lacuna marcada, painel com Tier/PCN e o endereco', async () => {
+test('explorar: arvore abre na raiz com o 1o nivel por tipo, relacao com o pai, lacuna e o endereco', async () => {
   const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('processo:p1');
-  await esperar();
-  const ids = nosNoMapa(w);
-  ['processo:p1', 'servico:s1', 'dependencia:infra', 'pessoa:pBeto', 'area:financeiro'].forEach((id) => assert.ok(ids.includes(id), id));
-  assert.ok(!ids.includes('dependencia:db'), 'o que esta dois passos adiante ainda nao abriu');
-  const cy = w._mapa.cy;
-  assert.strictEqual(cy.getElementById('processo:p1').data('raiz'), 1);
-  assert.strictEqual(cy.getElementById('processo:p1').data('lacuna'), 1);
-  assert.match(rotulo(w, 'processo:p1'), /<img src=x/, 'texto puro no canvas (nao vira HTML)');
-  const aresta = cy.edges().filter((e) => [e.source().id(), e.target().id()].sort().join('|') === 'pessoa:pBeto|processo:p1');
-  assert.match(aresta.data('rels'), /contato de crise/);
-  assert.strictEqual(w.__configCy.layout.name, 'breadthfirst');
+  const raiz = cartao(doc, 'processo:p1');
+  assert.ok(raiz.classList.contains('mm-cartao--raiz'));
+  assert.ok(raiz.classList.contains('mm-cartao--lacuna'));
+  assert.strictEqual(doc.querySelector('#mapaCanvas img'), null, 'nome escapado (nada vira elemento)');
+  const ids = idsNaArvore(doc);
+  ['servico:s1', 'dependencia:infra', 'pessoa:pBeto', 'area:financeiro'].forEach((id) => assert.ok(ids.includes(id), id));
+  assert.ok(!ids.includes('dependencia:db'), 'o 2o nivel ainda nao abriu');
+  const grupos = [...doc.querySelectorAll('#mapaCanvas .mm-grupo__rotulo')].map((g) => txt(g));
+  assert.ok(grupos.some((g) => /Serviços \(1\)/.test(g)));
+  assert.match(txt(cartao(doc, 'processo:p1>pessoa:pBeto')), /contato de crise/);
+  assert.match(txt(cartao(doc, 'processo:p1>dependencia:infra').querySelector('.mm-alternar')), /▸ \d+/, 'botao com a contagem');
   const painel = txt(doc.getElementById('mapaPainel'));
   assert.match(painel, /Lacuna: Tier 1 sem PCN/);
   assert.match(painel, /PCN gerado\s*Não/);
   assert.match(painel, /Abrir cadastro/);
-  assert.doesNotMatch(doc.getElementById('mapaPainel').innerHTML, /<img src=x/, 'nome escapado no painel');
-  assert.match(txt(doc.getElementById('mapaTrilha')), /Início › Faturamento.* · 5 itens no mapa/);
+  assert.match(txt(doc.getElementById('mapaTrilha')), /Início › Faturamento.* · 5 itens abertos/);
   assert.strictEqual(w.location.hash, '#mapa?no=processo%3Ap1');
+  assert.strictEqual(w._mapa.cy, null, 'Explorar nao usa o grafo');
 });
 
-test('explorar: expandir na mesma tela acrescenta sem recriar o grafo; selo +N; duplo clique recolhe', async () => {
+test('explorar: ▸ abre os vinculos a direita, ▾ recolhe (com o que estava aberto abaixo); o caminho nao volta como filho', async () => {
   const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('processo:p1');
-  await esperar();
-  const cy = w._mapa.cy;
-  assert.match(rotulo(w, 'dependencia:infra'), /\n\+\d+$/, 'selo de vinculos fechados');
-  w.mapaClicarNo('dependencia:infra');
-  assert.match(doc.getElementById('mapaPainel').innerHTML, /Expandir vínculos \(\d+\)/);
-  w.mapaExpandir('dependencia:infra');
-  await esperar();
-  assert.strictEqual(w._mapa.cy, cy, 'mesmo grafo, so cresceu');
-  assert.ok(nosNoMapa(w).includes('dependencia:db'), 'Oracle entrou');
-  assert.ok(nosNoMapa(w).includes('processo:p1'), 'o que ja estava continua');
-  assert.doesNotMatch(rotulo(w, 'dependencia:infra'), /\+\d+$/);
-  assert.match(doc.getElementById('mapaPainel').innerHTML, /Recolher/);
-  assert.strictEqual(w.__ultimoLayout.name, 'breadthfirst');
-  cy.getElementById('dependencia:infra').emit('dbltap');
-  await esperar();
-  assert.ok(!nosNoMapa(w).includes('dependencia:db'), 'duplo clique recolheu');
-  assert.ok(nosNoMapa(w).includes('dependencia:infra'));
-  cy.getElementById('dependencia:infra').emit('dbltap');
-  await esperar();
-  assert.ok(nosNoMapa(w).includes('dependencia:db'), 'e abre de novo');
+  w.mapaAlternarNo('processo:p1>dependencia:infra');
+  assert.ok(chavesNaArvore(doc).includes('processo:p1>dependencia:infra>dependencia:db'), 'Oracle abaixo do Cluster');
+  assert.ok(!chavesNaArvore(doc).includes('processo:p1>dependencia:infra>processo:p1'), 'nao volta ao processo');
+  assert.ok(chavesNaArvore(doc).includes('processo:p1>dependencia:infra>servico:s1'), 'mesmo item em outro ramo');
+  w.mapaAlternarNo('processo:p1>dependencia:infra>dependencia:db');
+  assert.ok(w._mapa.exploracao.abertos.has('processo:p1>dependencia:infra>dependencia:db'));
+  w.mapaAlternarNo('processo:p1>dependencia:infra');
+  assert.ok(!chavesNaArvore(doc).includes('processo:p1>dependencia:infra>dependencia:db'));
+  assert.ok(!w._mapa.exploracao.abertos.has('processo:p1>dependencia:infra>dependencia:db'), 'recolheu em cascata');
+  assert.ok(cartao(doc, 'processo:p1>dependencia:infra'), 'o proprio item fica');
 });
 
-test('explorar: clique seleciona (painel); "Comecar daqui" troca a raiz e o endereco; Inicio volta aos pontos de partida', async () => {
+test('explorar: clique seleciona e mostra o painel com Abrir vinculos, Comecar daqui e "Tambem ligado a"', async () => {
   const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('processo:p1');
-  await esperar();
-  w._mapa.cy.getElementById('servico:s1').emit('tap');
-  assert.match(txt(doc.getElementById('mapaPainel')), /Portal.*Composição/);
-  assert.ok(w._mapa.cy.getElementById('servico:s1').hasClass('selecionado'));
-  assert.match(doc.getElementById('mapaPainel').innerHTML, /Começar daqui/);
+  w.mapaClicarNo('processo:p1>servico:s1');
+  assert.ok(cartao(doc, 'processo:p1>servico:s1').classList.contains('mm-cartao--selecionado'));
+  const painel = doc.getElementById('mapaPainel');
+  assert.match(txt(painel), /Portal.*Composição/);
+  assert.match(painel.innerHTML, /Abrir vínculos \(\d+\)/);
+  assert.match(painel.innerHTML, /Começar daqui/);
+  // Servico e Cluster sao irmaos e ligados entre si: ligacao cruzada.
+  assert.match(txt(painel), /Também ligado a.*Cluster K8s.*usa/);
   w.mapaExplorarDe('servico:s1');
-  await esperar();
-  assert.strictEqual(w._mapa.cy.getElementById('servico:s1').data('raiz'), 1);
+  assert.ok(cartao(doc, 'servico:s1').classList.contains('mm-cartao--raiz'));
   assert.strictEqual(w.location.hash, '#mapa?no=servico%3As1');
   w.mapaVoltarAoInicio();
   assert.match(txt(doc.getElementById('mapaCanvas')), /Processos Tier 1/);
-  assert.strictEqual(w._mapa.cy, null);
 });
 
-test('explorar: filtros por tipo escondem o tipo (a raiz fica) e valem para o que se expande', async () => {
-  const { w } = await carregar(['admin']);
+test('explorar: grupo grande mostra 8 e "mostrar mais"; Abrir proximo nivel e Recolher tudo', async () => {
+  const muitos = Array.from({ length: 11 }, (_, k) => ({ id: 'pp' + k, area: 'Financeiro', processo: 'Proc ' + String(k).padStart(2, '0') }));
+  const { w, doc } = await carregar(['admin'], { getProcessos: PROCESSOS.concat(muitos) });
+  w.mapaExplorarDe('area:financeiro');
+  const procs = () => chavesNaArvore(doc).filter((k) => k.split('>').length === 2 && k.endsWith(k.split('>')[1]) && k.split('>')[1].startsWith('processo:'));
+  assert.strictEqual(procs().length, 8);
+  assert.match(txt(doc.getElementById('mapaCanvas')), /mostrar mais 5/);
+  w.mapaMostrarMais('area:financeiro', 'processo');
+  assert.strictEqual(procs().length, 13);
+  w.mapaAbrirProximoNivel();
+  assert.ok(chavesNaArvore(doc).some((k) => k.split('>').length === 3), 'abriu o nivel seguinte');
+  w.mapaRecolherTudo();
+  assert.ok(!chavesNaArvore(doc).some((k) => k.split('>').length === 3));
+});
+
+test('explorar: filtros por tipo tiram o grupo (a raiz fica)', async () => {
+  const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('processo:p1');
-  await esperar();
   w.mapaAlternarTipo('pessoa');
-  await esperar();
-  assert.ok(!nosNoMapa(w).includes('pessoa:pBeto'));
-  w.mapaExpandir('servico:s1');
-  await esperar();
-  assert.ok(!nosNoMapa(w).some((id) => id.startsWith('pessoa:')), 'Ana (stakeholder) nao entra com Pessoas desligado');
+  assert.ok(!idsNaArvore(doc).some((id) => id.startsWith('pessoa:')));
   w.mapaAlternarTipo('processo');
-  await esperar();
-  assert.ok(nosNoMapa(w).includes('processo:p1'), 'raiz nunca some');
+  assert.ok(cartao(doc, 'processo:p1'), 'raiz nunca some');
 });
 
 test('busca leva a explorar o item escolhido', async () => {
@@ -195,23 +197,14 @@ test('busca leva a explorar o item escolhido', async () => {
   w.mapaBuscar();
   assert.match(txt(doc.getElementById('mapaBuscaResultados')), /Cobrança.*Processo/);
   w.mapaEscolherBusca('processo:p2');
-  await esperar();
   assert.strictEqual(w._mapa.exploracao.raiz, 'processo:p2');
   assert.match(txt(doc.getElementById('mapaTrilha')), /Início › Cobrança/);
 });
 
 test('deep link #mapa?no= abre explorando o item', async () => {
-  const { w, doc } = await carregar(['admin'], {}, '#mapa?no=servico%3As1');
+  const { doc } = await carregar(['admin'], {}, '#mapa?no=servico%3As1');
   assert.match(txt(doc.getElementById('mapaTrilha')), /Início › Portal/);
-  assert.ok(nosNoMapa(w).includes('dependencia:infra'));
-});
-
-test('explorar: sem a biblioteca do mapa, mensagem de erro (nunca mapa vazio)', async () => {
-  const semLib = await carregar(['admin'], {}, '', true);
-  semLib.w.document.head.appendChild = (s) => { setTimeout(() => s.onerror && s.onerror(), 0); return s; };
-  semLib.w.mapaExplorarDe('processo:p1');
-  await esperar(40);
-  assert.match(semLib.doc.getElementById('mapaCy').textContent, /Não foi possível abrir o mapa/);
+  assert.ok(cartao(doc, 'servico:s1>dependencia:infra'));
 });
 
 test('TI: sem contratos (nem chama a API), aviso, e "Abrir cadastro" so onde ve a tela', async () => {
@@ -228,9 +221,7 @@ test('TI: sem contratos (nem chama a API), aviso, e "Abrir cadastro" so onde ve 
 test('admin ve contratos; abrir cadastro do servico navega e abre o drawer quando a tela carrega', async () => {
   const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('dependencia:db');
-  await esperar();
-  assert.ok(nosNoMapa(w).includes('contrato:c1'));
-  assert.match(rotulo(w, 'contrato:c1'), /CT-0001/);
+  assert.match(txt(cartao(doc, 'dependencia:db>contrato:c1')), /CT-0001/);
   // Como no navegador: a troca de hash dispara o route() (hashchange).
   w._perfilCarregado = true;
   w.mapaAbrirCadastro('servico', 's1');
@@ -295,8 +286,8 @@ test('visao completa: clique destaca o item e mostra o painel; duplo clique pass
   cy.getElementById('servico:s1').emit('dbltap');
   await esperar();
   assert.strictEqual(w._mapa.modo, 'explorar');
-  assert.notStrictEqual(w._mapa.cy, cy, 'o grafo da visao completa saiu; o da exploracao e outro');
-  assert.strictEqual(w._mapa.cyModo, 'explorar');
+  assert.strictEqual(w._mapa.cy, null, 'o grafo da visao completa saiu');
+  assert.ok(cartao(doc, 'servico:s1').classList.contains('mm-cartao--raiz'));
   assert.match(txt(doc.getElementById('mapaTrilha')), /Início › Portal/);
 });
 
@@ -316,24 +307,18 @@ test('visao completa: filtros por tipo refazem o grafo; deep link ?modo=completo
   assert.match(semLib.doc.getElementById('mapaCyCompleto').textContent, /Não foi possível abrir a visão completa/);
 });
 
-test('nos na cor da familia: fundo claro, borda e texto na cor do tipo; raiz cheia; lacuna e selecionado se destacam', async () => {
-  const { w } = await carregar(['admin']);
+test('cartoes na cor da familia: fundo claro e borda na cor do tipo; raiz cheia; lacuna e selecionado se destacam', async () => {
+  const { w, doc } = await carregar(['admin']);
   w.mapaExplorarDe('dependencia:db');
-  await esperar();
-  const cy = w._mapa.cy;
-  const contrato = cy.getElementById('contrato:c1');
-  assert.strictEqual(contrato.data('fundo'), w._corClaraMapa('#5d4037'));
-  assert.strictEqual(contrato.data('cor'), '#5d4037');
-  assert.strictEqual(contrato.data('texto'), '#5d4037');
+  const contrato = cartao(doc, 'dependencia:db>contrato:c1');
+  assert.match(contrato.getAttribute('style'), /--cor:#5d4037;/);
+  assert.match(contrato.getAttribute('style'), new RegExp(`--fundo:${w._corClaraMapa('#5d4037')};`));
   assert.strictEqual(w._corClaraMapa('#2e7d32'), '#e6efe6');
-  const raiz = cy.getElementById('dependencia:db');
-  assert.strictEqual(raiz.data('fundo'), raiz.data('cor'), 'raiz cheia na cor do tipo');
-  assert.strictEqual(raiz.data('texto'), '#ffffff');
+  const raiz = cartao(doc, 'dependencia:db');
+  assert.match(raiz.getAttribute('style'), /--cor:#00838f;--fundo:#00838f;/, 'raiz cheia na cor do tipo');
   w.mapaExplorarDe('servico:s1');
-  await esperar();
-  const c2 = w._mapa.cy;
-  assert.strictEqual(c2.getElementById('pessoa:pAna').data('fundo'), '#e6efe6');
-  assert.strictEqual(c2.getElementById('processo:p1').data('lacuna'), 1, 'lacuna (borda vermelha no estilo)');
-  w.mapaClicarNo('pessoa:pAna');
-  assert.ok(c2.getElementById('pessoa:pAna').hasClass('selecionado'));
+  assert.match(cartao(doc, 'servico:s1>pessoa:pAna').getAttribute('style'), /--fundo:#e6efe6;/);
+  assert.ok(cartao(doc, 'servico:s1>processo:p1').classList.contains('mm-cartao--lacuna'));
+  w.mapaClicarNo('servico:s1>pessoa:pAna');
+  assert.ok(cartao(doc, 'servico:s1>pessoa:pAna').classList.contains('mm-cartao--selecionado'));
 });

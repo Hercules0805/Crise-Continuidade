@@ -460,3 +460,39 @@ a.btn { text-decoration: none; }
 /* Cadastro rápido: "+ Novo X" ao lado de um campo (abre o cadastro por cima do formulário) */
 .link-acao { background: none; border: none; padding: 0; margin-top: 4px; color: var(--red); font: 600 12px var(--font-sans); cursor: pointer; }
 .link-acao:hover { text-decoration: underline; }
+
+/* Mapa de Continuidade -- Explorar como mind map em árvore (22/10/2026).
+   Raiz à esquerda; cada nó aberto mostra os grupos (por tipo) à direita,
+   ligados por conectores de borda. --cor = cor do tipo; --fundo = tom claro. */
+.mm-arvore { overflow: auto; max-height: 72vh; padding: 12px 8px 16px; }
+.mm-no { display: flex; align-items: flex-start; }
+.mm-cartao { position: relative; flex: 0 0 auto; width: 210px; box-sizing: border-box; padding: 8px 34px 8px 12px; border-radius: 8px;
+  background: var(--fundo); border: 1.5px solid var(--cor); border-left-width: 6px; cursor: pointer; margin: 4px 0; }
+.mm-cartao:hover { box-shadow: 0 1px 6px rgba(0,0,0,0.12); }
+.mm-cartao__rel { font-size: 10.5px; color: #888; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mm-cartao__nome { font-size: 13px; font-weight: 700; color: var(--cor); line-height: 1.3; word-break: break-word; }
+.mm-cartao__sub { font-size: 11px; color: #666; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mm-cartao__lacuna { display: inline-block; min-width: 16px; height: 16px; line-height: 16px; border-radius: 8px; background: #c62828; color: #fff; font-size: 11px; text-align: center; }
+.mm-cartao--raiz { width: 240px; }
+.mm-cartao--raiz .mm-cartao__nome { color: #fff; font-size: 14px; }
+.mm-cartao--raiz .mm-cartao__sub, .mm-cartao--raiz .mm-cartao__rel { color: rgba(255,255,255,0.85); }
+.mm-cartao--lacuna { border-color: #c62828; box-shadow: 0 0 0 1px #c62828; }
+.mm-cartao--selecionado { outline: 2.5px solid #222; outline-offset: 1px; }
+.mm-alternar { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); min-width: 26px; height: 24px; padding: 0 5px; border-radius: 12px;
+  border: 1.5px solid var(--cor); background: #fff; color: var(--cor); font: 700 12px var(--font-sans); cursor: pointer; }
+.mm-alternar span { font-size: 11px; }
+.mm-alternar:hover { background: var(--cor); color: #fff; }
+.mm-filhos { display: flex; flex-direction: column; padding-left: 28px; position: relative; margin-left: 0; }
+.mm-filhos::before { content: ''; position: absolute; left: 0; top: 26px; width: 14px; border-top: 1.5px solid #c9c9d2; }
+.mm-grupo { position: relative; padding: 4px 0 4px 14px; border-left: 1.5px solid #c9c9d2; margin-left: 14px; }
+.mm-grupo:last-child { border-left-color: transparent; }
+.mm-grupo:last-child::after { content: ''; position: absolute; left: -1.5px; top: 0; height: 18px; border-left: 1.5px solid #c9c9d2; }
+.mm-grupo::before { content: ''; position: absolute; left: 0; top: 18px; width: 10px; border-top: 1.5px solid #c9c9d2; }
+.mm-grupo__rotulo { font-size: 11.5px; font-weight: 700; color: var(--cor); text-transform: uppercase; letter-spacing: 0.3px; margin: 8px 0 2px; }
+.mm-grupo__rotulo span { color: #999; font-weight: 600; }
+.mm-itens { display: flex; flex-direction: column; padding-left: 4px; }
+.mm-mais { align-self: flex-start; margin: 2px 0 6px; background: none; border: 1.5px dashed var(--cor); color: var(--cor); border-radius: 12px; padding: 3px 10px; font: 600 11.5px var(--font-sans); cursor: pointer; }
+.mm-vazio { font-size: 12px; color: #999; padding: 10px 0 0 14px; }
+.mm-cruzadas { display: flex; flex-direction: column; gap: 4px; }
+.mm-cruzadas button { text-align: left; background: #fff; border: 1.5px solid var(--cor); border-left-width: 4px; color: #222; border-radius: 6px; padding: 4px 8px; font: 600 12px var(--font-sans); cursor: pointer; }
+.mm-cruzadas button span { display: block; font-weight: 400; font-size: 11px; color: #888; }

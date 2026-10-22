@@ -366,101 +366,122 @@
     }).filter(function (g) { return g.itens.length; });
   }
 
-  // ---- Explorar (21/10/2026): mind map que se expande na mesma tela ----
-  // Estado: { raiz, presentes: { id: paiId|null }, abertos: { id: true } }.
-  // `presentes[id]` guarda quem trouxe o no (a raiz tem null): recolher um no
-  // tira o que ele trouxe, e o que foi aberto a partir disso.
+  // ---- Explorar (22/10/2026): mind map em arvore ----
+  // A raiz a esquerda; os vinculos de cada item, agrupados por tipo, a direita.
+  // E arvore, nao grafo: o mesmo item pode aparecer em ramos diferentes, e o
+  // que ja esta no caminho ate ali nao reaparece como filho (sem voltar em
+  // circulo). Um no e identificado pela CHAVE do caminho ate ele
+  // ('processo:p1>servico:s1'); `abertos` e o Set das chaves abertas.
+  var SEP_CAMINHO = '>';
 
-  /** Vizinhos visiveis de id, um por item, lacunas primeiro (ordem de vizinhos dentro do tipo). */
-  function _vizinhosVisiveis(indice, id, tipos) {
-    var lista = [];
-    vizinhos(indice, id, tipos).forEach(function (g) { g.itens.forEach(function (i) { lista.push(i); }); });
-    return lista.map(function (i, k) { return { i: i, k: k }; })
-      .sort(function (a, b) { return (b.i.lacunas.length > 0) - (a.i.lacunas.length > 0) || a.k - b.k; })
-      .map(function (x) { return x.i.id; });
-  }
+  function chaveDoCaminho(caminho) { return caminho.join(SEP_CAMINHO); }
+  function caminhoDaChave(chave) { return String(chave || '').split(SEP_CAMINHO).filter(Boolean); }
 
-  function _visivel(estado, id, tipos) {
-    return id === estado.raiz || (tipos || TIPOS).indexOf(tipoDoId(id)) >= 0;
-  }
-
-  /** Quantos vizinhos visiveis do no ainda estao fora do mapa (selo "+N"). */
-  function pendentes(estado, indice, id, tipos) {
-    return _vizinhosVisiveis(indice, id, tipos).filter(function (v) { return !(v in estado.presentes); }).length;
-  }
-
-  /** Abre ate `limite` vizinhos ausentes de id (padrao 40). Devolve os ids acrescentados. */
-  function expandir(estado, indice, id, tipos, limite) {
-    if (!(id in estado.presentes)) return [];
-    var max = limite || 40;
-    var novos = _vizinhosVisiveis(indice, id, tipos).filter(function (v) { return !(v in estado.presentes); }).slice(0, max);
-    novos.forEach(function (v) { estado.presentes[v] = id; });
-    estado.abertos[id] = true;
-    return novos;
+  /** Quantos vinculos (dos tipos visiveis) o item tem fora do caminho -- o numero do botao ▸. */
+  function _contarFilhos(indice, caminho, tipos) {
+    var fora = {};
+    caminho.forEach(function (c) { fora[c] = true; });
+    var n = 0;
+    vizinhos(indice, caminho[caminho.length - 1], tipos).forEach(function (g) {
+      g.itens.forEach(function (i) { if (!fora[i.id]) n++; });
+    });
+    return n;
   }
 
   /**
-   * Tira o que id trouxe (e o que foi aberto a partir disso). Um no que um
-   * outro no ainda aberto tambem liga fica, passando a pertencer a ele. A raiz
-   * nunca sai. Devolve os ids removidos.
+   * Filhos do ultimo item do caminho, agrupados por tipo (ordem de TIPOS;
+   * dentro do grupo, lacunas primeiro e por nome -- a ordem de vizinhos).
+   * Grupo com mais de `opcoes.limite` (8) mostra os primeiros e diz quantos
+   * ficaram de fora, a menos que esteja em `opcoes.gruposAbertos`
+   * ('<chave>|<tipo>').
+   * [{ tipo, rotulo, total, ocultos, itens:[{ id, nome, sub, tipo, rels, lacunas, nFilhos }] }]
    */
-  function recolher(estado, indice, id) {
-    var sai = {};
-    var fila = [id];
-    while (fila.length) {
-      var atual = fila.shift();
-      Object.keys(estado.presentes).forEach(function (k) {
-        if (estado.presentes[k] === atual && !sai[k] && k !== estado.raiz) { sai[k] = true; fila.push(k); }
-      });
+  function filhosNaArvore(indice, caminho, tipos, opcoes) {
+    var op = opcoes || {};
+    var limite = op.limite || 8;
+    var chave = chaveDoCaminho(caminho);
+    var fora = {};
+    caminho.forEach(function (c) { fora[c] = true; });
+    return vizinhos(indice, caminho[caminho.length - 1], tipos).map(function (g) {
+      var todos = g.itens.filter(function (i) { return !fora[i.id]; });
+      var aberto = op.gruposAbertos && op.gruposAbertos.has && op.gruposAbertos.has(chave + '|' + g.tipo);
+      var mostrados = aberto ? todos : todos.slice(0, limite);
+      return {
+        tipo: g.tipo, rotulo: g.rotulo, total: todos.length, ocultos: todos.length - mostrados.length,
+        itens: mostrados.map(function (i) {
+          return { id: i.id, nome: i.nome, sub: i.sub, tipo: g.tipo, rels: i.rels, lacunas: i.lacunas,
+            nFilhos: _contarFilhos(indice, caminho.concat([i.id]), tipos) };
+        }),
+      };
+    }).filter(function (g) { return g.total > 0; });
+  }
+
+  /**
+   * Arvore aberta a partir da raiz. No: { id, chave, tipo, nome, sub, lacunas,
+   * relComPai, nFilhos, aberto, grupos:[{ tipo, rotulo, total, ocultos, nos:[no] }] }.
+   * Devolve { raiz: no, total } -- total = itens desenhados.
+   */
+  function montarArvore(indice, raiz, abertos, tipos, opcoes) {
+    var op = opcoes || {};
+    var maxProf = op.maxProfundidade || 12;
+    var total = 0;
+    function no(caminho, relComPai) {
+      var id = caminho[caminho.length - 1];
+      var n = indice.nos[id];
+      var chave = chaveDoCaminho(caminho);
+      total++;
+      var aberto = !!(abertos && abertos.has && abertos.has(chave)) && caminho.length <= maxProf;
+      var grupos = aberto ? filhosNaArvore(indice, caminho, tipos, op).map(function (g) {
+        return { tipo: g.tipo, rotulo: g.rotulo, total: g.total, ocultos: g.ocultos,
+          nos: g.itens.map(function (i) { return no(caminho.concat([i.id]), i.rels); }) };
+      }) : [];
+      return { id: id, chave: chave, tipo: n.tipo, nome: n.nome, sub: n.sub, lacunas: n.lacunas, relComPai: relComPai || [],
+        nFilhos: _contarFilhos(indice, caminho, tipos), aberto: aberto, grupos: grupos };
     }
-    delete estado.abertos[id];
-    Object.keys(sai).forEach(function (k) { delete estado.abertos[k]; });
-    // Quem continua aberto e liga a um no que ia sair o segura.
-    var removidos = [];
-    Object.keys(sai).forEach(function (k) {
-      var dono = (indice.adj[k] || []).map(function (x) { return x.para; })
-        .filter(function (o) { return !sai[o] && o !== id && estado.abertos[o] && (o in estado.presentes); })[0];
-      if (dono) estado.presentes[k] = dono;
-      else { delete estado.presentes[k]; removidos.push(k); }
-    });
-    return removidos;
+    if (!indice.nos[raiz]) return { raiz: null, total: 0 };
+    var r = no([raiz], null);
+    return { raiz: r, total: total };
   }
 
-  /** Estado inicial: a raiz com os vinculos dela abertos. */
-  function iniciarExploracao(indice, raiz, tipos, limite) {
-    var estado = { raiz: raiz, presentes: {}, abertos: {} };
-    if (!indice.nos[raiz]) return estado;
-    estado.presentes[raiz] = null;
-    expandir(estado, indice, raiz, tipos, limite);
-    return estado;
+  /** Todos os nos desenhados da arvore, na ordem (pre-ordem). */
+  function nosDaArvore(arvore) {
+    var saida = [];
+    (function v(n) {
+      if (!n) return;
+      saida.push(n);
+      n.grupos.forEach(function (g) { g.nos.forEach(v); });
+    })(arvore && arvore.raiz);
+    return saida;
   }
 
   /**
-   * Nos e ligacoes do que esta aberto (so os tipos visiveis; a raiz sempre).
-   * { nos:[{ id, tipo, nome, sub, lacuna, raiz, aberto, pendentes }], arestas:[{ id, de, para, rels }] }
+   * Ligacoes cruzadas do no `chave`: vinculos dele com itens desenhados em
+   * OUTROS ramos (fora o pai e os filhos diretos, que a arvore ja mostra).
+   * [{ id, nome, tipo, rels, chave }] -- chave = 1a ocorrencia na arvore.
    */
-  function elementosExploracao(estado, indice, tipos) {
-    var ids = Object.keys(estado.presentes).filter(function (id) { return indice.nos[id] && _visivel(estado, id, tipos); });
-    var esta = {};
-    ids.forEach(function (id) { esta[id] = true; });
-    var pares = {};
-    ids.forEach(function (de) {
-      (indice.adj[de] || []).forEach(function (x) {
-        if (!esta[x.para]) return;
-        var a = de < x.para ? de : x.para, b = de < x.para ? x.para : de;
-        var k = a + '|' + b;
-        var par = pares[k] || (pares[k] = { id: 'e:' + k, de: a, para: b, rels: [] });
-        if (de === a && par.rels.indexOf(x.rel) < 0) par.rels.push(x.rel);
-      });
+  function ligacoesCruzadas(indice, arvore, chave) {
+    var caminho = caminhoDaChave(chave);
+    var id = caminho[caminho.length - 1];
+    var pai = caminho.length > 1 ? caminho[caminho.length - 2] : null;
+    var nos = nosDaArvore(arvore);
+    var primeiro = {};
+    nos.forEach(function (n) { if (!primeiro[n.id]) primeiro[n.id] = n.chave; });
+    var proprio = nos.filter(function (n) { return n.chave === chave; })[0];
+    var filhos = {};
+    (proprio ? proprio.grupos : []).forEach(function (g) { g.nos.forEach(function (f) { filhos[f.id] = true; }); });
+    var vistos = {};
+    var saida = [];
+    (indice.adj[id] || []).forEach(function (x) {
+      if (x.para === id || x.para === pai || filhos[x.para] || !primeiro[x.para]) return;
+      var item = vistos[x.para];
+      if (!item) {
+        var n = indice.nos[x.para];
+        item = vistos[x.para] = { id: x.para, nome: n.nome, tipo: n.tipo, rels: [], chave: primeiro[x.para] };
+        saida.push(item);
+      }
+      if (item.rels.indexOf(x.rel) < 0) item.rels.push(x.rel);
     });
-    return {
-      nos: ids.map(function (id) {
-        var n = indice.nos[id];
-        return { id: id, tipo: n.tipo, nome: n.nome, sub: n.sub, lacuna: n.lacunas.length > 0, raiz: id === estado.raiz,
-          aberto: !!estado.abertos[id], pendentes: pendentes(estado, indice, id, tipos) };
-      }),
-      arestas: Object.keys(pares).map(function (k) { return pares[k]; }),
-    };
+    return saida.sort(function (a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
   }
 
   /** Busca por nome (sem acento), ate `limite` resultados, os com lacuna primeiro. */
@@ -542,11 +563,12 @@
     tipoDoId: tipoDoId,
     montarIndice: montarIndice,
     vizinhos: vizinhos,
-    iniciarExploracao: iniciarExploracao,
-    expandir: expandir,
-    recolher: recolher,
-    pendentes: pendentes,
-    elementosExploracao: elementosExploracao,
+    chaveDoCaminho: chaveDoCaminho,
+    caminhoDaChave: caminhoDaChave,
+    filhosNaArvore: filhosNaArvore,
+    montarArvore: montarArvore,
+    nosDaArvore: nosDaArvore,
+    ligacoesCruzadas: ligacoesCruzadas,
     buscar: buscar,
     pontosDePartida: pontosDePartida,
     contagemVinculos: contagemVinculos,
