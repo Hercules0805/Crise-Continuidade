@@ -13424,9 +13424,9 @@ async function riscos() {
       <table style="min-width:2516px;">
         <colgroup>
           <col style="width:104px"><col style="width:210px"><col style="width:140px"><col style="width:170px"><col style="width:150px">
-          <col style="width:200px"><col style="width:130px"><col style="width:300px"><col style="width:140px">
+          <col style="width:200px"><col style="width:130px"><col style="width:300px"><col style="width:180px"><col style="width:140px">
           <col style="width:104px"><col style="width:104px"><col style="width:72px"><col style="width:84px"><col style="width:72px">
-          <col style="width:140px"><col style="width:180px"><col style="width:112px"><col style="width:104px">
+          <col style="width:140px"><col style="width:112px"><col style="width:104px">
         </colgroup>
         <thead>
           <tr>
@@ -13438,6 +13438,7 @@ async function riscos() {
             <th title="Processo / Fornecedor">Processo</th>
             <th>Categoria</th>
             <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;">Título <span id="sort-risco-titulo"></span></th>
+            <th onclick="ordenarRiscos('status')" style="cursor:pointer;">Status <span id="sort-risco-status"></span></th>
             <th>Reportado por</th>
             <th title="Probabilidade">Prob.</th>
             <th>Impacto</th>
@@ -13445,7 +13446,6 @@ async function riscos() {
             <th class="col-c" title="Score depois do tratamento (Probabilidade x Impacto residuais)">Residual</th>
             <th class="col-c" title="Score x peso do Tier do processo (ou criticidade do fornecedor) -- quanto este risco soma na Carga de Risco da Empresa">Carga</th>
             <th class="col-r" title="Impacto financeiro">Impacto R$</th>
-            <th>Status</th>
             <th>Prioridade</th>
             <th class="col-c col-sticky">Ações</th>
           </tr>
@@ -14144,7 +14144,7 @@ function renderizarRiscos() {
     },
   });
 
-  riscosOrdenacao.atualizarSetas('sort-risco-', ['dataIdentificacao', 'area', 'titulo', 'score']);
+  riscosOrdenacao.atualizarSetas('sort-risco-', ['dataIdentificacao', 'area', 'titulo', 'status', 'score']);
 
   const processosPorId = RiscoConsolidado.indexarProcessos(riscosProcessosCache);
 
@@ -14161,6 +14161,7 @@ function renderizarRiscos() {
         <td>${r.processo ? esc(r.processo) : (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span class="muted">Corporativo</span>')}</td>
         <td class="muted">${esc((r.categorias || []).join(', ')) || '–'}</td>
         <td class="title" title="${esc(r.titulo)}">${esc(r.titulo)}</td>
+        <td>${_badgeStatusRisco(r.status)}${_selosGovernancaRisco(r)}</td>
         <td>${esc(r.reportadoPor || '–')}</td>
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
@@ -14168,7 +14169,6 @@ function renderizarRiscos() {
         <td class="col-c">${_badgeResidualRisco(r)}</td>
         <td class="col-c">${_badgeCargaRisco(r, processosPorId)}</td>
         <td class="num col-r col-nw">${r.impactoFinanceiro === null || r.impactoFinanceiro === undefined ? '<span class="muted">–</span>' : _formatarReais(r.impactoFinanceiro)}</td>
-        <td>${_badgeStatusRisco(r.status)}${_selosGovernancaRisco(r)}</td>
         <td>${_badgeProbImpactoRisco(r.prioridade)}</td>
         <td class="col-c col-nw col-sticky" onclick="event.stopPropagation();">
           <button class="btn-icon" onclick="editarRisco('${r.id}')" title="${isAdmin ? 'Editar' : 'Visualizar'}">

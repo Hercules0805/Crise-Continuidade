@@ -102,10 +102,10 @@ test('grade: coluna Produto (depois de Responsavel), com nome, "(produto removid
   assert.deepStrictEqual(ordem(), ['Legado', 'ERP', '(produto removido)', '–'], 'descendente: sem produto continua no fim');
 });
 
-test('grade: colunas na ordem Data, Area, Responsavel, Produto, Origem, Processo, Categoria, Titulo; cada celula sob o seu cabecalho', async () => {
+test('grade: colunas na ordem Data, Area, Responsavel, Produto, Origem, Processo, Categoria, Titulo, Status; cada celula sob o seu cabecalho', async () => {
   const { doc } = await carregar();
   const cab = [...doc.querySelectorAll('#listaRiscos thead th')].map((th) => th.textContent.trim().replace(/\s+/g, ' '));
-  assert.deepStrictEqual(cab.slice(0, 9).map((c) => c.split(' ')[0]), ['Data', 'Área', 'Responsável', 'Produto', 'Origem', 'Processo', 'Categoria', 'Título', 'Reportado']);
+  assert.deepStrictEqual(cab.slice(0, 10).map((c) => c.split(' ')[0]), ['Data', 'Área', 'Responsável', 'Produto', 'Origem', 'Processo', 'Categoria', 'Título', 'Status', 'Reportado']);
   const tr = [...doc.querySelectorAll('#riscoRows tr')].find((x) => x.textContent.includes('Falha no ERP'));
   const cel = (nome) => tr.children[cab.findIndex((c) => c.startsWith(nome))].textContent.trim();
   assert.strictEqual(cel('Área'), 'TI');
@@ -113,6 +113,7 @@ test('grade: colunas na ordem Data, Area, Responsavel, Produto, Origem, Processo
   assert.strictEqual(cel('Origem'), 'Vulnerabilidade Reportada');
   assert.strictEqual(cel('Processo'), 'Corporativo');
   assert.strictEqual(cel('Título'), 'Falha no ERP');
+  assert.ok(cel('Status').length > 0, 'a celula de Status esta sob o cabecalho Status');
   assert.ok(tr.children[cab.findIndex((c) => c.startsWith('Título'))].classList.contains('title'));
   assert.strictEqual(doc.querySelectorAll('#listaRiscos colgroup col').length, cab.length);
 });

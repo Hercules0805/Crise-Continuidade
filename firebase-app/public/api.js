@@ -2349,6 +2349,9 @@ async function _lerNotificacoesEmail() {
       grupo: n.grupo || '',
       contratoId: n.contratoId || '',
       contratoCodigo: n.contratoCodigo || '',
+      // Avisos de risco (22/10/2026): referencia e link no log.
+      riscoId: n.riscoId || '',
+      riscoTitulo: n.riscoTitulo || '',
       para: n.para || '',
       motivos: Array.isArray(n.motivos) ? n.motivos : [],
       assunto: n.assunto || '',
