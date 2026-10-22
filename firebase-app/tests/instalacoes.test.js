@@ -106,6 +106,24 @@ test('componentes: um Servidor pode ficar abaixo de uma Instalação; "Está aba
   assert.match(filial.doc.getElementById('depAcimaDe').textContent, /Sede SP \(contingência dela\)/);
 });
 
+test('componentes: Instalação não oferece outra Instalação; a já gravada fica em laranja para remover; trocar a categoria reavalia', async () => {
+  const legado = { ...FILIAL, componentes: [{ id: 'dc', nome: 'Data center', categoria: 'Instalações' }] };
+  const { w, doc } = await abrirDep(['ti'], legado);
+  w.depCompMostrarDropdown();
+  const opcoes = doc.getElementById('depComp-dropdown').textContent;
+  assert.doesNotMatch(opcoes, /\(Instalações\)/, 'nenhuma Instalação como componente de Instalação');
+  assert.match(opcoes, /SRV-01 \(Servidor\)/);
+  const tags = doc.getElementById('depComp-tags');
+  assert.ok(tags.querySelector('.dep-comp--nao-se-aplica'), 'componente antigo visivel e marcado');
+  assert.match(tags.textContent, /use "Instalação alternativa"/);
+  w.selecionarDepComponente('sede');
+  assert.strictEqual(w._depComponentesSel.length, 1, 'selecionar direto tambem e recusado');
+  // Virou Servidor: Instalação como componente volta a valer ("instalada em").
+  doc.getElementById('depCategoria').value = 'Servidor';
+  w._atualizarBlocoInstalacao();
+  assert.ok(!doc.querySelector('#depComp-tags .dep-comp--nao-se-aplica'));
+});
+
 // ---- api.js: leitura e gravacao (Firestore falso) ----
 const apiSrc = fs.readFileSync(path.join(PUB, 'api.js'), 'utf8');
 function extrair(nome) {
@@ -191,7 +209,7 @@ test('Pessoa: select "Instalação (lotação)" com as instalações; salvar gra
 });
 
 // ---- Etapa 5: Mapa de Continuidade e composicao do Servico ----
-test('mapa centrado numa Instalação: pessoas lotadas, processos, o que ela hospeda e a contingência; painel com tipo e endereço', async () => {
+test('mapa (Explorar) numa Instalação: pessoas lotadas, processos, o que ela hospeda e a contingência; painel com tipo e endereço', async () => {
   const ana = { id: 'pAna', categoria: 'Pessoas', nome: 'Ana', instalacao: { id: 'sede', nome: 'Sede SP' } };
   const ctx = await carregar(['admin'], {
     getDependencias: DEPS.filter((d) => d.id !== 'pAna').concat([ana]),
@@ -199,19 +217,23 @@ test('mapa centrado numa Instalação: pessoas lotadas, processos, o que ela hos
     getContratos: [], getStatusContrato: [], getPerguntas: [],
   });
   await ctx.w.mapaContinuidade();
-  ctx.w.mapaCentralizar('instalacao:sede');
-  const svg = ctx.doc.getElementById('mapaSvg').textContent;
-  assert.match(svg, /Ana/);
-  assert.match(svg, /pessoa lotada/);
-  assert.match(svg, /Filial RJ/);
-  assert.match(svg, /contingência/);
+  ctx.w.mapaExplorarDe('instalacao:sede');
+  // O grafo (cytoscape) carrega à parte; aqui basta o que a exploração abriu.
+  const m = ctx.w._mapa;
+  const g = ctx.w.MapaContinuidade.elementosExploracao(m.exploracao, m.indice, [...m.tipos]);
+  const nomes = g.nos.map((n) => n.nome);
+  assert.ok(nomes.includes('Ana') && nomes.includes('Filial RJ'));
+  const rels = g.arestas.map((e) => e.rels.join(',')).join(' | ');
+  assert.match(rels, /pessoa lotada/);
+  assert.match(rels, /contingência/);
   const painel = ctx.doc.getElementById('mapaPainel').textContent.replace(/\s+/g, ' ');
   assert.match(painel, /Instalação/);
   assert.match(painel, /Tipo\s*Sede/);
   assert.match(painel, /Endereço\s*Av\. Paulista, 1000/);
   assert.match(painel, /Contingência\s*Filial RJ/);
-  ctx.w.mapaCentralizar('instalacao:dc');
-  assert.match(ctx.doc.getElementById('mapaSvg').textContent, /SRV-01/);
+  ctx.w.mapaExplorarDe('instalacao:dc');
+  const g2 = ctx.w.MapaContinuidade.elementosExploracao(m.exploracao, m.indice, [...m.tipos]);
+  assert.ok(g2.nos.some((n) => n.nome === 'SRV-01'));
   assert.match(ctx.doc.getElementById('mapaPainel').textContent, /Sem instalação alternativa/);
   assert.match(ctx.doc.getElementById('mapaTipos').textContent, /Instalações/);
 });

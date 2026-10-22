@@ -5355,6 +5355,8 @@ function _atualizarBlocoInstalacao(alternativaId) {
   if (!bloco) return;
   const ehInst = _ehInstalacao(document.getElementById('depCategoria').value);
   bloco.style.display = ehInst ? 'block' : 'none';
+  // Trocar a categoria muda o que vale como componente (Instalação em Instalação, não).
+  renderDepComponentesTags();
   const sel = document.getElementById('depInstalacaoAlternativa');
   const atual = alternativaId !== undefined ? (alternativaId || '') : sel.value;
   const selfId = (document.getElementById('depId') || {}).value || '';
@@ -5398,13 +5400,20 @@ window._depComponentesSel = [];
 /**
  * Dependências técnicas que podem virar componente da que está aberta: fora
  * ela mesma, quem já está acima dela (fecharia um ciclo) e as já escolhidas.
+ * Instalação como componente ("instalada em") só para dependência técnica:
+ * Instalação dentro de Instalação não é um local físico, é contingência --
+ * para isso existe "Instalação alternativa" (21/10/2026).
  */
+const _depAbertaEhInstalacao = () => _ehInstalacao((document.getElementById('depCategoria') || {}).value);
+
 function _depCompDisponiveis(filtro) {
   const selfId = (document.getElementById('depId') || {}).value || '';
   const bloqueados = new Set(ServicoComposicao.bloqueadosComoComponente(selfId, dependenciasData).map(String));
   const termo = (filtro || '').toLowerCase();
+  const semInstalacoes = _depAbertaEhInstalacao();
   return (dependenciasData || []).filter((d) =>
     DEPENDENCIA_CATEGORIAS_CATALOGO.includes(d.categoria) &&
+    !(semInstalacoes && _ehInstalacao(d.categoria)) &&
     d.id && !String(d.id).startsWith('_tmp_') &&
     !bloqueados.has(String(d.id)) &&
     !window._depComponentesSel.some((s) => String(s.id) === String(d.id)) &&
@@ -5416,9 +5425,16 @@ function renderDepComponentesTags() {
   const cont = document.getElementById('depComp-tags');
   if (!cont) return;
   const sel = window._depComponentesSel || [];
-  cont.innerHTML = sel.length ? sel.map((item, i) =>
-    `<span style="display:inline-flex;align-items:center;gap:4px;background:#d60014;color:white;border:1.5px solid #d60014;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;" title="${esc(item.categoria || '')}">${esc(_iconeCategoriaDep(item.categoria))} ${esc(item.nome)}<button onclick="removerDepComponente(${i})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`
-  ).join(' ') : '<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum componente abaixo desta dependência.</span>';
+  // Instalação já gravada como componente de outra Instalação (antes da
+  // restrição): continua visível, em laranja, para ser removida -- nada some sozinho.
+  const instEmInst = _depAbertaEhInstalacao();
+  cont.innerHTML = sel.length ? sel.map((item, i) => {
+    const naoSeAplica = instEmInst && _ehInstalacao(item.categoria);
+    const cor = naoSeAplica ? '#e65100' : '#d60014';
+    return `<span class="${naoSeAplica ? 'dep-comp--nao-se-aplica' : ''}" style="display:inline-flex;align-items:center;gap:4px;background:${naoSeAplica ? '#fff3e0' : cor};color:${naoSeAplica ? cor : 'white'};border:1.5px solid ${cor};padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;white-space:nowrap;" title="${esc(naoSeAplica ? 'Instalação não fica dentro de outra Instalação — para contingência use "Instalação alternativa". Remova este componente.' : (item.categoria || ''))}">${esc(_iconeCategoriaDep(item.categoria))} ${esc(item.nome)}${naoSeAplica ? ' ⚠' : ''}<button onclick="removerDepComponente(${i})" style="background:none;border:none;cursor:pointer;font-size:1.1em;color:${naoSeAplica ? 'rgba(0,0,0,0.4)' : 'rgba(255,255,255,0.75)'};line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
+  }).join(' ') + (sel.some((item) => instEmInst && _ehInstalacao(item.categoria))
+    ? '<div style="width:100%;font-size:0.74em;color:#e65100;margin-top:2px;">⚠ Instalação não fica dentro de outra Instalação. Para contingência, use "Instalação alternativa" acima.</div>' : '')
+    : '<span style="font-size:0.82em;color:#bbb;font-style:italic;">Nenhum componente abaixo desta dependência.</span>';
 }
 
 window.depCompMostrarDropdown = () => {
@@ -5445,6 +5461,7 @@ window.depCompFecharDropdown = () => {
 window.selecionarDepComponente = (id) => {
   const d = (dependenciasData || []).find((x) => String(x.id) === String(id));
   if (!d) return;
+  if (_depAbertaEhInstalacao() && _ehInstalacao(d.categoria)) return;
   window._depComponentesSel.push({ id: d.id, nome: d.nome, categoria: d.categoria });
   document.getElementById('depComp-input').value = '';
   depCompFecharDropdown();
@@ -8984,7 +9001,10 @@ async function mapaContinuidade() {
     situacaoContrato: (c) => ContratoCiclo.situacaoDoStatus(c.statusId, dados.statusContrato || []),
     valorMin: ServicoComposicao.valorMin,
   });
-  window._mapa = { indice, centro: null, selecionado: null, trilha: [], tipos: new Set(MapaContinuidade.TIPOS), expandidos: {}, modo: 'centrado', cy: null };
+  // Explorar (21/10/2026): o mapa mental cresce na mesma tela -- cada nó abre
+  // os vínculos dele (MapaContinuidade.expandir/recolher). `exploracao` é o
+  // estado puro; `cy` o grafo da visão aberta (explorar ou completa).
+  window._mapa = { indice, exploracao: null, selecionado: null, tipos: new Set(MapaContinuidade.TIPOS), modo: 'explorar', cy: null, cyModo: null };
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('mapaConteudo').style.display = 'block';
   document.getElementById('mapaAviso').innerHTML = indice.semContratos
@@ -8999,39 +9019,63 @@ async function mapaContinuidade() {
 /** Atualiza o endereço (#mapa?no=...) sem recarregar a tela: o link do mapa pode ser compartilhado. */
 function _mapaAtualizarEndereco() {
   const m = window._mapa;
-  const alvo = '#mapa' + (m && m.modo === 'completo' ? '?modo=completo' : m && m.centro ? '?no=' + encodeURIComponent(m.centro) : '');
+  const raiz = m && m.exploracao ? m.exploracao.raiz : null;
+  const alvo = '#mapa' + (m && m.modo === 'completo' ? '?modo=completo' : raiz ? '?no=' + encodeURIComponent(raiz) : '');
   if (window.location.hash !== alvo && window.history && window.history.replaceState) window.history.replaceState(null, '', alvo);
 }
 
-window.mapaCentralizar = (id) => {
+/** Começa a exploração neste item (raiz), com os vínculos dele já abertos. */
+window.mapaExplorarDe = (id) => {
   const m = window._mapa;
   if (!m || !m.indice.nos[id]) return;
-  const pos = m.trilha.indexOf(id);
-  if (pos >= 0) m.trilha = m.trilha.slice(0, pos + 1); else m.trilha.push(id);
-  m.modo = 'centrado';
-  m.centro = id;
+  m.modo = 'explorar';
+  m.exploracao = MapaContinuidade.iniciarExploracao(m.indice, id, [...m.tipos]);
   m.selecionado = id;
-  m.expandidos = {};
   _mapaAtualizarEndereco();
   _renderMapa();
 };
+// Nome antigo (busca, pontos de partida, deep link, duplo clique na visão completa).
+window.mapaCentralizar = (id) => mapaExplorarDe(id);
 
 window.mapaVoltarAoInicio = () => {
   const m = window._mapa;
   if (!m) return;
-  m.centro = null; m.selecionado = null; m.trilha = []; m.expandidos = {}; m.modo = 'centrado';
+  m.exploracao = null; m.selecionado = null; m.modo = 'explorar';
   _mapaAtualizarEndereco();
   _renderMapa();
 };
 
-/** 1º clique seleciona (painel ao lado); clique no já selecionado o traz para o centro. */
+/** Clique num nó: seleciona e mostra o painel (Expandir / Recolher / Começar daqui). */
 window.mapaClicarNo = (id) => {
   const m = window._mapa;
-  if (!m) return;
-  if (id.startsWith('mais:')) { m.expandidos[id.slice(5)] = true; return _renderMapa(); }
-  if (m.selecionado === id && id !== m.centro) return mapaCentralizar(id);
+  if (!m || !m.indice.nos[id]) return;
+  m.selecionado = id;
+  _mapaDestacarSelecionado();
+  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, id);
+};
+
+window.mapaExpandir = (id) => {
+  const m = window._mapa;
+  if (!m || !m.exploracao || !(id in m.exploracao.presentes)) return;
+  MapaContinuidade.expandir(m.exploracao, m.indice, id, [...m.tipos]);
   m.selecionado = id;
   _renderMapa();
+};
+
+window.mapaRecolher = (id) => {
+  const m = window._mapa;
+  if (!m || !m.exploracao) return;
+  MapaContinuidade.recolher(m.exploracao, m.indice, id);
+  m.selecionado = id in m.exploracao.presentes ? id : m.exploracao.raiz;
+  _renderMapa();
+};
+
+/** Duplo clique: abre o que falta; se já está tudo aberto, recolhe. */
+window.mapaAlternarExpansao = (id) => {
+  const m = window._mapa;
+  if (!m || !m.exploracao) return;
+  if (MapaContinuidade.pendentes(m.exploracao, m.indice, id, [...m.tipos]) > 0) mapaExpandir(id);
+  else if (m.exploracao.abertos[id]) mapaRecolher(id);
 };
 
 window.mapaAlternarTipo = (tipo) => {
@@ -9065,9 +9109,7 @@ window.mapaEscolherBusca = (id) => {
   const input = document.getElementById('mapaBusca');
   if (input) input.value = '';
   mapaFecharBusca();
-  const m = window._mapa;
-  if (m) m.trilha = [];
-  mapaCentralizar(id);
+  mapaExplorarDe(id);
 };
 
 function _renderMapa() {
@@ -9079,41 +9121,131 @@ function _renderMapa() {
     const ativo = m.tipos.has(t);
     return `<button type="button" onclick="mapaAlternarTipo('${t}')" aria-pressed="${ativo}" style="display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:14px;font-size:0.8em;font-weight:600;cursor:pointer;border:1.5px solid ${_COR_TIPO_MAPA[t]};background:${ativo ? _COR_TIPO_MAPA[t] : '#fff'};color:${ativo ? '#fff' : _COR_TIPO_MAPA[t]};">${_ICONE_TIPO_MAPA[t]} ${esc(MC.ROTULO_TIPO[t])}</button>`;
   }).join('');
-  // Alternância de visão (centrado | completo), botões ghost colados.
-  document.getElementById('mapaModos').innerHTML = [['centrado', 'Mapa centrado'], ['completo', 'Visão completa']].map(([k, rot], i) => {
+  // Alternância de visão (explorar | completo), botões ghost colados.
+  document.getElementById('mapaModos').innerHTML = [['explorar', 'Explorar'], ['completo', 'Visão completa']].map(([k, rot], i) => {
     const ativo = m.modo === k;
     return `<button type="button" class="btn ${ativo ? 'btn-primary' : 'btn-ghost'}" aria-pressed="${ativo}" onclick="mapaModo('${k}')" style="padding:6px 14px;font-size:0.85em;border-radius:${i ? '0 7px 7px 0' : '7px 0 0 7px'};${i ? 'margin-left:-1px;' : ''}">${rot}</button>`;
   }).join('');
   if (m.modo === 'completo') return _renderMapaCompleto();
-  if (m.cy) { m.cy.destroy(); m.cy = null; }
-  // Trilha.
-  document.getElementById('mapaTrilha').innerHTML = m.centro
-    ? `<a href="javascript:void(0)" onclick="mapaVoltarAoInicio()" style="color:#d60014;">Início</a>` + m.trilha.map((id, i) => {
-      const n = m.indice.nos[id];
-      const ultimo = i === m.trilha.length - 1;
-      return ` <span style="color:#bbb;">›</span> ${ultimo ? `<strong>${esc(n.nome)}</strong>` : `<a href="javascript:void(0)" onclick="mapaCentralizar('${escJs(id)}')" style="color:#555;">${esc(n.nome)}</a>`}`;
-    }).join('')
-    : '<span style="color:#888;">Escolha um item na busca ou num dos pontos de partida abaixo.</span>';
+  if (m.cy && m.cyModo !== 'explorar') { m.cy.destroy(); m.cy = null; m.cyModo = null; }
 
   const canvas = document.getElementById('mapaCanvas');
   const legenda = document.getElementById('mapaLegenda');
-  if (!m.centro) {
+  if (!m.exploracao) {
+    if (m.cy) { m.cy.destroy(); m.cy = null; m.cyModo = null; }
+    document.getElementById('mapaTrilha').innerHTML = '<span style="color:#888;">Escolha um item na busca ou num dos pontos de partida abaixo.</span>';
     canvas.innerHTML = _htmlMapaInicio(m.indice);
     legenda.innerHTML = '';
     document.getElementById('mapaPainel').innerHTML = _htmlPainelMapaResumo(m.indice);
     return;
   }
-  const grupos = MC.vizinhos(m.indice, m.centro, [...m.tipos]);
-  const layout = MC.layoutRadial(grupos, { maxPorGrupo: 8, expandidos: m.expandidos });
-  canvas.innerHTML = _svgMapaContinuidade(m, grupos, layout);
+  const g = MC.elementosExploracao(m.exploracao, m.indice, [...m.tipos]);
+  const raiz = m.indice.nos[m.exploracao.raiz];
+  document.getElementById('mapaTrilha').innerHTML = `<a href="javascript:void(0)" onclick="mapaVoltarAoInicio()" style="color:#d60014;">Início</a>
+    <span style="color:#bbb;">›</span> <strong>${esc(raiz.nome)}</strong>
+    <span style="color:#555;"> · ${g.nos.length} ${g.nos.length === 1 ? 'item' : 'itens'} no mapa</span>
+    <span style="color:#999;"> — clique num item para os detalhes; duplo clique abre ou recolhe os vínculos dele.</span>`;
+  if (!document.getElementById('mapaCy')) {
+    canvas.innerHTML = `
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-bottom:6px;">
+        <button type="button" class="btn btn-ghost" style="padding:4px 12px;font-size:0.82em;" onclick="mapaAjustarTela()">Ajustar à tela</button>
+      </div>
+      <div id="mapaCy" style="height:68vh;min-height:460px;border:1px solid #eee;border-radius:8px;background:#fcfcfd;"><div class="loading" style="padding:20px;">⏳ Montando o mapa…</div></div>`;
+  }
   legenda.innerHTML = `${_htmlLegendaMapa()}
-    <div style="font-size:0.74em;color:#999;padding:2px 4px;">Clique num item para ver os detalhes; clique de novo para trazê-lo ao centro.</div>`;
-  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, m.selecionado || m.centro, m.centro);
+    <div style="font-size:0.74em;color:#999;padding:2px 4px;">"+N" no item: vínculos ainda fechados.</div>`;
+  if (!m.exploracao.presentes[m.selecionado] && m.selecionado !== m.exploracao.raiz) m.selecionado = m.exploracao.raiz;
+  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, m.selecionado || m.exploracao.raiz);
+  _desenharExploracao(g);
+}
+
+/** Elemento do cytoscape de um nó da exploração (cor da família; raiz cheia). */
+function _elementoNoExplorar(n) {
+  const corta = (t, max) => { t = String(t || ''); return t.length > max ? t.slice(0, max - 1) + '…' : t; };
+  const cor = _COR_TIPO_MAPA[n.tipo];
+  return { data: {
+    id: n.id, cor, fundo: n.raiz ? cor : _corClaraMapa(cor), texto: n.raiz ? '#ffffff' : cor,
+    rotulo: `${_ICONE_TIPO_MAPA[n.tipo]} ${corta(n.nome, 26)}${n.pendentes ? `\n+${n.pendentes}` : ''}`,
+    lacuna: n.lacuna ? 1 : 0, raiz: n.raiz ? 1 : 0, pendentes: n.pendentes,
+  } };
+}
+
+const _ESTILO_EXPLORAR = [
+  { selector: 'node', style: {
+    shape: 'round-rectangle', 'background-color': 'data(fundo)', 'border-color': 'data(cor)', 'border-width': 1.5,
+    label: 'data(rotulo)', color: 'data(texto)', 'font-size': 11, 'font-weight': 700, 'text-valign': 'center', 'text-halign': 'center',
+    'text-wrap': 'wrap', 'text-max-width': 170, width: 'label', height: 'label', padding: 10,
+  } },
+  { selector: 'node[raiz = 1]', style: { 'font-size': 13, padding: 14, 'border-width': 2 } },
+  { selector: 'node[lacuna = 1]', style: { 'border-color': '#c62828', 'border-width': 3 } },
+  { selector: 'node.selecionado', style: { 'border-color': '#222', 'border-width': 3 } },
+  { selector: 'edge', style: { width: 1.4, 'line-color': '#c9c9d2', 'curve-style': 'bezier', opacity: 0.9 } },
+  { selector: 'edge.foco', style: { 'line-color': '#555', width: 2, label: 'data(rels)', 'font-size': 9, color: '#555', 'text-outline-color': '#fff', 'text-outline-width': 2 } },
+];
+
+/**
+ * Monta (1ª vez) ou atualiza o grafo da exploração sem recriá-lo: tira o que
+ * saiu, põe o que entrou (nascendo no lugar do nó que o abriu) e refaz o layout
+ * radial a partir da raiz -- zoom e arrasto do usuário ficam.
+ */
+async function _desenharExploracao(g) {
+  const m = window._mapa;
+  let cytoscape;
+  try {
+    cytoscape = await _carregarCytoscape();
+  } catch (e) {
+    console.error('Mapa de Continuidade: explorar', e);
+    const alvo = document.getElementById('mapaCy');
+    if (alvo) alvo.innerHTML = `<div style="padding:20px;">${_htmlErroCarga('Não foi possível abrir o mapa (' + _mensagemErro(e, 'erro desconhecido') + ').', 'mapaContinuidade')}</div>`;
+    return;
+  }
+  const container = document.getElementById('mapaCy');
+  if (!container || m.modo !== 'explorar' || !m.exploracao) return; // trocou de visão enquanto carregava
+  const nos = g.nos.map(_elementoNoExplorar);
+  const arestas = g.arestas.map((e) => ({ data: { id: e.id, source: e.de, target: e.para, rels: e.rels.join(', ') } }));
+  // Seletor por atributo: o id tem ":" (processo:abc), que no seletor "#id" precisaria de escape.
+  const seletorRaiz = `[id = "${String(m.exploracao.raiz).replace(/"/g, '')}"]`;
+  const layout = (primeira) => ({ name: 'breadthfirst', circle: true, directed: false, roots: seletorRaiz, spacingFactor: 1.15,
+    animate: !primeira, animationDuration: 350, fit: primeira, padding: 30 });
+  if (!m.cy || m.cyModo !== 'explorar') {
+    if (m.cy) m.cy.destroy();
+    container.innerHTML = '';
+    m.cy = cytoscape({ container, elements: [...nos, ...arestas], style: _ESTILO_EXPLORAR, layout: layout(true), minZoom: 0.1, maxZoom: 3, wheelSensitivity: 0.3 });
+    m.cyModo = 'explorar';
+    m.cy.on('tap', 'node', (ev) => mapaClicarNo(ev.target.id()));
+    m.cy.on('dbltap', 'node', (ev) => mapaAlternarExpansao(ev.target.id()));
+    _mapaDestacarSelecionado();
+    return;
+  }
+  const cy = m.cy;
+  const ficam = new Set([...nos, ...arestas].map((el) => el.data.id));
+  cy.elements().filter((el) => !ficam.has(el.id())).remove();
+  const pos = (id) => { const pai = m.exploracao.presentes[id]; const elPai = pai ? cy.getElementById(pai) : null; return elPai && elPai.length ? Object.assign({}, elPai.position()) : undefined; };
+  const novosNos = nos.filter((el) => !cy.getElementById(el.data.id).length).map((el) => Object.assign(el, { position: pos(el.data.id) }));
+  if (novosNos.length) cy.add(novosNos);
+  // Campo a campo (valores simples): selo +N, raiz e lacuna mudam sem recriar o nó.
+  nos.forEach((el) => { const no = cy.getElementById(el.data.id); Object.keys(el.data).forEach((k) => { if (k !== 'id') no.data(k, el.data[k]); }); });
+  const novasArestas = arestas.filter((el) => !cy.getElementById(el.data.id).length);
+  if (novasArestas.length) cy.add(novasArestas);
+  cy.layout(layout(false)).run();
+  _mapaDestacarSelecionado();
+}
+
+/** Borda escura no selecionado e as ligações dele com o rótulo da relação. */
+function _mapaDestacarSelecionado() {
+  const m = window._mapa;
+  if (!m || !m.cy || m.cyModo !== 'explorar') return;
+  m.cy.elements().removeClass('selecionado foco');
+  if (!m.selecionado) return;
+  const no = m.cy.getElementById(m.selecionado);
+  if (!no.length) return;
+  no.addClass('selecionado');
+  no.connectedEdges().addClass('foco');
 }
 
 window.mapaModo = (modo) => {
   const m = window._mapa;
-  if (!m || (modo !== 'centrado' && modo !== 'completo')) return;
+  if (!m || (modo !== 'explorar' && modo !== 'completo')) return;
   m.modo = modo;
   if (modo === 'completo') m.selecionado = null;
   _mapaAtualizarEndereco();
@@ -9150,7 +9282,8 @@ async function _renderMapaCompleto() {
       ${g.nos.length > 800 ? '<span style="flex:1;font-size:0.8em;color:#e65100;align-self:center;">Muitos itens: use os filtros por tipo se o mapa ficar lento.</span>' : ''}
       <button type="button" class="btn btn-ghost" style="padding:4px 12px;font-size:0.82em;" onclick="mapaAjustarTela()">Ajustar à tela</button>
     </div>
-    <div id="mapaCy" style="height:68vh;min-height:460px;border:1px solid #eee;border-radius:8px;background:#fcfcfd;"><div class="loading" style="padding:20px;">⏳ Montando o mapa…</div></div>`;
+    <div id="mapaCyCompleto" style="height:68vh;min-height:460px;border:1px solid #eee;border-radius:8px;background:#fcfcfd;"><div class="loading" style="padding:20px;">⏳ Montando o mapa…</div></div>`;
+  if (m.cy) { m.cy.destroy(); m.cy = null; m.cyModo = null; }
   document.getElementById('mapaLegenda').innerHTML = _htmlLegendaMapa();
   document.getElementById('mapaPainel').innerHTML = _htmlPainelMapaResumo(m.indice);
   let cytoscape;
@@ -9158,15 +9291,16 @@ async function _renderMapaCompleto() {
     cytoscape = await _carregarCytoscape();
   } catch (e) {
     console.error('Mapa de Continuidade: visão completa', e);
-    const alvo = document.getElementById('mapaCy');
+    const alvo = document.getElementById('mapaCyCompleto');
     if (alvo) alvo.innerHTML = `<div style="padding:20px;">${_htmlErroCarga('Não foi possível abrir a visão completa (' + _mensagemErro(e, 'erro desconhecido') + ').', 'mapaContinuidade')}</div>`;
     return;
   }
-  const container = document.getElementById('mapaCy');
+  const container = document.getElementById('mapaCyCompleto');
   if (!container || m.modo !== 'completo') return; // trocou de visão enquanto carregava
   container.innerHTML = '';
   if (m.cy) { m.cy.destroy(); m.cy = null; }
   const corta = (t, max) => { t = String(t || ''); return t.length > max ? t.slice(0, max - 1) + '…' : t; };
+  m.cyModo = 'completo';
   m.cy = cytoscape({
     container,
     elements: [
@@ -9207,7 +9341,7 @@ function _mapaFocarNoCompleto(id) {
   const vizinhanca = no.closedNeighborhood();
   m.cy.elements().not(vizinhanca).addClass('apagado');
   vizinhanca.addClass('foco');
-  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, id, null);
+  document.getElementById('mapaPainel').innerHTML = _htmlPainelMapa(m.indice, id);
 }
 window._mapaFocarNoCompleto = _mapaFocarNoCompleto;
 
@@ -9248,60 +9382,8 @@ function _htmlPainelMapaResumo(indice) {
     <div style="font-size:0.86em;margin-top:10px;color:${lacunas ? '#c62828' : '#2e7d32'};font-weight:600;">${lacunas ? `${lacunas} item(ns) com lacuna` : 'Nenhuma lacuna'}</div>`;
 }
 
-/** SVG do mapa mental: centro + vizinhos do layoutRadial. */
-function _svgMapaContinuidade(m, grupos, layout) {
-  const MC = MapaContinuidade;
-  const nos = m.indice.nos;
-  const centro = nos[m.centro];
-  const porId = {};
-  grupos.forEach((g) => g.itens.forEach((i) => { porId[i.id] = i; }));
-  const corta = (t, max) => { t = String(t || ''); return t.length > max ? t.slice(0, max - 1) + '…' : t; };
-  const W = 156, H = 46;
-  const comRotulo = layout.itens.length <= 14;
-  const linhas = layout.itens.map((it) => {
-    const cor = _COR_TIPO_MAPA[it.tipo];
-    const rel = it.mais ? '' : (porId[it.id] || {}).rels.join(', ');
-    const mx = layout.centro.x + (it.x - layout.centro.x) * 0.58, my = layout.centro.y + (it.y - layout.centro.y) * 0.58;
-    return `<line x1="${layout.centro.x}" y1="${layout.centro.y}" x2="${it.x}" y2="${it.y}" stroke="${cor}" stroke-opacity="0.45" stroke-width="1.6"${it.mais ? ' stroke-dasharray="4 3"' : ''}/>` +
-      (comRotulo && rel ? `<text x="${mx}" y="${my}" font-size="10" fill="#666" text-anchor="middle" stroke="#fff" stroke-width="3" paint-order="stroke">${esc(corta(rel, 30))}</text>` : '');
-  }).join('');
-  const cartoes = layout.itens.map((it) => {
-    const cor = _COR_TIPO_MAPA[it.tipo];
-    const x = it.x - W / 2, y = it.y - H / 2;
-    if (it.mais) {
-      return `<g style="cursor:pointer;" onclick="mapaClicarNo('${escJs(it.id)}')" role="button">
-        <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="8" fill="${_corClaraMapa(cor)}" stroke="${cor}" stroke-width="1.4" stroke-dasharray="4 3"/>
-        <text x="${it.x}" y="${it.y + 4}" font-size="11.5" font-weight="700" fill="${cor}" text-anchor="middle">+${it.mais} ${esc(MC.ROTULO_TIPO[it.tipo].toLowerCase())}</text>
-        <title>Mostrar todos</title></g>`;
-    }
-    const n = nos[it.id];
-    const sel = m.selecionado === it.id;
-    const lacuna = n.lacunas.length > 0;
-    return `<g style="cursor:pointer;" onclick="mapaClicarNo('${escJs(it.id)}')" role="button">
-      <rect x="${x}" y="${y}" width="${W}" height="${H}" rx="8" fill="${_corClaraMapa(cor)}" stroke="${lacuna ? '#c62828' : sel ? '#222' : cor}" stroke-width="${lacuna ? 3 : sel ? 2.5 : 1.4}"/>
-      <rect x="${x}" y="${y}" width="6" height="${H}" rx="3" fill="${cor}"/>
-      <text x="${x + 14}" y="${y + 19}" font-size="11.5" font-weight="700" fill="${cor}">${esc(corta(n.nome, 20))}</text>
-      <text x="${x + 14}" y="${y + 35}" font-size="9.5" fill="#666">${esc(corta(n.sub || MC.ROTULO_TIPO_SINGULAR[n.tipo], 26))}</text>
-      ${lacuna ? `<circle cx="${x + W - 4}" cy="${y + 4}" r="8" fill="#c62828"/><text x="${x + W - 4}" y="${y + 8}" font-size="11" font-weight="800" fill="#fff" text-anchor="middle">!</text>` : ''}
-      <title>${esc(n.nome)} (${esc(MC.ROTULO_TIPO_SINGULAR[n.tipo])})${lacuna ? ' — ' + esc(n.lacunas.join(', ')) : ''}</title></g>`;
-  }).join('');
-  const CW = 230, CH = 64;
-  const cx = layout.centro.x - CW / 2, cy = layout.centro.y - CH / 2;
-  const corC = _COR_TIPO_MAPA[centro.tipo];
-  const lacunaC = centro.lacunas.length > 0;
-  const centroSvg = `<g style="cursor:pointer;" onclick="mapaClicarNo('${escJs(centro.id)}')">
-      <rect x="${cx}" y="${cy}" width="${CW}" height="${CH}" rx="10" fill="${corC}" stroke="${lacunaC ? '#c62828' : corC}" stroke-width="${lacunaC ? 4 : 2}"/>
-      <text x="${layout.centro.x}" y="${cy + 26}" font-size="14" font-weight="800" fill="#fff" text-anchor="middle">${esc(_ICONE_TIPO_MAPA[centro.tipo])} ${esc(corta(centro.nome, 24))}</text>
-      <text x="${layout.centro.x}" y="${cy + 46}" font-size="10.5" fill="#fff" fill-opacity="0.85" text-anchor="middle">${esc(MC.ROTULO_TIPO_SINGULAR[centro.tipo])}${centro.sub ? ' · ' + esc(corta(centro.sub, 22)) : ''}</text>
-      <title>${esc(centro.nome)}</title></g>`;
-  const vazio = layout.itens.length ? '' : `<text x="${layout.centro.x}" y="${layout.centro.y + 70}" font-size="12" fill="#999" text-anchor="middle">Nenhuma conexão${m.tipos.size < MC.TIPOS.length ? ' com os tipos selecionados' : ''}.</text>`;
-  return `<svg id="mapaSvg" viewBox="0 0 ${layout.largura} ${layout.altura}" width="100%" style="display:block;max-height:72vh;" xmlns="http://www.w3.org/2000/svg" font-family="Segoe UI, Arial, sans-serif" role="img" aria-label="Mapa de conexões de ${esc(centro.nome)}">
-    ${linhas}${cartoes}${centroSvg}${vazio}
-  </svg>`;
-}
-
 /** Painel do item selecionado: tipo, selos de continuidade, lacunas, vínculos e ações. */
-function _htmlPainelMapa(indice, id, centroId) {
+function _htmlPainelMapa(indice, id) {
   const MC = MapaContinuidade;
   const n = indice.nos[id];
   if (!n) return '';
@@ -9336,9 +9418,26 @@ function _htmlPainelMapa(indice, id, centroId) {
     <div style="font-size:0.75em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin:12px 0 4px;">Vínculos</div>
     ${vinculos}
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:14px;">
-      ${id !== centroId ? `<button class="btn btn-primary" onclick="mapaCentralizar('${escJs(id)}')">Centralizar</button>` : ''}
+      ${_htmlAcoesExploracaoMapa(indice, id)}
       ${abrir ? `<button class="btn btn-ghost" onclick="${abrir}">Abrir cadastro</button>` : ''}
     </div>`;
+}
+
+/** Expandir / Recolher / Começar daqui (Explorar) ou "Explorar a partir daqui" (visão completa). */
+function _htmlAcoesExploracaoMapa(indice, id) {
+  const m = window._mapa;
+  const alvo = escJs(id);
+  if (!m || m.modo !== 'explorar' || !m.exploracao || !(id in m.exploracao.presentes)) {
+    return `<button class="btn btn-primary" onclick="mapaExplorarDe('${alvo}')">Explorar a partir daqui</button>`;
+  }
+  const e = m.exploracao;
+  const faltam = MapaContinuidade.pendentes(e, indice, id, [...m.tipos]);
+  const trouxe = Object.keys(e.presentes).some((k) => e.presentes[k] === id);
+  return [
+    faltam ? `<button class="btn btn-primary" onclick="mapaExpandir('${alvo}')">➕ ${e.abertos[id] ? 'Expandir mais' : 'Expandir vínculos'} (${faltam})</button>` : '',
+    e.abertos[id] && trouxe ? `<button class="btn btn-ghost" onclick="mapaRecolher('${alvo}')">➖ Recolher</button>` : '',
+    id !== e.raiz ? `<button class="btn btn-ghost" onclick="mapaExplorarDe('${alvo}')">Começar daqui</button>` : '',
+  ].join('');
 }
 
 /**

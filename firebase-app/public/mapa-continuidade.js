@@ -280,7 +280,9 @@
       } else {
         (x.componentes || []).forEach(function (r) {
           var alvo = resolverDep(r);
-          if (alvo && tipoDoId(alvo) === 'instalacao') ligar(id, alvo, 'instalada em', 'hospeda');
+          // "instalada em" so de dependencia tecnica: Instalacao dentro de
+          // Instalacao (gravado antes da restricao) fica como componente comum.
+          if (alvo && tipoDoId(alvo) === 'instalacao' && tipo !== 'instalacao') ligar(id, alvo, 'instalada em', 'hospeda');
           else ligar(id, alvo, 'componente abaixo', 'está abaixo de');
         });
         if (tipo === 'instalacao' && x.instalacaoAlternativa && x.instalacaoAlternativa.id) {
@@ -364,40 +366,101 @@
     }).filter(function (g) { return g.itens.length; });
   }
 
+  // ---- Explorar (21/10/2026): mind map que se expande na mesma tela ----
+  // Estado: { raiz, presentes: { id: paiId|null }, abertos: { id: true } }.
+  // `presentes[id]` guarda quem trouxe o no (a raiz tem null): recolher um no
+  // tira o que ele trouxe, e o que foi aberto a partir disso.
+
+  /** Vizinhos visiveis de id, um por item, lacunas primeiro (ordem de vizinhos dentro do tipo). */
+  function _vizinhosVisiveis(indice, id, tipos) {
+    var lista = [];
+    vizinhos(indice, id, tipos).forEach(function (g) { g.itens.forEach(function (i) { lista.push(i); }); });
+    return lista.map(function (i, k) { return { i: i, k: k }; })
+      .sort(function (a, b) { return (b.i.lacunas.length > 0) - (a.i.lacunas.length > 0) || a.k - b.k; })
+      .map(function (x) { return x.i.id; });
+  }
+
+  function _visivel(estado, id, tipos) {
+    return id === estado.raiz || (tipos || TIPOS).indexOf(tipoDoId(id)) >= 0;
+  }
+
+  /** Quantos vizinhos visiveis do no ainda estao fora do mapa (selo "+N"). */
+  function pendentes(estado, indice, id, tipos) {
+    return _vizinhosVisiveis(indice, id, tipos).filter(function (v) { return !(v in estado.presentes); }).length;
+  }
+
+  /** Abre ate `limite` vizinhos ausentes de id (padrao 40). Devolve os ids acrescentados. */
+  function expandir(estado, indice, id, tipos, limite) {
+    if (!(id in estado.presentes)) return [];
+    var max = limite || 40;
+    var novos = _vizinhosVisiveis(indice, id, tipos).filter(function (v) { return !(v in estado.presentes); }).slice(0, max);
+    novos.forEach(function (v) { estado.presentes[v] = id; });
+    estado.abertos[id] = true;
+    return novos;
+  }
+
   /**
-   * Posicoes do mapa mental. Centro no meio; cada grupo num setor proporcional
-   * ao tamanho; mais de maxPorGrupo vira "+N" (a nao ser que o grupo esteja em
-   * `expandidos`). Mais de 14 itens no total: dois aneis alternados.
-   * { largura, altura, centro:{x,y}, itens:[{ id, tipo, x, y, mais? }] }
+   * Tira o que id trouxe (e o que foi aberto a partir disso). Um no que um
+   * outro no ainda aberto tambem liga fica, passando a pertencer a ele. A raiz
+   * nunca sai. Devolve os ids removidos.
    */
-  function layoutRadial(grupos, opcoes) {
-    var op = opcoes || {};
-    var max = op.maxPorGrupo || 8;
-    var expandidos = op.expandidos || {};
-    var L = 1100, A = 720, cx = L / 2, cy = A / 2;
-    var visiveis = grupos.map(function (g) {
-      var abrir = expandidos[g.tipo] || g.itens.length <= max;
-      var itens = abrir ? g.itens : g.itens.slice(0, max - 1);
-      var lista = itens.map(function (i) { return { id: i.id, tipo: g.tipo }; });
-      if (!abrir) lista.push({ id: 'mais:' + g.tipo, tipo: g.tipo, mais: g.itens.length - itens.length });
-      return lista;
+  function recolher(estado, indice, id) {
+    var sai = {};
+    var fila = [id];
+    while (fila.length) {
+      var atual = fila.shift();
+      Object.keys(estado.presentes).forEach(function (k) {
+        if (estado.presentes[k] === atual && !sai[k] && k !== estado.raiz) { sai[k] = true; fila.push(k); }
+      });
+    }
+    delete estado.abertos[id];
+    Object.keys(sai).forEach(function (k) { delete estado.abertos[k]; });
+    // Quem continua aberto e liga a um no que ia sair o segura.
+    var removidos = [];
+    Object.keys(sai).forEach(function (k) {
+      var dono = (indice.adj[k] || []).map(function (x) { return x.para; })
+        .filter(function (o) { return !sai[o] && o !== id && estado.abertos[o] && (o in estado.presentes); })[0];
+      if (dono) estado.presentes[k] = dono;
+      else { delete estado.presentes[k]; removidos.push(k); }
     });
-    var total = visiveis.reduce(function (s, l) { return s + l.length; }, 0);
-    var dois = total > 14;
-    var aneis = [{ rx: 330, ry: 225 }, { rx: 460, ry: 300 }];
-    var saida = [];
-    var angulo = -Math.PI / 2;
-    var passo = total ? (2 * Math.PI) / total : 0;
-    var k = 0;
-    visiveis.forEach(function (lista) {
-      lista.forEach(function (item) {
-        var a = angulo + passo * (k + 0.5);
-        var anel = dois ? aneis[k % 2] : aneis[0];
-        saida.push(Object.assign({}, item, { x: Math.round(cx + anel.rx * Math.cos(a)), y: Math.round(cy + anel.ry * Math.sin(a)) }));
-        k++;
+    return removidos;
+  }
+
+  /** Estado inicial: a raiz com os vinculos dela abertos. */
+  function iniciarExploracao(indice, raiz, tipos, limite) {
+    var estado = { raiz: raiz, presentes: {}, abertos: {} };
+    if (!indice.nos[raiz]) return estado;
+    estado.presentes[raiz] = null;
+    expandir(estado, indice, raiz, tipos, limite);
+    return estado;
+  }
+
+  /**
+   * Nos e ligacoes do que esta aberto (so os tipos visiveis; a raiz sempre).
+   * { nos:[{ id, tipo, nome, sub, lacuna, raiz, aberto, pendentes }], arestas:[{ id, de, para, rels }] }
+   */
+  function elementosExploracao(estado, indice, tipos) {
+    var ids = Object.keys(estado.presentes).filter(function (id) { return indice.nos[id] && _visivel(estado, id, tipos); });
+    var esta = {};
+    ids.forEach(function (id) { esta[id] = true; });
+    var pares = {};
+    ids.forEach(function (de) {
+      (indice.adj[de] || []).forEach(function (x) {
+        if (!esta[x.para]) return;
+        var a = de < x.para ? de : x.para, b = de < x.para ? x.para : de;
+        var k = a + '|' + b;
+        var par = pares[k] || (pares[k] = { id: 'e:' + k, de: a, para: b, rels: [] });
+        if (de === a && par.rels.indexOf(x.rel) < 0) par.rels.push(x.rel);
       });
     });
-    return { largura: L, altura: A, centro: { x: cx, y: cy }, itens: saida };
+    return {
+      nos: ids.map(function (id) {
+        var n = indice.nos[id];
+        return { id: id, tipo: n.tipo, nome: n.nome, sub: n.sub, lacuna: n.lacunas.length > 0, raiz: id === estado.raiz,
+          aberto: !!estado.abertos[id], pendentes: pendentes(estado, indice, id, tipos) };
+      }),
+      arestas: Object.keys(pares).map(function (k) { return pares[k]; }),
+    };
   }
 
   /** Busca por nome (sem acento), ate `limite` resultados, os com lacuna primeiro. */
@@ -479,7 +542,11 @@
     tipoDoId: tipoDoId,
     montarIndice: montarIndice,
     vizinhos: vizinhos,
-    layoutRadial: layoutRadial,
+    iniciarExploracao: iniciarExploracao,
+    expandir: expandir,
+    recolher: recolher,
+    pendentes: pendentes,
+    elementosExploracao: elementosExploracao,
     buscar: buscar,
     pontosDePartida: pontosDePartida,
     contagemVinculos: contagemVinculos,

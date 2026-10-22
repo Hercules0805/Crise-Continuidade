@@ -105,19 +105,6 @@ test('vizinhos: agrupados por tipo na ordem fixa, relacoes juntas, lacunas prime
   assert.deepStrictEqual(procsDaArea, ['Faturamento', 'Cobrança'], 'com lacuna primeiro');
 });
 
-test('layoutRadial: corta em +N acima do limite, expande sob demanda, dois aneis com muitos itens', () => {
-  const grupo = (tipo, n) => ({ tipo, itens: Array.from({ length: n }, (_, k) => ({ id: tipo + ':' + k })) });
-  const l = MC.layoutRadial([grupo('processo', 12), grupo('pessoa', 3)], { maxPorGrupo: 8 });
-  const mais = l.itens.find((x) => x.mais);
-  assert.deepStrictEqual([mais.id, mais.mais], ['mais:processo', 5]);
-  assert.strictEqual(l.itens.length, 8 + 3);
-  const aberto = MC.layoutRadial([grupo('processo', 12), grupo('pessoa', 3)], { maxPorGrupo: 8, expandidos: { processo: true } });
-  assert.strictEqual(aberto.itens.length, 15);
-  const raios = new Set(aberto.itens.map((x) => Math.round(Math.hypot((x.x - 550) / 1.5, x.y - 360))));
-  assert.ok(raios.size > 1, 'dois aneis');
-  aberto.itens.forEach((x) => assert.ok(x.x > 0 && x.x < aberto.largura && x.y > 0 && x.y < aberto.altura));
-});
-
 test('busca sem acento, pontos de partida e contagem de vinculos', () => {
   const i = idx();
   assert.deepStrictEqual(MC.buscar(i, 'cobranca').map((n) => n.id), ['processo:p2']);
@@ -240,4 +227,93 @@ test('processo aponta o Servico (item Serviços no processo): aresta sem repetir
   const j = MC.montarIndice(dados, OPCOES);
   assert.deepStrictEqual(rels(j, 'servico:s1', 'processo:p1'), ['suporta']);
   assert.deepStrictEqual(j.nos['processo:p2'].lacunas, [], 'sem tecnico direto, sem lacuna');
+});
+
+test('instalacao dentro de instalacao (gravado antes da restricao) nao vira "instalada em"', () => {
+  const dados = JSON.parse(JSON.stringify(DADOS_INST));
+  dados.dependencias.find((d) => d.id === 'filial').componentes = [{ id: 'dc', nome: 'Data center', categoria: 'Instalações' }];
+  const i = MC.montarIndice(dados, OPCOES);
+  assert.deepStrictEqual(rels(i, 'instalacao:filial', 'instalacao:dc'), ['componente abaixo']);
+  assert.deepStrictEqual(rels(i, 'dependencia:srv', 'instalacao:dc'), ['instalada em'], 'tecnica continua instalada em');
+});
+
+// ---- Explorar (21/10/2026): mind map que se expande na mesma tela ----
+test('explorar: inicia com a raiz e os vinculos dela; expandir acrescenta com o pai certo e o selo +N', () => {
+  const i = idx();
+  const e = MC.iniciarExploracao(i, 'processo:p1', MC.TIPOS);
+  assert.strictEqual(e.presentes['processo:p1'], null);
+  assert.ok(e.abertos['processo:p1']);
+  assert.strictEqual(e.presentes['dependencia:infra'], 'processo:p1');
+  assert.strictEqual(MC.pendentes(e, i, 'processo:p1', MC.TIPOS), 0);
+  const faltam = MC.pendentes(e, i, 'dependencia:infra', MC.TIPOS);
+  assert.ok(faltam > 0, 'infra tem vinculos fechados');
+  const novos = MC.expandir(e, i, 'dependencia:infra', MC.TIPOS);
+  assert.strictEqual(novos.length, faltam);
+  assert.ok(novos.includes('dependencia:db'));
+  assert.strictEqual(e.presentes['dependencia:db'], 'dependencia:infra');
+  assert.strictEqual(MC.pendentes(e, i, 'dependencia:infra', MC.TIPOS), 0);
+});
+
+test('explorar: limite por expansao, lacunas primeiro, e "expandir mais" traz o resto', () => {
+  const dados = { areas: [{ id: 'a', nome: 'TI' }], servicos: [], contratos: [], backups: [], processos: [],
+    dependencias: [{ id: 'hub', categoria: 'Servidor', nome: 'Hub', componentes: [] }] };
+  for (let k = 0; k < 5; k++) {
+    dados.dependencias.push({ id: 'd' + k, categoria: 'Banco de Dados', nome: 'Banco ' + k, drpSalvo: k === 3 ? '' : '[{"versao":1}]' });
+    dados.dependencias[0].componentes.push({ id: 'd' + k });
+  }
+  dados.processos.push({ id: 'p', area: 'TI', processo: 'X', dependenciaItens: [{ categoria: 'Serviços', id: 'nada' }] });
+  const i = MC.montarIndice(dados, OPCOES);
+  const e = MC.iniciarExploracao(i, 'dependencia:hub', MC.TIPOS, 2);
+  const abertos = Object.keys(e.presentes).filter((k) => k.startsWith('dependencia:d'));
+  assert.strictEqual(abertos.length, 2);
+  assert.strictEqual(MC.pendentes(e, i, 'dependencia:hub', MC.TIPOS), 3);
+  MC.expandir(e, i, 'dependencia:hub', MC.TIPOS, 40);
+  assert.strictEqual(MC.pendentes(e, i, 'dependencia:hub', MC.TIPOS), 0);
+});
+
+test('explorar: recolher tira o que o no trouxe (em cascata), mas nao a raiz nem o que outro no aberto liga', () => {
+  const i = idx();
+  const e = MC.iniciarExploracao(i, 'processo:p1', MC.TIPOS);
+  MC.expandir(e, i, 'dependencia:infra', MC.TIPOS); // traz db, servico s1 (ja presente?) etc.
+  MC.expandir(e, i, 'dependencia:db', MC.TIPOS);
+  assert.ok('dependencia:db' in e.presentes);
+  const removidos = MC.recolher(e, i, 'dependencia:infra');
+  assert.ok(!('dependencia:db' in e.presentes), 'db (trazido por infra) sai');
+  assert.ok(removidos.includes('dependencia:db'));
+  assert.ok('dependencia:infra' in e.presentes, 'o proprio no fica');
+  assert.ok(!e.abertos['dependencia:infra'] && !e.abertos['dependencia:db']);
+  assert.ok('processo:p1' in e.presentes);
+  // Recolher a raiz tira tudo, menos ela.
+  MC.recolher(e, i, 'processo:p1');
+  assert.deepStrictEqual(Object.keys(e.presentes), ['processo:p1']);
+});
+
+test('explorar: no ligado a outro no aberto nao sai ao recolher quem o trouxe', () => {
+  const i = idx();
+  const e = MC.iniciarExploracao(i, 'processo:p1', MC.TIPOS);
+  // s1 (servico) liga p1 e infra; abrir infra e depois recolher p1 nao pode tirar infra se ela segue aberta? infra e trazida por p1:
+  MC.expandir(e, i, 'servico:s1', MC.TIPOS);
+  const donoAntes = e.presentes['pessoa:pAna'];
+  assert.ok(donoAntes, 'Ana veio por algum no');
+  MC.expandir(e, i, 'area:financeiro', MC.TIPOS);
+  // Ana liga ao servico (stakeholder) e a area financeiro; recolher o servico nao tira Ana enquanto a area esta aberta.
+  MC.recolher(e, i, 'servico:s1');
+  assert.ok('pessoa:pAna' in e.presentes, 'segurada pela area aberta');
+});
+
+test('explorar: elementos so dos tipos visiveis (raiz sempre), ligacoes cruzadas uma vez por par', () => {
+  const i = idx();
+  const e = MC.iniciarExploracao(i, 'processo:p1', MC.TIPOS);
+  MC.expandir(e, i, 'dependencia:infra', MC.TIPOS);
+  const g = MC.elementosExploracao(e, i, MC.TIPOS);
+  const raiz = g.nos.find((n) => n.raiz);
+  assert.strictEqual(raiz.id, 'processo:p1');
+  assert.ok(raiz.aberto);
+  const pares = g.arestas.map((a) => a.de + '|' + a.para);
+  assert.strictEqual(new Set(pares).size, pares.length);
+  assert.ok(g.arestas.some((a) => [a.de, a.para].includes('servico:s1') && [a.de, a.para].includes('dependencia:infra')), 'cruzada servico-infra');
+  const soProc = MC.elementosExploracao(e, i, ['processo']);
+  assert.ok(soProc.nos.every((n) => n.tipo === 'processo'));
+  const soPessoa = MC.elementosExploracao(e, i, ['pessoa']);
+  assert.ok(soPessoa.nos.some((n) => n.raiz), 'raiz nunca some');
 });
