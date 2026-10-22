@@ -4198,7 +4198,8 @@ let dependenciasOrdenacao = criarOrdenacao('categoria', 'asc');
 // agora sao categoria fixa de Dependencia, o cadastro de um so). Reaproveitada
 // tambem na lista de categorias da aba BIA (Fornecedores/Pessoas/Processos
 // Internos sao as outras 3, cada uma sua propria entidade).
-const DEPENDENCIA_CATEGORIAS_TECNICAS = ['API', 'Banco de Dados', 'Infraestrutura', 'Segurança', 'Servidor', 'Sistemas', 'Outros'];
+// Portais Web (22/10/2026): portal do cliente, área restrita, site, e-commerce.
+const DEPENDENCIA_CATEGORIAS_TECNICAS = ['API', 'Banco de Dados', 'Infraestrutura', 'Portais Web', 'Segurança', 'Servidor', 'Sistemas', 'Outros'];
 
 // Instalações (21/10/2026): o "P" de Premises dos 4 Ps do BIA (Pessoas,
 // Instalações, Processos, Fornecedores/Tecnologia). Mora no mesmo catálogo e
@@ -4225,6 +4226,7 @@ const DEPENDENCIA_CAT_ICONES = {
   'API': '🔌',
   'Banco de Dados': '🗄️',
   'Infraestrutura': '⚡',
+  'Portais Web': '🌐',
   'Segurança': '🔒',
   'Servidor': '🖥️',
   'Sistemas': '💻',
@@ -4243,6 +4245,7 @@ const DEPENDENCIA_CAT_EXEMPLOS = {
   'API': 'Ex: API de pagamento (PIX/cartão), API de CEP, integração com Receita Federal, webhook de terceiros',
   'Banco de Dados': 'Ex: PostgreSQL de produção, banco Oracle financeiro, réplica de leitura, data warehouse',
   'Infraestrutura': 'Ex: Internet, energia elétrica, climatização, switches/roteadores, telefonia',
+  'Portais Web': 'Ex: Portal do cliente, área restrita, site institucional, e-commerce, portal do colaborador',
   'Segurança': 'Ex: Firewall, VPN, certificado digital, antivírus corporativo, controle de acesso',
   'Servidor': 'Ex: Servidor de aplicação, servidor de arquivos, cluster de virtualização',
   'Sistemas': 'Ex: ERP Fortes, e-mail corporativo, Active Directory, sistema bancário',
@@ -4593,7 +4596,7 @@ function _iconeCategoriaDep(cat) {
   const map = {
     'Fornecedores': '🏢', 'Fornecedor': '🏢', 'Pessoas': '👤', 'Pessoa': '👤',
     'Processos Internos': '🔄', 'Processo Interno': '🔄', 'API': '🔌', 'Banco de Dados': '🗄️',
-    'Infraestrutura': '⚡', 'Segurança': '🔒', 'Servidor': '🖥️', 'Sistemas': '💻', 'Outros': '📦',
+    'Infraestrutura': '⚡', 'Portais Web': '🌐', 'Segurança': '🔒', 'Servidor': '🖥️', 'Sistemas': '💻', 'Outros': '📦',
     'Instalações': '📍', 'Instalação': '📍',
   };
   return map[cat] || '📦';
@@ -11018,7 +11021,7 @@ function _nomeProdutoVuln(v) {
  * Internos: Fornecedor e Pessoa ja tem cadastro e risco proprios. O texto antigo
  * (`produto`) fica como legado: visivel so leitura ate alguem limpar.
  */
-const VULN_CATEGORIAS_DEPENDENCIA = ['Infraestrutura', 'Sistemas', 'Servidor', 'Banco de Dados', 'API', 'Segurança', 'Processos Internos'];
+const VULN_CATEGORIAS_DEPENDENCIA = ['Infraestrutura', 'Sistemas', 'Portais Web', 'Servidor', 'Banco de Dados', 'API', 'Segurança', 'Processos Internos'];
 let _vulnDepsCatalogo = [];
 window._vulnDependencias = [];
 

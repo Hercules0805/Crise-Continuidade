@@ -63,10 +63,10 @@ function adicionar(w, doc, categoria, id) {
   w.adicionarDependenciaVuln();
 }
 
-test('categorias: so as 7 tecnicas + Processos Internos (sem Fornecedores e Pessoas)', async () => {
+test('categorias: so as 8 tecnicas + Processos Internos (sem Fornecedores e Pessoas)', async () => {
   const { w, doc } = await carregar();
   w.abrirDrawerVulnerabilidade();
-  assert.deepStrictEqual(opcoes(doc, 'vulnDepCategoria'), ['Infraestrutura', 'Sistemas', 'Servidor', 'Banco de Dados', 'API', 'Segurança', 'Processos Internos']);
+  assert.deepStrictEqual(opcoes(doc, 'vulnDepCategoria'), ['Infraestrutura', 'Sistemas', 'Portais Web', 'Servidor', 'Banco de Dados', 'API', 'Segurança', 'Processos Internos']);
   assert.ok(doc.getElementById('vulnDepItem').disabled, 'item travado ate escolher a categoria');
   assert.ok(!doc.getElementById('vulnProduto') || doc.getElementById('vulnProduto').type === 'hidden', 'nao ha mais campo de texto livre visivel');
 });

@@ -391,7 +391,7 @@ async function _lerDependencias() {
     // antigo, de antes deste campo existir) conta como TIC -- marcado por
     // padrao, decisao do usuario.
     tic: d.tic !== false,
-    // So usado pelas 7 categorias tecnicas (API, Banco de Dados,
+    // So usado pelas 8 categorias tecnicas (API, Banco de Dados, Portais Web,
     // Infraestrutura, Seguranca, Servidor, Sistema, Outros) -- vieram do
     // antigo catalogo de Componentes, fundido aqui. Nas outras categorias
     // (Fornecedores/Pessoas) esses campos nunca sao escritos.
