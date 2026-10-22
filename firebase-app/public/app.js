@@ -8970,6 +8970,10 @@ async function mapaContinuidade() {
           <span class="field-label">Visão</span>
           <div id="mapaModos" role="group" aria-label="Visão do mapa" style="display:flex;gap:0;"></div>
         </div>
+        <div class="field">
+          <span class="field-label">&nbsp;</span>
+          <button type="button" id="btnMapaTelaCheia" class="btn btn-ghost" onclick="mapaTelaCheia()" style="padding:6px 14px;font-size:0.85em;" title="Ocupar a tela inteira com o mapa (Esc sai)">⛶ Tela cheia</button>
+        </div>
       </div>
       <div id="mapaTipos" style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0 10px;"></div>
       <div id="mapaTrilha" style="font-size:0.85em;margin-bottom:10px;"></div>
@@ -9016,6 +9020,55 @@ async function mapaContinuidade() {
   else if (params.get('modo') === 'completo') mapaModo('completo');
   else _renderMapa();
 }
+
+// ---- Tela cheia (22/10/2026): o bloco inteiro do mapa (busca, filtros, mapa
+// e painel) ocupa a tela. Fullscreen API do navegador; sem ela (ou recusada),
+// uma classe CSS que cobre a janela. Esc ou o botão saem. Trocar de tela tira
+// o #mapaConteudo do DOM, e o navegador sai da tela cheia sozinho.
+function _mapaEmTelaCheia(el) {
+  return !!el && (document.fullscreenElement === el || el.classList.contains('mapa--tela-cheia-css'));
+}
+
+function _mapaSincronizarTelaCheia() {
+  const el = document.getElementById('mapaConteudo');
+  if (!el) return;
+  const ativo = _mapaEmTelaCheia(el);
+  el.classList.toggle('mapa--tela-cheia', ativo);
+  const btn = document.getElementById('btnMapaTelaCheia');
+  if (btn) {
+    btn.textContent = ativo ? '✕ Sair da tela cheia' : '⛶ Tela cheia';
+    btn.setAttribute('aria-pressed', ativo ? 'true' : 'false');
+  }
+  // O grafo da visão completa precisa saber que o quadro mudou de tamanho.
+  const m = window._mapa;
+  if (m && m.cy) setTimeout(() => { try { m.cy.resize(); m.cy.fit(undefined, 30); } catch (e) { /* grafo já destruído */ } }, 60);
+}
+
+window.mapaTelaCheia = async () => {
+  const el = document.getElementById('mapaConteudo');
+  if (!el) return;
+  if (_mapaEmTelaCheia(el)) {
+    if (document.fullscreenElement === el && document.exitFullscreen) {
+      try { await document.exitFullscreen(); } catch (e) { /* já saiu */ }
+    }
+    el.classList.remove('mapa--tela-cheia-css');
+  } else if (el.requestFullscreen) {
+    try { await el.requestFullscreen(); } catch (e) { el.classList.add('mapa--tela-cheia-css'); }
+  } else {
+    el.classList.add('mapa--tela-cheia-css');
+  }
+  _mapaSincronizarTelaCheia();
+};
+
+document.addEventListener('fullscreenchange', _mapaSincronizarTelaCheia);
+document.addEventListener('keydown', (ev) => {
+  if (ev.key !== 'Escape') return;
+  const el = document.getElementById('mapaConteudo');
+  if (el && el.classList.contains('mapa--tela-cheia-css')) {
+    el.classList.remove('mapa--tela-cheia-css');
+    _mapaSincronizarTelaCheia();
+  }
+});
 
 /** Atualiza o endereço (#mapa?no=...) sem recarregar a tela: o link do mapa pode ser compartilhado. */
 function _mapaAtualizarEndereco() {

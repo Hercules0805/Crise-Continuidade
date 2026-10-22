@@ -322,3 +322,49 @@ test('cartoes na cor da familia: fundo claro e borda na cor do tipo; raiz cheia;
   w.mapaClicarNo('servico:s1>pessoa:pAna');
   assert.ok(cartao(doc, 'servico:s1>pessoa:pAna').classList.contains('mm-cartao--selecionado'));
 });
+
+// ---- Tela cheia (22/10/2026) ----
+test('tela cheia: sem a Fullscreen API cai no modo CSS; botao alterna o rotulo; Esc sai', async () => {
+  const { w, doc } = await carregar(['admin']);
+  const el = doc.getElementById('mapaConteudo');
+  const btn = doc.getElementById('btnMapaTelaCheia');
+  assert.match(btn.textContent, /Tela cheia/);
+  el.requestFullscreen = undefined;
+  await w.mapaTelaCheia();
+  assert.ok(el.classList.contains('mapa--tela-cheia-css'));
+  assert.ok(el.classList.contains('mapa--tela-cheia'));
+  assert.match(btn.textContent, /Sair da tela cheia/);
+  doc.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape' }));
+  assert.ok(!el.classList.contains('mapa--tela-cheia'));
+  assert.match(btn.textContent, /⛶ Tela cheia/);
+  await w.mapaTelaCheia();
+  await w.mapaTelaCheia();
+  assert.ok(!el.classList.contains('mapa--tela-cheia'), 'o botao tambem sai');
+});
+
+test('tela cheia: usa a Fullscreen API no bloco do mapa; recusa cai no CSS; visao completa reajusta o grafo', async () => {
+  const { w, doc } = await carregar(['admin']);
+  const el = doc.getElementById('mapaConteudo');
+  let pedidos = 0;
+  el.requestFullscreen = async () => {
+    pedidos++;
+    Object.defineProperty(doc, 'fullscreenElement', { configurable: true, get: () => el });
+  };
+  doc.exitFullscreen = async () => { Object.defineProperty(doc, 'fullscreenElement', { configurable: true, get: () => null }); };
+  w.mapaModo('completo');
+  await esperar();
+  let resized = 0;
+  const cy = w._mapa.cy;
+  cy.resize = () => { resized++; return cy; };
+  await w.mapaTelaCheia();
+  assert.strictEqual(pedidos, 1);
+  assert.ok(el.classList.contains('mapa--tela-cheia') && !el.classList.contains('mapa--tela-cheia-css'));
+  await esperar(80);
+  assert.ok(resized > 0, 'grafo reajustado ao novo tamanho');
+  await w.mapaTelaCheia();
+  assert.ok(!el.classList.contains('mapa--tela-cheia'));
+  // Navegador recusa (ex.: politica): modo CSS.
+  el.requestFullscreen = async () => { throw new Error('negado'); };
+  await w.mapaTelaCheia();
+  assert.ok(el.classList.contains('mapa--tela-cheia-css'));
+});

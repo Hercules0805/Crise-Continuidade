@@ -496,3 +496,11 @@ a.btn { text-decoration: none; }
 .mm-cruzadas { display: flex; flex-direction: column; gap: 4px; }
 .mm-cruzadas button { text-align: left; background: #fff; border: 1.5px solid var(--cor); border-left-width: 4px; color: #222; border-radius: 6px; padding: 4px 8px; font: 600 12px var(--font-sans); cursor: pointer; }
 .mm-cruzadas button span { display: block; font-weight: 400; font-size: 11px; color: #888; }
+
+/* Mapa em tela cheia (22/10/2026): .mapa--tela-cheia vale para a Fullscreen API
+   e para o modo CSS (.mapa--tela-cheia-css, quando o navegador não deixa). */
+#mapaConteudo.mapa--tela-cheia { background: #fff; padding: 14px 20px; box-sizing: border-box; overflow: auto; }
+#mapaConteudo.mapa--tela-cheia-css { position: fixed; inset: 0; z-index: 3000; }
+#mapaConteudo.mapa--tela-cheia .mm-arvore { max-height: none; height: calc(100vh - 230px); }
+#mapaConteudo.mapa--tela-cheia #mapaCyCompleto { height: calc(100vh - 270px) !important; min-height: 360px !important; }
+#mapaConteudo.mapa--tela-cheia #mapaPainel { max-height: calc(100vh - 200px); overflow: auto; }
