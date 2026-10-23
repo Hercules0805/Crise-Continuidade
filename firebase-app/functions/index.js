@@ -27,6 +27,7 @@ const retratoRisco = require('./retratoRisco');
 const contratoCiclo = require('./contratoCiclo');
 const notificacoes = require('./notificacoes');
 const notificacoesRisco = require('./notificacoesRisco');
+const notificacoesContinuidade = require('./notificacoesContinuidade');
 const { criarEnviador } = require('./transporteEmail');
 const {
   READ_ACTIONS: APP_READ,
@@ -847,6 +848,43 @@ exports.resumoDiarioRiscos = onSchedule(
       docs.slice(i, i + 400).forEach((d) => lote.set(d.ref, { resumido: true, resumidoEm: dia }, { merge: true }));
       await lote.commit();
     }
+  }
+);
+
+// Resumo semanal de conformidade de BIA/PCN/DRP (segunda 07:30, 23/10/2026).
+// Mesma conta da tela Conformidade de Continuidade; um e-mail por
+// destinatario (Operador de Processos e, se ligado, Gestor da area), so para
+// quem tem pendencia. A chave usa a semana: rodar de novo nao repete.
+exports.resumoSemanalContinuidade = onSchedule(
+  { region: 'us-central1', schedule: '30 7 * * 1', timeZone: 'America/Sao_Paulo' },
+  async () => {
+    const ctxN = await _contextoNotificacao();
+    if (ctxN.config.modo === notificacoes.MODO.DESLIGADO || !ctxN.config.continuidade.resumoSemanal) {
+      logger.info('resumoSemanalContinuidade: desligado na configuracao');
+      return;
+    }
+    const dia = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const lerTudo = async (col) => (await db.collection(col).get()).docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    const [processos, respostas, dependencias, servicos, ciclosSnap] = await Promise.all([
+      lerTudo('processos'), lerTudo('respostas_bia'), lerTudo('dependencias'), lerTudo('servicos'),
+      db.collection('config_continuidade').doc('ciclos').get(),
+    ]);
+    const resultado = notificacoesContinuidade.avaliarConformidade({
+      processos, respostas, dependencias, servicos, hoje: dia,
+      ciclos: ciclosSnap.exists ? ciclosSnap.data() : null,
+    });
+    const por = notificacoesContinuidade.resolverDestinatariosContinuidade(resultado.pendencias, ctxN);
+    const semana = notificacoesContinuidade.semanaDe(dia);
+    let n = 0;
+    for (const [email, x] of por) {
+      const m = notificacoesContinuidade.montarResumoContinuidade(x.pendencias, { dia, baseUrl: BASE_URL, motivos: x.motivos });
+      if (await _enfileirarEmail({
+        tipo: 'continuidade', evento: 'continuidadeResumo', chave: `continuidade:resumo:${semana}`,
+        referencia: `${x.pendencias.length} pendência(s)`, remetenteNome: notificacoesContinuidade.REMETENTE,
+        para: email, motivos: x.motivos, assunto: m.assunto, html: m.html, texto: m.texto,
+      })) n++;
+    }
+    logger.info('resumoSemanalContinuidade: concluido', { pendencias: resultado.pendencias.length, destinatarios: por.size, enfileirados: n });
   }
 );
 

@@ -53,11 +53,52 @@ const COLLECTION = {
  */
 const PERFIS_DRP = ['admin', 'seguranca', 'ti'];
 
-async function podeOperarDRP(db, email) {
+/**
+ * Le config_perfis do usuario: { perfis: [...normalizados], area }. Sem
+ * documento, nenhum perfil (o servidor nao aplica o PERFIL_PADRAO do cliente).
+ */
+async function _perfilDoUsuario(db, email) {
   const snap = await db.collection(COLLECTION.configPerfis).doc(String(email || '').toLowerCase()).get();
   const d = snap.exists ? snap.data() : null;
   const brutos = d && Array.isArray(d.perfis) ? d.perfis : (d && d.perfil ? [d.perfil] : []);
-  return brutos.some((p) => PERFIS_DRP.includes(String(p || '').trim().toLowerCase()));
+  return {
+    perfis: brutos.map((p) => String(p || '').trim().toLowerCase()),
+    area: d && d.area ? String(d.area) : '',
+  };
+}
+
+async function temAlgumPerfil(db, email, lista) {
+  const { perfis } = await _perfilDoUsuario(db, email);
+  return perfis.some((p) => lista.includes(p));
+}
+
+async function podeOperarDRP(db, email) {
+  return temAlgumPerfil(db, email, PERFIS_DRP);
+}
+
+/**
+ * Ler o DRP gerado e os roteiros de teste (obterDRP/obterRoteiroTeste): quem
+ * opera o DRP mais o Operador de Processos, que monitora o DRP sem editar
+ * (DECISAO 23/10/2026). Mirror de Perfis.podeVerConteudoDRP.
+ */
+const PERFIS_DRP_LEITURA = [...PERFIS_DRP, 'operador_processos'];
+
+/**
+ * Gerar/salvar/excluir o PCN e a edicao inline da pagina do PCN. Mirror de
+ * Perfis.podeGerarPCN. ANTES (ate 23/10/2026) essas acoes so conferiam o
+ * dominio -- qualquer conta podia apagar o PCN de qualquer processo chamando
+ * a Cloud Function direto.
+ */
+const PERFIS_PCN = ['admin', 'seguranca', 'operador_processos'];
+
+/**
+ * Gerar link de questionario (avaliacao, BIA, area, levantamento): quem edita
+ * processos de todas as areas; o gestor, so para a propria area.
+ */
+const PERFIS_LINK = ['admin', 'seguranca', 'operador_processos'];
+
+async function _exigirPerfil(db, email, lista, msg) {
+  if (!(await temAlgumPerfil(db, email, lista))) throw new AppError(msg);
 }
 
 /**
@@ -70,20 +111,14 @@ async function podeOperarDRP(db, email) {
 const PERFIS_VULNERABILIDADE = ['admin', 'seguranca'];
 
 async function podeOperarVulnerabilidade(db, email) {
-  const snap = await db.collection(COLLECTION.configPerfis).doc(String(email || '').toLowerCase()).get();
-  const d = snap.exists ? snap.data() : null;
-  const brutos = d && Array.isArray(d.perfis) ? d.perfis : (d && d.perfil ? [d.perfil] : []);
-  return brutos.some((p) => PERFIS_VULNERABILIDADE.includes(String(p || '').trim().toLowerCase()));
+  return temAlgumPerfil(db, email, PERFIS_VULNERABILIDADE);
 }
 
 /** Mesmo recorte de Perfis.podeEditarRiscos (perfis.js, client-side). */
 const PERFIS_RISCO = ['admin', 'seguranca'];
 
 async function podeOperarRiscos(db, email) {
-  const snap = await db.collection(COLLECTION.configPerfis).doc(String(email || '').toLowerCase()).get();
-  const d = snap.exists ? snap.data() : null;
-  const brutos = d && Array.isArray(d.perfis) ? d.perfis : (d && d.perfil ? [d.perfil] : []);
-  return brutos.some((p) => PERFIS_RISCO.includes(String(p || '').trim().toLowerCase()));
+  return temAlgumPerfil(db, email, PERFIS_RISCO);
 }
 
 class AppError extends Error {}
@@ -154,6 +189,11 @@ async function gerarLink(db, data, ctx) {
   }
   const area = exigir(data.area, 'area');
   const processo = tipo === 'area' ? '' : exigir(data.processo, 'processo');
+
+  const quem = await _perfilDoUsuario(db, ctx.email);
+  const corporativo = quem.perfis.some((p) => PERFIS_LINK.includes(p));
+  const gestorDaArea = quem.perfis.includes('gestor') && quem.area !== '' && quem.area === area;
+  if (!corporativo && !gestorDaArea) throw new AppError('Seu perfil não pode gerar links de questionário para esta área.');
 
   // O campo `processo` do token carrega o prefixo — convencao herdada do Apps
   // Script e que tokenLogic.js usa para saber de que formulario o token e.
@@ -233,8 +273,18 @@ async function getLevantamentoPCN(db, data) {
   return { success: true, levantamento: d.levantamentoPCN || null };
 }
 
-/** Grava uma nova versao do PCN, preservando as anteriores. */
+/**
+ * Historico do PCN limitado como o do DRP: as versoes moram (com o HTML) num
+ * campo do proprio processo, e o Firestore recusa documento acima de 1 MiB.
+ */
+const MAX_VERSOES_PCN = 5;
+
+/**
+ * Grava uma nova versao do PCN, preservando as anteriores (ate MAX_VERSOES_PCN).
+ * Salvar uma versao nova conta como revisao do plano (pcnRevisao.ultimaEm).
+ */
 async function salvarPCN(db, data, ctx) {
+  await _exigirPerfil(db, ctx.email, PERFIS_PCN, 'Seu perfil não pode alterar o PCN.');
   const html = exigir(data.html, 'html');
   const { ref, snap } = await _exigirProcesso(db, data);
 
@@ -247,19 +297,27 @@ async function salvarPCN(db, data, ctx) {
   }
   if (!Array.isArray(versoes)) versoes = [];
 
+  // Numera a partir da ultima versao (com o corte, length + 1 recomecaria).
+  const ultimaVersao = versoes.length ? Number(versoes[versoes.length - 1].versao) || versoes.length : 0;
+  const agora = new Date().toISOString();
   versoes.push({
-    versao: versoes.length + 1,
-    data: new Date().toISOString(),
+    versao: ultimaVersao + 1,
+    data: agora,
     autor: ctx.email,
     html,
   });
+  versoes = versoes.slice(-MAX_VERSOES_PCN);
 
-  await ref.set({ pcnSalvo: JSON.stringify(versoes) }, { merge: true });
-  return { success: true, versao: versoes.length };
+  await ref.set({
+    pcnSalvo: JSON.stringify(versoes),
+    pcnRevisao: { ...(atual.pcnRevisao || {}), ultimaEm: agora, revisadoPor: ctx.email },
+  }, { merge: true });
+  return { success: true, versao: ultimaVersao + 1, totalVersoes: versoes.length };
 }
 
 /** Apaga todas as versoes do PCN do processo. */
-async function excluirPCN(db, data) {
+async function excluirPCN(db, data, ctx) {
+  await _exigirPerfil(db, ctx.email, PERFIS_PCN, 'Seu perfil não pode excluir o PCN.');
   const { ref } = await _exigirProcesso(db, data);
   await ref.set({ pcnSalvo: '' }, { merge: true });
   return { success: true };
@@ -376,6 +434,7 @@ function _instalacoesDoProcessoPCN(p, dependencias) {
 }
 
 async function gerarPCN(db, data, ctx) {
+  await _exigirPerfil(db, ctx.email, PERFIS_PCN, 'Seu perfil não pode gerar o PCN.');
   const id = exigir(data.id, 'id');
   if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
 
@@ -1237,7 +1296,12 @@ async function salvarDRP(db, data, ctx) {
 
   await conteudoRef.set({ versoes });
   const metadados = versoes.map((v) => ({ versao: v.versao, data: v.data, autor: v.autor }));
-  await depRef.set({ drpSalvo: JSON.stringify(metadados) }, { merge: true });
+  // Salvar uma versao nova conta como revisao do DRP (drpRevisao.ultimaEm).
+  const ultima = versoes[versoes.length - 1];
+  await depRef.set({
+    drpSalvo: JSON.stringify(metadados),
+    drpRevisao: { ...((depSnap.data() || {}).drpRevisao || {}), ultimaEm: ultima.data, revisadoPor: ctx.email },
+  }, { merge: true });
 
   return { success: true, versao: ultimaVersao + 1, totalVersoes: versoes.length };
 }
@@ -1261,7 +1325,7 @@ async function excluirDRP(db, data, ctx) {
  * Cloud Function, com Admin SDK, le de la.
  */
 async function obterDRP(db, query, ctx) {
-  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode acessar o DRP.');
+  await _exigirPerfil(db, ctx.email, PERFIS_DRP_LEITURA, 'Seu perfil não pode acessar o DRP.');
   const id = exigir(query.id, 'id');
   const snap = await db.collection(COLLECTION.drpConteudo).doc(String(id)).get();
   const versoes = snap.exists && Array.isArray((snap.data() || {}).versoes) ? snap.data().versoes : [];
@@ -1437,7 +1501,7 @@ async function salvarRoteiroTeste(db, data, ctx) {
  * Devolve TODAS as categorias; o cliente filtra pela que quer abrir.
  */
 async function obterRoteiroTeste(db, query, ctx) {
-  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode acessar o DRP.');
+  await _exigirPerfil(db, ctx.email, PERFIS_DRP_LEITURA, 'Seu perfil não pode acessar o DRP.');
   const id = exigir(query.id, 'id');
   const snap = await db.collection(COLLECTION.roteiroConteudo).doc(String(id)).get();
   const versoes = snap.exists && Array.isArray((snap.data() || {}).versoes) ? snap.data().versoes : [];
@@ -1589,6 +1653,7 @@ async function dadosPCN(db, data) {
 const CAMPOS_EDITAVEIS_PCN = ['bcpContatos', 'bcpPapeisCrise'];
 
 async function salvarCamposPCN(db, data, ctx) {
+  await _exigirPerfil(db, ctx.email, PERFIS_PCN, 'Seu perfil não pode alterar o PCN.');
   const { ref } = await _exigirProcesso(db, data);
 
   const patch = {};
@@ -1621,6 +1686,9 @@ async function salvarCamposPCN(db, data, ctx) {
 const CAMPOS_DRP_DEPENDENCIA = ['estrategia', 'rto', 'rpo', 'responsavel'];
 
 async function salvarDrpDependencia(db, data, ctx) {
+  // Parametro de DRP da dependencia: so quem opera o DRP (o Operador de
+  // Processos edita o PCN, mas le o DRP -- DECISAO 23/10/2026).
+  await _exigirPerfil(db, ctx.email, PERFIS_DRP, 'Seu perfil não pode alterar parâmetros do DRP da dependência.');
   const dependenciaId = exigir(data.dependenciaId, 'dependenciaId');
   const ref = db.collection(COLLECTION.dependencias).doc(dependenciaId);
   const snap = await ref.get();
@@ -1652,10 +1720,7 @@ async function salvarDrpDependencia(db, data, ctx) {
 // logado, independente do modo configurado.
 // ============================================================
 async function enviarEmailTeste(db, data, ctx) {
-  const snap = await db.collection(COLLECTION.configPerfis).doc(String(ctx.email || '').toLowerCase()).get();
-  const d = snap.exists ? snap.data() : null;
-  const perfis = d && Array.isArray(d.perfis) ? d.perfis : (d && d.perfil ? [d.perfil] : []);
-  if (!perfis.some((p) => String(p || '').trim().toLowerCase() === 'admin')) {
+  if (!(await temAlgumPerfil(db, ctx.email, ['admin']))) {
     throw new AppError('Só o Administrador pode enviar o e-mail de teste.');
   }
   const cfgSnap = await db.collection('config_notificacoes').doc('contratos').get();
@@ -1848,6 +1913,10 @@ module.exports = {
   PREFIXO,
   VALIDADE_DIAS,
   PAGINA,
+  PERFIS_PCN,
+  PERFIS_DRP_LEITURA,
+  MAX_VERSOES_PCN,
+  temAlgumPerfil,
   processoKey,
   listaDeContatos,
   slug,

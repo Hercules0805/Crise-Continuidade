@@ -81,6 +81,21 @@ service cloud.firestore {
       return temPerfil('operador');
     }
 
+    // Operador de Processos (23/10/2026): documenta e monitora os processos de
+    // TODAS as areas. Escreve em processos/respostas_bia (BIA e PCN), sem
+    // recorte de area; DRP so le (pela Cloud Function). Espelha
+    // PERFIL.OPERADOR_PROCESSOS em public/perfis.js.
+    function isOperadorProcessos() {
+      return temPerfil('operador_processos');
+    }
+
+    // Quem mexe em processos de qualquer area: Admin, SI e Operador de
+    // Processos. O gestor entra a parte, pela propria area (isGestorDaArea).
+    // Espelha Perfis.podeEditarProcessos (sem o ramo do gestor).
+    function podeOperarProcessos() {
+      return isAdmin() || isSeguranca() || isOperadorProcessos();
+    }
+
     // Modulo de fornecedores: antes tinha perfil proprio; agora e Admin,
     // Seguranca da Informacao ou Operador Administrativo. (Espelha
     // Perfis.podeGerenciarFornecedores.) O cadastro do fornecedor em si mora em
@@ -318,18 +333,28 @@ service cloud.firestore {
     }
 
     // ---- Dados operacionais: admin (tudo) ou gestor (própria área) ----
+    // DECISAO 23/10/2026: SI (a tela ja mostrava os botoes e o banco recusava)
+    // e o Operador de Processos escrevem em processos de qualquer area.
     match /processos/{id} {
       allow read: if isCorpUser();
-      allow write: if isAdmin()
+      allow write: if podeOperarProcessos()
         || isGestorDaArea(request.resource.data.area)
         || (resource != null && isGestorDaArea(resource.data.area));
     }
 
     match /respostas_bia/{id} {
       allow read: if isCorpUser();
-      allow create: if isAdmin() || isGestorDaArea(request.resource.data.area);
+      allow create: if podeOperarProcessos() || isGestorDaArea(request.resource.data.area);
       // Respostas são registros históricos: não permitir update/delete pelo app.
       allow update, delete: if isAdmin();
+    }
+
+    // DECISAO 23/10/2026: periodicidades do ciclo de revisao de BIA/PCN/DRP
+    // (documento 'ciclos'). Todo calculo de vencimento le; so Admin e SI mudam
+    // (Perfis.podeEditarCiclos).
+    match /config_continuidade/{id} {
+      allow read: if isCorpUser();
+      allow write: if isAdmin() || isSeguranca();
     }
 
     // ---- Livro de medicoes ----

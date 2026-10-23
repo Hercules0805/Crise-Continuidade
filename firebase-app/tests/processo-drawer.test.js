@@ -48,7 +48,7 @@ async function carregar(perfis, extra) {
     },
   });
   ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
-    'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
+    'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = (m) => { window.__toasts = (window.__toasts || []).concat(m); };');
   await w.processos();
@@ -131,7 +131,17 @@ test('DRP: gestor ve a situacao, mas nao previa nem abrir (conteudo e de Admin/S
   assert.match(tabela.textContent, /SRV-01/);
   assert.ok(!tabela.querySelector('button[title="Ver a última versão aqui"]'));
   assert.ok(!tabela.querySelector('button[title="Abrir o DRP completo"]'));
-  assert.match(tabela.textContent, /restrito a Admin, Segurança e TI/);
+  assert.match(tabela.textContent, /restrito a Admin, Segurança, TI e Operador de Processos/);
+});
+
+test('DRP: operador de processos abre a previa e o DRP, mas nao gerencia (23/10/2026)', async () => {
+  const { w, doc } = await carregar(['operador_processos']);
+  w.editarProcesso('p1');
+  w.trocarAbaProcesso('drp');
+  await esperar();
+  const tabela = doc.getElementById('drpProcessoTabela');
+  assert.ok(tabela.querySelector('button[title="Abrir o DRP completo"]'));
+  assert.ok(!tabela.querySelector('button[title="Parâmetros DRP e geração, na tela de DRP"]'));
 });
 
 test('BIA: dependencia cujo cadastro foi removido vira chip cinza "(removida)"; Vinculos mostra servico e instalacao', async () => {

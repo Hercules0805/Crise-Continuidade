@@ -131,6 +131,15 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 .drawer#drawerProcessosLote { width: 680px; }
 .drawer#drawerSelecaoDependenciasRelatorio { width: 420px; }
 .drawer#drawerOrganograma { width: 420px; }
+/* Conformidade de Continuidade (23/10/2026): formulários de coluna única. O de
+   revisão abre também por cima do drawer de Processo/Dependência. */
+.drawer#drawerRevisao { width: 480px; }
+.drawer#drawerCiclos { width: 420px; }
+.drawer-overlay.drawer-overlay--sobre-drawer { z-index: 110; }
+.drawer.drawer--sobre-drawer { z-index: 111; }
+/* Selo do ciclo de revisão (Vigente/Vencendo/Vencido) nas abas de plano. */
+.ciclo-revisao { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid #eee; border-radius: 8px; margin-bottom: 14px; background: #fafafa; }
+.ciclo-revisao__texto { flex: 1; font-size: 0.84em; color: #555; }
 .drawer.open { transform: translateX(0); }
 /* Drawer fechado fica só deslocado para fora da tela: sem isto o Tab entrava
    nos campos dele. visibility espera a animação de saída terminar (0.25s). */

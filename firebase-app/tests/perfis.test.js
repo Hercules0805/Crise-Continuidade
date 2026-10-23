@@ -135,8 +135,8 @@ test('TI + Gestor soma poderes: opera DRP (TI) e cai na propria area (gestor)', 
 // CATALOGO
 // ============================================================
 
-test('sao exatamente cinco perfis, e o catalogo descreve todos', () => {
-  assert.strictEqual(Perfis.CATALOGO.length, 5);
+test('sao exatamente seis perfis, e o catalogo descreve todos', () => {
+  assert.strictEqual(Perfis.CATALOGO.length, 6);
   Object.values(Perfis.PERFIL).forEach((v) => {
     assert.ok(Perfis.CATALOGO.some((p) => p.valor === v), `${v} falta no catalogo`);
   });
@@ -168,6 +168,7 @@ test('rotulo devolve nome legivel, nunca o valor cru', () => {
   assert.strictEqual(Perfis.rotulo('ti'), 'TI');
   assert.strictEqual(Perfis.rotulo('gestor'), 'Gestor de área');
   assert.strictEqual(Perfis.rotulo('operador'), 'Operador Administrativo');
+  assert.strictEqual(Perfis.rotulo('operador_processos'), 'Operador de Processos');
 });
 
 // ============================================================
@@ -183,7 +184,7 @@ test('os perfis que as regras testam por nome existem nesta lista', () => {
   const regras = lerRegras();
   // 'gestor' NAO aparece por nome nas regras de proposito: la o gestor e
   // identificado por TER uma area, nao pelo texto do perfil.
-  [Perfis.PERFIL.ADMIN, Perfis.PERFIL.SEGURANCA, Perfis.PERFIL.TI, Perfis.PERFIL.OPERADOR].forEach((v) => {
+  [Perfis.PERFIL.ADMIN, Perfis.PERFIL.SEGURANCA, Perfis.PERFIL.TI, Perfis.PERFIL.OPERADOR, Perfis.PERFIL.OPERADOR_PROCESSOS].forEach((v) => {
     assert.ok(regras.includes(`temPerfil('${v}')`),
       `o perfil '${v}' nao aparece em firestore.rules via temPerfil()`);
   });
@@ -254,6 +255,7 @@ const TODAS_AS_TELAS = [
   'admin', 'perfis', 'produtos-software',
   'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
   'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status', 'notificacoes-email',
+  'conformidade',
 ];
 
 test('admin ve todas as telas', () => {
@@ -433,4 +435,74 @@ test('as regras limitam o operador em /dependencias a categoria de fornecedor', 
   assert.ok(/allow create:[^;]*isOperador\(\)[^;]*categoriaFornecedor\(request\.resource/s.test(corpo));
   assert.ok(/allow delete:[^;]*isOperador\(\)[^;]*categoriaFornecedor\(resource/s.test(corpo));
   assert.ok(!/podeMexerNaDependencia\(\)\s*\|\|\s*isOperador/.test(corpo), 'operador nao entra na regra ampla');
+});
+
+// ============================================================
+// OPERADOR DE PROCESSOS (23/10/2026): documenta e monitora os processos de
+// todas as areas. Opera Processos, BIA e PCN; DRP so em leitura.
+// ============================================================
+
+const TELAS_DO_OPERADOR_PROCESSOS = [
+  'admin', 'areas', 'conformidade', 'dependencias', 'drp', 'pcns', 'pessoas', 'processos', 'relatorios',
+];
+
+test('operador de processos ve as telas de continuidade, e nenhuma outra', () => {
+  const vistas = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela(Perfis.PERFIL.OPERADOR_PROCESSOS, t));
+  assert.deepStrictEqual(vistas.sort(), TELAS_DO_OPERADOR_PROCESSOS);
+  assert.strictEqual(Perfis.podeVerTela(Perfis.PERFIL.OPERADOR_PROCESSOS, 'mapa'), true);
+});
+
+test('a pagina inicial do operador de processos e o Painel de Conformidade', () => {
+  assert.strictEqual(Perfis.paginaInicial(Perfis.PERFIL.OPERADOR_PROCESSOS), 'conformidade');
+  assert.strictEqual(Perfis.paginaInicial(['gestor', 'operador_processos']), 'conformidade',
+    'tem mais alcance que o gestor');
+  assert.strictEqual(Perfis.paginaInicial(['seguranca', 'operador_processos']), 'admin');
+});
+
+test('operador de processos opera processos, BIA e PCN; DRP so le', () => {
+  const o = Perfis.PERFIL.OPERADOR_PROCESSOS;
+  assert.strictEqual(Perfis.ehOperadorProcessos(o), true);
+  assert.strictEqual(Perfis.exigeArea(o), false, 'visao corporativa, sem area');
+  assert.strictEqual(Perfis.podeEditarProcessos(o), true);
+  assert.strictEqual(Perfis.podeGerarPCN(o), true);
+  assert.strictEqual(Perfis.podeVerConteudoDRP(o), true);
+  assert.strictEqual(Perfis.podeRegistrarRevisao(o, 'bia'), true);
+  assert.strictEqual(Perfis.podeRegistrarRevisao(o, 'pcn'), true);
+  assert.strictEqual(Perfis.podeRegistrarRevisao(o, 'drp'), false);
+  [Perfis.podeGerarDRP, Perfis.podeOperarDRP, Perfis.podeMexerNaDependencia, Perfis.podeMexerNaArea,
+    Perfis.podeEditarPessoas, Perfis.podeEditarRiscos, Perfis.podeEditarIndicadores, Perfis.podeEditarPerguntas,
+    Perfis.podeEditarRegua, Perfis.podeGerenciarPerfis, Perfis.podeGerenciarFornecedores,
+    Perfis.podeEditarCiclos].forEach((fn) => {
+    assert.strictEqual(fn(o), false, `${fn.name} deveria ser false para o operador de processos`);
+  });
+});
+
+test('o Operador Administrativo (operador) NAO ganha nada do Operador de Processos', () => {
+  ['podeGerarPCN', 'podeEditarProcessos', 'podeVerConteudoDRP', 'ehOperadorProcessos'].forEach((fn) => {
+    assert.strictEqual(Perfis[fn]('operador'), false, fn);
+  });
+  assert.strictEqual(Perfis.podeVerTela('operador', 'conformidade'), false);
+});
+
+test('PCN: so gestor e TI continuam sem gerar; ver o DRP nao e dado ao gestor', () => {
+  ['admin', 'seguranca', 'operador_processos'].forEach((p) => assert.strictEqual(Perfis.podeGerarPCN(p), true, p));
+  ['gestor', 'ti', 'operador'].forEach((p) => assert.strictEqual(Perfis.podeGerarPCN(p), false, p));
+  ['admin', 'seguranca', 'ti', 'operador_processos'].forEach((p) => assert.strictEqual(Perfis.podeVerConteudoDRP(p), true, p));
+  ['gestor', 'operador'].forEach((p) => assert.strictEqual(Perfis.podeVerConteudoDRP(p), false, p));
+});
+
+test('conformidade: SI e gestor (area dele) tambem veem; TI nao', () => {
+  assert.strictEqual(Perfis.podeVerTela('seguranca', 'conformidade'), true);
+  assert.strictEqual(Perfis.podeVerTela('gestor', 'conformidade'), true);
+  assert.strictEqual(Perfis.podeVerTela('ti', 'conformidade'), false);
+});
+
+test('as regras dao ao operador de processos escrita em processos e respostas_bia', () => {
+  const regras = lerRegras();
+  const proc = regras.slice(regras.indexOf('match /processos/{id}'));
+  assert.ok(proc.slice(0, proc.indexOf('\n    }')).includes('podeOperarProcessos()'));
+  const bia = regras.slice(regras.indexOf('match /respostas_bia/{id}'));
+  assert.ok(/allow create:[^;]*podeOperarProcessos\(\)/.test(bia.slice(0, bia.indexOf('\n    }'))));
+  const fn = regras.slice(regras.indexOf('function podeOperarProcessos()'));
+  assert.ok(fn.slice(0, fn.indexOf('}')).includes('isOperadorProcessos()'));
 });

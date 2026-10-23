@@ -51,6 +51,12 @@ const CONFIG_PADRAO = {
     novo: true, encerrado: true, resumoAutomaticos: true,
     destinatarios: { responsavel: true, area: true, seguranca: true },
   },
+  // Resumo semanal de conformidade de BIA/PCN/DRP (23/10/2026) -- ver
+  // notificacoesContinuidade.js. Gestores (so a propria area) comecam desligados.
+  continuidade: {
+    resumoSemanal: true,
+    destinatarios: { operadoresProcessos: true, gestores: false },
+  },
   // Servidor SMTP (16/10/2026: SendGrid). Usuario/senha ficam nos segredos.
   servidor: { provedor: 'sendgrid', host: '', porta: null, remetenteEmail: '' },
 };
@@ -62,6 +68,7 @@ function normalizarConfig(c) {
   const bool = (v, padrao) => (typeof v === 'boolean' ? v : padrao);
   const g = x.grupos || {}, d = x.destinatarios || {};
   const rk = x.riscos || {}, rd = rk.destinatarios || {};
+  const ct = x.continuidade || {}, cd = ct.destinatarios || {};
   const resp = String(x.responderPara || '').trim().toLowerCase();
   const sv = x.servidor || {};
   const provedor = PROVEDORES_SMTP.includes(sv.provedor) ? sv.provedor : 'sendgrid';
@@ -89,6 +96,13 @@ function normalizarConfig(c) {
         responsavel: bool(rd.responsavel, true),
         area: bool(rd.area, true),
         seguranca: bool(rd.seguranca, true),
+      },
+    },
+    continuidade: {
+      resumoSemanal: bool(ct.resumoSemanal, true),
+      destinatarios: {
+        operadoresProcessos: bool(cd.operadoresProcessos, true),
+        gestores: bool(cd.gestores, false),
       },
     },
     servidor: {

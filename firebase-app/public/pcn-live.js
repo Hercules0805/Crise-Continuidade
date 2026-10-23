@@ -227,17 +227,23 @@ function buildEstrategiaTecnicaEditor(data) {
   });
 
   window._pcnEstrategiaTecnicaRows = rows;
-  var temAlgumaExportavel = rows.some(function(r) { return r.dependenciaId; });
+  // Sem perfil de DRP (ex.: Operador de Processos), a tabela e so leitura.
+  var podeExportar = typeof PCN_PODE_EXPORTAR_DRP === 'undefined' || PCN_PODE_EXPORTAR_DRP;
+  var temAlgumaExportavel = podeExportar && rows.some(function(r) { return r.dependenciaId; });
 
-  var html = '<p style="font-size:0.85em;color:#666;margin-bottom:12px;">Exporte a estratégia técnica de recuperação de volta para o cadastro de Dependências.</p>';
-  html += temAlgumaExportavel
+  var html = podeExportar
+    ? '<p style="font-size:0.85em;color:#666;margin-bottom:12px;">Exporte a estratégia técnica de recuperação de volta para o cadastro de Dependências.</p>'
+    : '<p style="font-size:0.85em;color:#666;margin-bottom:12px;">Exportar para o cadastro de Dependências altera parâmetros do DRP: fica com Admin, Segurança e TI.</p>';
+  if (podeExportar) html += temAlgumaExportavel
     ? '<div style="margin-bottom:12px;"><button onclick="exportarTudoEstrategiaTecnica()" style="padding:8px 16px;background:#d60014;color:white;border:none;border-radius:6px;font-size:0.85em;font-weight:600;cursor:pointer;">⭳ Exportar tudo</button></div>'
     : '<div style="border:1px solid #ffe0b2;background:#fff8e1;border-radius:8px;padding:10px 12px;margin-bottom:12px;color:#e65100;font-size:0.82em;">Nenhuma linha desta tabela está vinculada a uma Dependência do catálogo deste processo — por isso não há nada pra exportar. Isso acontece quando o processo não tem Dependências críticas marcadas na aba BIA (o Gemini preenche a tabela com recursos genéricos nesse caso), ou quando o nome do recurso na tabela não bate com o nome cadastrado. Vincule as dependências na aba BIA e gere um PCN novo pra poder exportar.</div>';
   rows.forEach(function(r) {
     html += '<div style="border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;margin-bottom:8px;">';
     html += '<div style="font-weight:700;color:#d60014;margin-bottom:4px;">' + (r.nome || '(sem nome)') + '</div>';
     html += '<div style="font-size:0.8em;color:#666;margin-bottom:8px;">' + [r.estrategia, r.rto ? 'RTO: ' + r.rto : '', r.rpo ? 'RPO: ' + r.rpo : '', r.responsavel ? 'Resp.: ' + r.responsavel : ''].filter(Boolean).join(' | ') + '</div>';
-    if (r.dependenciaId) {
+    if (!podeExportar) {
+      // so leitura
+    } else if (r.dependenciaId) {
       html += '<button onclick="exportLiveEstrategiaTecnica(' + r.idx + ')" style="padding:5px 12px;background:#2e7d32;color:white;border:none;border-radius:5px;font-size:0.8em;cursor:pointer;">Exportar</button>';
     } else {
       html += '<span style="font-size:0.78em;color:#999;">sem dependência vinculada — exportação indisponível</span>';

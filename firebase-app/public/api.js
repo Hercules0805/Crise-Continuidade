@@ -59,6 +59,7 @@ const COLLECTION = {
   statusContrato: 'status_contrato',
   configNotificacoes: 'config_notificacoes',
   notificacoesEmail: 'notificacoes_email',
+  configContinuidade: 'config_continuidade',
 };
 
 // ------------------------------------------------------------
@@ -442,6 +443,8 @@ async function _lerDependencias() {
     drpTemplate: d.drpTemplate || '',
     drpTemplateNome: d.drpTemplateNome || '',
     drpSalvo: d.drpSalvo || '',
+    drpRevisao: d.drpRevisao && d.drpRevisao.ultimaEm ? d.drpRevisao : null,
+    drpHistoricoRevisao: Array.isArray(d.drpHistoricoRevisao) ? d.drpHistoricoRevisao : [],
   }));
 }
 
@@ -1505,8 +1508,69 @@ async function _lerProcessos() {
       score: resp ? resp.score : 0,
       avaliado: resp ? resp.avaliado : false,
       respostas: resp ? resp.respostas : [],
+      // Ciclo de revisao (23/10/2026, ver conformidade-continuidade.js): a
+      // resposta de BIA mais recente e as revisoes registradas de BIA/PCN.
+      biaUltimaEm: resp && resp.timestamp ? resp.timestamp : '',
+      // Revisao vigente: {ultimaEm, revisadoPor, aprovadoPor, aprovadoEm, observacao} ou null.
+      biaRevisao: d.biaRevisao && d.biaRevisao.ultimaEm ? d.biaRevisao : null,
+      biaHistoricoRevisao: Array.isArray(d.biaHistoricoRevisao) ? d.biaHistoricoRevisao : [],
+      pcnRevisao: d.pcnRevisao && d.pcnRevisao.ultimaEm ? d.pcnRevisao : null,
+      pcnHistoricoRevisao: Array.isArray(d.pcnHistoricoRevisao) ? d.pcnHistoricoRevisao : [],
+      atualizadoEm: d.atualizadoEm || '',
+      atualizadoPor: d.atualizadoPor || '',
     };
   });
+}
+
+/**
+ * Registra a revisao periodica de um plano (23/10/2026). tipo 'bia'|'pcn'
+ * grava no processo; 'drp' na dependencia. A revisao vigente vai em
+ * <tipo>Revisao e entra tambem no historico <tipo>HistoricoRevisao (so cresce).
+ * As regras do banco decidem quem pode: processos (Admin/SI/Operador de
+ * Processos/gestor da area) e dependencias (Admin/SI/TI).
+ */
+async function _registrarRevisao(b) {
+  const tipo = String(b.tipo || '');
+  if (!['bia', 'pcn', 'drp'].includes(tipo)) throw new Error('Tipo de revisão inválido.');
+  const id = String(b.id || '').trim();
+  if (!id) throw new Error('Informe o processo ou a dependência.');
+  const data = /^\d{4}-\d{2}-\d{2}$/.test(String(b.data || '')) ? b.data : '';
+  if (!data) throw new Error('Informe a data da revisão.');
+  if (data > new Date().toISOString().slice(0, 10)) throw new Error('A data da revisão não pode estar no futuro.');
+  const aprovadoPor = String(b.aprovadoPor || '').trim();
+  const revisao = {
+    ultimaEm: data,
+    revisadoPor: (window.USER_EMAIL || '').toLowerCase(),
+    aprovadoPor,
+    aprovadoEm: aprovadoPor ? data : '',
+    observacao: String(b.observacao || '').trim().slice(0, 1000),
+  };
+  const col = tipo === 'drp' ? COLLECTION.dependencias : COLLECTION.processos;
+  await _db.collection(col).doc(id).set({
+    [tipo + 'Revisao']: revisao,
+    [tipo + 'HistoricoRevisao']: firebase.firestore.FieldValue.arrayUnion({ ...revisao, registradoEm: new Date().toISOString() }),
+  }, { merge: true });
+  return { success: true, revisao };
+}
+
+/** Periodicidades do ciclo de revisao (config_continuidade/ciclos), com o padrao quando nao existe. */
+async function _lerCiclosContinuidade() {
+  try {
+    const snap = await _db.collection(COLLECTION.configContinuidade).doc('ciclos').get();
+    return ConformidadeContinuidade.normalizarCiclos(snap.exists ? snap.data() : null);
+  } catch {
+    return ConformidadeContinuidade.normalizarCiclos(null);
+  }
+}
+
+async function _salvarCiclosContinuidade(d) {
+  const ciclos = ConformidadeContinuidade.normalizarCiclos(d);
+  await _db.collection(COLLECTION.configContinuidade).doc('ciclos').set({
+    ...ciclos,
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  }, { merge: true });
+  return { success: true, ciclos };
 }
 
 // ------------------------------------------------------------
@@ -1931,6 +1995,9 @@ async function _salvarProcesso(p) {
     }
   }
 
+  // Autoria da ultima alteracao (23/10/2026): base do acompanhamento do
+  // Operador de Processos.
+  paraGravar = { ...paraGravar, atualizadoEm: new Date().toISOString(), atualizadoPor: (window.USER_EMAIL || '').toLowerCase() };
   await ref.set(paraGravar, { merge: true });
   return { success: true, id: docId };
 }
@@ -2268,6 +2335,12 @@ const _CONFIG_NOTIFICACOES_PADRAO = {
     novo: true, encerrado: true, resumoAutomaticos: true,
     destinatarios: { responsavel: true, area: true, seguranca: true },
   },
+  // Resumo semanal de conformidade de BIA/PCN/DRP (23/10/2026) --
+  // functions/notificacoesContinuidade.js. Gestores comecam desligados.
+  continuidade: {
+    resumoSemanal: true,
+    destinatarios: { operadoresProcessos: true, gestores: false },
+  },
   // SMTP (16/10/2026: SendGrid). Usuario e senha ficam nos segredos do Firebase.
   servidor: { provedor: 'sendgrid', host: '', porta: null, remetenteEmail: '' },
 };
@@ -2287,9 +2360,9 @@ function _servidorNotificacoes(sv) {
   };
 }
 
-/** Bloco `riscos` da configuracao; `bools(obj, padrao)` decide o que falta. */
-function _riscosNotificacoes(r, bools) {
-  const p = _CONFIG_NOTIFICACOES_PADRAO.riscos;
+/** Bloco `riscos` ou `continuidade` da configuracao; `bools(obj, padrao)` decide o que falta. */
+function _blocoNotificacoes(nome, r, bools) {
+  const p = _CONFIG_NOTIFICACOES_PADRAO[nome];
   const x = r || {};
   const { destinatarios, ...eventos } = p;
   return Object.assign(bools(x, eventos), { destinatarios: bools(x.destinatarios, destinatarios) });
@@ -2306,7 +2379,8 @@ async function _lerConfigNotificacoes() {
     responderPara: d.responderPara || '',
     grupos: bools(d.grupos, p.grupos),
     destinatarios: bools(d.destinatarios, p.destinatarios),
-    riscos: _riscosNotificacoes(d.riscos, (obj, padrao) => bools(obj, padrao)),
+    riscos: _blocoNotificacoes('riscos', d.riscos, bools),
+    continuidade: _blocoNotificacoes('continuidade', d.continuidade, bools),
     servidor: _servidorNotificacoes(d.servidor),
     atualizadoEm: d.atualizadoEm || '',
     atualizadoPor: d.atualizadoPor || '',
@@ -2321,6 +2395,7 @@ async function _salvarConfigNotificacoes(c) {
   const remetente = String(sv.remetenteEmail || '').trim().toLowerCase();
   if (remetente && !remetente.endsWith(DOMINIO_CORPORATIVO)) throw new Error('O e-mail do remetente precisa ser ' + DOMINIO_CORPORATIVO + '.');
   if (sv.provedor === 'outro' && !String(sv.host || '').trim()) throw new Error('Informe o host do servidor SMTP.');
+  const boolsOuPadrao = (obj, padrao) => Object.fromEntries(Object.keys(padrao).map((k) => [k, typeof (obj || {})[k] === 'boolean' ? obj[k] : padrao[k]]));
   const data = {
     modo: ['desligado', 'simulacao', 'ativo'].includes(c.modo) ? c.modo : 'desligado',
     remetenteNome: String(c.remetenteNome || '').trim() || p.remetenteNome,
@@ -2328,7 +2403,8 @@ async function _salvarConfigNotificacoes(c) {
     grupos: Object.fromEntries(Object.keys(p.grupos).map((k) => [k, !!(c.grupos || {})[k]])),
     destinatarios: Object.fromEntries(Object.keys(p.destinatarios).map((k) => [k, !!(c.destinatarios || {})[k]])),
     // Sem o bloco no payload, fica o padrao (ligado) -- nao desliga por omissao.
-    riscos: _riscosNotificacoes(c.riscos, (obj, padrao) => Object.fromEntries(Object.keys(padrao).map((k) => [k, typeof (obj || {})[k] === 'boolean' ? obj[k] : padrao[k]]))),
+    riscos: _blocoNotificacoes('riscos', c.riscos, boolsOuPadrao),
+    continuidade: _blocoNotificacoes('continuidade', c.continuidade, boolsOuPadrao),
     servidor: _servidorNotificacoes(sv),
     atualizadoEm: new Date().toISOString(),
     atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
@@ -2352,6 +2428,8 @@ async function _lerNotificacoesEmail() {
       // Avisos de risco (22/10/2026): referencia e link no log.
       riscoId: n.riscoId || '',
       riscoTitulo: n.riscoTitulo || '',
+      // Resumo de conformidade (23/10/2026): sem contrato nem risco, so a contagem.
+      referencia: n.referencia || '',
       para: n.para || '',
       motivos: Array.isArray(n.motivos) ? n.motivos : [],
       assunto: n.assunto || '',
@@ -2395,6 +2473,7 @@ const _GET_FIRESTORE = {
   getConfigFornecedor: () => _lerConfigFornecedor(),
   getConfigVulnerabilidade: () => _lerConfigVulnerabilidade(),
   getConfigRiscos: () => _lerConfigRiscos(),
+  getCiclosContinuidade: () => _lerCiclosContinuidade(),
   getPerfis: () => _lerPerfis(),
   getServicos: () => _lerServicos(),
   getBackups: () => _lerBackups(),
@@ -2451,6 +2530,8 @@ const _POST_FIRESTORE = {
   salvarConfigFornecedor: (b) => _salvarConfigFornecedor(b),
   salvarConfigVulnerabilidade: (b) => _salvarConfigVulnerabilidade(b),
   salvarConfigRiscos: (b) => _salvarConfigRiscos(b),
+  registrarRevisao: (b) => _registrarRevisao(b),
+  salvarCiclosContinuidade: (b) => _salvarCiclosContinuidade(b),
   salvarPerfilAcesso: (b) => _salvarPerfilAcesso(b),
   excluirPerfilAcesso: (b) => _db.collection(COLLECTION.configPerfis).doc(String(b.email || '').toLowerCase()).delete()
     .then(() => ({ success: true })),
@@ -2697,6 +2778,10 @@ const API = {
   getConfigFornecedor: () => API.get('getConfigFornecedor'),
   getConfigVulnerabilidade: () => API.get('getConfigVulnerabilidade'),
   getConfigRiscos: () => API.get('getConfigRiscos'),
+  getCiclosContinuidade: () => API.get('getCiclosContinuidade'),
+  salvarCiclosContinuidade: (c) => API.post('salvarCiclosContinuidade', c)
+    .then((r) => { API.invalidate('getCiclosContinuidade'); return r; }),
+  registrarRevisao: (r) => API.post('registrarRevisao', r),
   getPerfis: () => API.get('getPerfis'),
   salvarPerfilAcesso: (p) => API.post('salvarPerfilAcesso', p)
     .then((r) => { API.invalidate('getPerfis'); return r; }),

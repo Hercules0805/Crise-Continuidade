@@ -30,6 +30,7 @@ const pages = {
   'contratos-status': contratosStatus,
   'notificacoes-email': notificacoesEmail,
   perfis,
+  conformidade,
 };
 
 // Paleta rotativa de 10 cores para tags de categoria dinâmicas (dependências/BIA).
@@ -272,19 +273,25 @@ function route() {
 
 /**
  * Área à qual a visão do usuário fica restrita (Processos/PCNs/Painel), ou
- * null quando ele vê tudo. Admin e Segurança da Informação veem todas as
- * áreas; só o Gestor (sem esses perfis mais amplos) fica preso à própria área.
+ * null quando ele vê tudo. Admin, Segurança da Informação e Operador de
+ * Processos veem todas as áreas; só o Gestor (sem esses perfis mais amplos)
+ * fica preso à própria área.
  */
 function _recorteAreaGestor() {
-  if (Perfis.ehAdmin(window.USER_PERFIS) || Perfis.ehSeguranca(window.USER_PERFIS)) return null;
+  if (_visaoCorporativa()) return null;
   return window.USER_AREA || null;
+}
+
+/** Perfis que enxergam todas as áreas (sem recorte de gestor). */
+function _visaoCorporativa() {
+  return Perfis.ehAdmin(window.USER_PERFIS)
+    || Perfis.ehSeguranca(window.USER_PERFIS)
+    || Perfis.ehOperadorProcessos(window.USER_PERFIS);
 }
 
 /** true quando a visão do usuário é limitada à própria área (gestor puro). */
 function _limitadoAArea() {
-  return Perfis.exigeArea(window.USER_PERFIS)
-    && !Perfis.ehAdmin(window.USER_PERFIS)
-    && !Perfis.ehSeguranca(window.USER_PERFIS);
+  return Perfis.exigeArea(window.USER_PERFIS) && !_visaoCorporativa();
 }
 
 /** Primeira tela que este perfil ve — e onde ele cai quando nao pede nada. */
@@ -829,6 +836,10 @@ window.trocarAbaProcesso = (aba) => {
     renderPcnResumoBcp();
     renderContatosCriseBcp();
   }
+  // Selo do ciclo de revisao (23/10/2026): BIA na Avaliacao, PCN no BCP.
+  const idProcesso = (document.getElementById('fId') || {}).value || '';
+  if (aba === 'avaliacao') renderCicloRevisao('bia', idProcesso);
+  if (aba === 'bcp') renderCicloRevisao('pcn', idProcesso);
   if (aba === 'drp') renderDrpDoProcesso();
   if (aba === 'identificacao') renderVinculosProcesso();
   // Renderizar avaliação ao abrir aba
@@ -2677,6 +2688,7 @@ async function processos() {
 
           <!-- ABA: AVALIAÇÃO -->
           <div id="painel-avaliacao" style="display:none;">
+            <div data-ciclo="bia"></div>
             <div class="premissas-avaliacao">
               <div class="premissas-avaliacao__titulo">Premissas da avaliação</div>
               <ul>
@@ -2761,6 +2773,7 @@ async function processos() {
 
           <!-- ABA: BCP -->
           <div id="painel-bcp" style="display:none;">
+            <div data-ciclo="pcn"></div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BCP Status</label>
               <select id="fBcpStatus" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
@@ -5158,6 +5171,7 @@ function _htmlDrpPlano() {
           <button class="btn btn-ghost" id="btnGerarDrp" onclick="gerarDRPDependencia()" style="color:#2e7d32;border-color:#2e7d32;">🤖 Gerar DRP</button>
           <button class="btn btn-ghost" id="btnAbrirDrp" onclick="abrirDRPSalvo()" style="color:#1565c0;border-color:#1565c0;display:none;">📂 Abrir DRP</button>
         </div>
+        <div data-ciclo="drp"></div>
         <div id="drpResumo"></div>
       </div>
     </div>`;
@@ -5223,6 +5237,7 @@ function _garantirEstiloPreviaDrp() {
 function renderDrpResumo() {
   const container = document.getElementById('drpResumo');
   if (!container) return;
+  renderCicloRevisao('drp', (document.getElementById('depId') || {}).value || '');
   // Importar template e Gerar DRP: Admin ou Segurança (TI opera/edita, mas não gera).
   const podeGerar = Perfis.podeGerarDRP(window.USER_PERFIS);
   const btnImp = document.getElementById('btnImportarTemplateDrp');
@@ -18078,6 +18093,9 @@ var PCN_API_URL = '` + APP_API_URL + `';
 // Passado isso, salvar devolve 401 e a pagina manda reabrir o PCN.
 var PCN_TOKEN = '` + (idToken || '') + `';
 var PCN_AREA = '${escScript(info.area || '')}';
+// Exportar a estrategia tecnica grava parametro de DRP na dependencia: so quem
+// opera o DRP (o servidor confere em salvarDrpDependencia). 23/10/2026.
+var PCN_PODE_EXPORTAR_DRP = ${Perfis.podeOperarDRP(window.USER_PERFIS) ? 'true' : 'false'};
 var PCN_PROCESSO = '${escScript(info.processo || '')}';
 var PCN_VERSOES = JSON.parse('${versoesJson}');
 ${_SCRIPT_TOKEN_POPUP('PCN_TOKEN')}
@@ -18146,7 +18164,7 @@ async function salvarVersaoPCN(){
   finally{if(btn){btn.disabled=false;btn.textContent='💾 Salvar versão';}}
 }
 </script>
-<script src="https://bia-forte-2025.web.app/pcn-live.js?v=11"></script>
+<script src="https://bia-forte-2025.web.app/pcn-live.js?v=12"></script>
 <script src="https://bia-forte-2025.web.app/tabela-editavel.js?v=1"></script>
 </body>
 </html>`;
@@ -18285,6 +18303,9 @@ function _buildDRPPage(drpContent, info, depId, versoes, idToken) {
     showToast('Aviso: o DRP foi exibido com limpeza reduzida (biblioteca indisponível).', '#e65100');
   }
   drpContent = _limpo.html;
+  // Operador de Processos (23/10/2026) le o DRP, mas nao edita: sem salvar
+  // versao, sem cadeado e sem contenteditable (o servidor recusaria o salvarDRP).
+  const somenteLeitura = !Perfis.podeOperarDRP(window.USER_PERFIS);
   const versoesJson = versoes ? JSON.stringify(versoes).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t').replace(/</g, '\\x3c') : '[]';
   // Numero da versao exibida (a ultima), nao o tamanho da lista: o historico
   // guarda so as 5 ultimas (salvarDRP), entao a lista pode ser v16..v20.
@@ -18347,7 +18368,7 @@ tr:nth-child(even){background:#fafbfc}
 <button class="toggle-btn" id="drp-toggle" onclick="toggleDRPSidebar()">☰</button>
 <button class="btn-action" style="right:360px;background:#1565c0;" onclick="navigator.clipboard.writeText('${location.origin}/#drp?abrir=${escScript(depId)}').then(function(){alert('Link copiado!');})">🔗 Copiar link</button>
 <button class="btn-action" style="right:180px;" onclick="window.print()">🖨️ Imprimir / PDF</button>
-<button class="btn-action" style="right:20px;background:#2e7d32;" onclick="salvarVersaoDRP()">💾 Salvar versão</button>
+${somenteLeitura ? '<style>.drp-lock-btn{display:none!important}</style>' : '<button class="btn-action" style="right:20px;background:#2e7d32;" onclick="salvarVersaoDRP()">💾 Salvar versão</button>'}
 ${seletorVersoes}
 <div class="main" id="drp-main">
   <div class="cover">
@@ -18357,7 +18378,7 @@ ${seletorVersoes}
     <p>Categoria: ${esc(info.categoria || '')}</p>
     <p style="margin-top:16px;font-size:9pt;opacity:0.7;">Versão ${versaoAtual} • ${new Date().toLocaleDateString('pt-BR')} • Classificação: Uso Interno</p>
   </div>
-  <div id="drp-editavel" contenteditable="true" style="outline:none;min-height:200px;">
+  <div id="drp-editavel" contenteditable="${somenteLeitura ? 'false' : 'true'}" style="outline:none;min-height:200px;">
   ${drpContent}
   </div>
   <div class="footer">
@@ -18676,8 +18697,8 @@ window.renderDrpDoProcesso = async () => {
 
   const lista = CadeiaDependencias.cadeiaDoProcesso({ processo: p, dependencias: window.dependenciasCatalogo || [], servicos });
   const rtoProc = ServicoComposicao.valorMin({ rto: p.rto }, 'rto');
-  const podeAbrir = Perfis.podeOperarDRP(window.USER_PERFIS);
-  const podeGerenciar = podeAbrir && Perfis.podeVerTela(window.USER_PERFIS, 'drp');
+  const podeAbrir = Perfis.podeVerConteudoDRP(window.USER_PERFIS);
+  const podeGerenciar = Perfis.podeOperarDRP(window.USER_PERFIS) && Perfis.podeVerTela(window.USER_PERFIS, 'drp');
   window._drpProcessoLista = lista;
 
   const comDrp = lista.filter((it) => it.dep && _parsePCNVersoes(it.dep.drpSalvo).length).length;
@@ -18733,7 +18754,7 @@ window.renderDrpDoProcesso = async () => {
         <tbody>${linhas}</tbody>
       </table>
     </div>
-    ${podeAbrir ? '' : '<p style="font-size:0.74em;color:#888;margin-top:6px;">O conteúdo dos DRPs é restrito a Admin, Segurança e TI — aqui você vê só a situação de cada um.</p>'}
+    ${podeAbrir ? '' : '<p style="font-size:0.74em;color:#888;margin-top:6px;">O conteúdo dos DRPs é restrito a Admin, Segurança, TI e Operador de Processos — aqui você vê só a situação de cada um.</p>'}
     ${semServicos ? '<p style="font-size:0.74em;color:#e65100;margin-top:6px;">Não foi possível carregar os Serviços: as dependências que vêm deles podem estar faltando.</p>' : ''}`;
 };
 
@@ -18915,6 +18936,8 @@ window.toggleAreaPCN = (areaId) => {
 function renderPCNLista(comPCN) {
   const porArea = _agruparPorArea(comPCN);
   const tierLabel = (p) => Criticidade.tierCurto(p);
+  // Excluir PCN: o mesmo recorte de gerar (o servidor confere PERFIS_PCN).
+  const podeExcluirPcn = Perfis.podeGerarPCN(window.USER_PERFIS);
 
   let html = '';
   Object.entries(porArea).sort((a, b) => a[0].localeCompare(b[0])).forEach(([area, procs]) => {
@@ -18940,7 +18963,7 @@ function renderPCNLista(comPCN) {
         <div style="display:flex;align-items:center;gap:8px;">
           ${_htmlBadge(_nivelTierProcesso(Criticidade.tierDoProcesso(p)), tierLabel(p) + ' • ' + (p.score || 0))}
           <button onclick="abrirPCNDireto('${p.id}')" style="background:none;border:none;cursor:pointer;font-size:1.1em;padding:4px;" title="Abrir PCN">📄</button>
-          <button class="btn-icon" onclick="event.stopPropagation();excluirPCN('${p.id}','${escJs(p.area)}','${escJs(p.processo)}')" title="Excluir PCN">${SVG_EXCLUIR}</button>
+          ${podeExcluirPcn ? `<button class="btn-icon" onclick="event.stopPropagation();excluirPCN('${p.id}','${escJs(p.area)}','${escJs(p.processo)}')" title="Excluir PCN">${SVG_EXCLUIR}</button>` : ''}
         </div>
       </div>`;
     });
@@ -23971,6 +23994,7 @@ const NOTIF_EVENTO = {
   avisoPerdido: 'Prazo de aviso encerrado', renovado: 'Renovação automática', resumoMensal: 'Resumo mensal',
   relatorioCompartilhado: 'Relatório compartilhado',
   riscoNovo: 'Risco: novo', riscoEncerrado: 'Risco: encerrado', riscosResumo: 'Riscos: resumo diário',
+  continuidadeResumo: 'Continuidade: resumo semanal',
 };
 const NOTIF_MODOS = [
   { valor: 'desligado', rotulo: 'Desligado', descricao: 'Nada é enfileirado nem enviado.', cor: '#757575', fundo: '#f5f5f5' },
@@ -23996,7 +24020,7 @@ async function notificacoesEmail() {
   const chk = (id, rotulo, dica) => `<label class="check-label" style="margin-bottom:8px;"><input type="checkbox" id="${id}"> <span><strong style="font-weight:600;">${rotulo}</strong>${dica ? `<span style="display:block;font-size:0.8em;color:#888;">${dica}</span>` : ''}</span></label>`;
   app.innerHTML = `
     <div class="page-header">
-      <div><h2>Notificações por e-mail</h2><p class="page-sub">Alertas de contratos (prazos, renovação automática e resumo mensal) e avisos de riscos registrados e encerrados</p></div>
+      <div><h2>Notificações por e-mail</h2><p class="page-sub">Alertas de contratos (prazos, renovação automática e resumo mensal), avisos de riscos registrados e encerrados e o resumo semanal de conformidade de continuidade</p></div>
       <div style="display:flex;gap:8px;">
         <button class="btn btn-ghost" id="btnEmailTeste" onclick="enviarEmailTesteNotificacoes()">✉️ Enviar e-mail de teste</button>
         <button class="btn btn-primary" id="btnSalvarConfigNotificacoes" onclick="salvarConfigNotificacoesTela()">Salvar configuração</button>
@@ -24050,6 +24074,18 @@ async function notificacoesEmail() {
             ${chk('notifRiscoDestArea', 'Responsável e gestor da área', 'E-mail cadastrado na Área do risco e os usuários com perfil Gestor dela.')}
             ${chk('notifRiscoDestSeguranca', 'Segurança da Informação', 'Todos os usuários com esse perfil.')}
             <div style="font-size:0.74em;color:#888;">Levam título, área, nível, responsável, origem, status e o link. Sem impacto financeiro, descrição ou plano de ação.</div>
+          </div>
+        </div>
+        <div style="${lbl}margin-top:22px;padding-top:16px;border-top:1px solid #eee;">Continuidade (BIA, PCN e DRP)</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;">
+          <div>
+            <div style="${lbl}">O que envia</div>
+            ${chk('notifContResumo', 'Resumo semanal de conformidade (segunda, 07:30)', 'BIA, PCN e DRP faltando, vencidos, com teste atrasado ou status divergente — o mesmo da tela Conformidade de Continuidade. Quem não tem pendência não recebe.')}
+          </div>
+          <div>
+            <div style="${lbl}">Para quem</div>
+            ${chk('notifContDestOperadores', 'Operadores de Processos', 'Todos os usuários com esse perfil, com as pendências de todas as áreas.')}
+            ${chk('notifContDestGestores', 'Gestores de área', 'Cada gestor recebe só as pendências dos processos da própria área.')}
           </div>
         </div>
         <div style="${lbl}margin-top:22px;padding-top:16px;border-top:1px solid #eee;">Servidor de envio</div>
@@ -24157,6 +24193,10 @@ function _popularConfigNotificacoes(c) {
   document.getElementById('notifRiscoDestResponsavel').checked = !!rk.destinatarios.responsavel;
   document.getElementById('notifRiscoDestArea').checked = !!rk.destinatarios.area;
   document.getElementById('notifRiscoDestSeguranca').checked = !!rk.destinatarios.seguranca;
+  const ct = c.continuidade || { destinatarios: {} };
+  document.getElementById('notifContResumo').checked = !!ct.resumoSemanal;
+  document.getElementById('notifContDestOperadores').checked = !!ct.destinatarios.operadoresProcessos;
+  document.getElementById('notifContDestGestores').checked = !!ct.destinatarios.gestores;
   const sv = c.servidor || { provedor: 'sendgrid' };
   document.getElementById('notifProvedor').value = sv.provedor || 'sendgrid';
   document.getElementById('notifRemetenteEmail').value = sv.remetenteEmail || '';
@@ -24216,6 +24256,13 @@ function _coletarConfigNotificacoes() {
         responsavel: document.getElementById('notifRiscoDestResponsavel').checked,
         area: document.getElementById('notifRiscoDestArea').checked,
         seguranca: document.getElementById('notifRiscoDestSeguranca').checked,
+      },
+    },
+    continuidade: {
+      resumoSemanal: document.getElementById('notifContResumo').checked,
+      destinatarios: {
+        operadoresProcessos: document.getElementById('notifContDestOperadores').checked,
+        gestores: document.getElementById('notifContDestGestores').checked,
       },
     },
     servidor: {
@@ -24280,7 +24327,7 @@ window.irParaPaginaNotificacoes = (delta) => { notificacoesPaginacao.mover(delta
 function renderizarNotificacoesEmail() {
   let data = [...notificacoesEmailData];
   const busca = ((document.getElementById('buscaNotificacoes') || {}).value || '').trim().toLowerCase();
-  if (busca) data = data.filter((n) => [n.contratoCodigo, n.riscoTitulo, n.para, n.assunto].some((t) => String(t || '').toLowerCase().includes(busca)));
+  if (busca) data = data.filter((n) => [n.contratoCodigo, n.riscoTitulo, n.referencia, n.para, n.assunto].some((t) => String(t || '').toLowerCase().includes(busca)));
   const status = (document.getElementById('filtroNotificacaoStatus') || {}).value || '';
   if (status) data = data.filter((n) => n.status === status);
 
@@ -24296,7 +24343,7 @@ function renderizarNotificacoesEmail() {
       <tr style="cursor:pointer;" onclick="abrirDrawerNotificacao('${escJs(n.id)}')">
         <td class="col-nw muted">${esc(_dataHoraBR(n.criadoEm))}</td>
         <td>${esc(NOTIF_EVENTO[n.evento] || n.evento || '–')}</td>
-        <td class="title" title="${esc(n.contratoCodigo || n.riscoTitulo || '')}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(n.contratoCodigo || n.riscoTitulo || '–')}</td>
+        <td class="title" title="${esc(n.contratoCodigo || n.riscoTitulo || n.referencia || '')}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(n.contratoCodigo || n.riscoTitulo || n.referencia || '–')}</td>
         <td title="${esc(n.para)}">${n.para ? esc(n.para) : '<span class="muted">—</span>'}</td>
         <td title="${esc(n.assunto)}" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(n.assunto)}</td>
         <td>${_pillStatusNotificacao(n.status)}${n.status === 'erro' ? `<div class="muted" style="font-size:0.75em;">${n.tentativas} tentativa(s)</div>` : ''}</td>
@@ -24314,9 +24361,11 @@ window.abrirDrawerNotificacao = (id) => {
   const n = notificacoesEmailData.find((x) => String(x.id) === String(id));
   if (!n) return;
   const risco = n.tipo === 'risco';
-  const motivo = risco
-    ? { responsavel: 'Responsável pelo risco', area: 'Responsável da área', gestor: 'Gestor da área', seguranca: 'Segurança da Informação' }
-    : { gestor: 'Gestor do contrato', area: 'Responsável da área', operador: 'Operador Administrativo' };
+  const motivo = n.tipo === 'continuidade'
+    ? { operadorProcessos: 'Operador de Processos', gestor: 'Gestor da área' }
+    : risco
+      ? { responsavel: 'Responsável pelo risco', area: 'Responsável da área', gestor: 'Gestor da área', seguranca: 'Segurança da Informação' }
+      : { gestor: 'Gestor do contrato', area: 'Responsável da área', operador: 'Operador Administrativo' };
   const linha = (k, v) => (v ? `<div style="margin-bottom:4px;"><span style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;">${esc(k)}:</span> ${v}</div>` : '');
   document.getElementById('notificacaoDrawerTitulo').textContent = n.assunto || 'E-mail';
   document.getElementById('notificacaoDetalhes').innerHTML =
@@ -24337,4 +24386,357 @@ window.abrirDrawerNotificacao = (id) => {
 window.fecharDrawerNotificacao = () => {
   document.getElementById('drawerNotificacao').classList.remove('open');
   document.getElementById('drawerOverlayNotificacao').classList.remove('open');
+};
+
+// ============================================================
+// PÁGINA: CONFORMIDADE DE CONTINUIDADE (23/10/2026)
+//
+// Painel do Operador de Processos: o que está faltando, vencido ou divergente
+// em BIA, PCN e DRP. A conta fica em conformidade-continuidade.js (a mesma do
+// resumo por e-mail, no servidor); aqui só desenha. Admin, SI e Operador de
+// Processos veem todas as áreas; o Gestor, só a dele (_recorteAreaGestor).
+// ============================================================
+let conformidadeDados = null; // { resultado, processos, dependencias, ciclos }
+const conformidadeFiltro = { tipo: '', situacao: '', area: '', tier: '' };
+const conformidadePaginacao = criarPaginacao(20);
+
+async function conformidade() {
+  const podeCiclos = Perfis.podeEditarCiclos(window.USER_PERFIS);
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Conformidade de Continuidade</h2><p class="page-sub">BIA, PCN e DRP faltando, vencidos, com teste atrasado ou com status divergente do plano real</p></div>
+      ${podeCiclos ? '<button class="btn btn-ghost" onclick="abrirDrawerCiclos()">⚙️ Periodicidades</button>' : ''}
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="conformidadeConteudo" style="display:none;">
+      <div class="painel-metricas painel-metricas--auto" id="conformidadeMetricas"></div>
+      <p id="conformidadeCiclos" style="font-size:0.8em;color:#888;margin:4px 0 16px;"></p>
+      <div class="filters">
+        <div class="field"><label class="field-label" for="confTipo">Tipo</label>
+          <select id="confTipo" class="field-control" onchange="filtrarConformidade()"><option value="">Todos</option>
+            ${Object.entries(ConformidadeContinuidade.ROTULO_TIPO).map(([v, r]) => `<option value="${v}">${esc(r)}</option>`).join('')}
+          </select></div>
+        <div class="field"><label class="field-label" for="confSituacao">Situação</label>
+          <select id="confSituacao" class="field-control" onchange="filtrarConformidade()"><option value="">Todas</option>
+            ${Object.entries(ConformidadeContinuidade.ROTULO_SITUACAO).map(([v, r]) => `<option value="${v}">${esc(r)}</option>`).join('')}
+          </select></div>
+        <div class="field"><label class="field-label" for="confArea">Área</label>
+          <select id="confArea" class="field-control" onchange="filtrarConformidade()"><option value="">Todas</option></select></div>
+        <div class="field"><label class="field-label" for="confTier">Tier</label>
+          <select id="confTier" class="field-control" onchange="filtrarConformidade()"><option value="">Todos</option>
+            <option value="critico">Tier 1 e 2</option>
+            ${Object.values(Criticidade.TIER).map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
+          </select></div>
+      </div>
+      <div class="data-table data-table--compact" style="overflow-x:auto;">
+        <table style="min-width:1090px;">
+          <colgroup><col style="width:120px;"><col style="width:130px;"><col style="width:220px;"><col style="width:140px;"><col style="width:110px;"><col style="width:260px;"><col style="width:100px;"><col style="width:110px;"></colgroup>
+          <thead><tr>
+            <th>Tipo</th><th>Situação</th><th>Processo / Dependência</th><th>Área</th><th>Tier</th><th>Pendência</th><th class="col-nw" title="Última revisão ou último teste registrado">Desde</th><th class="col-nw col-sticky">Ações</th>
+          </tr></thead>
+          <tbody id="conformidadeRows"></tbody>
+        </table>
+      </div>
+      <div id="conformidadePaginacao"></div>
+    </div>
+
+    <div class="drawer-overlay" id="drawerOverlayCiclos" onclick="fecharDrawerCiclos()"></div>
+    <div class="drawer" id="drawerCiclos">
+      <div class="drawer-header">
+        <h3>Periodicidades de revisão</h3>
+        <button onclick="fecharDrawerCiclos()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" id="ciclosCorpo"></div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerCiclos()">Fechar</button>
+        <button class="btn btn-primary" id="btnSalvarCiclos" onclick="salvarCiclosTela()">Salvar</button>
+      </div>
+    </div>`;
+
+  try {
+    const [processos, dependencias, servicos, ciclos] = await Promise.all([
+      API.getProcessos(), API.getDependencias(), API.getServicos().catch(() => []), API.getCiclosContinuidade(),
+    ]);
+    // Gestor sem área configurada não vê nada (sem recorte ele veria todas).
+    const recorte = _recorteAreaGestor();
+    const doRecorte = _limitadoAArea() && !recorte ? [] : (recorte ? processos.filter((p) => p.area === recorte) : processos);
+    // Os atalhos (abrir PCN/DRP, registrar revisão) leem estes globais, os
+    // mesmos das telas de origem.
+    window.processosData = processos;
+    window.dependenciasCatalogo = dependencias;
+    _ciclosCache = ciclos;
+    const resultado = ConformidadeContinuidade.avaliar({
+      processos: doRecorte,
+      dependencias,
+      ciclos,
+      hoje: new Date().toISOString().slice(0, 10),
+      tierDe: (p) => Criticidade.tierDoProcesso(p),
+      cadeiaDoProcesso: (p) => CadeiaDependencias.cadeiaDoProcesso({ processo: p, dependencias, servicos }),
+      somenteCadeia: _limitadoAArea(),
+    });
+    conformidadeDados = { resultado, processos: doRecorte, dependencias, ciclos };
+  } catch (e) {
+    console.error('Conformidade: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar a conformidade.', 'conformidade');
+    return;
+  }
+
+  const areas = [...new Set(conformidadeDados.processos.map((p) => p.area).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  document.getElementById('confArea').insertAdjacentHTML('beforeend', areas.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join(''));
+  Object.assign(conformidadeFiltro, { tipo: '', situacao: '', area: '', tier: '' });
+  conformidadePaginacao.reiniciar();
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('conformidadeConteudo').style.display = '';
+  renderizarConformidade();
+}
+
+function _pctTexto(pct) {
+  return pct === null ? '—' : pct + '%';
+}
+
+const _NIVEL_SITUACAO_CONFORMIDADE = { vencido: 'critical', faltando: 'high', atrasado: 'high', divergente: 'medium', vencendo: 'low' };
+
+function renderizarConformidade() {
+  const { resultado, ciclos } = conformidadeDados;
+  const i = resultado.indicadores;
+  const f = conformidadeFiltro;
+  const card = (label, value, tipo, titulo, cor) => _htmlMetricCardFiltro({
+    label, value, cor, titulo,
+    ativo: f.tipo === tipo && !f.situacao,
+    onclick: `filtrarConformidadePorCard('${tipo}')`,
+  });
+  document.getElementById('conformidadeMetricas').innerHTML = [
+    card('BIA em dia', _pctTexto(i.biaPct), 'bia', `${i.biaEmDia} de ${i.processos} processo(s) com BIA dentro do ciclo`),
+    card('PCN em dia (Tier 1/2)', _pctTexto(i.pcnPct), 'pcn', `${i.pcnEmDia} de ${i.criticos} processo(s) Tier 1/2 com PCN dentro do ciclo`),
+    card('DRP em dia (dep. críticas)', _pctTexto(i.drpPct), 'drp', `${i.drpEmDia} de ${i.depsCriticas} dependência(s) da cadeia de processos Tier 1/2 com DRP dentro do ciclo`),
+    card('Testes de DRP atrasados', i.testesAtrasados, 'teste-drp', 'DRP nunca testado ou com o último teste fora da frequência declarada', i.testesAtrasados ? 'var(--risk-high)' : ''),
+    card('Status divergente', i.divergencias, 'divergencia', 'Status "Realizado" informado à mão sem o plano existir', i.divergencias ? 'var(--risk-high)' : ''),
+  ].join('');
+  document.getElementById('conformidadeCiclos').textContent =
+    `Ciclo de revisão: BIA a cada ${ciclos.biaMeses} meses · PCN a cada ${ciclos.pcnMeses} · DRP a cada ${ciclos.drpMeses}. "Vencendo" = faltam ${ciclos.avisoDias} dias ou menos.`;
+
+  document.getElementById('confTipo').value = f.tipo;
+  document.getElementById('confSituacao').value = f.situacao;
+  document.getElementById('confArea').value = f.area;
+  document.getElementById('confTier').value = f.tier;
+
+  const lista = resultado.pendencias.filter((p) => (!f.tipo || p.tipo === f.tipo)
+    && (!f.situacao || p.situacao === f.situacao)
+    && (!f.area || p.area === f.area)
+    && (!f.tier || (f.tier === 'critico' ? ConformidadeContinuidade.ehTierCritico(p.tier) : p.tier === f.tier)));
+  const pag = conformidadePaginacao.aplicar(lista);
+  const dataBR = (d) => (d ? d.split('-').reverse().join('/') : '—');
+
+  document.getElementById('conformidadeRows').innerHTML = pag.itens.length ? pag.itens.map((p) => {
+    const ehDep = p.alvo === 'dependencia';
+    const abrir = `mapaAbrirCadastro('${ehDep ? 'dependencia' : 'processo'}','${escJs(p.id)}')`;
+    const tipoPlano = p.tipo === 'teste-drp' ? 'drp' : p.tipo;
+    const acoes = [
+      `<button class="btn-icon" onclick="${abrir}" title="${ehDep ? 'Abrir a dependência' : 'Abrir o processo'}">${SVG_EDITAR}</button>`,
+      p.tipo === 'pcn' && p.situacao !== 'faltando' ? `<button class="btn-icon" onclick="abrirPCNDireto('${escJs(p.id)}')" title="Abrir o PCN">📄</button>` : '',
+      ehDep && p.situacao !== 'faltando' && Perfis.podeVerConteudoDRP(window.USER_PERFIS) ? `<button class="btn-icon" onclick="abrirDRPDireto('${escJs(p.id)}')" title="Abrir o DRP">📄</button>` : '',
+      ['bia', 'pcn', 'drp'].includes(p.tipo) && p.situacao !== 'faltando' && Perfis.podeRegistrarRevisao(window.USER_PERFIS, tipoPlano)
+        ? `<button class="btn-icon" onclick="abrirDrawerRevisao('${tipoPlano}','${escJs(p.id)}')" title="Registrar revisão">✅</button>` : '',
+    ].filter(Boolean).join(' ');
+    const procs = p.processos || [];
+    const sub = ehDep && procs.length ? `<div style="font-size:0.76em;color:#888;" title="${esc(procs.join(', '))}">${esc(procs.length === 1 ? procs[0] : procs.length + ' processos Tier 1/2')}</div>` : '';
+    return `<tr style="cursor:pointer;" onclick="${abrir}">
+      <td>${esc(ConformidadeContinuidade.ROTULO_TIPO[p.tipo] || p.tipo)}</td>
+      <td>${_htmlBadge(_NIVEL_SITUACAO_CONFORMIDADE[p.situacao], ConformidadeContinuidade.ROTULO_SITUACAO[p.situacao] || p.situacao)}</td>
+      <td><strong>${esc(p.nome || '—')}</strong>${sub}</td>
+      <td>${esc(p.area || '—')}</td>
+      <td>${p.tier ? _htmlBadge(_nivelTierProcesso(p.tier), Criticidade.tierCurto(p.tier)) : '<span class="muted">—</span>'}</td>
+      <td style="font-size:0.88em;">${esc(p.mensagem)}</td>
+      <td class="col-nw">${esc(dataBR(p.desde))}</td>
+      <td class="col-nw col-sticky" onclick="event.stopPropagation();">${acoes}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="8" class="vazio">${resultado.pendencias.length ? 'Nenhuma pendência com estes filtros.' : 'Nenhuma pendência: BIA, PCN e DRP em dia.'}</td></tr>`;
+  document.getElementById('conformidadePaginacao').innerHTML = _htmlPaginacao(pag, 'irParaPaginaConformidade');
+}
+
+window.filtrarConformidade = () => {
+  conformidadeFiltro.tipo = document.getElementById('confTipo').value;
+  conformidadeFiltro.situacao = document.getElementById('confSituacao').value;
+  conformidadeFiltro.area = document.getElementById('confArea').value;
+  conformidadeFiltro.tier = document.getElementById('confTier').value;
+  conformidadePaginacao.reiniciar();
+  renderizarConformidade();
+};
+
+/** Card de indicador filtra a lista pelo tipo; clicar de novo limpa. */
+window.filtrarConformidadePorCard = (tipo) => {
+  const ativo = conformidadeFiltro.tipo === tipo && !conformidadeFiltro.situacao;
+  conformidadeFiltro.tipo = ativo ? '' : tipo;
+  conformidadeFiltro.situacao = '';
+  conformidadePaginacao.reiniciar();
+  renderizarConformidade();
+};
+
+window.irParaPaginaConformidade = (delta) => { conformidadePaginacao.mover(delta); renderizarConformidade(); };
+
+// ---- Registrar revisão (BIA/PCN no processo, DRP na dependência) ----
+// Chamado da Conformidade e do selo de ciclo nas abas BIA/BCP do Processo e
+// Plano de Recuperação da Dependência (_htmlCicloRevisao) -- por isso o
+// drawer é criado sob demanda, por cima de um drawer já aberto.
+const _ROTULO_PLANO = { bia: 'BIA', pcn: 'PCN', drp: 'DRP' };
+let _ciclosCache = null;
+
+function _garantirDrawerRevisao() {
+  if (document.getElementById('drawerRevisao')) return;
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="drawer-overlay drawer-overlay--sobre-drawer" id="drawerOverlayRevisao" onclick="fecharDrawerRevisao()"></div>
+    <div class="drawer drawer--sobre-drawer" id="drawerRevisao">
+      <div class="drawer-header">
+        <h3 id="revisaoTitulo">Registrar revisão</h3>
+        <button onclick="fecharDrawerRevisao()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" id="revisaoCorpo"></div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerRevisao()">Fechar</button>
+        <button class="btn btn-primary" id="btnSalvarRevisao" onclick="salvarRevisaoPlano()">Registrar</button>
+      </div>
+    </div>`);
+}
+
+function _alvoRevisao(tipo, id) {
+  const lista = tipo === 'drp'
+    ? [].concat(typeof dependenciasData !== 'undefined' ? (dependenciasData || []) : [], window._drpData || [], window.dependenciasCatalogo || [])
+    : (window.processosData || []);
+  return lista.find((x) => String(x.id) === String(id)) || null;
+}
+
+window.abrirDrawerRevisao = (tipo, id) => {
+  if (!Perfis.podeRegistrarRevisao(window.USER_PERFIS, tipo)) return showToast('Seu perfil não registra revisão deste plano.', '#e65100');
+  _garantirDrawerRevisao();
+  const alvo = _alvoRevisao(tipo, id) || {};
+  const rev = alvo[tipo + 'Revisao'] || null;
+  const hist = (alvo[tipo + 'HistoricoRevisao'] || []).slice().sort((a, b) => String(b.ultimaEm).localeCompare(String(a.ultimaEm)));
+  const hoje = new Date().toISOString().slice(0, 10);
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  const dataBR = (d) => String(d || '').slice(0, 10).split('-').reverse().join('/');
+  document.getElementById('revisaoTitulo').textContent = `Registrar revisão do ${_ROTULO_PLANO[tipo]}`;
+  document.getElementById('revisaoCorpo').innerHTML = `
+    <input type="hidden" id="revTipo" value="${esc(tipo)}"><input type="hidden" id="revId" value="${esc(id)}">
+    <div style="font-size:0.88em;color:#555;margin-bottom:10px;"><strong>${esc(alvo.processo || alvo.nome || '')}</strong>${alvo.area ? ` · ${esc(alvo.area)}` : ''}</div>
+    <p class="vazio-inline" style="margin-bottom:14px;">Use quando o plano foi conferido e continua válido sem versão nova. ${tipo === 'bia' ? 'Uma nova resposta do questionário' : 'Salvar uma versão nova'} já conta como revisão.</p>
+    <label style="${lbl}" for="revData">Data da revisão <span class="req" aria-hidden="true">*</span></label>
+    <input type="date" id="revData" style="${inp}" max="${hoje}" value="${hoje}">
+    <label style="${lbl}margin-top:14px;" for="revAprovador">Aprovado por</label>
+    <input type="text" id="revAprovador" style="${inp}" placeholder="Ex.: dono do processo" value="${esc((rev && rev.aprovadoPor) || '')}">
+    <label style="${lbl}margin-top:14px;" for="revObs">Observação</label>
+    <textarea id="revObs" rows="3" style="${inp}resize:vertical;" placeholder="O que foi conferido"></textarea>
+    <div style="${lbl}margin-top:22px;">Histórico</div>
+    ${hist.length
+      ? `<ul style="margin:0 0 0 18px;padding:0;font-size:0.84em;line-height:1.7;">${hist.slice(0, 10).map((h) => `<li>${esc(dataBR(h.ultimaEm))} · ${esc(h.revisadoPor || '')}${h.aprovadoPor ? ` · aprovado por ${esc(h.aprovadoPor)}` : ''}${h.observacao ? `<div style="color:#888;">${esc(h.observacao)}</div>` : ''}</li>`).join('')}</ul>`
+      : '<p class="vazio-inline">Nenhuma revisão registrada.</p>'}`;
+  document.getElementById('drawerRevisao').classList.add('open');
+  document.getElementById('drawerOverlayRevisao').classList.add('open');
+};
+
+window.fecharDrawerRevisao = () => {
+  const d = document.getElementById('drawerRevisao');
+  const o = document.getElementById('drawerOverlayRevisao');
+  if (d) d.classList.remove('open');
+  if (o) o.classList.remove('open');
+};
+
+window.salvarRevisaoPlano = async () => {
+  const tipo = document.getElementById('revTipo').value;
+  const id = document.getElementById('revId').value;
+  const data = document.getElementById('revData').value;
+  if (!data) return _avisarCampo('revData', 'Informe a data da revisão.');
+  await comBotaoCarregando(document.getElementById('btnSalvarRevisao'), async () => {
+    try {
+      const r = await API.registrarRevisao({
+        tipo, id, data,
+        aprovadoPor: document.getElementById('revAprovador').value,
+        observacao: document.getElementById('revObs').value,
+      });
+      API.invalidate('getProcessos', 'getDependencias');
+      const alvo = _alvoRevisao(tipo, id);
+      if (alvo) {
+        alvo[tipo + 'Revisao'] = r.revisao;
+        alvo[tipo + 'HistoricoRevisao'] = (alvo[tipo + 'HistoricoRevisao'] || []).concat([r.revisao]);
+      }
+      fecharDrawerRevisao();
+      showToast('✅ Revisão registrada.', '#2e7d32');
+      if (document.getElementById('conformidadeConteudo')) conformidade();
+      else renderCicloRevisao(tipo, id);
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível registrar a revisão. Tente de novo.'), '#c62828');
+    }
+  });
+};
+
+// ---- Selo do ciclo (Vigente/Vencendo/Vencido) nas abas de plano ----
+// Contêiner: <div data-ciclo="bia|pcn|drp"></div>; preenchido por
+// renderCicloRevisao(tipo, id) quando a aba abre.
+function _htmlCicloRevisao(tipo, alvo, ciclos) {
+  const CC = ConformidadeContinuidade;
+  const c = CC.normalizarCiclos(ciclos);
+  const ultima = { bia: CC.ultimaRevisaoBia, pcn: CC.ultimaRevisaoPcn, drp: CC.ultimaRevisaoDrp }[tipo](alvo);
+  const meses = { bia: c.biaMeses, pcn: c.pcnMeses, drp: c.drpMeses }[tipo];
+  const st = CC.statusCiclo(ultima, meses, c.avisoDias, new Date().toISOString().slice(0, 10));
+  const nivel = { vigente: 'low', vencendo: 'medium', vencido: 'critical' }[st.status] || null;
+  const rev = alvo[tipo + 'Revisao'];
+  const dataBR = (d) => (d ? d.split('-').reverse().join('/') : '—');
+  const botao = alvo.id && Perfis.podeRegistrarRevisao(window.USER_PERFIS, tipo)
+    ? `<button type="button" class="btn btn-ghost" style="padding:4px 10px;font-size:0.8em;" onclick="abrirDrawerRevisao('${tipo}','${escJs(alvo.id)}')">✅ Registrar revisão</button>` : '';
+  return `<div class="ciclo-revisao">
+    ${_htmlBadge(nivel, CC.ROTULO_STATUS[st.status])}
+    <span class="ciclo-revisao__texto">Última revisão: <strong>${esc(dataBR(st.ultima))}</strong>${rev && rev.aprovadoPor ? ` · aprovado por ${esc(rev.aprovadoPor)}` : ''} · Próxima: <strong>${esc(dataBR(st.proxima))}</strong> <span class="muted">(ciclo de ${meses} meses)</span></span>
+    ${botao}
+  </div>`;
+}
+
+window.renderCicloRevisao = async (tipo, id) => {
+  const el = document.querySelector(`[data-ciclo="${tipo}"]`);
+  if (!el) return;
+  if (!_ciclosCache) {
+    try { _ciclosCache = await API.getCiclosContinuidade(); } catch (e) { _ciclosCache = null; }
+  }
+  const alvo = id ? _alvoRevisao(tipo, id) : null;
+  el.innerHTML = alvo ? _htmlCicloRevisao(tipo, alvo, _ciclosCache) : '';
+};
+
+// ---- Periodicidades (config_continuidade/ciclos): Admin e SI ----
+window.abrirDrawerCiclos = () => {
+  const c = (conformidadeDados && conformidadeDados.ciclos) || ConformidadeContinuidade.CICLOS_PADRAO;
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  const campo = (id, rotulo, valor, minimo, dica) => `<label style="${lbl}margin-top:14px;" for="${id}">${rotulo} <span class="req" aria-hidden="true">*</span></label>
+    <input type="number" min="${minimo}" step="1" id="${id}" style="${inp}" value="${esc(String(valor))}">
+    <div style="font-size:0.74em;color:#888;margin-top:4px;">${dica}</div>`;
+  document.getElementById('ciclosCorpo').innerHTML =
+    campo('cicloBia', 'BIA — meses', c.biaMeses, 1, 'Prazo entre uma resposta (ou revisão) do BIA e a próxima.')
+    + campo('cicloPcn', 'PCN — meses', c.pcnMeses, 1, 'O modelo de PCN recomenda revisão anual.')
+    + campo('cicloDrp', 'DRP — meses', c.drpMeses, 1, 'Prazo entre versões (ou revisões) do DRP. O teste segue a frequência das estratégias de teste.')
+    + campo('cicloAviso', 'Aviso — dias antes', c.avisoDias, 0, 'A partir de quantos dias antes do prazo o plano aparece como "Vencendo".');
+  document.getElementById('drawerCiclos').classList.add('open');
+  document.getElementById('drawerOverlayCiclos').classList.add('open');
+};
+
+window.fecharDrawerCiclos = () => {
+  document.getElementById('drawerCiclos').classList.remove('open');
+  document.getElementById('drawerOverlayCiclos').classList.remove('open');
+};
+
+window.salvarCiclosTela = async () => {
+  const v = (id) => document.getElementById(id).value;
+  for (const id of ['cicloBia', 'cicloPcn', 'cicloDrp']) {
+    if (!(Number(v(id)) >= 1)) return _avisarCampo(id, 'Informe um número de meses (1 ou mais).');
+  }
+  if (v('cicloAviso') === '' || !(Number(v('cicloAviso')) >= 0)) return _avisarCampo('cicloAviso', 'Informe os dias de aviso (0 ou mais).');
+  await comBotaoCarregando(document.getElementById('btnSalvarCiclos'), async () => {
+    try {
+      await API.salvarCiclosContinuidade({ biaMeses: v('cicloBia'), pcnMeses: v('cicloPcn'), drpMeses: v('cicloDrp'), avisoDias: Number(v('cicloAviso')) });
+      _ciclosCache = null;
+      fecharDrawerCiclos();
+      showToast('✅ Periodicidades salvas.', '#2e7d32');
+      conformidade();
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar. Tente de novo.'), '#c62828');
+    }
+  });
 };

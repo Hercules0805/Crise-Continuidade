@@ -42,6 +42,7 @@
     TI: 'ti',
     GESTOR: 'gestor',
     OPERADOR: 'operador',
+    OPERADOR_PROCESSOS: 'operador_processos',
   };
 
   /** O perfil de quem nao esta cadastrado. O menor acesso possivel. */
@@ -74,7 +75,7 @@
     'dependencias', 'areas', 'pessoas', 'relatorios', 'mapa', 'servicos', 'servicos-relatorio', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
-    'admin',
+    'admin', 'conformidade',
   ];
   // DECISAO 02/10/2026: Servicos sai da posse de TI -- quem gerencia agora e so
   // Seguranca da Informacao ("Seguranca de Sistemas" no pedido do usuario). TI
@@ -113,7 +114,14 @@
     'processos', 'pcns', 'drp', 'riscos', 'riscos-relatorio', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
     'contratos',
-    'admin',
+    'admin', 'conformidade',
+  ];
+  // DECISAO 23/10/2026: Operador de Processos -- documenta e monitora os
+  // processos da empresa inteira (sem recorte de area). OPERA Processos, BIA e
+  // PCN; so CONSULTA DRP, Dependencias, Mapa, Areas e Pessoas. Abre no Painel
+  // de Conformidade (o que esta vencido, faltando ou divergente).
+  TELAS[PERFIL.OPERADOR_PROCESSOS] = [
+    'conformidade', 'admin', 'processos', 'pcns', 'drp', 'dependencias', 'mapa', 'areas', 'pessoas', 'relatorios',
   ];
 
   // Tela inicial de cada perfil (DECISAO 16/10/2026): escolha explicita, nao
@@ -127,7 +135,8 @@
   PAGINA_INICIAL[PERFIL.GESTOR] = 'admin';
   PAGINA_INICIAL[PERFIL.OPERADOR] = 'processos';
   PAGINA_INICIAL[PERFIL.TI] = 'drp';
-  var ORDEM_PAGINA_INICIAL = [PERFIL.ADMIN, PERFIL.SEGURANCA, PERFIL.GESTOR, PERFIL.OPERADOR, PERFIL.TI];
+  PAGINA_INICIAL[PERFIL.OPERADOR_PROCESSOS] = 'conformidade';
+  var ORDEM_PAGINA_INICIAL = [PERFIL.ADMIN, PERFIL.SEGURANCA, PERFIL.OPERADOR_PROCESSOS, PERFIL.GESTOR, PERFIL.OPERADOR, PERFIL.TI];
 
   var CATALOGO = [
     {
@@ -152,6 +161,12 @@
       valor: PERFIL.OPERADOR,
       rotulo: 'Operador Administrativo',
       descricao: 'Perfil administrativo, não técnico: gerencia fornecedores e consulta processos, pessoas e áreas. Sem acesso a DRP, PCN, riscos ou perfis.',
+      exigeArea: false,
+    },
+    {
+      valor: PERFIL.OPERADOR_PROCESSOS,
+      rotulo: 'Operador de Processos',
+      descricao: 'Documenta e monitora os processos de todas as áreas: edita processos, BIA e PCN, registra revisões e acompanha a conformidade. DRP só em leitura.',
       exigeArea: false,
     },
     {
@@ -233,6 +248,10 @@
     return _tem(valor, PERFIL.OPERADOR);
   }
 
+  function ehOperadorProcessos(valor) {
+    return _tem(valor, PERFIL.OPERADOR_PROCESSOS);
+  }
+
   /** Uniao das telas de todos os perfis do usuario. Admin ve tudo. */
   function telasDoPerfil(valor) {
     var lista = _perfisDe(valor);
@@ -266,9 +285,12 @@
 
   // ---- Poderes por modulo (uniao dos perfis) ----
 
-  /** Gerar PCN: Admin ou Seguranca (PCN e do processo/BIA; TI nao gera). */
+  /**
+   * Gerar/editar/excluir PCN: Admin, Seguranca ou Operador de Processos (PCN e
+   * do processo/BIA; TI nao gera). Mesmo recorte de PERFIS_PCN no servidor.
+   */
   function podeGerarPCN(valor) {
-    return ehAdmin(valor) || ehSeguranca(valor);
+    return ehAdmin(valor) || ehSeguranca(valor) || ehOperadorProcessos(valor);
   }
 
   /** Gerar DRP (via IA): Admin ou Seguranca (TI opera, mas nao gera). */
@@ -279,6 +301,30 @@
   /** Operar o DRP (editar parametros/conteudo, abrir, gerenciar): Admin, Seguranca ou TI. */
   function podeOperarDRP(valor) {
     return ehAdmin(valor) || ehSeguranca(valor) || ehTI(valor);
+  }
+
+  /**
+   * Abrir o DRP gerado e os roteiros de teste SO PARA LER: quem opera o DRP e o
+   * Operador de Processos (DECISAO 23/10/2026 -- monitora o DRP, nao edita).
+   * Mesmo recorte de PERFIS_DRP_LEITURA no servidor (obterDRP/obterRoteiroTeste).
+   */
+  function podeVerConteudoDRP(valor) {
+    return podeOperarDRP(valor) || ehOperadorProcessos(valor);
+  }
+
+  /**
+   * Registrar a revisao periodica de um plano ('bia' | 'pcn' | 'drp'). BIA e
+   * PCN sao de quem edita processos corporativamente (Admin, SI, Operador de
+   * Processos); a revisao do DRP e de quem opera o DRP.
+   */
+  function podeRegistrarRevisao(valor, tipo) {
+    if (tipo === 'drp') return podeOperarDRP(valor);
+    return ehAdmin(valor) || ehSeguranca(valor) || ehOperadorProcessos(valor);
+  }
+
+  /** Periodicidades do ciclo de revisao (config_continuidade/ciclos): Admin ou Seguranca. */
+  function podeEditarCiclos(valor) {
+    return ehAdmin(valor) || ehSeguranca(valor);
   }
 
   /** Editar Riscos: Admin ou Seguranca (gestor edita os da propria area, tratado por area). */
@@ -330,10 +376,11 @@
 
   /**
    * Mostrar os controles de edicao de Processos (novo, editar, excluir, enviar
-   * questionario): Admin, Seguranca ou Gestor (por area). Operador so consulta.
+   * questionario): Admin, Seguranca, Operador de Processos (todas as areas) ou
+   * Gestor (por area). Operador Administrativo so consulta.
    */
   function podeEditarProcessos(valor) {
-    return ehAdmin(valor) || ehSeguranca(valor) || exigeArea(valor);
+    return ehAdmin(valor) || ehSeguranca(valor) || ehOperadorProcessos(valor) || exigeArea(valor);
   }
 
   /** Cadastrar/editar/excluir Pessoas (vivem em /dependencias): Admin, Seguranca ou TI. */
@@ -392,6 +439,7 @@
     ehSeguranca: ehSeguranca,
     ehTI: ehTI,
     ehOperador: ehOperador,
+    ehOperadorProcessos: ehOperadorProcessos,
     podeVerTela: podeVerTela,
     telasDoPerfil: telasDoPerfil,
     paginaInicial: paginaInicial,
@@ -408,6 +456,9 @@
     podeGerarPCN: podeGerarPCN,
     podeGerarDRP: podeGerarDRP,
     podeOperarDRP: podeOperarDRP,
+    podeVerConteudoDRP: podeVerConteudoDRP,
+    podeRegistrarRevisao: podeRegistrarRevisao,
+    podeEditarCiclos: podeEditarCiclos,
     podeEditarRiscos: podeEditarRiscos,
     podeGerarRelatorioExecutivo: podeGerarRelatorioExecutivo,
     podeEditarIndicadores: podeEditarIndicadores,

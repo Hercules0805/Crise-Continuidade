@@ -448,9 +448,9 @@ describe('Security Rules — fornecedores, perfis e dependências', () => {
     });
     // SI já lê qualquer risco por permissão própria — isso continua valendo.
     await assertSucceeds(db(SIAREA).doc('riscos/r-rh-priv').get());
-    // Mas NÃO ganha a escrita de processo pela rota de gestor da área RH
-    // (SI não escreve processos; só admin ou o gestor DAQUELA área).
-    await assertFails(db(SIAREA).doc('processos/rh__x').set({ area: 'RH', processo: 'X2' }, { merge: true }));
+    // DECISAO 23/10/2026: SI escreve processos de qualquer área por permissão
+    // PRÓPRIA (podeOperarProcessos), não pela rota de gestor da área RH.
+    await assertSucceeds(db(SIAREA).doc('processos/rh__x').set({ area: 'RH', processo: 'X2' }, { merge: true }));
     // E a consulta de riscos filtrando a "sua" área NÃO passa como gestor. Com
     // SI isso não dá para ver (SI já lê todo risco, ver acima); com um TI que tem
     // área -- TI não lê riscos -- a consulta só passaria se a área desse poder de gestor.
@@ -593,6 +593,48 @@ describe('Security Rules — fornecedores, perfis e dependências', () => {
     const LEGACY = { email: 'legadoadmin@fortestecnologia.com.br' };
     await seedPerfil(LEGACY.email, { perfil: 'admin' });
     await assertSucceeds(db(LEGACY).doc('perguntas/p-legacy').set({ pergunta: 'x' }));
+  });
+});
+
+describe('Security Rules — Operador de Processos', () => {
+  const OPP = { email: 'opprocessos@fortestecnologia.com.br' };
+  beforeEach(async () => {
+    await seedPerfil(OPP.email, { perfis: ['operador_processos'] });
+  });
+
+  test('escreve processos e cria respostas de BIA de QUALQUER área', async () => {
+    await assertSucceeds(db(OPP).doc('processos/rh__proc').set({ area: 'RH', processo: 'Proc' }, { merge: true }));
+    await assertSucceeds(db(OPP).doc('processos/ti__proc').set({ area: 'TI', processo: 'Proc' }, { merge: true }));
+    await assertSucceeds(db(OPP).doc('processos/novo').set({ area: 'Financeiro', processo: 'Novo' }));
+    await assertSucceeds(db(OPP).collection('respostas_bia').add({ area: 'RH', processo: 'Proc', score: 8 }));
+  });
+
+  test('não altera nem apaga respostas de BIA (histórico)', async () => {
+    let id;
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      id = (await ctx.firestore().collection('respostas_bia').add({ area: 'RH', score: 1 })).id;
+    });
+    await assertFails(db(OPP).doc(`respostas_bia/${id}`).set({ score: 9 }, { merge: true }));
+    await assertFails(db(OPP).doc(`respostas_bia/${id}`).delete());
+  });
+
+  test('não escreve em dependências (DRP), áreas, riscos, perfis nem nas periodicidades', async () => {
+    await assertSucceeds(db(OPP).doc('dependencias/d1').get());
+    await assertFails(db(OPP).doc('dependencias/d1').set({ categoria: 'Sistemas', nome: 'ERP' }));
+    await assertFails(db(OPP).doc('areas/a1').set({ nome: 'X' }));
+    await assertFails(db(OPP).doc('riscos/r1').set({ titulo: 'X' }));
+    await assertFails(db(OPP).doc('config_perfis/opprocessos@fortestecnologia.com.br').set({ perfis: ['admin'] }));
+    await assertFails(db(OPP).doc('config_continuidade/ciclos').set({ pcnMeses: 99 }));
+    await assertFails(db(OPP).doc('drp_conteudo/d1').get());
+  });
+
+  test('periodicidades: domínio lê; Admin e SI escrevem; gestor não', async () => {
+    const SI = { email: 'si-ciclo@fortestecnologia.com.br' };
+    await seedPerfil(SI.email, { perfis: ['seguranca'] });
+    await assertSucceeds(db(GESTOR).doc('config_continuidade/ciclos').get());
+    await assertSucceeds(db(ADMIN).doc('config_continuidade/ciclos').set({ pcnMeses: 12 }));
+    await assertSucceeds(db(SI).doc('config_continuidade/ciclos').set({ pcnMeses: 6 }));
+    await assertFails(db(GESTOR).doc('config_continuidade/ciclos').set({ pcnMeses: 1 }));
   });
 });
 

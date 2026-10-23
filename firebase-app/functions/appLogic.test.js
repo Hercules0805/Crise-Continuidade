@@ -51,9 +51,12 @@ function ctx(over) {
   };
 }
 
+// Quem chama e admin por padrao: PCN, links e DRP conferem o perfil no
+// servidor (23/10/2026). Testes de recusa trocam config_perfis.
 const seed = () => ({
   processos: { ti__backup: { area: 'TI', processo: 'Backup' } },
   tokens: {},
+  config_perfis: { 'analista@fortestecnologia.com.br': { perfis: ['admin'] } },
 });
 
 test('gerarLink cria token com prefixo e validade por tipo', async () => {
@@ -1230,6 +1233,7 @@ const seedRenomeado = () => ({
   respostas_bia: {
     r1: { area: 'TI', processo: 'Backup', score: 14, timestamp: '2026-01-01T00:00:00.000Z' },
   },
+  config_perfis: { 'analista@fortestecnologia.com.br': { perfis: ['admin'] } },
 });
 
 test('PCN de processo renomeado: salvarPCN, excluirPCN, dadosPCN e salvarCamposPCN acham pelo id', async () => {
@@ -1330,4 +1334,107 @@ test('gerarPCN: Servicos do processo e a cadeia tecnica deles entram nas Depende
   assert.match(p.texto, /\*\*Banco de Dados:\*\* Oracle.*Estratégia: Backup & Restore.*Ligação: Componente de SRV-01/);
   assert.match(p.texto, /### Serviços que suportam o processo[^#]*\*\*Portal\*\* — Portal do cliente/);
   assert.doesNotMatch(p.texto, /\*\*Serviços:\*\* Portal/, 'o servico nao vira linha de dependencia');
+});
+
+// ============================================================
+// OPERADOR DE PROCESSOS (23/10/2026): opera PCN e links de BIA de todas as
+// areas; le o DRP; nao altera DRP. Fecha as acoes de PCN que so conferiam
+// dominio.
+// ============================================================
+
+const comPerfil = (perfis, extra) => {
+  const s = seed();
+  s.config_perfis = { 'analista@fortestecnologia.com.br': { perfis, ...(extra || {}) } };
+  return s;
+};
+
+test('PCN: gestor, TI, operador administrativo e conta sem perfil sao recusados no servidor', async () => {
+  for (const perfis of [['gestor'], ['ti'], ['operador'], []]) {
+    const s = comPerfil(perfis, { area: 'TI' });
+    s.processos.ti__backup.pcnSalvo = JSON.stringify([{ versao: 1 }]);
+    const db = makeDb(s);
+    await assert.rejects(() => WRITE_ACTIONS.salvarPCN(db, { area: 'TI', processo: 'Backup', html: 'x' }, ctx()), AppError, String(perfis));
+    await assert.rejects(() => WRITE_ACTIONS.excluirPCN(db, { area: 'TI', processo: 'Backup' }, ctx()), AppError, String(perfis));
+    await assert.rejects(() => WRITE_ACTIONS.salvarCamposPCN(db, { area: 'TI', processo: 'Backup', bcpPapeisCrise: '{}' }, ctx()), AppError);
+    await assert.rejects(() => WRITE_ACTIONS.gerarPCN(db, { id: 'ti__backup' }, ctx({ geminiApiKey: 'k' })), AppError);
+    assert.strictEqual(db._store.processos.ti__backup.pcnSalvo, JSON.stringify([{ versao: 1 }]), 'nada foi apagado');
+  }
+});
+
+test('PCN: operador de processos salva, edita e exclui o PCN de qualquer area', async () => {
+  const s = comPerfil(['operador_processos']);
+  s.processos.rh__folha = { area: 'RH', processo: 'Folha' };
+  const db = makeDb(s);
+  const r = await WRITE_ACTIONS.salvarPCN(db, { area: 'RH', processo: 'Folha', html: '<p>v1</p>' }, ctx());
+  assert.strictEqual(r.versao, 1);
+  await WRITE_ACTIONS.salvarCamposPCN(db, { area: 'RH', processo: 'Folha', bcpPapeisCrise: '{}' }, ctx());
+  await WRITE_ACTIONS.excluirPCN(db, { area: 'RH', processo: 'Folha' }, ctx());
+  assert.strictEqual(db._store.processos.rh__folha.pcnSalvo, '');
+});
+
+test('salvarPCN guarda no maximo 5 versoes, sem recomecar a numeracao, e carimba a revisao', async () => {
+  const s = seed();
+  s.processos.ti__backup.pcnSalvo = JSON.stringify([1, 2, 3, 4, 5].map((v) => ({ versao: v, html: 'v' + v })));
+  const db = makeDb(s);
+  const r = await WRITE_ACTIONS.salvarPCN(db, { area: 'TI', processo: 'Backup', html: '<p>v6</p>' }, ctx());
+  assert.strictEqual(r.versao, 6);
+  const versoes = JSON.parse(db._store.processos.ti__backup.pcnSalvo);
+  assert.deepStrictEqual(versoes.map((v) => v.versao), [2, 3, 4, 5, 6]);
+  const rev = db._store.processos.ti__backup.pcnRevisao;
+  assert.strictEqual(rev.revisadoPor, 'analista@fortestecnologia.com.br');
+  assert.strictEqual(rev.ultimaEm, versoes[4].data);
+});
+
+test('salvarPCN preserva o aprovador ja registrado na revisao', async () => {
+  const s = seed();
+  s.processos.ti__backup.pcnRevisao = { aprovadoPor: 'Dono', aprovadoEm: '2026-01-01', ultimaEm: '2026-01-01' };
+  const db = makeDb(s);
+  await WRITE_ACTIONS.salvarPCN(db, { area: 'TI', processo: 'Backup', html: 'x' }, ctx());
+  assert.strictEqual(db._store.processos.ti__backup.pcnRevisao.aprovadoPor, 'Dono');
+});
+
+test('DRP: operador de processos LE o DRP e os roteiros, mas nao salva, gera nem exporta parametros', async () => {
+  const s = comPerfil(['operador_processos']);
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor' } };
+  s.drp_conteudo = { d1: { versoes: [{ versao: 1, html: '<p>drp</p>' }] } };
+  const db = makeDb(s);
+  const r = await READ_ACTIONS.obterDRP(db, { id: 'd1' }, ctx());
+  assert.strictEqual(r.versoes.length, 1);
+  await READ_ACTIONS.obterRoteiroTeste(db, { id: 'd1' }, ctx());
+  await assert.rejects(() => WRITE_ACTIONS.salvarDRP(db, { id: 'd1', html: 'x' }, ctx()), AppError);
+  await assert.rejects(() => WRITE_ACTIONS.excluirDRP(db, { id: 'd1' }, ctx()), AppError);
+  await assert.rejects(() => WRITE_ACTIONS.gerarDRP(db, { id: 'd1' }, ctx({ geminiApiKey: 'k' })), AppError);
+  await assert.rejects(() => WRITE_ACTIONS.salvarDrpDependencia(db, { dependenciaId: 'd1', rto: '1 hora' }, ctx()), AppError);
+  assert.strictEqual(db._store.dependencias.d1.rto, undefined);
+});
+
+test('DRP: gestor continua sem ler o conteudo do DRP', async () => {
+  const s = comPerfil(['gestor'], { area: 'TI' });
+  s.drp_conteudo = { d1: { versoes: [{ versao: 1 }] } };
+  await assert.rejects(() => READ_ACTIONS.obterDRP(makeDb(s), { id: 'd1' }, ctx()), AppError);
+});
+
+test('salvarDRP carimba a revisao do DRP na dependencia', async () => {
+  const s = seed();
+  s.dependencias = { d1: { nome: 'SRV-01', categoria: 'Servidor', drpRevisao: { aprovadoPor: 'Infra' } } };
+  const db = makeDb(s);
+  await WRITE_ACTIONS.salvarDRP(db, { id: 'd1', html: '<p>x</p>' }, ctx());
+  const rev = db._store.dependencias.d1.drpRevisao;
+  assert.strictEqual(rev.revisadoPor, 'analista@fortestecnologia.com.br');
+  assert.ok(rev.ultimaEm);
+  assert.strictEqual(rev.aprovadoPor, 'Infra');
+});
+
+test('gerarLink: operador de processos gera para qualquer area; gestor so para a propria', async () => {
+  const op = makeDb(comPerfil(['operador_processos']));
+  const r = await WRITE_ACTIONS.gerarLink(op, { tipo: 'bia', area: 'RH', processo: 'Folha' }, ctx());
+  assert.strictEqual(r.success, true);
+
+  const g = makeDb(comPerfil(['gestor'], { area: 'TI' }));
+  await WRITE_ACTIONS.gerarLink(g, { tipo: 'bia', area: 'TI', processo: 'Backup' }, ctx());
+  await assert.rejects(() => WRITE_ACTIONS.gerarLink(g, { tipo: 'bia', area: 'RH', processo: 'Folha' }, ctx()), AppError);
+
+  for (const perfis of [['ti'], ['operador'], []]) {
+    await assert.rejects(() => WRITE_ACTIONS.gerarLink(makeDb(comPerfil(perfis)), { tipo: 'bia', area: 'TI', processo: 'Backup' }, ctx()), AppError);
+  }
 });
