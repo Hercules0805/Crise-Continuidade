@@ -39,7 +39,7 @@ const espera = () => new Promise((r) => setTimeout(r, 0));
 test('menu e busca filtram pela UNIAO dos perfis (USER_PERFIS), igual ao route()', () => {
   const html = fs.readFileSync(path.join(PUB, 'index.html'), 'utf8');
   assert.match(html, /Perfis\.ehAdmin\(window\.USER_PERFIS\)/);
-  assert.match(html, /Perfis\.podeVerTela\(window\.USER_PERFIS, el\.dataset\.page\)/);
+  assert.match(html, /MenuLateral\.aplicarPerfil\(\(page\) => Perfis\.podeVerTela\(window\.USER_PERFIS, page\)\)/);
   assert.doesNotMatch(html, /podeVerTela\(window\.USER_PERFIL,/);
 });
 

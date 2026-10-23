@@ -151,6 +151,8 @@ function route() {
   const params = new URLSearchParams(queryStr || '');
   document.querySelectorAll('.nav-link').forEach(l => l.classList.toggle('active', l.dataset.page === page));
   document.querySelectorAll('.nav-group').forEach(g => g.classList.toggle('has-active', !!g.querySelector('.nav-link.active')));
+  // Menu lateral: abre o grupo e o subnível da tela atual (e fecha painel/gaveta).
+  if (window.MenuLateral) MenuLateral.marcarAtivo(page);
   // Título da aba do navegador = rótulo da tela no menu (o mesmo título da página),
   // lido do próprio menu para não manter outra lista de nomes.
   const linkAtivo = Array.from(document.querySelectorAll('.nav-link')).find((l) => l.dataset.page === page);

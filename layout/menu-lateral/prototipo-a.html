@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Menu Lateral A</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap">
+<style>
+:root {
+  --surface: #ffffff; --surface-sunken: #f6f4f2; --ink: #2a2623; --ink-muted: #5c5550;
+  --border: #d8d2cd; --border-strong: #8a817b; --red: #d50014; --on-red: #ffffff; --red-tint: #fde8ea;
+  --ok: #2e7d32; --ok-tint: #e8f5e9; --warn: #a15c00; --warn-tint: #fff3e0; --crit: #b3261e; --crit-tint: #fdecea;
+  --info: #1f5fa8; --info-tint: #e7f0fa;
+  --shadow: 0 10px 28px rgba(42,38,35,0.16);
+  --r-sm: 4px; --r-md: 8px; --r-pill: 999px;
+  --font-sans: "Open Sans", "Segoe UI", system-ui, sans-serif;
+  --topbar-h: 56px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: #1c1917; --surface-sunken: #14110f; --ink: #f4f1ef; --ink-muted: #b9b1ab;
+    --border: #4a423d; --border-strong: #8f857e; --red: #ff4d5c; --on-red: #1c1917; --red-tint: #3b1a1d;
+    --ok: #7bc47f; --ok-tint: #1d2e1e; --warn: #f0a94a; --warn-tint: #33240f; --crit: #ff8a80; --crit-tint: #3a1a18;
+    --info: #8ab8ec; --info-tint: #16263a; --shadow: 0 10px 28px rgba(0,0,0,0.5);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --surface: #1c1917; --surface-sunken: #14110f; --ink: #f4f1ef; --ink-muted: #b9b1ab;
+  --border: #4a423d; --border-strong: #8f857e; --red: #ff4d5c; --on-red: #1c1917; --red-tint: #3b1a1d;
+  --ok: #7bc47f; --ok-tint: #1d2e1e; --warn: #f0a94a; --warn-tint: #33240f; --crit: #ff8a80; --crit-tint: #3a1a18;
+  --info: #8ab8ec; --info-tint: #16263a; --shadow: 0 10px 28px rgba(0,0,0,0.5);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--surface-sunken); color: var(--ink); font-family: var(--font-sans); font-size: 14px; line-height: 1.45; overflow-x: hidden; }
+button { font: inherit; color: inherit; }
+a { color: inherit; }
+svg.ic { width: 20px; height: 20px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+
+/* Barra superior */
+.topbar { grid-area: top; height: var(--topbar-h); background: var(--surface); border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 12px; padding: 0 16px; position: sticky; top: 0; z-index: 30; }
+.icon-btn { width: 36px; height: 36px; border-radius: var(--r-md); border: 1px solid transparent; background: none; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; color: var(--ink-muted); flex-shrink: 0; }
+.icon-btn:hover { background: var(--surface-sunken); color: var(--ink); }
+.logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; letter-spacing: -0.2px; white-space: nowrap; }
+.logo-marca { width: 28px; height: 28px; border-radius: 7px; background: var(--red); color: var(--on-red); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; }
+.logo small { font-weight: 600; color: var(--ink-muted); font-size: 12px; }
+.espaco { flex: 1; }
+.proto-perfil { display: flex; align-items: center; gap: 8px; border: 1px dashed var(--border-strong); border-radius: var(--r-md); padding: 4px 6px 4px 10px; font-size: 12px; color: var(--ink-muted); }
+.proto-perfil select { font: inherit; font-size: 13px; color: var(--ink); background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-sm); padding: 4px 6px; max-width: 200px; }
+.avatar { width: 32px; height: 32px; border-radius: var(--r-pill); background: var(--red-tint); color: var(--red); font-weight: 700; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+
+/* Busca de telas */
+.busca { position: relative; }
+.busca input { width: 100%; height: 36px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface); color: var(--ink); padding: 0 10px 0 34px; font: inherit; }
+.busca input:focus { outline: none; border-color: var(--red); box-shadow: 0 0 0 3px var(--red-tint); }
+.busca .lupa { position: absolute; left: 9px; top: 8px; width: 18px; height: 18px; color: var(--ink-muted); }
+.busca-res { display: none; position: absolute; left: 0; right: 0; top: calc(100% + 6px); min-width: 260px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow); z-index: 60; max-height: 360px; overflow: auto; }
+.busca-res.open { display: block; }
+.busca-res a { display: block; padding: 9px 14px; text-decoration: none; border-bottom: 1px solid var(--border); }
+.busca-res a:last-child { border-bottom: none; }
+.busca-res a:hover, .busca-res a.sel { background: var(--red-tint); }
+.busca-res a small { display: block; color: var(--ink-muted); font-size: 11px; }
+.busca-res .nada { padding: 12px 14px; color: var(--ink-muted); }
+
+/* Conteúdo de exemplo */
+.conteudo { grid-area: main; min-width: 0; padding: 24px; }
+.aviso-proto { display: flex; gap: 12px; align-items: flex-start; background: var(--info-tint); color: var(--ink); border: 1px solid var(--border); border-left: 4px solid var(--info); border-radius: var(--r-md); padding: 12px 16px; margin-bottom: 20px; font-size: 13px; }
+.aviso-proto strong { color: var(--info); }
+.aviso-proto .medida { margin-left: auto; white-space: nowrap; font-weight: 700; color: var(--info); }
+.trilha { font-size: 12px; color: var(--ink-muted); margin-bottom: 4px; }
+.trilha b { color: var(--ink); font-weight: 600; }
+.conteudo h1 { font-size: 22px; margin: 0 0 16px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); gap: 12px; margin-bottom: 16px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px 16px; }
+.card .rot { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px; color: var(--ink-muted); }
+.card .val { font-size: 26px; font-weight: 700; margin-top: 4px; }
+.painel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); }
+.painel-topo { display: flex; gap: 8px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.filtro { height: 32px; border: 1px solid var(--border); border-radius: var(--r-md); padding: 0 10px; display: inline-flex; align-items: center; color: var(--ink-muted); font-size: 13px; background: var(--surface); }
+.btn { height: 32px; border-radius: var(--r-md); padding: 0 14px; font-weight: 600; border: 1px solid var(--red); background: var(--red); color: var(--on-red); cursor: pointer; }
+.tabela-rolagem { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; min-width: 1280px; }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); white-space: nowrap; font-size: 13px; }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: .4px; color: var(--ink-muted); background: var(--surface-sunken); font-weight: 700; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: var(--r-pill); font-size: 12px; font-weight: 600; }
+.b-crit { background: var(--crit-tint); color: var(--crit); }
+.b-warn { background: var(--warn-tint); color: var(--warn); }
+.b-ok { background: var(--ok-tint); color: var(--ok); }
+.b-info { background: var(--info-tint); color: var(--info); }
+
+.veu { display: none; position: fixed; inset: 0; background: rgba(20,17,15,0.45); z-index: 40; }
+.veu.open { display: block; }
+.so-mobile { display: none; }
+@media (max-width: 1024px) {
+  .so-mobile { display: inline-flex; }
+  .so-desktop { display: none !important; }
+  .conteudo { padding: 16px; }
+  .proto-perfil span { display: none; }
+  .logo small { display: none; }
+}
+@media (max-width: 520px) {
+  .aviso-proto .medida { display: none; }
+  .topbar { gap: 8px; padding: 0 8px; }
+  .topbar > * { min-width: 0; }
+  .logo { font-size: 15px; }
+  .proto-perfil { padding: 2px; border-style: solid; }
+  .proto-perfil select { max-width: 112px; }
+  .cards { grid-template-columns: 1fr 1fr; }
+  .card .val { font-size: 22px; }
+}
+
+.app { display: grid; grid-template-columns: var(--sb-w) minmax(0, 1fr); grid-template-rows: var(--topbar-h) 1fr; grid-template-areas: "top top" "side main"; min-height: 100vh; --sb-w: 272px; transition: grid-template-columns .18s ease; }
+.app.recolhido { --sb-w: 64px; }
+
+.sidebar { grid-area: side; position: sticky; top: var(--topbar-h); height: calc(100vh - var(--topbar-h)); background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 20; }
+.sb-busca { padding: 12px 12px 8px; }
+.sb-busca-ic { display: none; }
+.sb-rolagem { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; display: flex; flex-direction: column; }
+.sb-nav { padding: 4px 8px 8px; }
+.sb-rodape { margin-top: auto; border-top: 1px solid var(--border); padding: 8px; }
+.sb-recolher { display: flex; align-items: center; gap: 10px; width: 100%; height: 40px; border: none; border-top: 1px solid var(--border); background: none; cursor: pointer; color: var(--ink-muted); padding: 0 20px; font-size: 13px; font-weight: 600; }
+.sb-recolher:hover { color: var(--ink); background: var(--surface-sunken); }
+
+.grupo-btn { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 40px; padding: 0 12px; border: none; background: none; border-radius: var(--r-md); cursor: pointer; text-align: left; font-weight: 600; font-size: 13.5px; color: var(--ink); }
+.grupo-btn:hover { background: var(--surface-sunken); }
+.grupo-btn .rot { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.grupo-btn .chev { width: 16px; height: 16px; color: var(--ink-muted); transition: transform .15s; }
+.grupo.aberto > .grupo-btn .chev { transform: rotate(90deg); }
+.grupo.tem-ativo > .grupo-btn { color: var(--red); }
+.grupo-itens { display: none; padding: 2px 0 8px 0; }
+.grupo.aberto > .grupo-itens { display: block; }
+.item { display: block; text-decoration: none; color: var(--ink-muted); padding: 7px 12px 7px 44px; border-radius: var(--r-md); font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid transparent; }
+.item:hover { background: var(--surface-sunken); color: var(--ink); }
+.item.ativo { background: var(--red-tint); color: var(--red); font-weight: 700; border-left-color: var(--red); }
+.sub-btn { display: flex; align-items: center; gap: 6px; width: 100%; border: none; background: none; cursor: pointer; padding: 7px 12px 7px 44px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-muted); text-align: left; border-radius: var(--r-md); }
+.sub-btn:hover { background: var(--surface-sunken); }
+.sub-btn .chev { width: 14px; height: 14px; transition: transform .15s; }
+.sub.aberto > .sub-btn .chev { transform: rotate(90deg); }
+.sub-itens { display: none; }
+.sub.aberto > .sub-itens { display: block; }
+.sub-itens .item { padding-left: 58px; }
+
+/* Recolhido: só ícones; o grupo abre num painel flutuante */
+.app.recolhido .sb-busca .busca, .app.recolhido .sb-busca .lupa, .app.recolhido .grupo-btn .rot, .app.recolhido .grupo-btn .chev, .app.recolhido .grupo-itens, .app.recolhido .sb-recolher .rot { display: none !important; }
+.app.recolhido .sb-busca { padding: 12px 8px 4px; }
+.app.recolhido .sb-busca-ic { display: inline-flex; width: 48px; height: 40px; }
+.app.recolhido .grupo-btn { justify-content: center; padding: 0; height: 44px; }
+.app.recolhido .grupo.tem-ativo > .grupo-btn { background: var(--red-tint); }
+.app.recolhido .sb-recolher { justify-content: center; padding: 0; }
+.flyout { display: none; position: fixed; z-index: 50; min-width: 240px; max-height: 70vh; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 8px; }
+.flyout.open { display: block; }
+.flyout h3 { margin: 4px 8px 6px; font-size: 13px; }
+.flyout .sec { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; color: var(--ink-muted); padding: 10px 10px 4px; }
+.flyout .item { padding-left: 12px; }
+
+.conteudo { grid-area: main; }
+
+@media (max-width: 1024px) {
+  .app, .app.recolhido { grid-template-columns: minmax(0, 1fr); grid-template-areas: "top" "main"; }
+  .sidebar { position: fixed; top: 0; left: 0; height: 100vh; width: 280px; transform: translateX(-100%); transition: transform .2s ease; z-index: 50; visibility: hidden; }
+  .sidebar.open { transform: none; visibility: visible; }
+  .sb-recolher { display: none; }
+  .app.recolhido .sb-busca .busca, .app.recolhido .sb-busca .lupa, .app.recolhido .grupo-btn .rot, .app.recolhido .grupo-btn .chev { display: revert !important; }
+  .app.recolhido .grupo.aberto > .grupo-itens { display: block !important; }
+  .app.recolhido .sb-busca-ic { display: none; }
+  .app.recolhido .grupo-btn { justify-content: flex-start; padding: 0 12px; height: auto; }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header class="topbar">
+    <button class="icon-btn so-desktop" id="btnRecolherTopo" type="button" aria-label="Recolher menu"></button>
+    <button class="icon-btn so-mobile" id="btnAbrirMobile" type="button" aria-label="Abrir menu"></button>
+    <div class="logo"><span class="logo-marca">G</span>GRC360 <small>Governança, Riscos e Conformidade</small></div>
+    <span class="espaco"></span>
+    <label class="proto-perfil"><span>Ver como</span><select id="perfil" aria-label="Perfil de acesso (protótipo)"></select></label>
+    <span class="avatar" title="Usuário">HO</span>
+  </header>
+  <aside class="sidebar" id="sidebar" aria-label="Menu principal">
+    <div class="sb-busca" id="sbBusca">
+      <button class="icon-btn sb-busca-ic" id="btnBuscaRecolhido" type="button" aria-label="Buscar tela"></button>
+      <div class="busca"><span class="ic-wrap"></span><input type="search" id="busca" placeholder="Buscar tela…" autocomplete="off" aria-label="Buscar tela">
+      <div class="busca-res" id="buscaRes"></div></div>
+    </div>
+    <div class="sb-rolagem">
+      <nav class="sb-nav" id="navPrincipal"></nav>
+      <nav class="sb-rodape" id="navRodape" aria-label="Configuração e administração"></nav>
+    </div>
+    <button class="sb-recolher" id="btnRecolher" type="button"></button>
+  </aside>
+  <main class="conteudo" id="conteudo"></main>
+</div>
+<div class="flyout" id="flyout" role="menu"></div>
+<div class="veu" id="veu"></div>
+<script>
+const PROTO = 'a';
+const NOME_PROTO = 'Protótipo A · Árvore acordeão';
+const DICA_PROTO = 'grupos abrem como árvore (um por vez), com subníveis. Recolhido, sobram os ícones e cada grupo abre num painel flutuante.';
+// ---- Arquitetura de informação proposta (as 37 telas reais; hashes iguais aos do sistema) ----
+const GRUPOS = [
+  { id: 'continuidade', rotulo: 'Continuidade de Negócio', curto: 'Continuidade', icone: 'escudo', secoes: [
+    { titulo: null, itens: [
+      ['admin', 'Dashboard de Continuidade'], ['conformidade', 'Conformidade de Continuidade'],
+      ['processos', 'Processos de Negócio'], ['pcns', 'Planos de Continuidade (PCN)'], ['drp', 'Planos de Recuperação (DRP)'],
+      ['dependencias', 'Dependências'], ['mapa', 'Mapa de Continuidade'], ['relatorios', 'Relatórios'] ] } ] },
+  { id: 'riscos', rotulo: 'Riscos e Vulnerabilidades', curto: 'Riscos', icone: 'alerta', secoes: [
+    { titulo: 'Riscos', itens: [['riscos', 'Registro de Riscos'], ['monitor', 'Risco no Tempo'], ['riscos-relatorio', 'Relatório de Riscos']] },
+    { titulo: 'Vulnerabilidades', itens: [['vulnerabilidades-painel', 'Painel de Vulnerabilidades'], ['vulnerabilidades', 'Vulnerabilidades'], ['vulnerabilidades-relatorio', 'Relatório de Vulnerabilidades']] } ] },
+  { id: 'terceiros', rotulo: 'Terceiros', curto: 'Terceiros', icone: 'predio', secoes: [
+    { titulo: null, itens: [['fornecedores', 'Fornecedores'], ['contratos', 'Contratos']] } ] },
+  { id: 'servicos', rotulo: 'Serviços de TI', curto: 'Serviços', icone: 'servidor', secoes: [
+    { titulo: null, itens: [['servicos', 'Serviços'], ['catalogo-backup', 'Catálogo do Backup'], ['servicos-relatorio', 'Relatórios de Serviços']] } ] },
+  { id: 'indicadores', rotulo: 'Indicadores', curto: 'Indicadores', icone: 'grafico', secoes: [
+    { titulo: null, itens: [['indicadores-dashboard', 'Dashboard de Indicadores'], ['indicadores-lancamento', 'Lançamento Mensal'], ['indicadores-matriz', 'Matriz de Indicadores']] } ] },
+  { id: 'config', rotulo: 'Configurações', curto: 'Config.', icone: 'ajustes', rodape: true, secoes: [
+    { titulo: 'Organização', itens: [['areas', 'Áreas'], ['pessoas', 'Pessoas'], ['produtos-software', 'Produtos de Software']] },
+    { titulo: 'Continuidade', itens: [['perguntas', 'Perguntas do BIA']] },
+    { titulo: 'Indicadores', itens: [['indicadores-cadastro', 'Cadastro de Indicadores']] },
+    { titulo: 'Fornecedores', itens: [['fornecedores-categorias', 'Categorias de Fornecedores'], ['fornecedores-subcategorias', 'Subcategorias de Fornecedores'], ['fornecedores-criterios', 'Critérios de Avaliação'], ['fornecedores-criticidade', 'Perguntas de Criticidade']] },
+    { titulo: 'Contratos', itens: [['contratos-tipos', 'Tipos de Contrato'], ['contratos-status', 'Status de Contrato'], ['contratos-indexadores', 'Indexadores de Reajuste']] },
+    { titulo: 'Serviços', itens: [['catalogo-backup-ferramentas', 'Ferramentas de Backup']] } ] },
+  { id: 'admin', rotulo: 'Administração', curto: 'Admin.', icone: 'cadeado', rodape: true, secoes: [
+    { titulo: null, itens: [['perfis', 'Perfis de Acesso'], ['notificacoes-email', 'Notificações por e-mail']] } ] },
+];
+
+// ---- Telas por perfil: cópia de firebase-app/public/perfis.js (TELAS e PAGINA_INICIAL) ----
+const TELAS = {
+  admin: '*',
+  seguranca: ['processos', 'pcns', 'drp', 'riscos', 'monitor', 'riscos-relatorio', 'vulnerabilidades', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
+    'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
+    'dependencias', 'areas', 'pessoas', 'relatorios', 'mapa', 'servicos', 'servicos-relatorio', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
+    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
+    'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status', 'admin', 'conformidade'],
+  ti: ['drp', 'dependencias', 'mapa', 'relatorios'],
+  operador: ['processos', 'pessoas', 'areas', 'relatorios',
+    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
+    'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status'],
+  gestor: ['processos', 'pcns', 'drp', 'riscos', 'riscos-relatorio', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
+    'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz', 'contratos', 'admin', 'conformidade'],
+  operador_processos: ['conformidade', 'admin', 'processos', 'pcns', 'drp', 'dependencias', 'mapa', 'areas', 'pessoas', 'relatorios'],
+};
+const PERFIS = [['admin', 'Administrador'], ['seguranca', 'Segurança da Informação'], ['ti', 'TI'], ['gestor', 'Gestor de Área'],
+  ['operador', 'Operador Administrativo'], ['operador_processos', 'Operador de Processos']];
+const INICIAL = { admin: 'admin', seguranca: 'admin', gestor: 'admin', operador: 'processos', ti: 'drp', operador_processos: 'conformidade' };
+
+const ICONES = {
+  escudo: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  alerta: '<path d="M12 3.5l9 16H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/>',
+  predio: '<rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M9 7h1.5M13.5 7H15M9 11h1.5M13.5 11H15M9 15h1.5M13.5 15H15"/>',
+  servidor: '<rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+  grafico: '<path d="M3 20h18"/><path d="M6 16v-4M11 16V6M16 16V9M20 16v-2"/>',
+  ajustes: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  cadeado: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
+  seta: '<path d="M9 6l6 6-6 6"/>',
+  menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  busca: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+  recolher: '<path d="M15 6l-6 6 6 6"/>',
+  expandir: '<path d="M9 6l6 6-6 6"/>',
+  fechar: '<path d="M6 6l12 12M18 6L6 18"/>',
+};
+const ic = (n) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONES[n]}</svg>`;
+
+// ---- Estado: perfil, tela atual, recolhido (lembrado no navegador quando der) ----
+const CHAVE = 'grc360-proto-' + PROTO;
+function lerLocal(k, padrao) { try { const v = localStorage.getItem(CHAVE + k); return v === null ? padrao : v; } catch (e) { return padrao; } }
+function gravarLocal(k, v) { try { localStorage.setItem(CHAVE + k, v); } catch (e) { /* sem armazenamento: só não lembra */ } }
+const estado = { perfil: lerLocal('perfil', 'admin'), pagina: null, recolhido: lerLocal('recolhido', '0') === '1' };
+// ?perfil=ti&recolhido=1 na URL: atalho para abrir num estado (usado nas capturas de tela).
+{ const q = new URLSearchParams(location.search); if (TELAS[q.get('perfil')]) estado.perfil = q.get('perfil'); if (q.has('recolhido')) estado.recolhido = q.get('recolhido') === '1'; }
+
+const vePagina = (pagina) => { const t = TELAS[estado.perfil]; return t === '*' || t.indexOf(pagina) !== -1; };
+function gruposVisiveis() {
+  return GRUPOS.map((g) => ({ ...g, secoes: g.secoes.map((s) => ({ ...s, itens: s.itens.filter(([p]) => vePagina(p)) })).filter((s) => s.itens.length) }))
+    .filter((g) => g.secoes.length);
+}
+function localizar(pagina) {
+  for (const g of GRUPOS) for (const s of g.secoes) for (const it of s.itens) if (it[0] === pagina) return { g, s, rotulo: it[1] };
+  return null;
+}
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const link = (p, rotulo, extra = '') => `<a class="item${p === estado.pagina ? ' ativo' : ''}" href="#${p}" data-page="${p}"${p === estado.pagina ? ' aria-current="page"' : ''}${extra}>${esc(rotulo)}</a>`;
+
+// ---- Rotas ----
+function rotaAtual() {
+  const h = decodeURIComponent((location.hash || '').slice(1));
+  return (h && localizar(h) && vePagina(h)) ? h : INICIAL[estado.perfil];
+}
+function aoMudarRota() {
+  estado.pagina = rotaAtual();
+  const loc = localizar(estado.pagina);
+  document.title = loc.rotulo + ' · GRC360';
+  renderConteudo();
+  aoNavegar(loc);
+}
+window.addEventListener('hashchange', aoMudarRota);
+
+// ---- Busca de telas (mesma ideia do sistema: lê a própria lista do menu) ----
+function ligarBusca(input, caixa) {
+  let sel = 0;
+  const achados = () => {
+    const t = input.value.trim().toLowerCase();
+    if (!t) return [];
+    const r = [];
+    gruposVisiveis().forEach((g) => g.secoes.forEach((s) => s.itens.forEach(([p, rot]) => {
+      if ((rot + ' ' + g.rotulo + ' ' + (s.titulo || '')).toLowerCase().includes(t)) r.push({ p, rot, onde: g.rotulo + (s.titulo ? ' › ' + s.titulo : '') });
+    })));
+    return r.slice(0, 8);
+  };
+  const desenhar = () => {
+    const r = achados();
+    if (!input.value.trim()) { caixa.classList.remove('open'); return; }
+    sel = Math.min(sel, Math.max(r.length - 1, 0));
+    caixa.innerHTML = r.length ? r.map((x, i) => `<a href="#${x.p}" class="${i === sel ? 'sel' : ''}">${esc(x.rot)}<small>${esc(x.onde)}</small></a>`).join('')
+      : '<div class="nada">Nenhuma tela encontrada</div>';
+    caixa.classList.add('open');
+  };
+  input.addEventListener('input', () => { sel = 0; desenhar(); });
+  input.addEventListener('keydown', (e) => {
+    const r = achados();
+    if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, r.length - 1); desenhar(); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); desenhar(); e.preventDefault(); }
+    else if (e.key === 'Enter' && r[sel]) { location.hash = r[sel].p; fecharBusca(); }
+    else if (e.key === 'Escape') { fecharBusca(); }
+  });
+  caixa.addEventListener('click', (e) => { if (e.target.closest('a')) fecharBusca(); });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.busca')) caixa.classList.remove('open'); });
+  function fecharBusca() { input.value = ''; caixa.classList.remove('open'); input.blur(); }
+}
+
+// ---- Conteúdo de exemplo (uma grade larga como a de Riscos, para comparar espaço) ----
+const LINHAS = [
+  ['R-014', 'Indisponibilidade do ERP no fechamento', ['Em tratamento', 'b-warn'], 'Financeiro', 'Operacional', 'Alta', 'Alto', ['Crítico', 'b-crit'], 'Marina Lopes', 'Mitigar', '30/11/2026', '12/10/2026', '3', 'BIA'],
+  ['R-021', 'Vazamento de dados de clientes', ['Aberto', 'b-crit'], 'Comercial', 'Segurança', 'Média', 'Muito alto', ['Crítico', 'b-crit'], 'Paulo Reis', 'Mitigar', '15/12/2026', '05/10/2026', '5', 'Vulnerabilidade'],
+  ['R-008', 'Falha do fornecedor de nuvem', ['Monitorado', 'b-info'], 'TI', 'Terceiros', 'Baixa', 'Alto', ['Alto', 'b-warn'], 'Ana Souza', 'Transferir', '31/01/2027', '01/10/2026', '2', 'Fornecedor'],
+  ['R-030', 'Perda de pessoa-chave na folha', ['Em tratamento', 'b-warn'], 'RH', 'Pessoas', 'Média', 'Médio', ['Médio', 'b-warn'], 'Carla Dias', 'Mitigar', '20/12/2026', '28/09/2026', '1', 'BIA'],
+  ['R-002', 'Interrupção de energia na matriz', ['Encerrado', 'b-ok'], 'Facilities', 'Infraestrutura', 'Baixa', 'Médio', ['Baixo', 'b-ok'], 'João Melo', 'Aceitar', '—', '15/09/2026', '4', 'DRP'],
+];
+const COLUNAS = ['ID', 'Título', 'Status', 'Área', 'Categoria', 'Probabilidade', 'Impacto', 'Nível', 'Responsável', 'Tratamento', 'Prazo', 'Última revisão', 'Controles', 'Origem'];
+
+function renderConteudo() {
+  const loc = localizar(estado.pagina);
+  const el = document.getElementById('conteudo');
+  el.innerHTML = `
+    <div class="aviso-proto"><div><strong>${esc(NOME_PROTO)}</strong> — ${DICA_PROTO}<br>
+      Troque o <b>perfil</b> no alto para ver o menu de cada um. O conteúdo abaixo é só ilustrativo.</div>
+      <div class="medida" id="medida" title="Largura útil para a tela"></div></div>
+    <div class="trilha">${esc(loc.g.rotulo)}${loc.s.titulo ? ' › ' + esc(loc.s.titulo) : ''} › <b>${esc(loc.rotulo)}</b></div>
+    <h1>${esc(loc.rotulo)}</h1>
+    <div class="cards">
+      <div class="card"><div class="rot">Total</div><div class="val">128</div></div>
+      <div class="card"><div class="rot">Críticos</div><div class="val" style="color:var(--crit)">9</div></div>
+      <div class="card"><div class="rot">Em tratamento</div><div class="val" style="color:var(--warn)">37</div></div>
+      <div class="card"><div class="rot">Encerrados no mês</div><div class="val" style="color:var(--ok)">14</div></div>
+    </div>
+    <div class="painel">
+      <div class="painel-topo"><span class="filtro">Área: todas</span><span class="filtro">Status: todos</span><span class="filtro">Nível: todos</span><span class="espaco"></span><button class="btn" type="button">+ Novo</button></div>
+      <div class="tabela-rolagem"><table><thead><tr>${COLUNAS.map((c) => `<th>${c}</th>`).join('')}</tr></thead><tbody>
+        ${LINHAS.map((l) => `<tr>${l.map((v) => `<td>${Array.isArray(v) ? `<span class="badge ${v[1]}">${v[0]}</span>` : esc(v)}</td>`).join('')}</tr>`).join('')}
+      </tbody></table></div>
+    </div>`;
+  medir();
+}
+function medir() {
+  const el = document.getElementById('conteudo'), m = document.getElementById('medida');
+  if (el && m) m.textContent = 'Área útil: ' + Math.round(el.clientWidth) + 'px';
+}
+window.addEventListener('resize', medir);
+
+function montarPerfil() {
+  const sel = document.getElementById('perfil');
+  sel.innerHTML = PERFIS.map(([v, r]) => `<option value="${v}"${v === estado.perfil ? ' selected' : ''}>${r}</option>`).join('');
+  sel.addEventListener('change', () => {
+    estado.perfil = sel.value; gravarLocal('perfil', sel.value);
+    const h = (location.hash || '').slice(1);
+    if (!vePagina(h)) location.hash = INICIAL[estado.perfil]; // a tela atual não é do perfil
+    aoMudarRota();
+  });
+}
+const ehMobile = () => window.matchMedia('(max-width: 1024px)').matches;
+
+
+let grupoAberto = null;           // acordeão: um grupo aberto por vez
+// Subníveis: em grupos com até 2 (Riscos) começam abertos; em Configurações (6),
+// fechados -- abre só o da tela atual. O clique do usuário vale por cima disso.
+const subEscolha = new Map();      // "config/Contratos" -> true/false
+
+function htmlGrupo(g) {
+  const temAtivo = g.secoes.some((s) => s.itens.some(([p]) => p === estado.pagina));
+  const aberto = grupoAberto === g.id;
+  const corpo = g.secoes.map((s) => {
+    if (!s.titulo) return s.itens.map(([p, r]) => link(p, r)).join('');
+    const chave = g.id + '/' + s.titulo;
+    const subAtivo = s.itens.some(([p]) => p === estado.pagina);
+    const subAberto = subAtivo || (subEscolha.has(chave) ? subEscolha.get(chave) : g.secoes.length <= 2);
+    return `<div class="sub${subAberto ? ' aberto' : ''}"><button class="sub-btn" type="button" data-sub="${esc(chave)}" aria-expanded="${subAberto}">${ic('seta').replace('class="ic"', 'class="ic chev"')}${esc(s.titulo)}</button>
+      <div class="sub-itens">${s.itens.map(([p, r]) => link(p, r)).join('')}</div></div>`;
+  }).join('');
+  return `<div class="grupo${aberto ? ' aberto' : ''}${temAtivo ? ' tem-ativo' : ''}">
+    <button class="grupo-btn" type="button" data-g="${g.id}" aria-expanded="${aberto}" title="${esc(g.rotulo)}">${ic(g.icone)}<span class="rot">${esc(g.rotulo)}</span>${ic('seta').replace('class="ic"', 'class="ic chev"')}</button>
+    <div class="grupo-itens">${corpo}</div></div>`;
+}
+
+function renderMenu() {
+  const gs = gruposVisiveis();
+  document.getElementById('navPrincipal').innerHTML = gs.filter((g) => !g.rodape).map(htmlGrupo).join('');
+  const rod = gs.filter((g) => g.rodape);
+  const navRod = document.getElementById('navRodape');
+  navRod.innerHTML = rod.map(htmlGrupo).join('');
+  navRod.style.display = rod.length ? '' : 'none';
+  const app = document.getElementById('app');
+  app.classList.toggle('recolhido', estado.recolhido);
+  const rot = estado.recolhido ? 'Expandir menu' : 'Recolher menu';
+  document.getElementById('btnRecolher').innerHTML = ic(estado.recolhido ? 'expandir' : 'recolher') + `<span class="rot">${rot}</span>`;
+  document.getElementById('btnRecolher').setAttribute('aria-label', rot);
+  document.getElementById('btnRecolherTopo').innerHTML = ic('menu');
+  document.getElementById('btnRecolherTopo').setAttribute('aria-label', rot);
+}
+
+function aoNavegar(loc) {
+  grupoAberto = loc.g.id;            // o grupo da tela atual fica aberto
+  fecharFlyout();
+  if (ehMobile()) fecharMobile();
+  renderMenu();
+}
+
+// ---- Flyout (menu recolhido) ----
+const flyout = document.getElementById('flyout');
+let flyoutDe = null, timerFechar = null;
+function abrirFlyout(btn) {
+  const g = gruposVisiveis().find((x) => x.id === btn.dataset.g);
+  if (!g) return;
+  flyoutDe = g.id;
+  flyout.innerHTML = `<h3>${esc(g.rotulo)}</h3>` + g.secoes.map((s) =>
+    (s.titulo ? `<div class="sec">${esc(s.titulo)}</div>` : '') + s.itens.map(([p, r]) => link(p, r, ' role="menuitem"')).join('')).join('');
+  const r = btn.getBoundingClientRect();
+  flyout.classList.add('open');
+  const alto = flyout.offsetHeight;
+  flyout.style.left = (r.right + 8) + 'px';
+  flyout.style.top = Math.max(8, Math.min(r.top, window.innerHeight - alto - 8)) + 'px';
+}
+function fecharFlyout() { flyout.classList.remove('open'); flyoutDe = null; }
+flyout.addEventListener('mouseenter', () => clearTimeout(timerFechar));
+flyout.addEventListener('mouseleave', () => { timerFechar = setTimeout(fecharFlyout, 250); });
+flyout.addEventListener('click', (e) => { if (e.target.closest('a')) fecharFlyout(); });
+
+// ---- Cliques no menu ----
+document.getElementById('sidebar').addEventListener('click', (e) => {
+  const gb = e.target.closest('.grupo-btn');
+  if (gb) {
+    if (estado.recolhido && !ehMobile()) { flyoutDe === gb.dataset.g ? fecharFlyout() : abrirFlyout(gb); return; }
+    grupoAberto = grupoAberto === gb.dataset.g ? null : gb.dataset.g;
+    renderMenu();
+    return;
+  }
+  const sb = e.target.closest('.sub-btn');
+  if (sb) { subEscolha.set(sb.dataset.sub, sb.getAttribute('aria-expanded') !== 'true'); renderMenu(); }
+});
+document.getElementById('sidebar').addEventListener('mouseover', (e) => {
+  const gb = e.target.closest('.grupo-btn');
+  if (gb && estado.recolhido && !ehMobile()) { clearTimeout(timerFechar); if (flyoutDe !== gb.dataset.g) abrirFlyout(gb); }
+});
+document.getElementById('sidebar').addEventListener('mouseleave', () => { if (estado.recolhido) timerFechar = setTimeout(fecharFlyout, 250); });
+document.addEventListener('click', (e) => { if (!e.target.closest('#flyout') && !e.target.closest('.grupo-btn')) fecharFlyout(); });
+
+function alternarRecolhido() { estado.recolhido = !estado.recolhido; gravarLocal('recolhido', estado.recolhido ? '1' : '0'); fecharFlyout(); renderMenu(); setTimeout(medir, 220); }
+document.getElementById('btnRecolher').addEventListener('click', alternarRecolhido);
+document.getElementById('btnRecolherTopo').addEventListener('click', alternarRecolhido);
+document.getElementById('btnBuscaRecolhido').innerHTML = ic('busca');
+document.getElementById('btnBuscaRecolhido').addEventListener('click', () => { alternarRecolhido(); setTimeout(() => document.getElementById('busca').focus(), 50); });
+document.querySelector('#sbBusca .ic-wrap').outerHTML = ic('busca').replace('class="ic"', 'class="ic lupa"');
+
+// ---- Celular: gaveta ----
+const sidebar = document.getElementById('sidebar'), veu = document.getElementById('veu');
+function abrirMobile() { sidebar.classList.add('open'); veu.classList.add('open'); }
+function fecharMobile() { sidebar.classList.remove('open'); veu.classList.remove('open'); }
+document.getElementById('btnAbrirMobile').innerHTML = ic('menu');
+document.getElementById('btnAbrirMobile').addEventListener('click', abrirMobile);
+veu.addEventListener('click', fecharMobile);
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { fecharFlyout(); fecharMobile(); } });
+
+montarPerfil();
+ligarBusca(document.getElementById('busca'), document.getElementById('buscaRes'));
+aoMudarRota();
+</script>
+</body>
+</html>

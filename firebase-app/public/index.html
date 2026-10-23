@@ -11,102 +11,150 @@
   <!-- GRC360 v2 (layout/lay-v2): tokens depois do pacote v1 e antes de styles.css; fonte Open Sans (confirmar a oficial) -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap">
   <link rel="stylesheet" href="vendor/grc360/tokens-v2.css?v=1">
-  <link rel="stylesheet" href="styles.css?v=34">
+  <link rel="stylesheet" href="styles.css?v=35">
 </head>
 <body>
-  <nav class="nav">
+  <header class="topo">
+    <button type="button" class="topo-menu" data-menu-recolher aria-label="Recolher menu" title="Recolher menu"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
     <div class="nav-brand" title="GRC360 · Governança, Riscos e Conformidade"><span id="nav-logo"></span></div>
     <script>document.getElementById('nav-logo').appendChild(window.GRC360.Logo({ height: 28 }));</script>
-    <div class="nav-links">
-      <!-- DECISÃO 16/10/2026: em cada grupo, a tela principal primeiro e a operação
-           depois (alfabética); os cadastros de configuração do módulo ficam sob o
-           separador "Configuração". O rótulo é o mesmo título da tela. -->
-      <div class="nav-group" data-group="continuidade">
-        <button type="button" class="nav-group-label" aria-haspopup="true" aria-expanded="false">Continuidade de Negócio <span class="caret">▾</span></button>
-        <div class="nav-dropdown">
-          <a href="#admin" class="nav-link" data-page="admin">Dashboard de Continuidade</a>
-          <a href="#conformidade" class="nav-link" data-page="conformidade">Conformidade de Continuidade</a>
-          <a href="#dependencias" class="nav-link" data-page="dependencias">Dependências</a>
-          <a href="#mapa" class="nav-link" data-page="mapa">Mapa de Continuidade</a>
-          <a href="#pcns" class="nav-link" data-page="pcns">Planos de Continuidade (PCN)</a>
-          <a href="#drp" class="nav-link" data-page="drp">Planos de Recuperação (DRP)</a>
-          <a href="#processos" class="nav-link" data-page="processos">Processos de Negócio</a>
-          <a href="#relatorios" class="nav-link" data-page="relatorios">Relatórios</a>
-          <div class="nav-secao">Configuração</div>
-          <a href="#areas" class="nav-link" data-page="areas">Áreas</a>
-          <a href="#perguntas" class="nav-link" data-page="perguntas">Perguntas do BIA</a>
-          <a href="#pessoas" class="nav-link" data-page="pessoas">Pessoas</a>
-        </div>
-      </div>
-      <div class="nav-group" data-group="riscos">
-        <button type="button" class="nav-group-label" aria-haspopup="true" aria-expanded="false">Riscos <span class="caret">▾</span></button>
-        <div class="nav-dropdown">
-          <div class="nav-secao">Vulnerabilidades</div>
-          <a href="#vulnerabilidades-painel" class="nav-link" data-page="vulnerabilidades-painel">Painel de Vulnerabilidades</a>
-          <a href="#vulnerabilidades-relatorio" class="nav-link" data-page="vulnerabilidades-relatorio">Relatório de Vulnerabilidades</a>
-          <a href="#vulnerabilidades" class="nav-link" data-page="vulnerabilidades">Vulnerabilidades</a>
-          <div class="nav-secao">Riscos</div>
-          <a href="#riscos" class="nav-link" data-page="riscos">Registro de Riscos</a>
-          <a href="#riscos-relatorio" class="nav-link" data-page="riscos-relatorio">Relatório de Riscos</a>
-          <a href="#monitor" class="nav-link" data-page="monitor">Risco no Tempo</a>
-        </div>
-      </div>
-      <div class="nav-group" data-group="indicadores">
-        <button type="button" class="nav-group-label" aria-haspopup="true" aria-expanded="false">Indicadores <span class="caret">▾</span></button>
-        <div class="nav-dropdown">
-          <a href="#indicadores-dashboard" class="nav-link" data-page="indicadores-dashboard">Dashboard de Indicadores</a>
-          <a href="#indicadores-lancamento" class="nav-link" data-page="indicadores-lancamento">Lançamento Mensal</a>
-          <a href="#indicadores-matriz" class="nav-link" data-page="indicadores-matriz">Matriz de Indicadores</a>
-          <div class="nav-secao">Configuração</div>
-          <a href="#indicadores-cadastro" class="nav-link" data-page="indicadores-cadastro">Cadastro de Indicadores</a>
-        </div>
-      </div>
-      <div class="nav-group" data-group="fornecedores">
-        <button type="button" class="nav-group-label" aria-haspopup="true" aria-expanded="false">Fornecedores <span class="caret">▾</span></button>
-        <div class="nav-dropdown">
-          <a href="#fornecedores" class="nav-link" data-page="fornecedores">Fornecedores</a>
-          <div class="nav-secao">Configuração</div>
-          <a href="#fornecedores-categorias" class="nav-link" data-page="fornecedores-categorias">Categorias de Fornecedores</a>
-          <a href="#fornecedores-criterios" class="nav-link" data-page="fornecedores-criterios">Critérios de Avaliação</a>
-          <a href="#fornecedores-criticidade" class="nav-link" data-page="fornecedores-criticidade">Perguntas de Criticidade</a>
-          <a href="#fornecedores-subcategorias" class="nav-link" data-page="fornecedores-subcategorias">Subcategorias de Fornecedores</a>
-        </div>
-      </div>
-      <div class="nav-group" data-group="contratos">
-        <button type="button" class="nav-group-label" aria-haspopup="true" aria-expanded="false">Contratos <span class="caret">▾</span></button>
-        <div class="nav-dropdown">
-          <a href="#contratos" class="nav-link" data-page="contratos">Contratos</a>
-          <div class="nav-secao">Configuração</div>
-          <a href="#contratos-indexadores" class="nav-link" data-page="contratos-indexadores">Indexadores de Reajuste</a>
-          <a href="#contratos-status" class="nav-link" data-page="contratos-status">Status de Contrato</a>
-          <a href="#contratos-tipos" class="nav-link" data-page="contratos-tipos">Tipos de Contrato</a>
-        </div>
-      </div>
-      <div class="nav-group" data-group="servicos">
-        <button type="button" class="nav-group-label" aria-haspopup="true" aria-expanded="false">Serviços <span class="caret">▾</span></button>
-        <div class="nav-dropdown">
-          <a href="#servicos" class="nav-link" data-page="servicos">Serviços</a>
-          <a href="#catalogo-backup" class="nav-link" data-page="catalogo-backup">Catálogo do Backup</a>
-          <a href="#catalogo-backup-ferramentas" class="nav-link" data-page="catalogo-backup-ferramentas">Ferramentas de Backup</a>
-          <a href="#servicos-relatorio" class="nav-link" data-page="servicos-relatorio">Relatórios de Serviços</a>
-        </div>
-      </div>
-      <div class="nav-group" data-group="administracao">
-        <button type="button" class="nav-group-label" aria-haspopup="true" aria-expanded="false">Administração <span class="caret">▾</span></button>
-        <div class="nav-dropdown">
-          <a href="#notificacoes-email" class="nav-link" data-page="notificacoes-email">Notificações por e-mail</a>
-          <a href="#perfis" class="nav-link" data-page="perfis">Perfis de Acesso</a>
-          <a href="#produtos-software" class="nav-link" data-page="produtos-software">Produtos de Software</a>
-        </div>
-      </div>
-    </div>
-    <div class="nav-busca" id="navBuscaWrap">
-      <input type="text" id="navBuscaInput" placeholder="🔍 Buscar tela..." autocomplete="off"
-             oninput="filtrarNavBusca()" onfocus="filtrarNavBusca()" onkeydown="onNavBuscaKeydown(event)">
-      <div class="nav-busca-resultados" id="navBuscaResultados"></div>
-    </div>
     <div id="nav-user" style="display:flex;align-items:center;gap:12px;margin-left:auto;padding:0 8px;"></div>
-  </nav>
+  </header>
+  <!-- DECISÃO 23/10/2026: menu lateral multinível e recolhível (protótipo A, "árvore
+       acordeão", layout/menu-lateral/prototipo-a.html). Operação primeiro, pela ordem
+       de uso do módulo; os cadastros de todos os módulos ficam em "Configurações", no
+       rodapé. O rótulo de cada tela é o mesmo título da tela. Comportamento em menu-lateral.js. -->
+  <aside class="menu-lateral" id="menuLateral" aria-label="Menu principal">
+    <div class="menu-busca">
+      <button type="button" class="menu-busca__lupa" data-menu-buscar aria-label="Buscar tela" title="Buscar tela"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button>
+      <div class="nav-busca" id="navBuscaWrap">
+        <svg class="nav-busca__ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+        <input type="text" id="navBuscaInput" placeholder="Buscar tela…" autocomplete="off" aria-label="Buscar tela"
+               oninput="filtrarNavBusca()" onfocus="filtrarNavBusca()" onkeydown="onNavBuscaKeydown(event)">
+        <div class="nav-busca-resultados" id="navBuscaResultados"></div>
+      </div>
+    </div>
+    <div class="menu-rolagem">
+      <nav class="menu-principal" aria-label="Módulos">
+        <div class="nav-group" data-group="continuidade">
+          <button type="button" class="nav-group-label" aria-expanded="false" title="Continuidade de Negócio"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/></svg><span class="rot">Continuidade de Negócio</span><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <div class="nav-itens">
+            <a href="#admin" class="nav-link" data-page="admin">Dashboard de Continuidade</a>
+            <a href="#conformidade" class="nav-link" data-page="conformidade">Conformidade de Continuidade</a>
+            <a href="#processos" class="nav-link" data-page="processos">Processos de Negócio</a>
+            <a href="#pcns" class="nav-link" data-page="pcns">Planos de Continuidade (PCN)</a>
+            <a href="#drp" class="nav-link" data-page="drp">Planos de Recuperação (DRP)</a>
+            <a href="#dependencias" class="nav-link" data-page="dependencias">Dependências</a>
+            <a href="#mapa" class="nav-link" data-page="mapa">Mapa de Continuidade</a>
+            <a href="#relatorios" class="nav-link" data-page="relatorios">Relatórios</a>
+          </div>
+        </div>
+        <div class="nav-group" data-group="riscos">
+          <button type="button" class="nav-group-label" aria-expanded="false" title="Riscos e Vulnerabilidades"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5l9 16H3z"/><path d="M12 10v4"/><path d="M12 17h.01"/></svg><span class="rot">Riscos e Vulnerabilidades</span><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <div class="nav-itens">
+            <div class="nav-sub" data-sub="riscos/riscos">
+              <button type="button" class="nav-sub-label" aria-expanded="false"><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="rot">Riscos</span></button>
+              <div class="nav-sub-itens">
+                <a href="#riscos" class="nav-link" data-page="riscos">Registro de Riscos</a>
+                <a href="#monitor" class="nav-link" data-page="monitor">Risco no Tempo</a>
+                <a href="#riscos-relatorio" class="nav-link" data-page="riscos-relatorio">Relatório de Riscos</a>
+              </div>
+            </div>
+            <div class="nav-sub" data-sub="riscos/vulnerabilidades">
+              <button type="button" class="nav-sub-label" aria-expanded="false"><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="rot">Vulnerabilidades</span></button>
+              <div class="nav-sub-itens">
+                <a href="#vulnerabilidades-painel" class="nav-link" data-page="vulnerabilidades-painel">Painel de Vulnerabilidades</a>
+                <a href="#vulnerabilidades" class="nav-link" data-page="vulnerabilidades">Vulnerabilidades</a>
+                <a href="#vulnerabilidades-relatorio" class="nav-link" data-page="vulnerabilidades-relatorio">Relatório de Vulnerabilidades</a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="nav-group" data-group="terceiros">
+          <button type="button" class="nav-group-label" aria-expanded="false" title="Terceiros"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M9 7h1.5M13.5 7H15M9 11h1.5M13.5 11H15M9 15h1.5M13.5 15H15"/></svg><span class="rot">Terceiros</span><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <div class="nav-itens">
+            <a href="#fornecedores" class="nav-link" data-page="fornecedores">Fornecedores</a>
+            <a href="#contratos" class="nav-link" data-page="contratos">Contratos</a>
+          </div>
+        </div>
+        <div class="nav-group" data-group="servicos">
+          <button type="button" class="nav-group-label" aria-expanded="false" title="Serviços de TI"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><span class="rot">Serviços de TI</span><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <div class="nav-itens">
+            <a href="#servicos" class="nav-link" data-page="servicos">Serviços</a>
+            <a href="#catalogo-backup" class="nav-link" data-page="catalogo-backup">Catálogo do Backup</a>
+            <a href="#servicos-relatorio" class="nav-link" data-page="servicos-relatorio">Relatórios de Serviços</a>
+          </div>
+        </div>
+        <div class="nav-group" data-group="indicadores">
+          <button type="button" class="nav-group-label" aria-expanded="false" title="Indicadores"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18"/><path d="M6 16v-4M11 16V6M16 16V9M20 16v-2"/></svg><span class="rot">Indicadores</span><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <div class="nav-itens">
+            <a href="#indicadores-dashboard" class="nav-link" data-page="indicadores-dashboard">Dashboard de Indicadores</a>
+            <a href="#indicadores-lancamento" class="nav-link" data-page="indicadores-lancamento">Lançamento Mensal</a>
+            <a href="#indicadores-matriz" class="nav-link" data-page="indicadores-matriz">Matriz de Indicadores</a>
+          </div>
+        </div>
+      </nav>
+      <nav class="menu-rodape" aria-label="Configurações e administração">
+        <div class="nav-group" data-group="configuracoes">
+          <button type="button" class="nav-group-label" aria-expanded="false" title="Configurações"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/></svg><span class="rot">Configurações</span><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <div class="nav-itens">
+            <div class="nav-sub" data-sub="configuracoes/organizacao">
+              <button type="button" class="nav-sub-label" aria-expanded="false"><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="rot">Organização</span></button>
+              <div class="nav-sub-itens">
+                <a href="#areas" class="nav-link" data-page="areas">Áreas</a>
+                <a href="#pessoas" class="nav-link" data-page="pessoas">Pessoas</a>
+                <a href="#produtos-software" class="nav-link" data-page="produtos-software">Produtos de Software</a>
+              </div>
+            </div>
+            <div class="nav-sub" data-sub="configuracoes/continuidade">
+              <button type="button" class="nav-sub-label" aria-expanded="false"><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="rot">Continuidade</span></button>
+              <div class="nav-sub-itens">
+                <a href="#perguntas" class="nav-link" data-page="perguntas">Perguntas do BIA</a>
+              </div>
+            </div>
+            <div class="nav-sub" data-sub="configuracoes/indicadores">
+              <button type="button" class="nav-sub-label" aria-expanded="false"><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="rot">Indicadores</span></button>
+              <div class="nav-sub-itens">
+                <a href="#indicadores-cadastro" class="nav-link" data-page="indicadores-cadastro">Cadastro de Indicadores</a>
+              </div>
+            </div>
+            <div class="nav-sub" data-sub="configuracoes/fornecedores">
+              <button type="button" class="nav-sub-label" aria-expanded="false"><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="rot">Fornecedores</span></button>
+              <div class="nav-sub-itens">
+                <a href="#fornecedores-categorias" class="nav-link" data-page="fornecedores-categorias">Categorias de Fornecedores</a>
+                <a href="#fornecedores-subcategorias" class="nav-link" data-page="fornecedores-subcategorias">Subcategorias de Fornecedores</a>
+                <a href="#fornecedores-criterios" class="nav-link" data-page="fornecedores-criterios">Critérios de Avaliação</a>
+                <a href="#fornecedores-criticidade" class="nav-link" data-page="fornecedores-criticidade">Perguntas de Criticidade</a>
+              </div>
+            </div>
+            <div class="nav-sub" data-sub="configuracoes/contratos">
+              <button type="button" class="nav-sub-label" aria-expanded="false"><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="rot">Contratos</span></button>
+              <div class="nav-sub-itens">
+                <a href="#contratos-tipos" class="nav-link" data-page="contratos-tipos">Tipos de Contrato</a>
+                <a href="#contratos-status" class="nav-link" data-page="contratos-status">Status de Contrato</a>
+                <a href="#contratos-indexadores" class="nav-link" data-page="contratos-indexadores">Indexadores de Reajuste</a>
+              </div>
+            </div>
+            <div class="nav-sub" data-sub="configuracoes/servicos">
+              <button type="button" class="nav-sub-label" aria-expanded="false"><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg><span class="rot">Serviços</span></button>
+              <div class="nav-sub-itens">
+                <a href="#catalogo-backup-ferramentas" class="nav-link" data-page="catalogo-backup-ferramentas">Ferramentas de Backup</a>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="nav-group" data-group="administracao">
+          <button type="button" class="nav-group-label" aria-expanded="false" title="Administração"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><span class="rot">Administração</span><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
+          <div class="nav-itens">
+            <a href="#perfis" class="nav-link" data-page="perfis">Perfis de Acesso</a>
+            <a href="#notificacoes-email" class="nav-link" data-page="notificacoes-email">Notificações por e-mail</a>
+          </div>
+        </div>
+      </nav>
+    </div>
+    <button type="button" class="menu-recolher" data-menu-recolher aria-label="Recolher menu" title="Recolher menu"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg><span class="rot">Recolher menu</span></button>
+  </aside>
+  <div class="menu-veu" id="menuVeu"></div>
 
   <div id="app"></div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -136,12 +184,13 @@
   <script src="conformidade-continuidade.js?v=1"></script>
   <script src="api-legacy.js?v=6"></script>
   <script src="api.js?v=79"></script>
+  <script src="menu-lateral.js?v=1"></script>
   <script>
     if (!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
     const auth = firebase.auth();
     const DOMINIO = 'fortestecnologia.com.br';
 
-    // Busca de telas no menu superior -- le os proprios .nav-link[data-page]
+    // Busca de telas no menu lateral -- le os proprios .nav-link[data-page]
     // ja renderizados (mesmo rotulo, mesma restricao de permissao que ja
     // escondeu os que esse perfil nao pode ver mais abaixo), sem duplicar
     // essa lista em outro lugar.
@@ -164,7 +213,9 @@
         .map(el => ({
           page: el.dataset.page,
           label: el.textContent.trim(),
-          grupo: (el.closest('.nav-group').querySelector('.nav-group-label').textContent || '').replace('▾', '').trim(),
+          // "Riscos e Vulnerabilidades › Riscos": grupo e subnível do menu lateral.
+          grupo: [el.closest('.nav-group'), el.closest('.nav-sub')].filter(Boolean)
+            .map((x) => x.querySelector('.rot').textContent.trim()).join(' › '),
         }));
     }
     window.filtrarNavBusca = () => {
@@ -248,45 +299,10 @@
       // União dos perfis (USER_PERFIS), igual ao route(): com só o 1º perfil,
       // quem tem 2+ perfis via menu/busca incompletos.
       if (!Perfis.ehAdmin(window.USER_PERFIS)) {
-        document.querySelectorAll('.nav-link[data-page]').forEach(el => {
-          if (!Perfis.podeVerTela(window.USER_PERFIS, el.dataset.page)) el.style.display = 'none';
-        });
-        // Esconder grupos do menu que ficaram sem nenhum item visível
-        document.querySelectorAll('.nav-group').forEach(g => {
-          const temItemVisivel = Array.from(g.querySelectorAll('.nav-link')).some(a => a.style.display !== 'none');
-          if (!temItemVisivel) g.style.display = 'none';
-        });
-        // Separador "Configuração" sem nenhum item visível abaixo dele também some.
-        document.querySelectorAll('.nav-secao').forEach(sec => {
-          let el = sec.nextElementSibling, temItemVisivel = false;
-          while (el && !el.classList.contains('nav-secao')) {
-            if (el.classList.contains('nav-link') && el.style.display !== 'none') temItemVisivel = true;
-            el = el.nextElementSibling;
-          }
-          if (!temItemVisivel) sec.style.display = 'none';
-        });
-      }
-      // Abrir/fechar submenu por clique (alem do hover), e fechar ao clicar fora
-      document.querySelectorAll('.nav-group-label').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const grupo = btn.closest('.nav-group');
-          const jaAberto = grupo.classList.contains('open');
-          _fecharGruposDoMenu();
-          if (!jaAberto) {
-            grupo.classList.add('open');
-            btn.setAttribute('aria-expanded', 'true');
-          }
-        });
-      });
-      function _fecharGruposDoMenu() {
-        document.querySelectorAll('.nav-group.open').forEach(g => {
-          g.classList.remove('open');
-          g.querySelector('.nav-group-label').setAttribute('aria-expanded', 'false');
-        });
+        // Esconde as telas fora do perfil e os subníveis/grupos que ficaram vazios (menu-lateral.js).
+        MenuLateral.aplicarPerfil((page) => Perfis.podeVerTela(window.USER_PERFIS, page));
       }
       document.addEventListener('click', (e) => {
-        _fecharGruposDoMenu();
         if (!e.target.closest('#navBuscaWrap')) {
           document.getElementById('navBuscaResultados').classList.remove('open');
         }
@@ -306,6 +322,6 @@
       if (window._routePendente) route();
     });
   </script>
-  <script src="app.js?v=226"></script>
+  <script src="app.js?v=227"></script>
 </body>
 </html>

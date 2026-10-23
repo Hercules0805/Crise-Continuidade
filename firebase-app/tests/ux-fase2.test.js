@@ -10,22 +10,17 @@ const Perfis = require('../public/perfis.js');
 const INDEX = fs.readFileSync(path.join(PUB, 'index.html'), 'utf8');
 const APP = fs.readFileSync(path.join(PUB, 'app.js'), 'utf8');
 
+// Menu lateral (DECISÃO 23/10/2026): grupos > (subníveis) > telas.
 function menu() {
   const doc = new JSDOM(INDEX).window.document;
-  return Array.from(doc.querySelectorAll('.nav-group')).map((g) => {
-    const itens = [];
-    let secao = 'operacao';
-    // Grupo dividido em seções temáticas (Riscos: Vulnerabilidades e Riscos): o
-    // separador abre uma seção com nome; só "Configuração" é configuração.
-    let tema = '';
-    Array.from(g.querySelector('.nav-dropdown').children).forEach((el) => {
-      if (el.classList.contains('nav-secao')) {
-        tema = el.textContent.trim();
-        secao = tema === 'Configuração' ? 'configuracao' : 'operacao';
-      } else itens.push({ page: el.dataset.page, rotulo: el.textContent.trim(), secao, tema });
-    });
-    return { grupo: g.dataset.group, itens };
-  });
+  return Array.from(doc.querySelectorAll('#menuLateral .nav-group')).map((g) => ({
+    grupo: g.dataset.group,
+    rodape: !!g.closest('.menu-rodape'),
+    itens: Array.from(g.querySelectorAll('.nav-link')).map((a) => {
+      const sub = a.closest('.nav-sub');
+      return { page: a.dataset.page, rotulo: a.textContent.trim(), sub: sub ? sub.querySelector('.rot').textContent.trim() : '' };
+    }),
+  }));
 }
 
 test('tela inicial e uma escolha explicita por perfil', () => {
@@ -57,49 +52,42 @@ test('Gestor sem area comeca em Processos (o Dashboard fica bloqueado para ele)'
   w.close();
 });
 
-test('menu: grupos na ordem, tela principal primeiro, alfabetico dentro de cada secao', () => {
+test('menu lateral: operacao primeiro (continuidade no topo), configuracao e administracao no rodape', () => {
   const m = menu();
-  // Ordem dos grupos (um modulo ainda nao publicado simplesmente nao aparece).
-  const ORDEM = ['continuidade', 'riscos', 'indicadores', 'fornecedores', 'contratos', 'servicos', 'administracao'];
-  assert.deepStrictEqual(m.map((g) => g.grupo), ORDEM.filter((g) => m.some((x) => x.grupo === g)));
-  assert.ok(m.length >= 6);
-  // Riscos e dividido em duas secoes tematicas (sem tela "principal" do grupo):
-  // a regra "principal primeiro" vale dentro de cada secao, e a ordem e alfabetica.
-  const principal = { continuidade: 'admin', indicadores: 'indicadores-dashboard', fornecedores: 'fornecedores', contratos: 'contratos', servicos: 'servicos' };
-  for (const g of m) {
-    if (principal[g.grupo]) assert.strictEqual(g.itens[0].page, principal[g.grupo], g.grupo + ': principal primeiro');
-    const temas = [...new Set(g.itens.map((i) => i.tema))];
-    for (const tema of temas) {
-      let nomes = g.itens.filter((i) => i.tema === tema).map((i) => i.rotulo);
-      if (tema === '' && principal[g.grupo]) nomes = nomes.slice(1);
-      const ordenado = [...nomes].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-      assert.deepStrictEqual(nomes, ordenado, `${g.grupo}/${tema || 'operacao'} em ordem alfabetica`);
-    }
-  }
+  assert.deepStrictEqual(m.map((g) => g.grupo), ['continuidade', 'riscos', 'terceiros', 'servicos', 'indicadores', 'configuracoes', 'administracao']);
+  assert.deepStrictEqual(m.filter((g) => g.rodape).map((g) => g.grupo), ['configuracoes', 'administracao']);
+  // Ordem de uso do módulo: painel/tela principal primeiro.
+  const principal = { continuidade: 'admin', terceiros: 'fornecedores', servicos: 'servicos', indicadores: 'indicadores-dashboard' };
+  for (const g of m) if (principal[g.grupo]) assert.strictEqual(g.itens[0].page, principal[g.grupo], g.grupo + ': principal primeiro');
+  assert.deepStrictEqual(m.find((g) => g.grupo === 'continuidade').itens.map((i) => i.page),
+    ['admin', 'conformidade', 'processos', 'pcns', 'drp', 'dependencias', 'mapa', 'relatorios']);
 });
 
-test('menu Riscos: telas de vulnerabilidade primeiro, depois as de risco', () => {
+test('menu Riscos e Vulnerabilidades: subnivel Riscos primeiro, depois Vulnerabilidades', () => {
   const g = menu().find((x) => x.grupo === 'riscos');
-  assert.deepStrictEqual(g.itens.map((i) => [i.tema, i.page]), [
-    ['Vulnerabilidades', 'vulnerabilidades-painel'],
-    ['Vulnerabilidades', 'vulnerabilidades-relatorio'],
-    ['Vulnerabilidades', 'vulnerabilidades'],
+  assert.deepStrictEqual(g.itens.map((i) => [i.sub, i.page]), [
     ['Riscos', 'riscos'],
-    ['Riscos', 'riscos-relatorio'],
     ['Riscos', 'monitor'],
+    ['Riscos', 'riscos-relatorio'],
+    ['Vulnerabilidades', 'vulnerabilidades-painel'],
+    ['Vulnerabilidades', 'vulnerabilidades'],
+    ['Vulnerabilidades', 'vulnerabilidades-relatorio'],
   ]);
 });
 
-test('menu: cadastros de configuracao ficam sob o separador "Configuracao"', () => {
-  const secao = {};
-  menu().forEach((g) => g.itens.forEach((i) => { secao[i.page] = i.secao; }));
-  for (const p of ['areas', 'pessoas', 'perguntas', 'indicadores-cadastro', 'fornecedores-categorias', 'fornecedores-subcategorias',
-    'fornecedores-criterios', 'fornecedores-criticidade', 'contratos-tipos', 'contratos-status', 'contratos-indexadores']) {
-    if (secao[p] !== undefined) assert.strictEqual(secao[p], 'configuracao', p);
-  }
-  for (const p of ['admin', 'processos', 'riscos', 'fornecedores', 'contratos', 'indicadores-dashboard']) {
-    if (secao[p] !== undefined) assert.strictEqual(secao[p], 'operacao', p);
-  }
+test('menu: todos os cadastros de configuracao ficam em Configuracoes, por modulo', () => {
+  const g = menu().find((x) => x.grupo === 'configuracoes');
+  assert.deepStrictEqual(g.itens.map((i) => [i.sub, i.page]), [
+    ['Organização', 'areas'], ['Organização', 'pessoas'], ['Organização', 'produtos-software'],
+    ['Continuidade', 'perguntas'],
+    ['Indicadores', 'indicadores-cadastro'],
+    ['Fornecedores', 'fornecedores-categorias'], ['Fornecedores', 'fornecedores-subcategorias'],
+    ['Fornecedores', 'fornecedores-criterios'], ['Fornecedores', 'fornecedores-criticidade'],
+    ['Contratos', 'contratos-tipos'], ['Contratos', 'contratos-status'], ['Contratos', 'contratos-indexadores'],
+    ['Serviços', 'catalogo-backup-ferramentas'],
+  ]);
+  const operacao = menu().filter((x) => !x.rodape).flatMap((x) => x.itens.map((i) => i.page));
+  for (const p of g.itens.map((i) => i.page)) assert.ok(!operacao.includes(p), p + ' nao repete na operacao');
 });
 
 test('menu: rotulos sem ambiguidade e iguais ao titulo da tela', () => {
