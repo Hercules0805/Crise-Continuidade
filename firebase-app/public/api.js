@@ -2326,7 +2326,7 @@ async function _salvarListaContrato(colecao, extras, c) {
 
 const _CONFIG_NOTIFICACOES_PADRAO = {
   modo: 'desligado',
-  remetenteNome: 'GRC360 · Contratos',
+  remetenteNome: 'BIA · Contratos',
   responderPara: '',
   grupos: { prazos: true, renovacaoReajuste: true, resumoMensal: true },
   destinatarios: { gestor: true, area: true, operadores: true },

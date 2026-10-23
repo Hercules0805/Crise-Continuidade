@@ -156,7 +156,7 @@ function route() {
   // Título da aba do navegador = rótulo da tela no menu (o mesmo título da página),
   // lido do próprio menu para não manter outra lista de nomes.
   const linkAtivo = Array.from(document.querySelectorAll('.nav-link')).find((l) => l.dataset.page === page);
-  document.title = linkAtivo ? `${linkAtivo.textContent.trim()} · GRC360` : 'GRC360';
+  document.title = linkAtivo ? `${linkAtivo.textContent.trim()} · BIA` : 'BIA';
 
   // Menu escondido nao e permissao. Sem esta guarda, digitar #processos na barra
   // de endereco abria a tela para quem nao deveria ve-la — as regras do banco
@@ -2170,7 +2170,7 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
 
   html += '<div class="header"><div>'
     + '<img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display=\'none\'">'
-    + '<div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>'
+    + '<div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">BIA · Governança, Riscos e Conformidade</div>'
     + '<h1>Relatório de Vínculos — ' + esc(nome) + '</h1>'
     + '<div class="sub">' + esc(pessoa.detalhes || '-') + ' • ' + new Date().toLocaleDateString('pt-BR') + ' • Fortes Tecnologia</div>'
     + '</div><button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button></div>';
@@ -2382,7 +2382,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#222;background:#f5f6fa;paddi
 <div class="org-header">
   <div>
     <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
-    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">BIA · Governança, Riscos e Conformidade</div>
     <h1>${esc(titulo)}</h1>
     <div class="sub">${total} pessoa${total === 1 ? '' : 's'} • ${new Date().toLocaleDateString('pt-BR')} • Fortes Tecnologia</div>
   </div>
@@ -4157,7 +4157,7 @@ window.imprimirAvaliacao = () => {
   }).join('');
 
   const janela = window.open('', '_blank');
-  janela.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>GRC360 - ${titulo}</title>
+  janela.document.write(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>BIA - ${titulo}</title>
     <style>body{font-family:Arial,sans-serif;max-width:900px;margin:0 auto;padding:32px;color:#1a1a2e;}h1{color:#d60014;font-size:20px;margin-bottom:4px;}.rodape{margin-top:32px;text-align:center;font-size:11px;color:#999;border-top:1px solid #eee;padding-top:16px;}@media print{body{padding:16px;}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}}</style>
     </head><body>
     <h1>${titulo}</h1>
@@ -4170,7 +4170,7 @@ window.imprimirAvaliacao = () => {
       <div><div style="font-size:14px;font-weight:600;">Score Total</div></div>
       <div style="text-align:right;"><div style="font-size:36px;font-weight:700;">${scoreTotal}</div><div style="background:rgba(255,255,255,0.2);padding:4px 14px;border-radius:20px;font-weight:700;font-size:13px;">${scoreTier}</div></div>
     </div>
-    <div class="rodape">Relatório gerado pelo Sistema GRC360 &middot; Fortes Tecnologia &middot; ${new Date().toLocaleDateString('pt-BR')}</div>
+    <div class="rodape">Relatório gerado pelo Sistema BIA &middot; Fortes Tecnologia &middot; ${new Date().toLocaleDateString('pt-BR')}</div>
     <script>window.onload=()=>{window.print();}<\/script></body></html>`);
   janela.document.close();
 };
@@ -4985,7 +4985,7 @@ function _buildRoteiroTestePage(categoria, versoesDaCategoria, versaoAtual, dep,
     <div class="header">
       <div>
         <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
-        <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+        <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">BIA · Governança, Riscos e Conformidade</div>
         <h1>Roteiro de Teste — ${esc(categoria)}</h1>
         <div class="sub">${esc(dep && dep.nome || '')} • ${esc(versaoAtual.autor || '')} • ${versaoAtual.data ? new Date(versaoAtual.data).toLocaleString('pt-BR') : ''} • Fortes Tecnologia</div>
       </div>
@@ -6315,7 +6315,7 @@ td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
 <div class="header">
   <div>
     <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
-    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">BIA · Governança, Riscos e Conformidade</div>
     <h1>Processos por Área</h1>
     <div class="sub">${nAreas} área${nAreas === 1 ? '' : 's'} • ${totalProcessos} processo${totalProcessos === 1 ? '' : 's'} • ${new Date().toLocaleDateString('pt-BR')} • Fortes Tecnologia</div>
   </div>
@@ -7469,7 +7469,7 @@ function _cabecalhoDocumentoExecutivo(titulo, subtitulo, comBotao) {
   return `<div class="header">
   <div>
     <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
-    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">BIA · Governança, Riscos e Conformidade</div>
     <h1>${esc(titulo)}</h1>
     <div class="sub">${esc(subtitulo)}</div>
     <span class="classificacao">Classificação: Uso Interno</span>
@@ -7533,7 +7533,7 @@ ${blocoIA}
 <div class="bloco"><h3>Destaques</h3>${(destaques || []).length ? `<ul class="lista">${destaques.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : '<p class="vazio">Sem dados suficientes.</p>'}</div>
 ${(secoes || []).map((s, i) => `<div class="secao"><span class="num">${i + 1}</span>${esc(s.titulo)}<span class="ref">${esc(s.ref || '')}</span></div>${s.html}`).join('\n')}
 ${(notas || []).length ? `<div class="secao" style="border-bottom-color:#eee;">Notas metodológicas</div><div class="bloco notas"><ul class="lista">${notas.map((n) => `<li>${esc(n)}</li>`).join('')}</ul></div>` : ''}
-<div class="footer">Gerado em ${esc(quando)} por ${esc(geradoPor)} • GRC360 • Fortes Tecnologia</div>
+<div class="footer">Gerado em ${esc(quando)} por ${esc(geradoPor)} • BIA • Fortes Tecnologia</div>
 </div></body></html>`;
 }
 
@@ -8135,7 +8135,7 @@ td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
 <div class="header">
   <div>
     <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
-    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">BIA · Governança, Riscos e Conformidade</div>
     <h1>Processos por Dependência</h1>
     <div class="sub">${total} dependência${total === 1 ? '' : 's'} no catálogo • ${new Date().toLocaleDateString('pt-BR')} • Fortes Tecnologia</div>
   </div>
@@ -17590,7 +17590,7 @@ window.gerarDossieProcesso = async () => {
   const servicosDossie = await API.getServicos().catch(() => []);
   const drpItens = CadeiaDependencias.cadeiaDoProcesso({ processo: p, dependencias: catalogo, servicos: servicosDossie });
   win.document.write('<html><head><title>Dossiê - ' + p.processo + '</title><style>:root{--risk-critical:#d60014;--risk-high:#b64a12;--risk-medium:#9a6700;--risk-low:#38bb0e}body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6}h1{color:#d60014}h2{color:#d60014;border-bottom:2px solid #fce8ea;padding-bottom:6px;margin-top:24px}table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt}th{background:#d60014;color:white;padding:8px 10px;text-align:left}td{padding:7px 10px;border:1px solid #e0e0e0}.badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:9pt;font-weight:700;color:white;background:' + Criticidade.corDoTier(tier) + '}.header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px}.header .sub{font-size:9pt;color:#888;margin-top:4px;font-weight:400}.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}.btn-print:hover{opacity:.9}@media print{.btn-print{display:none!important}}</style></head><body>');
-  win.document.write('<div class="header"><div><img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display=\'none\'"><div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div><h1>' + p.processo + '</h1><div class="sub">' + p.area + ' — ' + responsavel + ' • ' + new Date().toLocaleDateString('pt-BR') + ' • Fortes Tecnologia</div></div><button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button></div><span class="badge">' + tier + ' • Score ' + score + '</span>');
+  win.document.write('<div class="header"><div><img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display=\'none\'"><div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">BIA · Governança, Riscos e Conformidade</div><h1>' + p.processo + '</h1><div class="sub">' + p.area + ' — ' + responsavel + ' • ' + new Date().toLocaleDateString('pt-BR') + ' • Fortes Tecnologia</div></div><button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button></div><span class="badge">' + tier + ' • Score ' + score + '</span>');
   win.document.write('<h2>Identificação</h2><p><b>Descrição:</b> ' + (p.descricaoFuncional || '-') + '</p>');
   win.document.write('<h2>BIA</h2><p><b>Status:</b> ' + (p.biaHomologada || '-') + '</p><p><b>Impacto:</b> ' + (p.descricao || '-') + '</p><p><b>RTO:</b> ' + (p.rto || '-') + ' | <b>RPO:</b> ' + (p.rpo || '-') + ' | <b>MTD:</b> ' + (p.mtd || '-') + '</p>');
   if (depItens.length) { win.document.write('<h3>Dependências</h3><table><tr><th>Categoria</th><th>Recurso</th><th>Detalhe</th></tr>'); depItens.forEach(function(d) { win.document.write('<tr><td><b>' + d.categoria + '</b></td><td>' + d.nome + '</td><td>' + (d.detalhe || '-') + '</td></tr>'); }); win.document.write('</table>'); }
@@ -17663,7 +17663,7 @@ td{padding:7px 10px;border:1px solid #e0e0e0;vertical-align:top;}
 <div class="header">
   <div>
     <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
-    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">BIA · Governança, Riscos e Conformidade</div>
     <h1>Plano de Ação — ${esc(r.titulo || '')}</h1>
     <div class="sub">${esc(r.area || 'Corporativo')}${r.processo ? ' — ' + esc(r.processo) : (r.fornecedorNome ? ' — 🏢 ' + esc(r.fornecedorNome) : '')} • ${new Date().toLocaleDateString('pt-BR')} • Fortes Tecnologia</div>
   </div>
@@ -24041,7 +24041,7 @@ async function notificacoesEmail() {
           </div>
           <div>
             <label style="${lbl}">Nome do remetente</label>
-            <input type="text" id="notifRemetente" style="${inp}" placeholder="GRC360 · Contratos">
+            <input type="text" id="notifRemetente" style="${inp}" placeholder="BIA · Contratos">
             <div style="font-size:0.74em;color:#888;margin-top:4px;">Nome exibido na caixa de entrada. O endereço é o do campo "E-mail do remetente", em Servidor de envio.</div>
             <label style="${lbl}margin-top:12px;">Responder para (opcional)</label>
             <input type="email" id="notifResponderPara" style="${inp}" placeholder="contratos@fortestecnologia.com.br">

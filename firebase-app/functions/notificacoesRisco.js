@@ -26,7 +26,7 @@ const E = require('./escalaRisco');
 const TIPO = { NOVO: 'novo', ENCERRADO: 'encerrado' };
 const ENCERRADO = 'Encerrado';
 const PREFIXO_AUTOMACAO = 'automacao:';
-const REMETENTE = 'GRC360 · Riscos';
+const REMETENTE = 'BIA · Riscos';
 
 function _encerrado(r) {
   return !!r && String(r.status || '') === ENCERRADO;
@@ -175,8 +175,8 @@ function montarEmailRisco(risco, evento, opts) {
     N._cabecalhoHtml(novo ? 'Novo risco registrado' : 'Risco encerrado')
     + `<p style="font-size:15px;">${N.esc(frase)}</p>` + tabela
     + '<p>A descrição, o plano de ação e a avaliação completa ficam no sistema.</p>'
-    + N._botao(url, 'Abrir no GRC360'), rodape);
-  const texto = [frase, '', ...linhas.map(([k, v]) => `${k}: ${v}`), '', `Abrir no GRC360: ${url}`, '', rodape].join('\n');
+    + N._botao(url, 'Abrir no BIA'), rodape);
+  const texto = [frase, '', ...linhas.map(([k, v]) => `${k}: ${v}`), '', `Abrir no BIA: ${url}`, '', rodape].join('\n');
   return { assunto, html, texto };
 }
 

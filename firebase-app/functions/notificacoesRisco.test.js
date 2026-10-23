@@ -132,7 +132,7 @@ test('envio: remetenteNome do documento da fila prevalece sobre o da configuraca
   const doc = { status: 'pendente', para: 'a@fortestecnologia.com.br', assunto: 's', html: 'h', texto: 't', remetenteNome: R.REMETENTE };
   const patch = await N.processarEnvio(doc, { modo: 'ativo' }, async (m) => { msg = m; });
   assert.strictEqual(patch.status, 'enviado');
-  assert.strictEqual(msg.de, 'GRC360 · Riscos');
+  assert.strictEqual(msg.de, 'BIA · Riscos');
   await N.processarEnvio(Object.assign({}, doc, { remetenteNome: '' }), { modo: 'ativo' }, async (m) => { msg = m; });
-  assert.strictEqual(msg.de, 'GRC360 · Contratos');
+  assert.strictEqual(msg.de, 'BIA · Contratos');
 });

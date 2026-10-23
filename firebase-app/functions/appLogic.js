@@ -1733,10 +1733,10 @@ async function enviarEmailTeste(db, data, ctx) {
       de: config.remetenteNome,
       para: ctx.email,
       responderPara: config.responderPara,
-      assunto: '[Contratos] E-mail de teste do GRC360',
-      texto: `Este é um e-mail de teste dos alertas de contratos do GRC360.\n\n`
+      assunto: '[Contratos] E-mail de teste do BIA',
+      texto: `Este é um e-mail de teste dos alertas de contratos do BIA.\n\n`
         + `Se ele chegou, a conta de envio está configurada. Modo atual: ${config.modo}.\n\n${url}`,
-      html: `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#2a2623;"><p><strong>E-mail de teste dos alertas de contratos do GRC360.</strong></p>`
+      html: `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#2a2623;"><p><strong>E-mail de teste dos alertas de contratos do BIA.</strong></p>`
         + `<p>Se ele chegou, a conta de envio está configurada. Modo atual: <strong>${config.modo}</strong>.</p>`
         + `<p><a href="${url}" style="color:#d60014;">Abrir a tela de Contratos</a></p></div>`,
     });

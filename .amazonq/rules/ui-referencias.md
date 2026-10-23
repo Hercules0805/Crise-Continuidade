@@ -68,6 +68,24 @@ Segunda geração do design system: **superfície clara e neutra-quente, vermelh
 | `--on-brand` | `#fff` | Texto sobre fundo `--brand` (nav, thead, botão primário) |
 
 ### Logo (`window.GRC360.Logo({height, tone, tagline})`, `vendor/grc360/bundle.js`)
+**DECISÃO 23/10/2026 — o sistema volta a se chamar BIA** (pedido do usuário; protótipo em
+`layout/marca-bia/prototipo.html`). Mesma tipografia escura e pesada do logo GRC360, **sem o anel**:
+só o nome **"BIA"**, com a letra **B no vermelho da marca** (`#d50014`) e "IA" em `#2b2b2b`
+(branco na versão `-branco`; o B continua vermelho). Tagline mantida: "GOVERNANÇA · RISCO ·
+COMPLIANCE". Arquivos (PNG transparente, 2x, gerados num canvas com Open Sans 800):
+`bia-logo.png` (com tagline, 841×225), `bia-logo-simbolo.png` (só o nome, 336×151), versões
+`-branco` e `bia-favicon.png` (128×128, o B vermelho). `Logo()`: `height` = altura do nome "BIA";
+largura = `height × 336/151` (só o nome) ou `height × 841/151` (com tagline); `alt="BIA"`.
+- **Texto visível** diz "BIA" (aba do navegador `Tela · BIA`, cabeçalho de documento
+  "BIA · Governança, Riscos e Conformidade", rodapé "Sistema BIA", e-mails `[BIA]`, "Abrir no BIA",
+  remetentes "BIA · Contratos/Riscos/Continuidade"). **Nomes internos ficam GRC360 de propósito**
+  (namespace `window.GRC360`, pasta `vendor/grc360/`, constantes `GRC360_*`, tokens): ninguém os
+  vê, e renomear só traria risco. Guarda: `tests/marca-bia.test.js`.
+- Os `grc360-logo*.png` e `grc360-favicon.png` antigos continuam na pasta (e-mails já enviados).
+- Remetente salvo na configuração de Notificações antes da troca ("GRC360 · Contratos") continua
+  até alguém editar o campo na tela Notificações por e-mail.
+
+**Histórico (substituído acima):**
 **DECISÃO 04/10/2026 (versão final)**: a logo é a **imagem oficial de referência** da marca
 (texto `--ink` escuro + "0" como **anel vermelho** `--brand`, tagline "GOVERNANÇA · RISCO ·
 COMPLIANCE" abaixo), não mais um SVG com fonte do sistema (a versão com disco cheio foi
@@ -348,7 +366,7 @@ Processo, visualizadores de PCN e DRP) leva a logo real da Fortes Tecnologia no
 cabeçalho, não só o nome em texto:
 ```html
 <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
-<div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">GRC360 · Governança, Riscos e Conformidade</div>
+<div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">BIA · Governança, Riscos e Conformidade</div>
 ```
 - **URL sempre absoluta** (`https://bia-forte-2025.web.app/...`), nunca relativa — esses
   documentos abrem com base `about:blank`, um caminho relativo dá 404. A URL continua
@@ -356,7 +374,7 @@ cabeçalho, não só o nome em texto:
   visual — ver DECISÃO 04/10/2026 no topo da seção de cores).
 - **Sempre com `onerror` escondendo a própria tag** — no ambiente sem acesso ao domínio
   (teste local/offline), o relatório continua funcionando, só sem a imagem.
-- **A linha "GRC360 · Governança, Riscos e Conformidade" logo abaixo da logo é
+- **A linha "BIA · Governança, Riscos e Conformidade" (era "GRC360 ·…" até 23/10/2026) logo abaixo da logo é
   obrigatória** — o nome do sistema, não só a marca da Fortes Tecnologia (mesmo texto
   do `.nav-brand` em `index.html`, só que em linha única em vez de duas). Fica entre a
   logo e o `h1` do próprio documento (que é o título do relatório em si, ex.

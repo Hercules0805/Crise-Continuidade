@@ -42,7 +42,7 @@ const STATUS = {
 
 const CONFIG_PADRAO = {
   modo: MODO.DESLIGADO,
-  remetenteNome: 'GRC360 · Contratos',
+  remetenteNome: 'BIA · Contratos',
   responderPara: '',
   grupos: { prazos: true, renovacaoReajuste: true, resumoMensal: true },
   destinatarios: { gestor: true, area: true, operadores: true },
@@ -279,7 +279,7 @@ function _textoEvento(ev, c) {
 function _cabecalhoHtml(titulo) {
   return `<div style="border-bottom:3px solid #d60014;padding-bottom:10px;margin-bottom:18px;">
   <img src="${URL_BASE_PADRAO}/logo_fortes.png" style="height:34px;display:block;margin-bottom:4px;" alt="Fortes Tecnologia">
-  <div style="font-size:12px;color:#d60014;font-weight:700;letter-spacing:0.3px;">GRC360 · Governança, Riscos e Conformidade</div>
+  <div style="font-size:12px;color:#d60014;font-weight:700;letter-spacing:0.3px;">BIA · Governança, Riscos e Conformidade</div>
   <h1 style="font-size:20px;color:#2a2623;margin:10px 0 0;">${esc(titulo)}</h1>
 </div>`;
 }
@@ -288,7 +288,7 @@ function _envelopeHtml(conteudo, rodape) {
   return `<!doctype html><html><body style="margin:0;background:#f6f4f2;">
 <div style="max-width:640px;margin:0 auto;background:#ffffff;padding:24px;font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:20px;color:#2a2623;">
 ${conteudo}
-<p style="font-size:12px;color:#888;border-top:1px solid #eee;padding-top:12px;margin-top:24px;">${esc(rodape)} E-mail automático do GRC360 — não responda a este endereço, a não ser que ele indique outro para resposta.</p>
+<p style="font-size:12px;color:#888;border-top:1px solid #eee;padding-top:12px;margin-top:24px;">${esc(rodape)} E-mail automático do BIA — não responda a este endereço, a não ser que ele indique outro para resposta.</p>
 </div></body></html>`;
 }
 
@@ -441,15 +441,15 @@ function montarEmailRelatorioCompartilhado(c, opts) {
   const recorte = x.area ? ` Você recebe a versão com os riscos da área ${x.area}.` : '';
   const frase = `${x.compartilhadoPor || 'A equipe de Segurança da Informação'} compartilhou com você o ${titulo} (edição de ${edicao}).${recorte}`;
   const mensagem = String(x.mensagem || '').trim();
-  const assunto = `[GRC360] ${titulo} compartilhado com você`;
-  const rodape = 'Você recebe este e-mail porque um relatório do GRC360 foi compartilhado com você. Ele fica disponível no sistema enquanto não for revogado.';
+  const assunto = `[BIA] ${titulo} compartilhado com você`;
+  const rodape = 'Você recebe este e-mail porque um relatório do BIA foi compartilhado com você. Ele fica disponível no sistema enquanto não for revogado.';
   const html = _envelopeHtml(
     _cabecalhoHtml('Relatório compartilhado com você')
     + `<p style="font-size:15px;">${esc(frase)}</p>`
     + (mensagem ? `<blockquote style="margin:12px 0;padding:8px 14px;border-left:3px solid #d60014;background:#f6f4f2;white-space:pre-line;">${esc(mensagem)}</blockquote>` : '')
     + '<p>O relatório abre dentro do sistema, em "Compartilhados com você".</p>'
-    + _botao(url, 'Abrir no GRC360'), rodape);
-  const texto = [frase, '', mensagem ? `Mensagem: ${mensagem}` : '', '', `Abrir no GRC360: ${url}`, '', rodape].filter((l, i, a) => l || a[i - 1]).join('\n');
+    + _botao(url, 'Abrir no BIA'), rodape);
+  const texto = [frase, '', mensagem ? `Mensagem: ${mensagem}` : '', '', `Abrir no BIA: ${url}`, '', rodape].filter((l, i, a) => l || a[i - 1]).join('\n');
   return { assunto, html, texto };
 }
 
@@ -472,7 +472,7 @@ async function processarEnvio(doc, config, enviar) {
   const tentativas = (Number(d.tentativas) || 0) + 1;
   try {
     await enviar({
-      // O documento pode trazer o proprio nome de remetente ("GRC360 · Riscos").
+      // O documento pode trazer o proprio nome de remetente ("BIA · Riscos").
       de: String(d.remetenteNome || '').trim() || cfg.remetenteNome, para: d.para, responderPara: cfg.responderPara,
       assunto: d.assunto, html: d.html, texto: d.texto,
     });

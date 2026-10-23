@@ -21,7 +21,7 @@ const CC = require('./conformidadeContinuidade');
 const cadeiaDependencias = require('./cadeiaDependencias');
 const { calcularTier } = require('./tokenLogic');
 
-const REMETENTE = 'GRC360 · Continuidade';
+const REMETENTE = 'BIA · Continuidade';
 const PERFIL_OPERADOR_PROCESSOS = 'operador_processos';
 const MAX_ITENS_EMAIL = 40;
 
@@ -165,7 +165,7 @@ function montarResumoContinuidade(pendencias, opts) {
   }
   const url = linkConformidade(o.baseUrl);
   html += N._botao(url, 'Abrir a Conformidade de Continuidade');
-  textoLinhas.push(`Abrir no GRC360: ${url}`, '');
+  textoLinhas.push(`Abrir no BIA: ${url}`, '');
   const rodape = _textoMotivos(o.motivos);
   textoLinhas.push(rodape);
   return { assunto, html: N._envelopeHtml(html, rodape), texto: textoLinhas.join('\n') };

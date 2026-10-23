@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>GRC360</title>
-  <link rel="icon" type="image/png" href="vendor/grc360/grc360-favicon.png">
+  <title>BIA</title>
+  <link rel="icon" type="image/png" href="vendor/grc360/bia-favicon.png">
   <link rel="stylesheet" href="vendor/grc360/tokens.css?v=1">
   <link rel="stylesheet" href="vendor/grc360/bundle.css?v=1">
-  <script src="vendor/grc360/bundle.js?v=4"></script>
+  <script src="vendor/grc360/bundle.js?v=5"></script>
   <!-- GRC360 v2 (layout/lay-v2): tokens depois do pacote v1 e antes de styles.css; fonte Open Sans (confirmar a oficial) -->
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700&display=swap">
   <link rel="stylesheet" href="vendor/grc360/tokens-v2.css?v=1">
@@ -16,7 +16,7 @@
 <body>
   <header class="topo">
     <button type="button" class="topo-menu" data-menu-recolher aria-label="Recolher menu" title="Recolher menu"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
-    <div class="nav-brand" title="GRC360 · Governança, Riscos e Conformidade"><span id="nav-logo"></span></div>
+    <div class="nav-brand" title="BIA · Governança, Riscos e Conformidade"><span id="nav-logo"></span></div>
     <script>document.getElementById('nav-logo').appendChild(window.GRC360.Logo({ height: 28 }));</script>
     <div id="nav-user" style="display:flex;align-items:center;gap:12px;margin-left:auto;padding:0 8px;"></div>
   </header>
@@ -183,7 +183,7 @@
   <script src="mapa-continuidade.js?v=9"></script>
   <script src="conformidade-continuidade.js?v=1"></script>
   <script src="api-legacy.js?v=6"></script>
-  <script src="api.js?v=79"></script>
+  <script src="api.js?v=80"></script>
   <script src="menu-lateral.js?v=1"></script>
   <script>
     if (!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
@@ -322,6 +322,6 @@
       if (window._routePendente) route();
     });
   </script>
-  <script src="app.js?v=227"></script>
+  <script src="app.js?v=228"></script>
 </body>
 </html>

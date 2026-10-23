@@ -132,6 +132,6 @@ test('titulo da aba do navegador acompanha a tela', () => {
   w.USER_PERFIS = ['admin'];
   w._perfilCarregado = true;
   w.route();
-  assert.strictEqual(w.document.title, 'Registro de Riscos · GRC360');
+  assert.strictEqual(w.document.title, 'Registro de Riscos · BIA');
   w.close();
 });

@@ -20,7 +20,7 @@ function falso(erroNoEnvio) {
   return { capturado, deps: { nodemailer } };
 }
 
-const MSG = { de: 'GRC360 · Contratos', para: 'a@fortestecnologia.com.br', assunto: 'Assunto', html: '<p>x</p>', texto: 'x' };
+const MSG = { de: 'BIA · Contratos', para: 'a@fortestecnologia.com.br', assunto: 'Assunto', html: '<p>x</p>', texto: 'x' };
 const SENDGRID = { provedor: 'sendgrid', remetenteEmail: 'Alertas@fortestecnologia.com.br' };
 
 test('SendGrid: smtp.sendgrid.net:587 com STARTTLS, usuario apikey e a API Key como senha', async () => {
@@ -35,7 +35,7 @@ test('SendGrid: From e o remetente verificado (nao "apikey") e o rastreamento de
   const { capturado, deps } = falso();
   await T.criarEnviador({ usuario: 'apikey', senha: 'SG.abc', servidor: SENDGRID }, deps)({ ...MSG, responderPara: 'contratos@fortestecnologia.com.br' });
   const m = capturado.envios[0];
-  assert.strictEqual(m.from, '"GRC360 · Contratos" <alertas@fortestecnologia.com.br>');
+  assert.strictEqual(m.from, '"BIA · Contratos" <alertas@fortestecnologia.com.br>');
   assert.strictEqual(m.replyTo, 'contratos@fortestecnologia.com.br');
   const filtros = JSON.parse(m.headers['X-SMTPAPI']).filters;
   assert.strictEqual(filtros.clicktrack.settings.enable, 0);
@@ -56,7 +56,7 @@ test('Gmail: smtp.gmail.com:465 TLS; sem remetente, o From e a propria conta; se
   assert.strictEqual(capturado.transporte.port, 465);
   assert.strictEqual(capturado.transporte.secure, true);
   assert.strictEqual(capturado.transporte.auth.pass, 'abcdefghijklmnop');
-  assert.strictEqual(capturado.envios[0].from, '"GRC360 · Contratos" <alertas@fortestecnologia.com.br>');
+  assert.strictEqual(capturado.envios[0].from, '"BIA · Contratos" <alertas@fortestecnologia.com.br>');
   assert.strictEqual(capturado.envios[0].headers, undefined, 'cabecalho do SendGrid so no SendGrid');
 });
 

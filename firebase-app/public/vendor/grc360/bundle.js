@@ -11,12 +11,14 @@
 
   var LEVEL_LABEL = { low: 'Baixo', medium: 'Médio', high: 'Alto', critical: 'Crítico' };
 
-  // Logo oficial GRC360 (04/10/2026): usa a imagem de referencia da marca (texto escuro +
-  // anel vermelho no "0"), nao mais um SVG com fonte do sistema. Arquivos em vendor/grc360/:
-  //   grc360-logo(.png|-branco.png)          -> com tagline "GOVERNANCA · RISCO · COMPLIANCE"
-  //   grc360-logo-simbolo(.png|-branco.png)  -> so o simbolo (nav, espacos curtos)
-  // props.height = altura do SIMBOLO em px. props.tagline = true usa a versao com tagline.
-  // tone "on-dark" = versao branca (fundo vermelho/escuro).
+  // Logo BIA (DECISAO 23/10/2026: o sistema volta a se chamar BIA). Mesma tipografia
+  // escura e pesada do logo GRC360, sem o anel: o "B" leva o vermelho da marca.
+  // O namespace GRC360 e a pasta vendor/grc360/ ficam (nomes internos). Arquivos:
+  //   bia-logo(.png|-branco.png)          -> com tagline "GOVERNANCA · RISCO · COMPLIANCE"
+  //   bia-logo-simbolo(.png|-branco.png)  -> so o nome (nav, espacos curtos)
+  // Os grc360-logo*.png antigos continuam na pasta (e-mails ja enviados apontam para eles).
+  // props.height = altura do NOME "BIA" em px. props.tagline = true usa a versao com tagline.
+  // tone "on-dark" = versao branca (o "B" continua vermelho).
   var BASE = (function () {
     var s = document.currentScript && document.currentScript.src;
     return s ? s.replace(/[^\/]*$/, '') : 'vendor/grc360/';
@@ -26,13 +28,14 @@
     props = props || {};
     var height = Number(props.height) || 32;
     var tone = props.tone === 'on-dark' ? 'on-dark' : 'default';
-    var file = 'grc360-logo' + (props.tagline ? '' : '-simbolo') + (tone === 'on-dark' ? '-branco' : '') + '.png';
-    var width = Math.round(height * (428 / 92));
+    var file = 'bia-logo' + (props.tagline ? '' : '-simbolo') + (tone === 'on-dark' ? '-branco' : '') + '.png';
+    // largura da imagem / altura do nome: 336/151 so o nome; 841/151 com a tagline (mais larga)
+    var width = Math.round(height * (props.tagline ? 841 / 151 : 336 / 151));
     var wrap = h('span', 'bia-logo bia-logo--' + tone);
     var img = document.createElement('img');
     img.src = BASE + file;
     img.width = width;
-    img.alt = 'GRC360';
+    img.alt = 'BIA';
     img.style.display = 'block';
     img.style.height = 'auto';
     wrap.appendChild(img);
