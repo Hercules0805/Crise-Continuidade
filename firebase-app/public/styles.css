@@ -594,3 +594,6 @@ button.mm-grupo__rotulo:hover { background: var(--brand-tint); }
 .plano-mark--ok { background: #e8f5e9; color: #2e7d32; }
 .plano-mark--andamento { background: #fff3e0; color: #a15c00; }
 .plano-mark--vazio { background: var(--surface-sunken); color: var(--ink-muted); }
+/* Grades de lista cabendo em ~960px: um pouco menos de respiro lateral e de espaçamento no título. */
+.data-table--lista th, .data-table--lista td { padding-left: 10px; padding-right: 10px; }
+.data-table--lista th { letter-spacing: .04em; }

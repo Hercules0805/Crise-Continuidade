@@ -1706,8 +1706,8 @@ async function pessoas() {
       ] })}
     <div class="loading" id="loadingPessoas">⏳ Carregando...</div>
     <div class="data-table data-table--lista" id="listaPessoas" style="display:none;">
-      <table style="min-width:1080px;">
-        <colgroup><col style="width:210px"><col style="width:140px"><col style="width:180px"><col style="width:170px"><col style="width:140px"><col style="width:250px"><col style="width:92px"></colgroup>
+      <table style="min-width:960px;">
+        <colgroup><col style="width:180px"><col style="width:110px"><col style="width:140px"><col style="width:140px"><col style="width:120px"><col style="width:190px"><col style="width:80px"></colgroup>
         <thead>
           <tr>
             <th onclick="ordenarPessoas('nome')" style="cursor:pointer;">Nome <span id="sort-pessoa-nome"></span></th>
@@ -9713,8 +9713,8 @@ async function catalogoBackup() {
       filtros: [{ id: 'filtroBackupServico', rotulo: 'Serviço', todos: 'Todos', opcoes: [] }] })}
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table data-table--lista" id="listaBackups" style="display:none;">
-      <table style="min-width:1060px;">
-        <colgroup><col style="width:230px"><col style="width:200px"><col style="width:160px"><col style="width:160px"><col style="width:120px"><col style="width:80px"><col style="width:110px"></colgroup>
+      <table style="min-width:910px;">
+        <colgroup><col style="width:200px"><col style="width:170px"><col style="width:130px"><col style="width:140px"><col style="width:100px"><col style="width:60px"><col style="width:110px"></colgroup>
         <thead>
           <tr>
             <th onclick="ordenarCatalogoBackup('nome')" style="cursor:pointer;">Nome <span id="sort-backup-nome"></span></th>
@@ -10965,21 +10965,21 @@ async function vulnerabilidades() {
     ${_htmlDrawerConfigLista('Risco automático a partir de CVSS', 'vulnLimiarBox')}
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table data-table--lista" id="listaVulnerabilidades" style="display:none;">
-      <table style="min-width:1470px;">
+      <!-- 8 colunas que cabem em ~960px (23/10/2026): Tipo segue o nome na mesma
+           célula; a data de detecção vai no title da Severidade. -->
+      <table style="min-width:960px;">
         <colgroup>
-          <col style="width:44px"><col style="width:100px"><col style="width:170px"><col style="width:300px"><col style="width:200px"><col style="width:130px">
-          <col style="width:160px"><col style="width:110px"><col style="width:150px"><col style="width:130px">
+          <col style="width:40px"><col style="width:96px"><col style="width:115px"><col style="width:200px"><col style="width:112px">
+          <col style="width:135px"><col style="width:120px"><col style="width:110px">
         </colgroup>
         <thead>
           <tr>
             <th style="text-align:center;padding-left:6px;padding-right:6px;"><input type="checkbox" id="chkTodasVulnerabilidades" onchange="toggleTodasVulnerabilidades(this.checked)" title="Selecionar todas desta página"></th>
             <th onclick="ordenarVulnerabilidades('codigo')" style="cursor:pointer;">Código <span id="sort-vuln-codigo"></span></th>
             <th onclick="ordenarVulnerabilidades('produto')" style="cursor:pointer;">Produto <span id="sort-vuln-produto"></span></th>
-            <th onclick="ordenarVulnerabilidades('nome')" style="cursor:pointer;">Vulnerabilidade <span id="sort-vuln-nome"></span></th>
-            <th onclick="ordenarVulnerabilidades('tipo')" style="cursor:pointer;">Tipo <span id="sort-vuln-tipo"></span></th>
+            <th onclick="ordenarVulnerabilidades('nome')" style="cursor:pointer;" title="Nome e tipo">Vulnerabilidade <span id="sort-vuln-nome"></span></th>
             <th onclick="ordenarVulnerabilidades('severidade')" style="cursor:pointer;">Severidade <span id="sort-vuln-severidade"></span></th>
-            <th onclick="ordenarVulnerabilidades('statusCorrecao')" style="cursor:pointer;">Status da Correção <span id="sort-vuln-statusCorrecao"></span></th>
-            <th onclick="ordenarVulnerabilidades('dataDeteccao')" style="cursor:pointer;">Detecção <span id="sort-vuln-dataDeteccao"></span></th>
+            <th onclick="ordenarVulnerabilidades('statusCorrecao')" style="cursor:pointer;">Correção <span id="sort-vuln-statusCorrecao"></span></th>
             <th>Responsável</th>
             <th class="col-acoes">Ações</th>
           </tr>
@@ -11122,16 +11122,14 @@ function renderizarVulnerabilidades() {
         <td class="col-c" onclick="event.stopPropagation();"><input type="checkbox" class="chk-vulnerabilidade" data-id="${esc(v.id)}" ${vulnerabilidadesSelecionadas.has(String(v.id)) ? 'checked' : ''} onchange="toggleVulnerabilidadeSelecionada('${escJs(v.id)}', this.checked)" aria-label="Selecionar"></td>
         ${_tdLista(v.codigo || '–', 'forte')}
         <td>${_htmlCelulaProdutoVuln(v)}</td>
-        <td title="${esc(v.nome || '')}">${esc(v.nome || '–')}${riscoAberto ? ` <a href="#riscos?risco=${esc(riscoAberto.id)}" onclick="event.stopPropagation();" class="badge badge-red" style="text-decoration:none;">${riscoAberto.status === 'Aceito' ? 'Risco aceito' : 'Risco aberto'}</a>` : ''}</td>
-        <td>${_htmlCelulaTipoVuln(v)}</td>
-        <td>${_htmlBadge(_nivelSeveridadeVulnerabilidade(faixa.rotulo), faixa.rotulo)}</td>
+        <td title="${esc([v.nome, v.tipo ? [v.tipo, v.subtipo].filter(Boolean).join(' · ') : 'Não classificada'].filter(Boolean).join(' — '))}">${esc(v.nome || '–')}${riscoAberto ? ` <a href="#riscos?risco=${esc(riscoAberto.id)}" onclick="event.stopPropagation();" class="badge badge-red" style="text-decoration:none;">${riscoAberto.status === 'Aceito' ? 'Risco aceito' : 'Risco aberto'}</a>` : ''} <span class="muted">· ${v.tipo ? esc([v.tipo, v.subtipo].filter(Boolean).join(' · ')) : 'Não classificada'}</span></td>
+        <td title="${esc(v.dataDeteccao ? 'Detectada em ' + new Date(v.dataDeteccao + 'T00:00:00').toLocaleDateString('pt-BR') : '')}">${_htmlBadge(_nivelSeveridadeVulnerabilidade(faixa.rotulo), faixa.rotulo)}</td>
         <td>${_pillStatusCorrecaoVulnerabilidade(v.statusCorrecao)}${_vulnAtrasada(v) ? ' <span class="vuln-atrasada badge badge-red" title="Data prevista de correção já passou">Atrasada</span>' : ''}</td>
-        <td class="num">${esc(v.dataDeteccao ? new Date(v.dataDeteccao + 'T00:00:00').toLocaleDateString('pt-BR') : '–')}</td>
         ${_tdLista(v.responsavel || '–')}
         ${_htmlAcoesLinha([_acaoEditar(`abrirDrawerVulnerabilidade('${escJs(v.id)}')`), _acaoClonar(`clonarVulnerabilidade('${escJs(v.id)}')`), _acaoExcluir(`excluirVulnerabilidade('${escJs(v.id)}')`)])}
       </tr>`;
       }).join('')
-    : `<tr><td colspan="10" class="vazio">${vulnerabilidadesData.length ? 'Nenhuma vulnerabilidade encontrada com esses filtros.' : 'Nenhuma vulnerabilidade cadastrada.'}</td></tr>`;
+    : `<tr><td colspan="8" class="vazio">${vulnerabilidadesData.length ? 'Nenhuma vulnerabilidade encontrada com esses filtros.' : 'Nenhuma vulnerabilidade cadastrada.'}</td></tr>`;
   _sincronizarSelecaoVulnerabilidades();
 
   const paginacao = document.getElementById('vulnPaginacao');
@@ -13478,34 +13476,25 @@ async function riscos() {
     ${_htmlDrawerConfigLista('Apetite de risco', 'riscoApetiteBox')}
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table data-table--lista" id="listaRiscos" style="display:none;">
-      <!-- Larguras em px (soma 2214) em vez de %: 16 colunas não cabem espremidas;
-           abaixo disso a grade rola na horizontal e Ações fica fixa à direita. -->
-      <table style="min-width:2516px;">
+      <!-- 8 colunas que cabem em ~960px (23/10/2026). Antes eram 17 e a grade rolava
+           com Ações fixa cobrindo metade delas. O que saiu fica no title (Origem,
+           Processo e Produto no Título; Probabilidade x Impacto no Score) e no drawer
+           (Categoria, Reportado por, Impacto R$, Prioridade). -->
+      <table style="min-width:960px;">
         <colgroup>
-          <col style="width:104px"><col style="width:210px"><col style="width:140px"><col style="width:170px"><col style="width:150px">
-          <col style="width:200px"><col style="width:130px"><col style="width:300px"><col style="width:180px"><col style="width:140px">
-          <col style="width:104px"><col style="width:104px"><col style="width:72px"><col style="width:84px"><col style="width:72px">
-          <col style="width:140px"><col style="width:112px"><col style="width:104px">
+          <col style="width:96px"><col style="width:180px"><col style="width:100px"><col style="width:110px"><col style="width:165px">
+          <col style="width:72px"><col style="width:84px"><col style="width:70px"><col style="width:104px">
         </colgroup>
         <thead>
           <tr>
-            <th class="col-nw" onclick="ordenarRiscos('dataIdentificacao')" style="cursor:pointer;" title="Data de identificação">Data <span id="sort-risco-dataIdentificacao"></span></th>
+            <th onclick="ordenarRiscos('dataIdentificacao')" style="cursor:pointer;" title="Data de identificação">Data <span id="sort-risco-dataIdentificacao"></span></th>
+            <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;">Título <span id="sort-risco-titulo"></span></th>
             <th onclick="ordenarRiscos('area')" style="cursor:pointer;">Área <span id="sort-risco-area"></span></th>
             <th>Responsável</th>
-            <th onclick="ordenarRiscos('produto')" style="cursor:pointer;" title="Produto de Software">Produto <span id="sort-risco-produto"></span></th>
-            <th>Origem</th>
-            <th title="Processo / Fornecedor">Processo</th>
-            <th>Categoria</th>
-            <th onclick="ordenarRiscos('titulo')" style="cursor:pointer;">Título <span id="sort-risco-titulo"></span></th>
             <th onclick="ordenarRiscos('status')" style="cursor:pointer;">Status <span id="sort-risco-status"></span></th>
-            <th>Reportado por</th>
-            <th title="Probabilidade">Prob.</th>
-            <th>Impacto</th>
             <th class="col-c" onclick="ordenarRiscos('score')" style="cursor:pointer;" title="Probabilidade x Impacto, de 1 a 25 (escala NIST 5x5)">Score <span id="sort-risco-score"></span></th>
             <th class="col-c" title="Score depois do tratamento (Probabilidade x Impacto residuais)">Residual</th>
             <th class="col-c" title="Score x peso do Tier do processo (ou criticidade do fornecedor) -- quanto este risco soma na Carga de Risco da Empresa">Carga</th>
-            <th class="col-r" title="Impacto financeiro">Impacto R$</th>
-            <th>Prioridade</th>
             <th class="col-acoes">Ações</th>
           </tr>
         </thead>
@@ -14201,22 +14190,16 @@ function renderizarRiscos() {
   document.getElementById('riscoRows').innerHTML = pag.itens.length
     ? pag.itens.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${escJs(r.id)}')">
         <td class="num">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '–'}</td>
-        ${_tdLista(r.area || '–')}${_tdLista(r.responsavel || '–')}${_tdLista(_nomeProdutoRisco(r) || '–')}${_tdLista(_rotuloOrigemRisco(r.origem))}
-        ${_tdLista(r.processo || (r.fornecedorNome ? 'Fornecedor: ' + r.fornecedorNome : 'Corporativo'))}
-        ${_tdLista((r.categorias || []).join(', ') || '–')}${_tdLista(r.titulo, 'title forte')}
-        <td>${_badgeStatusRisco(r.status)}${_selosGovernancaRisco(r)}</td>
-        ${_tdLista(r.reportadoPor || '–')}
-        <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
-        <td>${_badgeProbImpactoRisco(r.impacto)}</td>
-        <td class="col-c">${_badgeScoreRisco(r)}</td>
+        <td class="title forte" title="${esc(_dicaTituloRisco(r))}">${esc(r.titulo)}</td>
+        ${_tdLista(r.area || '–')}${_tdLista(r.responsavel || '–')}
+        <td title="${esc([r.status, ..._textosSelosRisco(r)].filter(Boolean).join(' · '))}">${_badgeStatusRisco(r.status)}${_selosGovernancaRisco(r)}</td>
+        <td class="col-c" title="${esc(`Probabilidade: ${r.probabilidade || '–'} · Impacto: ${r.impacto || '–'}`)}">${_badgeScoreRisco(r)}</td>
         <td class="col-c">${_badgeResidualRisco(r)}</td>
         <td class="col-c">${_badgeCargaRisco(r, processosPorId)}</td>
-        <td class="num col-r">${r.impactoFinanceiro === null || r.impactoFinanceiro === undefined ? '<span class="muted">–</span>' : _formatarReais(r.impactoFinanceiro)}</td>
-        <td>${_badgeProbImpactoRisco(r.prioridade)}</td>
         ${_htmlAcoesLinha([{ icone: SVG_EDITAR, titulo: isAdmin ? 'Editar' : 'Visualizar', onclick: `editarRisco('${escJs(r.id)}')` },
           isAdmin ? _acaoClonar(`clonarRisco('${escJs(r.id)}')`) : null, isAdmin ? _acaoExcluir(`excluirRisco('${escJs(r.id)}')`) : null])}
       </tr>`).join('')
-    : `<tr><td colspan="18" class="vazio">${riscosData.length ? 'Nenhum risco encontrado com esses filtros.' : 'Nenhum risco cadastrado.'}</td></tr>`;
+    : `<tr><td colspan="9" class="vazio">${riscosData.length ? 'Nenhum risco encontrado com esses filtros.' : 'Nenhum risco cadastrado.'}</td></tr>`;
 }
 
 // ------------------------------------------------------------
@@ -14224,6 +14207,24 @@ function renderizarRiscos() {
 // (CSF GV.RM-02), reavaliacao periodica (RMF Monitor), avisos da automacao.
 // Regras puras em risco-consolidado.js.
 // ------------------------------------------------------------
+/** Title do Título na grade: o que saiu das colunas (origem, processo/fornecedor, produto, categoria). */
+function _dicaTituloRisco(r) {
+  return [r.titulo,
+    `Origem: ${_rotuloOrigemRisco(r.origem)}`,
+    r.processo ? `Processo: ${r.processo}` : (r.fornecedorNome ? `Fornecedor: ${r.fornecedorNome}` : 'Corporativo'),
+    _nomeProdutoRisco(r) ? `Produto: ${_nomeProdutoRisco(r)}` : '',
+    (r.categorias || []).length ? `Categoria: ${r.categorias.join(', ')}` : '',
+  ].filter(Boolean).join(' · ');
+}
+/** Textos dos selos de governança (para o title da célula de Status, que corta com reticências). */
+function _textosSelosRisco(r) {
+  const hoje = new Date().toISOString().slice(0, 10);
+  return [RiscoConsolidado.acimaDoApetite(r, riscosApetite) ? 'Acima do apetite' : '',
+    RiscoConsolidado.reavaliacaoVencida(r, hoje) ? 'Reavaliação vencida' : '',
+    r.alertaAutomacao ? 'Revisar: ' + r.alertaAutomacao : '',
+    r.status !== 'Encerrado' && _riscoComKriForaDaMeta(r) ? 'KRI fora da meta' : ''].filter(Boolean);
+}
+
 function _selosGovernancaRisco(r) {
   const hoje = new Date().toISOString().slice(0, 10);
   const selo = (txt, cor, fundo, title) => ` <span title="${esc(title)}" style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.72em;font-weight:700;color:${cor};background:${fundo};">${txt}</span>`;
@@ -20335,10 +20336,10 @@ function renderizarFornecedores() {
   // Uma linha por fornecedor: o que não cabe fica no title (contatos, quem avaliou).
   lista.innerHTML = `
     <div class="data-table data-table--lista">
-      <table style="min-width:1110px;">
+      <table style="min-width:960px;">
         <colgroup>
-          <col style="width:200px"><col style="width:110px"><col style="width:140px"><col style="width:140px"><col style="width:150px">
-          <col style="width:70px"><col style="width:96px"><col style="width:150px"><col style="width:92px">
+          <col style="width:170px"><col style="width:95px"><col style="width:110px"><col style="width:110px"><col style="width:125px">
+          <col style="width:60px"><col style="width:86px"><col style="width:130px"><col style="width:76px">
         </colgroup>
         <thead>
           <tr>
@@ -22164,10 +22165,12 @@ async function contratos() {
     </div>
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table data-table--lista" id="listaContratos" style="display:none;">
-      <table style="min-width:1520px;">
+      <!-- 8 colunas que cabem em ~960px (23/10/2026): Tipo no title do Objeto; Fim e
+           Valor mensal juntos em "Vigência". Status segue com 175px. -->
+      <table style="min-width:980px;">
         <colgroup>
-          <col style="width:100px"><col style="width:200px"><col style="width:255px"><col style="width:175px"><col style="width:160px">
-          <col style="width:130px"><col style="width:120px"><col style="width:130px"><col style="width:140px"><col style="width:110px">
+          <col style="width:96px"><col style="width:125px"><col style="width:140px"><col style="width:175px">
+          <col style="width:85px"><col style="width:165px"><col style="width:95px"><col style="width:100px">
         </colgroup>
         <thead>
           <tr>
@@ -22175,10 +22178,8 @@ async function contratos() {
             <th onclick="ordenarContratos('fornecedorNome')" style="cursor:pointer;">Fornecedor <span id="sort-contrato-fornecedorNome"></span></th>
             <th onclick="ordenarContratos('objeto')" style="cursor:pointer;">Objeto <span id="sort-contrato-objeto"></span></th>
             <th onclick="ordenarContratos('status')" style="cursor:pointer;">Status <span id="sort-contrato-status"></span></th>
-            <th onclick="ordenarContratos('tipo')" style="cursor:pointer;">Tipo <span id="sort-contrato-tipo"></span></th>
             <th onclick="ordenarContratos('area')" style="cursor:pointer;">Área <span id="sort-contrato-area"></span></th>
-            <th onclick="ordenarContratos('dataFim')" style="cursor:pointer;" class="col-nw">Fim <span id="sort-contrato-dataFim"></span></th>
-            <th onclick="ordenarContratos('valorMensal')" style="cursor:pointer;" class="col-r">Valor mensal <span id="sort-contrato-valorMensal"></span></th>
+            <th onclick="ordenarContratos('dataFim')" style="cursor:pointer;" title="Fim da vigência e valor mensal (ordena pelo fim)">Vigência <span id="sort-contrato-dataFim"></span></th>
             <th>Alertas</th>
             <th class="col-acoes">Ações</th>
           </tr>
@@ -22402,17 +22403,15 @@ function renderizarContratos() {
       <tr style="cursor:pointer;" onclick="abrirDrawerContrato('${escJs(c.id)}')">
         ${_tdLista(c.codigo || '–', 'forte')}
         ${_tdLista(c.fornecedorNome || _nomeNaLista(_contratoFornecedores, c.fornecedorId) || '–')}
-        <td title="${esc((c.objeto || '') + (c.numero ? ' — Nº ' + c.numero : ''))}">${esc(c.objeto || '–')}</td>
+        <td title="${esc([c.objeto, c.numero ? 'Nº ' + c.numero : '', _nomeNaLista(tiposContratoData, c.tipoId) ? 'Tipo: ' + _nomeNaLista(tiposContratoData, c.tipoId) : ''].filter(Boolean).join(' — '))}">${esc(c.objeto || '–')}</td>
         <td>${_pillStatusContrato(c)}</td>
-        ${_tdLista(_nomeNaLista(tiposContratoData, c.tipoId) || '–')}
         ${_tdLista(c.area ? c.area + (c.rateado ? ' (rateado)' : '') : '–')}
-        <td class="num" title="${c.renovacaoAutomatica ? 'Renovação automática' : ''}">${esc(_dataBR(c.dataFim))}${c.renovacaoAutomatica ? ' 🔁' : ''}</td>
-        <td class="num col-r">${c.valorMensal != null ? esc(_formatarReais(c.valorMensal)) : '<span class="muted">–</span>'}</td>
+        <td class="num" title="${esc([c.dataFim ? 'Fim: ' + _dataBR(c.dataFim) : 'Sem data de fim', c.renovacaoAutomatica ? 'renovação automática' : '', c.valorMensal != null ? 'Valor mensal: ' + _formatarReais(c.valorMensal) : ''].filter(Boolean).join(' · '))}">${esc(_dataBR(c.dataFim))}${c.renovacaoAutomatica ? ' 🔁' : ''}${c.valorMensal != null ? ` <span class="muted">· ${esc(_formatarReais(c.valorMensal))}</span>` : ''}</td>
         <td title="${esc(c._alertas.map((a) => a.texto || a.rotulo || a.codigo).join(' · '))}">${c._alertas.map(_chipAlertaContrato).join('') || '<span class="muted">–</span>'}</td>
         ${_htmlAcoesLinha([{ icone: SVG_EDITAR, titulo: podeEditar ? 'Editar' : 'Ver', onclick: `abrirDrawerContrato('${escJs(c.id)}')` },
           podeEditar ? _acaoClonar(`clonarContrato('${escJs(c.id)}')`) : null, podeEditar ? _acaoExcluir(`excluirContrato('${escJs(c.id)}')`) : null])}
       </tr>`).join('')
-    : `<tr><td colspan="10" class="vazio">${vazio}</td></tr>`;
+    : `<tr><td colspan="8" class="vazio">${vazio}</td></tr>`;
 
   const paginacao = document.getElementById('contratosPaginacao');
   if (paginacao) {
@@ -23955,8 +23954,8 @@ async function notificacoesEmail() {
       ${_htmlBarraLista({ busca: { id: 'buscaNotificacoes', placeholder: 'Buscar contrato, risco, destinatário ou assunto…' }, aoMudar: 'filtrarNotificacoesEmail', contadorId: 'contadorNotificacoes',
         filtros: [{ id: 'filtroNotificacaoStatus', rotulo: 'Status', todos: 'Todos', opcoes: Object.entries(NOTIF_STATUS).map(([k, v]) => [k, v.rotulo]) }] })}
       <div class="data-table data-table--lista">
-        <table style="min-width:1080px;">
-          <colgroup><col style="width:140px"><col style="width:190px"><col style="width:120px"><col style="width:230px"><col style="width:300px"><col style="width:140px"></colgroup>
+        <table style="min-width:960px;">
+          <colgroup><col style="width:120px"><col style="width:150px"><col style="width:100px"><col style="width:190px"><col style="width:250px"><col style="width:150px"></colgroup>
           <thead><tr><th>Data</th><th>Tipo</th><th>Referência</th><th>Para</th><th>Assunto</th><th>Status</th></tr></thead>
           <tbody id="notificacoesRows"></tbody>
         </table>
@@ -24234,8 +24233,8 @@ async function conformidade() {
           { id: 'confTier', rotulo: 'Tier', todos: 'Todos', opcoes: [['critico', 'Tier 1 e 2'], ...Object.values(Criticidade.TIER).map((x) => [x, x])] },
         ] })}
       <div class="data-table data-table--lista" style="overflow-x:auto;">
-        <table style="min-width:1090px;">
-          <colgroup><col style="width:120px;"><col style="width:130px;"><col style="width:220px;"><col style="width:140px;"><col style="width:110px;"><col style="width:260px;"><col style="width:100px;"><col style="width:110px;"></colgroup>
+        <table style="min-width:960px;">
+          <colgroup><col style="width:90px;"><col style="width:110px;"><col style="width:180px;"><col style="width:105px;"><col style="width:80px;"><col style="width:185px;"><col style="width:85px;"><col style="width:125px;"></colgroup>
           <thead><tr>
             <th>Tipo</th><th>Situação</th><th>Processo / Dependência</th><th>Área</th><th>Tier</th><th>Pendência</th><th class="col-nw" title="Última revisão ou último teste registrado">Desde</th><th class="col-acoes">Ações</th>
           </tr></thead>

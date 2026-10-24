@@ -83,37 +83,21 @@ test('grade: filtro Produto (produtos dos riscos + Sem produto) e busca pelo nom
   assert.match(linhas(), /Sistema antigo/);
 });
 
-test('grade: coluna Produto (depois de Responsavel), com nome, "(produto removido)" e "–"; ordenar deixa sem produto no fim', async () => {
-  const { w, doc } = await carregar();
-  const cab = [...doc.querySelectorAll('#listaRiscos thead th')].map((th) => th.textContent.trim().replace(/\s+/g, ' '));
-  assert.ok(cab[cab.findIndex((c) => c.startsWith('Responsável')) + 1].startsWith('Produto'));
-  assert.strictEqual(doc.querySelectorAll('#listaRiscos colgroup col').length, cab.length, 'uma largura por coluna');
-  const idx = cab.indexOf('Produto');
-  const produtoDe = () => Object.fromEntries([...doc.querySelectorAll('#riscoRows tr')].map((tr) => [tr.children[cab.findIndex((c) => c.startsWith('Título'))].textContent.trim(), tr.children[idx].textContent.trim()]));
-  const porTitulo = produtoDe();
-  assert.strictEqual(porTitulo['Falha no ERP'], 'ERP');
-  assert.strictEqual(porTitulo['Sistema antigo'], 'Legado');
-  assert.strictEqual(porTitulo['Produto apagado'], '(produto removido)');
-  assert.strictEqual(porTitulo['Risco sem produto'], '–');
-  const ordem = () => [...doc.querySelectorAll('#riscoRows tr')].map((tr) => tr.children[idx].textContent.trim());
-  w.ordenarRiscos('produto');
-  assert.deepStrictEqual(ordem(), ['(produto removido)', 'ERP', 'Legado', '–']);
-  w.ordenarRiscos('produto');
-  assert.deepStrictEqual(ordem(), ['Legado', 'ERP', '(produto removido)', '–'], 'descendente: sem produto continua no fim');
-});
-
-test('grade: colunas na ordem Data, Area, Responsavel, Produto, Origem, Processo, Categoria, Titulo, Status; cada celula sob o seu cabecalho', async () => {
+test('grade enxuta (8 colunas): Data, Título, Área, Responsável, Status, Score, Residual, Carga; o que saiu fica no title do Título', async () => {
   const { doc } = await carregar();
-  const cab = [...doc.querySelectorAll('#listaRiscos thead th')].map((th) => th.textContent.trim().replace(/\s+/g, ' '));
-  assert.deepStrictEqual(cab.slice(0, 10).map((c) => c.split(' ')[0]), ['Data', 'Área', 'Responsável', 'Produto', 'Origem', 'Processo', 'Categoria', 'Título', 'Status', 'Reportado']);
+  const cab = [...doc.querySelectorAll('#listaRiscos thead th')].map((th) => th.textContent.trim().replace(/\s+/g, ' ').split(' ')[0]);
+  assert.deepStrictEqual(cab, ['Data', 'Título', 'Área', 'Responsável', 'Status', 'Score', 'Residual', 'Carga', 'Ações']);
+  assert.strictEqual(doc.querySelectorAll('#listaRiscos colgroup col').length, cab.length, 'uma largura por coluna');
   const tr = [...doc.querySelectorAll('#riscoRows tr')].find((x) => x.textContent.includes('Falha no ERP'));
-  const cel = (nome) => tr.children[cab.findIndex((c) => c.startsWith(nome))].textContent.trim();
-  assert.strictEqual(cel('Área'), 'TI');
-  assert.strictEqual(cel('Produto'), 'ERP');
-  assert.strictEqual(cel('Origem'), 'Vulnerabilidade Reportada');
-  assert.strictEqual(cel('Processo'), 'Corporativo');
-  assert.strictEqual(cel('Título'), 'Falha no ERP');
-  assert.ok(cel('Status').length > 0, 'a celula de Status esta sob o cabecalho Status');
-  assert.ok(tr.children[cab.findIndex((c) => c.startsWith('Título'))].classList.contains('title'));
-  assert.strictEqual(doc.querySelectorAll('#listaRiscos colgroup col').length, cab.length);
+  assert.strictEqual(tr.children.length, cab.length, 'cada célula sob o seu cabeçalho');
+  const titulo = tr.children[cab.indexOf('Título')];
+  assert.ok(titulo.classList.contains('title'));
+  assert.strictEqual(titulo.textContent.trim(), 'Falha no ERP');
+  assert.match(titulo.getAttribute('title'), /Origem: Vulnerabilidade Reportada/);
+  assert.match(titulo.getAttribute('title'), /Corporativo/);
+  assert.match(titulo.getAttribute('title'), /Produto: ERP/);
+  const semProduto = [...doc.querySelectorAll('#riscoRows tr')].find((x) => x.textContent.includes('Risco sem produto'));
+  assert.doesNotMatch(semProduto.children[cab.indexOf('Título')].getAttribute('title'), /Produto:/);
+  const apagado = [...doc.querySelectorAll('#riscoRows tr')].find((x) => x.textContent.includes('Produto apagado'));
+  assert.match(apagado.children[cab.indexOf('Título')].getAttribute('title'), /Produto: \(produto removido\)/);
 });

@@ -130,7 +130,8 @@ test('gestor não vê o chip de fornecedores sem contrato (catálogo inteiro)', 
 test('na grade, Fornecedor vem antes de Objeto (cabeçalho, linhas e larguras alinhados)', async () => {
   const { doc } = await carregar(['admin']);
   const cab = [...doc.querySelectorAll('#listaContratos thead th')].map((th) => th.textContent.replace(/[▲▼]/g, '').trim());
-  assert.deepStrictEqual(cab.slice(0, 5), ['Código', 'Fornecedor', 'Objeto', 'Status', 'Tipo']);
+  // Grade de 8 colunas (23/10/2026): Tipo foi para o title do Objeto; Fim e Valor mensal = "Vigência".
+  assert.deepStrictEqual(cab, ['Código', 'Fornecedor', 'Objeto', 'Status', 'Área', 'Vigência', 'Alertas', 'Ações']);
   const linha = doc.querySelector('#listaContratos tbody tr');
   assert.equal(linha.children.length, cab.length);
   assert.match(linha.children[1].textContent, /Alfa Cloud/);
