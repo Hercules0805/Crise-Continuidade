@@ -73,7 +73,7 @@
     'processos', 'pcns', 'drp', 'riscos', 'monitor', 'riscos-relatorio', 'vulnerabilidades', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
     'dependencias', 'areas', 'pessoas', 'relatorios', 'mapa', 'servicos', 'servicos-relatorio', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
-    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
+    'terceiros-dashboard', 'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
     'admin', 'conformidade',
   ];
@@ -99,7 +99,7 @@
   // perfis ou perguntas. Processos primeiro: e a pagina inicial dele.
   TELAS[PERFIL.OPERADOR] = [
     'processos', 'pessoas', 'areas', 'relatorios',
-    'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
+    'terceiros-dashboard', 'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
   ];
   // DECISAO 15/10/2026: Contratos tem a mesma posse de Fornecedores (Admin, SI,
@@ -110,10 +110,13 @@
   // mas SO para ver o que foi compartilhado com ele (no de Riscos, so a area
   // dele) -- gerar e ver as edicoes da equipe continua com Admin/Seguranca
   // (podeGerarRelatorioExecutivo).
+  // DECISAO 23/10/2026: Dashboard de Terceiros (números que saíram das listas de
+  // Fornecedores e Contratos) -- quem vê Fornecedores ou Contratos; a tela mostra
+  // só a seção que o perfil vê (Gestor: só Contratos, da área dele).
   TELAS[PERFIL.GESTOR] = [
     'processos', 'pcns', 'drp', 'riscos', 'riscos-relatorio', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
-    'contratos',
+    'contratos', 'terceiros-dashboard',
     'admin', 'conformidade',
   ];
   // DECISAO 23/10/2026: Operador de Processos -- documenta e monitora os

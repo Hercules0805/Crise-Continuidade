@@ -82,7 +82,7 @@ test('Fornecedores: grade paginada (20 por pagina), larguras em px e filtro volt
   doc.getElementById('filtroFornCadastroSetor').value = 'TI';
   w.filtrarFornecedores();
   assert.match(doc.querySelector('.paginacao').textContent, /Mostrando 1–13 de 13/);
-  assert.ok(doc.querySelector('.filters .field-label'), 'filtros no padrao .filters/.field');
+  assert.ok(doc.querySelector('.lista-barra #filtroFornCadastroSetor'), 'filtros na barra única');
   w.close();
 });
 
@@ -90,7 +90,7 @@ test('Fornecedores: quem so consulta ve o lapis "Visualizar" (nao um botao "Ver"
   const w = carregar({ getDependencias: forn.slice(0, 2), getAreas: [] }, ['gestor']);
   await w.fornecedores();
   await espera();
-  const acoes = w.document.querySelector('#listaFornecedores tbody tr td.col-sticky');
+  const acoes = w.document.querySelector('#listaFornecedores tbody tr td.col-acoes');
   assert.ok(acoes.querySelector('button[title="Visualizar"] svg'));
   assert.doesNotMatch(acoes.textContent, /Ver/);
   w.close();

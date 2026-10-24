@@ -65,10 +65,10 @@ test('o filtro existe, com os gestores dos contratos VIGENTES, em ordem alfabét
   const { $ } = await carregar();
   const sel = $('filtroFornCadastroGestor');
   assert.ok(sel);
-  assert.equal(sel.parentElement.querySelector('label').textContent, 'Gestor do Contrato');
+  assert.equal(sel.getAttribute('aria-label'), 'Gestor');
   const opcoes = [...sel.options].map((o) => o.textContent);
   // Fulano Antigo e o gestor legado do Eta ficam de fora: só o contrato vale.
-  assert.deepStrictEqual(opcoes, ['Todos os gestores', 'Sem gestor', 'Ana Souza', 'Gabriel Fortes', 'Kaique Xavier']);
+  assert.deepStrictEqual(opcoes, ['Gestor: Todos', 'Gestor: Sem gestor', 'Gestor: Ana Souza', 'Gestor: Gabriel Fortes', 'Gestor: Kaique Xavier']);
 });
 
 test('escolher um gestor mostra os fornecedores em que ele é gestor de contrato vigente, em qualquer posição', async () => {

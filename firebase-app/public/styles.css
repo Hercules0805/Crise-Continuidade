@@ -559,11 +559,11 @@ button.mm-grupo__rotulo:hover { background: var(--brand-tint); }
 .mais-acoes__menu button { display: block; width: 100%; padding: 8px 12px; border: none; border-radius: var(--r-sm); background: none; color: var(--ink); font: inherit; font-size: 14px; text-align: left; white-space: nowrap; cursor: pointer; }
 .mais-acoes__menu button:hover { background: var(--surface-sunken); }
 .lista-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
-.lista-busca { position: relative; width: 240px; max-width: 100%; }
+.lista-busca { position: relative; width: 220px; max-width: 100%; }
 .lista-busca svg { position: absolute; left: 9px; top: 7px; width: 18px; height: 18px; fill: none; stroke: var(--ink-muted); stroke-width: 1.8; stroke-linecap: round; pointer-events: none; }
 .lista-busca input { width: 100%; height: 32px; padding: 0 10px 0 34px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface); color: var(--ink); font: 400 14px var(--font-sans); }
 .lista-busca input:focus { outline: none; border-color: var(--red); box-shadow: 0 0 0 3px var(--red-tint); }
-.lista-sel { height: 32px; width: 168px; padding: 0 24px 0 10px; border: 1px solid var(--border); border-radius: var(--r-md); background-color: var(--surface); color: var(--ink); font: 400 13px var(--font-sans); text-overflow: ellipsis; cursor: pointer; }
+.lista-sel { height: 32px; width: 150px; padding: 0 24px 0 10px; border: 1px solid var(--border); border-radius: var(--r-md); background-color: var(--surface); color: var(--ink); font: 400 13px var(--font-sans); text-overflow: ellipsis; cursor: pointer; }
 .lista-sel--ativo { border-color: var(--red); background-color: var(--red-tint); color: var(--red); font-weight: 600; }
 .lista-limpar { height: 32px; padding: 0 6px; border: none; background: none; color: var(--red); font: 600 13px var(--font-sans); cursor: pointer; }
 .lista-contador { margin-left: auto; color: var(--ink-muted); font-size: 13px; white-space: nowrap; }
@@ -588,3 +588,4 @@ button.mm-grupo__rotulo:hover { background: var(--brand-tint); }
 /* Alerta operacional de uma linha acima da grade (não é painel: é um aviso que pede ação) */
 .lista-alerta { margin-bottom: 12px; padding: 8px 12px; border: 1px solid #ffe0b2; border-radius: var(--r-md); background: #fff8e1; color: #a15c00; font-size: 13px; }
 .badge-azul { background: #e3f2fd; color: #1565c0; }
+.painel-secao { font-size: 13px; font-weight: 700; color: var(--ink); margin: 8px 0 10px; }

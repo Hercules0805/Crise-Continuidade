@@ -47,8 +47,10 @@ async function carregar(perfis, extra) {
 const linhasGrade = (doc) => doc.querySelectorAll('#listaContratos tbody tr').length;
 const chips = (doc) => [...doc.querySelectorAll('#contratosPainel .kpi-chip')];
 
-test('indicadores numa faixa única, número antes do rótulo, sem os cards altos', async () => {
-  const { doc } = await carregar(['admin']);
+test('indicadores numa faixa única no Dashboard de Terceiros, número antes do rótulo', async () => {
+  const { w, doc } = await carregar(['admin']);
+  await w.terceirosDashboard();
+  assert.equal(doc.querySelectorAll('#listaContratos').length, 0);
   assert.equal(doc.querySelectorAll('#contratosPainel .kpi-strip').length, 1);
   assert.equal(doc.querySelectorAll('#contratosPainel .bia-metric').length, 0);
   const textos = chips(doc).map((c) => c.textContent.replace(/\s+/g, ' ').trim());
@@ -58,15 +60,17 @@ test('indicadores numa faixa única, número antes do rótulo, sem os cards alto
   assert.match(textos[6], /^1 fornecedores TIC sem contrato vigente$/);
 });
 
-test('chip clicável filtra como antes e fica marcado como ativo; clicar de novo desliga', async () => {
-  const { w, doc } = await carregar(['admin']);
+test('número do Dashboard abre a lista já filtrada (selects marcados); "Limpar" desfaz', async () => {
+  const { w, doc, $ } = await carregar(['admin']);
   assert.equal(linhasGrade(doc), 2);
-  w.filtrarContratosPainel('vencimento');
+  await w.terceirosDashboard();
+  assert.match(chips(doc)[2].getAttribute('onclick'), /_abrirListaFiltrada\('contratos'/);
+  w._abrirListaFiltrada('contratos', { filtroContratoStatus: '__vigentes__', filtroContratoAlerta: '__vencimento__' });
+  await w.contratos();
   assert.equal(linhasGrade(doc), 1);
-  assert.ok(chips(doc)[2].classList.contains('kpi-chip--ativo'));
-  w.filtrarContratosPainel('vencimento');
+  assert.ok($('filtroContratoAlerta').classList.contains('lista-sel--ativo'));
+  w.limparFiltrosContratos();
   assert.equal(linhasGrade(doc), 2);
-  assert.ok(!chips(doc).some((c) => c.classList.contains('kpi-chip--ativo')));
 });
 
 test('linha de filtros: busca, Fornecedor, Status e Alerta à vista, sem rótulo acima; o select se nomeia', async () => {
@@ -74,9 +78,9 @@ test('linha de filtros: busca, Fornecedor, Status e Alerta à vista, sem rótulo
   const linha = doc.querySelector('.filtros-linha');
   ['buscaContrato', 'filtroContratoFornecedor', 'filtroContratoStatus', 'filtroContratoAlerta', 'contadorContratos']
     .forEach((id) => assert.ok(linha.contains($(id)), id));
-  assert.equal(linha.querySelectorAll('label').length, 0);
-  assert.equal($('filtroContratoFornecedor').options[0].textContent, 'Fornecedor: todos');
-  assert.equal($('filtroContratoStatus').options[0].textContent, 'Status: todos');
+  assert.equal([...linha.querySelectorAll('label')].filter((l) => l.textContent.trim()).length, 0, 'sem rótulo escrito acima');
+  assert.equal($('filtroContratoFornecedor').options[0].textContent, 'Fornecedor: Todos');
+  assert.equal($('filtroContratoStatus').options[0].textContent, 'Status: Todos');
   assert.equal($('contadorContratos').textContent, '2 contratos');
 });
 
@@ -117,7 +121,8 @@ test('"Limpar filtros" só aparece com filtro ativo e zera tudo, inclusive o fil
 });
 
 test('gestor não vê o chip de fornecedores sem contrato (catálogo inteiro)', async () => {
-  const { doc } = await carregar(['gestor']);
+  const { w, doc } = await carregar(['gestor']);
+  await w.terceirosDashboard();
   assert.ok(!/sem contrato vigente/.test(doc.getElementById('contratosPainel').textContent));
   assert.equal(chips(doc).length, 6);
 });
@@ -142,9 +147,6 @@ test('situação "Vigência expirada": opção no cadastro de Status, rótulo e 
     getStatusContrato: status,
     getContratos: [contrato(), contrato({ id: 'c3', codigo: 'CT-0003', objeto: 'Antigo', statusId: 's-exp', dataFim: CC.somarDias(HOJE, -60), valorMensal: 700 })],
   });
-  // O painel só conta o vigente (R$ 1.000), nunca o expirado.
-  assert.match(doc.getElementById('contratosPainel').textContent, /R\$ 1\.000/);
-  assert.doesNotMatch(doc.getElementById('contratosPainel').textContent, /1\.700/);
   const linha = [...doc.querySelectorAll('#listaContratos tbody tr')].find((tr) => tr.textContent.includes('CT-0003'));
   assert.match(linha.innerHTML, /Vigência expirada/);
   assert.match(linha.innerHTML, /#e65100/, 'laranja, diferente do verde do vigente e do cinza do encerrado');
@@ -153,6 +155,10 @@ test('situação "Vigência expirada": opção no cadastro de Status, rótulo e 
   w.abrirDrawerListaContrato();
   const opcoes = [...doc.getElementById('listaContratoSituacao').options].map((o) => [o.value, o.textContent]);
   assert.deepStrictEqual(opcoes, [['pre', 'Antes da vigência'], ['vigente', 'Vigente'], ['expirada', 'Vigência expirada'], ['encerrado', 'Encerrado']]);
+  // A faixa do Dashboard só conta o vigente (R$ 1.000), nunca o expirado.
+  await w.terceirosDashboard();
+  assert.match(doc.getElementById('contratosPainel').textContent, /R\$ 1\.000/);
+  assert.doesNotMatch(doc.getElementById('contratosPainel').textContent, /1\.700/);
 });
 
 test('Status do contrato fica logo depois do Objeto (visível sem rolar), com a pill da situação, e cabeçalho/linha/larguras alinhados', async () => {

@@ -15,6 +15,7 @@ const pages = {
   'indicadores-matriz': indicadoresMatriz,
   monitor,
   fornecedores,
+  'terceiros-dashboard': terceirosDashboard,
   'fornecedores-criterios': fornecedoresCriterios,
   'fornecedores-categorias': fornecedoresCategorias,
   'fornecedores-subcategorias': fornecedoresSubcategorias,
@@ -19923,15 +19924,16 @@ window.filtrarFornecedores = () => {
   renderizarFornecedores();
 };
 
-window.filtrarFornecedoresResumo = (modo) => {
-  fornecedoresFiltroResumo = fornecedoresFiltroResumo === modo ? 'todos' : modo;
+// Situação e TIC moram nos selects da barra (antes eram cards em cima da lista).
+function _filtroSelectForn(id, modo) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  sel.value = sel.value === modo ? '' : modo;
+  _marcarFiltroLista(sel);
   filtrarFornecedores();
-};
-
-window.filtrarFornecedoresTic = (modo) => {
-  fornecedoresFiltroTic = fornecedoresFiltroTic === modo ? 'todos' : modo;
-  filtrarFornecedores();
-};
+}
+window.filtrarFornecedoresResumo = (modo) => _filtroSelectForn('filtroFornSituacao', modo === 'todos' ? '' : modo);
+window.filtrarFornecedoresTic = (modo) => _filtroSelectForn('filtroFornTic', modo === 'todos' ? '' : modo);
 
 window.ordenarFornecedores = (coluna) => {
   fornecedoresOrdenacao.ordenar(coluna);
@@ -19949,6 +19951,19 @@ window.irParaPaginaFornecedores = (delta) => {
  * está nessa situação (a vigência acabou sem renovação -- a pessoa precisa
  * saber que e isso, e nao que nunca houve contrato); senão "Sem contrato vigente".
  */
+/** Célula "Contrato" da grade de Fornecedores: situação dos contratos em uma linha. */
+function _tdContratosFornecedor(id) {
+  if (!window._fornContratosCarregados) return '<td></td>';
+  const n = _contratosVigentesDoFornecedor(id).length;
+  if (n) return _tdLista(`${n} contrato${n > 1 ? 's' : ''} vigente${n > 1 ? 's' : ''}`);
+  const expirados = _contratosExpiradosDoFornecedor(id);
+  if (expirados.length) {
+    const codigos = expirados.map((c) => c.codigo).filter(Boolean).join(', ');
+    return `<td class="forn-vigencia-expirada" title="${esc(`Vigência expirada${codigos ? ': ' + codigos : ''}`)}" style="color:#e65100;font-weight:600;">Vigência expirada</td>`;
+  }
+  return '<td class="muted">Sem contrato vigente</td>';
+}
+
 function _htmlContratosVigentesFornecedor(id) {
   if (!window._fornContratosCarregados) return '';
   const n = _contratosVigentesDoFornecedor(id).length;
@@ -20066,12 +20081,11 @@ function _popularFiltroGestorFornecedor() {
   const assinatura = itens.map(([c, n]) => `${c}=${n}`).join('|');
   if (sel.dataset.assinatura === assinatura) return;
   const atual = sel.value;
-  sel.innerHTML = '<option value="">Todos os gestores</option>' +
-    `<option value="${GESTOR_FORN_SEM}">Sem gestor</option>` +
-    itens.map(([chave, nome]) => `<option value="${esc(chave)}">${esc(nome)}</option>`).join('');
+  sel.innerHTML = _opcoesFiltroLista('Gestor', [[GESTOR_FORN_SEM, 'Sem gestor'], ...itens], 'Todos');
   sel.dataset.assinatura = assinatura;
   // Escolha que sumiu da lista (gestor removido) volta para "Todos".
   sel.value = [...sel.options].some((o) => o.value === atual) ? atual : '';
+  _marcarFiltroLista(sel);
 }
 
 /** 1º nome + "+N" (o resto no title). `itens` = [{nome}]; vazio = "–". */
@@ -20092,46 +20106,133 @@ function _resumoAreasFornecedor(f) {
   return _resumoLista(_gestaoDoFornecedor(f.id).areas);
 }
 
+// ============================================================
+// PÁGINA: DASHBOARD DE TERCEIROS (DECISÃO 23/10/2026 -- telas de lista enxutas)
+// O que era painel em cima das listas de Fornecedores (7 cards) e de Contratos
+// (faixa de indicadores) mora aqui. Cada número abre a lista já filtrada.
+// Seções pelo perfil: Fornecedores para quem vê Fornecedores; Contratos para
+// quem vê Contratos (o Gestor só os da área dele).
+// ============================================================
+const FORN_SITUACOES_FILTRO = [['semAvaliacao', 'Sem avaliação'], ['vencida', 'Avaliação vencida'], ['abaixoLimiar', 'Abaixo do limiar'], ['semContrato', 'Sem contrato vigente']];
+
+/** Números de Fornecedores (os antigos cards da lista); `filtro` = valores dos selects da lista. */
+function _metricasFornecedores() {
+  const comNota = fornecedoresData.filter((f) => { const a = _avaliacaoDoFornecedor(f.id); return a && a.nota !== null; });
+  const vencidas = comNota.filter((f) => FornecedorScore.vencida(_avaliacaoDoFornecedor(f.id).avaliadoEm)).length;
+  const abaixo = comNota.filter((f) => FornecedorScore.abreRisco(_avaliacaoDoFornecedor(f.id).nota, configFornecedor.limiarRisco)).length;
+  const semAvaliacao = fornecedoresData.length - comNota.length;
+  const qtdTic = fornecedoresData.filter((f) => f.tic !== false).length;
+  const m = [
+    { n: fornecedoresData.length, t: 'Fornecedores no catálogo', c: '#d60014', filtro: {} },
+    { n: semAvaliacao, t: 'Sem avaliação', c: semAvaliacao ? '#e65100' : '#999', filtro: { filtroFornSituacao: 'semAvaliacao' } },
+    { n: vencidas, t: 'Avaliação vencida', c: vencidas ? '#e65100' : '#999', filtro: { filtroFornSituacao: 'vencida' } },
+    { n: abaixo, t: `Nota abaixo de ${configFornecedor.limiarRisco}`, c: abaixo ? '#c62828' : '#2e7d32', filtro: { filtroFornSituacao: 'abaixoLimiar' } },
+  ];
+  if (window._fornContratosCarregados) {
+    const n = fornecedoresData.filter((f) => !_contratosVigentesDoFornecedor(f.id).length).length;
+    m.push({ n, t: 'Sem contrato vigente', c: n ? '#e65100' : '#999', filtro: { filtroFornSituacao: 'semContrato' } });
+  }
+  m.push({ n: qtdTic, t: 'TIC', c: '#d60014', filtro: { filtroFornTic: 'tic' } });
+  m.push({ n: fornecedoresData.length - qtdTic, t: 'Não TIC', c: '#555', filtro: { filtroFornTic: 'naoTic' } });
+  return m;
+}
+
+/** Abre uma lista já com filtros: { idDoSelect: valor }. A lista aplica depois de montar os selects. */
+window._abrirListaFiltrada = (tela, filtros) => {
+  window._filtroInicialLista = { tela, filtros: filtros || {} };
+  window.location.hash = tela;
+};
+/** Chamado pela lista depois de preencher os selects: aplica o filtro que veio do dashboard. */
+function _aplicarFiltroInicialLista(tela) {
+  const f = window._filtroInicialLista;
+  if (!f || f.tela !== tela) return;
+  window._filtroInicialLista = null;
+  Object.entries(f.filtros).forEach(([id, valor]) => {
+    const el = document.getElementById(id);
+    if (el) { el.value = valor; if (el.tagName === 'SELECT') _marcarFiltroLista(el); }
+  });
+}
+
+async function terceirosDashboard() {
+  const veForn = Perfis.podeVerTela(window.USER_PERFIS, 'fornecedores');
+  const veContratos = Perfis.podeVerTela(window.USER_PERFIS, 'contratos');
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Dashboard de Terceiros</h2><p class="page-sub">Situação dos fornecedores e dos contratos. Clique num número para abrir a lista já filtrada.</p></div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="terceirosPainel"></div>`;
+  try {
+    const opc = (p) => p.catch((e) => { console.error('Dashboard de Terceiros: dado opcional não carregou', e); return null; });
+    const [deps, crits, avals, cfg, lista, status, tipos, processosList, riscosList, servicosList] = await Promise.all([
+      API.getDependencias(),
+      veForn ? API.getCriteriosFornecedor() : null, veForn ? API.getAvaliacoesFornecedor() : null, veForn ? API.getConfigFornecedor() : null,
+      veContratos || veForn ? opc(API.getContratos()) : null, veContratos || veForn ? opc(API.getStatusContrato()) : null,
+      veContratos ? opc(API.getTiposContrato()) : null,
+      veContratos ? opc(API.getProcessos()) : null, veContratos ? opc(API.getRiscos()) : null, veContratos ? opc(API.getServicos()) : null,
+    ]);
+    fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
+    _contratoFornecedores = fornecedoresData.slice().sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+    _contratoDependenciasTodas = deps;
+    if (crits) criteriosFornecedorData = crits;
+    if (avals) avaliacoesFornecedorData = avals;
+    if (cfg) configFornecedor = cfg;
+    window._fornContratosCarregados = !!(lista && status);
+    contratosData = lista || [];
+    statusContratoData = status || [];
+    if (tipos) tiposContratoData = tipos;
+    _contratoProcessos = processosList || [];
+    _contratoRiscos = riscosList || [];
+    if (servicosList) _contratoServicos = servicosList;
+  } catch (e) {
+    console.error('Dashboard de Terceiros: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar o Dashboard de Terceiros.', 'terceirosDashboard');
+    return;
+  }
+  document.querySelector('.loading').style.display = 'none';
+  const card = (x, tela) => _htmlMetricCardFiltro({ label: x.t, value: x.n, cor: x.c, ativo: false, titulo: 'Abrir a lista filtrada',
+    onclick: `_abrirListaFiltrada('${tela}', ${esc(JSON.stringify(x.filtro))})` });
+  const semCriterio = veForn && !criteriosFornecedorData.filter(FornecedorScore.criterioAtivo).length;
+  // Contratos que vencem em até 90 dias (ou já vencidos): os mais urgentes primeiro.
+  const vencendo = veContratos ? contratosData
+    .filter((c) => _situacaoContrato(c) === ContratoCiclo.SITUACAO.VIGENTE && _alertasContrato(c).some((a) => a.codigo === 'vence_em' || a.codigo === 'vencido'))
+    .sort((a, b) => String(a.dataFim || '').localeCompare(String(b.dataFim || ''))).slice(0, 8) : [];
+  document.getElementById('terceirosPainel').innerHTML = `
+    ${veForn ? `<div class="painel-secao">Fornecedores</div>
+      ${semCriterio ? `<div class="lista-alerta">Nenhum critério ativo cadastrado: sem critério não existe nota e todo fornecedor aparece como "Não avaliado".</div>` : ''}
+      <div class="painel-metricas painel-metricas--auto metricas-filtro">${_metricasFornecedores().map((x) => card(x, 'fornecedores')).join('')}</div>` : ''}
+    ${veContratos ? `<div class="painel-secao">Contratos</div>
+      <div id="contratosPainel"></div>
+      <div class="painel-card" style="margin-top:16px;">
+        <div class="painel-card__titulo">Contratos que vencem em até 90 dias</div>
+        ${vencendo.length ? `<div class="data-table data-table--lista"><table><colgroup><col style="width:110px"><col style="width:220px"><col><col style="width:120px"></colgroup>
+          <thead><tr><th>Código</th><th>Fornecedor</th><th>Objeto</th><th>Fim</th></tr></thead>
+          <tbody>${vencendo.map((c) => `<tr style="cursor:pointer;" onclick="location.hash='#contratos?contrato=${escJs(c.id)}'">
+            ${_tdLista(c.codigo || '–', 'forte')}${_tdLista(c.fornecedorNome || _nomeNaLista(_contratoFornecedores, c.fornecedorId))}${_tdLista(c.objeto)}${_tdLista(_dataBR(c.dataFim))}</tr>`).join('')}</tbody>
+        </table></div>` : '<div class="vazio-inline">Nenhum contrato vigente vence nos próximos 90 dias.</div>'}
+      </div>` : ''}`;
+  if (veContratos) _renderPainelContratos();
+}
+
 async function fornecedores() {
   const podeMexer = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Fornecedores</h2><p class="page-sub">Catálogo, avaliação e criticidade dos fornecedores da empresa</p></div>
-      <div style="display:flex;gap:10px;">
-        <a href="#fornecedores-criterios" class="btn btn-ghost" id="btnIrCriterios" style="display:none;">Critérios</a>
-        <button class="btn btn-primary" onclick="abrirDrawerFornecedorCadastro()" id="btnNovoFornecedor" style="display:none;">+ Novo Fornecedor</button>
-      </div>
-    </div>
-    <div id="fornResumo" style="margin-bottom:18px;"></div>
-    <div class="filters">
-      <div class="field">
-        <label class="field-label">Categoria</label>
-        <select id="filtroFornCadastroCategoria" onchange="filtrarFornecedores()" class="field-control">
-          <option value="">Todas as categorias</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Área do contrato</label>
-        <select id="filtroFornCadastroSetor" onchange="filtrarFornecedores()" class="field-control">
-          <option value="">Todos os setores</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Gestor do Contrato</label>
-        <select id="filtroFornCadastroGestor" onchange="filtrarFornecedores()" class="field-control">
-          <option value="">Todos os gestores</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">&nbsp;</label>
-        <input type="search" id="buscaFornecedor" placeholder="Buscar fornecedor…" aria-label="Buscar fornecedor" oninput="filtrarFornecedores()" class="field-control field-control--busca">
-      </div>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Fornecedores', sub: 'Catálogo, avaliação e criticidade dos fornecedores da empresa.',
+      primario: { rotulo: '+ Novo fornecedor', onclick: 'abrirDrawerFornecedorCadastro()', id: 'btnNovoFornecedor' },
+      maisAcoes: podeMexer ? [{ rotulo: 'Critérios de Avaliação', onclick: "location.hash='#fornecedores-criterios'" }] : [] })}
+    ${_htmlBarraLista({ busca: { id: 'buscaFornecedor', placeholder: 'Buscar fornecedor…' }, aoMudar: 'filtrarFornecedores', contadorId: 'fornecedoresContador',
+      filtros: [
+        { id: 'filtroFornCadastroCategoria', rotulo: 'Categoria', opcoes: [] },
+        { id: 'filtroFornCadastroSetor', rotulo: 'Área', opcoes: [] },
+        { id: 'filtroFornCadastroGestor', rotulo: 'Gestor', todos: 'Todos', opcoes: [] },
+        { id: 'filtroFornSituacao', rotulo: 'Situação', opcoes: FORN_SITUACOES_FILTRO },
+        { id: 'filtroFornTic', rotulo: 'TIC', todos: 'Todos', opcoes: [['tic', 'TIC'], ['naoTic', 'Não TIC']] },
+      ] })}
+    <div id="fornResumo"></div>
     <div class="loading" id="loadingFornecedores">⏳ Carregando...</div>
     <div id="listaFornecedores"></div>
     ${_htmlDrawerFornecedorCadastro()}`;
 
-  document.getElementById('btnIrCriterios').style.display = podeMexer ? 'inline-block' : 'none';
   document.getElementById('btnNovoFornecedor').style.display = podeMexer ? 'inline-block' : 'none';
 
   try {
@@ -20158,13 +20259,10 @@ async function fornecedores() {
     criticidadeFornecedorPerguntasData = critPerguntas;
     // Montados uma vez so: renderizarFornecedores() roda a cada tecla da
     // busca, e remontar as opcoes toda hora apagaria o filtro escolhido.
-    document.getElementById('filtroFornCadastroCategoria').innerHTML = '<option value="">Todas as categorias</option>' +
-      categoriasFornecedorData.filter((c) => c.ativo)
-        .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
-        .map((c) => `<option value="${esc(c.nome)}">${esc(c.nome)}</option>`).join('');
-    document.getElementById('filtroFornCadastroSetor').innerHTML = '<option value="">Todos os setores</option>' +
-      [...window.areasData].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))
-        .map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
+    _preencherFiltroLista('filtroFornCadastroCategoria', 'Categoria', categoriasFornecedorData.filter((c) => c.ativo)
+      .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR')).map((c) => [c.nome, c.nome]));
+    _preencherFiltroLista('filtroFornCadastroSetor', 'Área', [...window.areasData]
+      .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR')).map((a) => [a.nome, a.nome]));
   } catch (e) {
     console.error('Fornecedores: falha ao carregar', e);
     document.getElementById('loadingFornecedores').style.display = 'none';
@@ -20172,12 +20270,9 @@ async function fornecedores() {
     return;
   }
   document.getElementById('loadingFornecedores').style.display = 'none';
-  // Veio do card "fornecedores TIC sem contrato vigente" da tela de Contratos.
-  if (window._fornFiltroInicial) {
-    fornecedoresFiltroResumo = window._fornFiltroInicial;
-    if (window._fornFiltroInicial === 'semContrato') fornecedoresFiltroTic = 'tic';
-    window._fornFiltroInicial = null;
-  }
+  // Veio de um número do Dashboard de Terceiros: abre já filtrado.
+  _popularFiltroGestorFornecedor();
+  _aplicarFiltroInicialLista('fornecedores');
   renderizarFornecedores();
   // Veio de um clique numa linha de fornecedor no Catálogo de Dependências
   // (irParaFornecedor guardou o id): abre o cadastro direto. So agora, com
@@ -20199,38 +20294,14 @@ function renderizarFornecedores() {
 
   const ativos = criteriosFornecedorData.filter(FornecedorScore.criterioAtivo);
 
+  // Os números (antes cards aqui) estão no Dashboard de Terceiros; na lista fica
+  // só o aviso que pede ação.
   if (resumo) {
-    const comNota = fornecedoresData.filter((f) => { const a = _avaliacaoDoFornecedor(f.id); return a && a.nota !== null; });
-    const semAvaliacao = fornecedoresData.length - comNota.length;
-    const vencidas = comNota.filter((f) => FornecedorScore.vencida(_avaliacaoDoFornecedor(f.id).avaliadoEm)).length;
-    const abaixo = comNota.filter((f) => FornecedorScore.abreRisco(_avaliacaoDoFornecedor(f.id).nota, configFornecedor.limiarRisco)).length;
-    const qtdTic = fornecedoresData.filter((f) => f.tic !== false).length;
-    const qtdNaoTic = fornecedoresData.length - qtdTic;
-    const semContratoCard = () => {
-      const n = fornecedoresData.filter((f) => !_contratosVigentesDoFornecedor(f.id).length).length;
-      return { n, t: 'sem contrato vigente', c: n ? '#e65100' : '#999', titulo: 'Filtrar fornecedores sem contrato vigente', ativo: fornecedoresFiltroResumo === 'semContrato', onclick: "filtrarFornecedoresResumo('semContrato')" };
-    };
-
-    // Cards clicáveis que filtram a lista (_htmlMetricCardFiltro).
-    const card = (x) => _htmlMetricCardFiltro({ label: x.t, value: x.n, cor: x.c, ativo: x.ativo, onclick: x.onclick, titulo: x.titulo });
-
-    resumo.innerHTML = !ativos.length
-      ? `<div style="border:1px solid #ffe0b2;background:#fff8e1;border-radius:10px;padding:14px 16px;color:#e65100;font-size:0.9em;">
-           Nenhum critério ativo cadastrado. Sem critério não existe nota — todo fornecedor vai aparecer como "Não avaliado".
-           ${podeMexer ? ' <a href="#fornecedores-criterios" style="color:#e65100;font-weight:700;">Cadastrar critérios</a>' : ''}
-         </div>`
-      : `<div style="display:flex;gap:12px;flex-wrap:wrap;">
-           ${[
-             { n: fornecedoresData.length, t: 'fornecedores no catálogo', c: '#d60014', titulo: 'Ver todos', ativo: fornecedoresFiltroResumo === 'todos', onclick: "filtrarFornecedoresResumo('todos')" },
-             { n: semAvaliacao, t: 'sem avaliação', c: semAvaliacao ? '#e65100' : '#999', titulo: 'Filtrar sem avaliação', ativo: fornecedoresFiltroResumo === 'semAvaliacao', onclick: "filtrarFornecedoresResumo('semAvaliacao')" },
-             { n: vencidas, t: 'com avaliação vencida', c: vencidas ? '#e65100' : '#999', titulo: 'Filtrar avaliação vencida', ativo: fornecedoresFiltroResumo === 'vencida', onclick: "filtrarFornecedoresResumo('vencida')" },
-             { n: abaixo, t: `abaixo de ${configFornecedor.limiarRisco}`, c: abaixo ? '#c62828' : '#2e7d32', titulo: `Filtrar nota abaixo de ${configFornecedor.limiarRisco}`, ativo: fornecedoresFiltroResumo === 'abaixoLimiar', onclick: "filtrarFornecedoresResumo('abaixoLimiar')" },
-             ...(window._fornContratosCarregados ? [semContratoCard()] : []),
-             { n: qtdTic, t: 'TIC', c: '#d60014', titulo: 'Filtrar fornecedores de TIC', ativo: fornecedoresFiltroTic === 'tic', onclick: "filtrarFornecedoresTic('tic')" },
-             { n: qtdNaoTic, t: 'Não TIC', c: '#555', titulo: 'Filtrar fornecedores que não são de TIC', ativo: fornecedoresFiltroTic === 'naoTic', onclick: "filtrarFornecedoresTic('naoTic')" },
-           ].map(card).join('')}
-         </div>`;
+    resumo.innerHTML = ativos.length ? '' : `<div class="lista-alerta">Nenhum critério ativo cadastrado. Sem critério não existe nota — todo fornecedor vai aparecer como "Não avaliado".
+      ${podeMexer ? ' <a href="#fornecedores-criterios">Cadastrar critérios</a>' : ''}</div>`;
   }
+  fornecedoresFiltroResumo = (document.getElementById('filtroFornSituacao') || {}).value || 'todos';
+  fornecedoresFiltroTic = (document.getElementById('filtroFornTic') || {}).value || 'todos';
 
   const busca = (document.getElementById('buscaFornecedor')?.value || '').toLowerCase();
   const filtroCategoria = document.getElementById('filtroFornCadastroCategoria')?.value || '';
@@ -20289,58 +20360,51 @@ function renderizarFornecedores() {
   const th = (coluna, rotulo, classe, titulo) => `<th class="${classe || ''}" onclick="ordenarFornecedores('${coluna}')" style="cursor:pointer;"${titulo ? ` title="${titulo}"` : ''}>${rotulo} <span id="sort-forn-${coluna}"></span></th>`;
   const pag = fornecedoresPaginacao.aplicar(data);
 
-  // Larguras em px (somavam 109% em %): abaixo de 1356px a grade rola e Ações fica fixa.
+  _atualizarBarraLista('fornecedoresContador', data.length, ['fornecedor', 'fornecedores']);
+  // Uma linha por fornecedor: o que não cabe fica no title (contatos, quem avaliou).
   lista.innerHTML = `
-    <div class="data-table">
-      <table style="min-width:1356px;">
+    <div class="data-table data-table--lista">
+      <table style="min-width:1110px;">
         <colgroup>
-          <col style="width:200px"><col style="width:140px"><col style="width:120px"><col style="width:140px"><col style="width:140px">
-          <col style="width:100px"><col style="width:120px"><col style="width:170px"><col style="width:130px"><col style="width:96px">
+          <col style="width:200px"><col style="width:110px"><col style="width:140px"><col style="width:140px"><col style="width:150px">
+          <col style="width:70px"><col style="width:96px"><col style="width:150px"><col style="width:92px">
         </colgroup>
         <thead>
           <tr>
             ${th('nome', 'Empresa')}
             ${th('categoria', 'Categoria')}
             ${th('setor', 'Área (contrato)')}
-            <th>Contatos</th>
             <th title="Gestor dos contratos vigentes">Gestor</th>
+            <th>Contrato</th>
             ${th('nota', 'Nota', 'col-c', 'Nota de Conformidade (0 a 100)')}
             ${th('criticidade', 'Criticidade', 'col-c')}
-            <th>Situação</th>
-            ${th('avaliadoEm', 'Avaliado em', 'col-nw', 'Data da última avaliação')}
-            <th class="col-c col-sticky">Ações</th>
+            ${th('avaliadoEm', 'Situação', '', 'Situação da avaliação (ordena pela data da última avaliação)')}
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody>
           ${pag.itens.length ? pag.itens.map((f) => {
             const av = _avaliacaoDoFornecedor(f.id);
             const sit = _situacaoFornecedor(av);
+            const contatos = (f.pessoas || []).map((p) => p.nome).join(', ');
             return `
-            <tr style="cursor:pointer;" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')">
-              <td class="title">${esc(f.nome)}${_htmlContratosVigentesFornecedor(f.id)}</td>
-              <td class="muted">${esc(f.categoriaFornecedor || '–')}</td>
-              <td class="muted">${_resumoAreasFornecedor(f)}</td>
-              <td class="muted">${_resumoPessoasFornecedor(f)}</td>
-              <td class="muted">${_resumoGestoresFornecedor(f)}</td>
+            <tr style="cursor:pointer;" onclick="abrirDrawerFornecedorCadastro('${escJs(f.id)}')">
+              <td class="forte" title="${esc(f.nome + (contatos ? ' — contatos: ' + contatos : ''))}">${esc(f.nome)}</td>
+              ${_tdLista(f.categoriaFornecedor || '–')}
+              <td>${_resumoAreasFornecedor(f)}</td>
+              <td>${_resumoGestoresFornecedor(f)}</td>
+              ${_tdContratosFornecedor(f.id)}
               <td class="col-c">
                 ${av && av.nota !== null
                   ? `<span title="${esc(FornecedorScore.faixaNota(av.nota).rotulo)} — ${av.nota} de 100">${_htmlBadge(_nivelNotaFornecedor(FornecedorScore.faixaNota(av.nota).rotulo), String(av.nota))}</span>`
-                  : '<span style="color:#999;font-weight:600;" title="Sem nota — não é o mesmo que nota zero">–</span>'}
+                  : '<span class="muted" title="Sem nota — não é o mesmo que nota zero">–</span>'}
               </td>
               <td class="col-c">${_badgeCriticidadeFornecedor(av)}</td>
-              <td>
-                ${_htmlBadge(_nivelSituacaoFornecedor(sit), sit.rotulo)}
-                ${sit.aviso ? `<div style="font-size:0.72em;color:#e65100;margin-top:3px;">${esc(sit.aviso)}</div>` : ''}
-              </td>
-              <td class="muted">
-                ${av ? `<span class="num">${_dataCurtaForn(av.avaliadoEm)}</span><div style="font-size:0.8em;">${esc(av.avaliadoPor || '')}</div>` : '–'}
-              </td>
-              <td class="col-c col-nw col-sticky" onclick="event.stopPropagation();">
-                <button class="btn-icon" onclick="abrirDrawerFornecedorCadastro('${esc(f.id)}')" title="${podeMexer ? 'Editar / avaliar fornecedor' : 'Visualizar'}">${SVG_EDITAR}</button>
-                ${podeMexer ? `<button class="btn-icon" onclick="excluirFornecedorCadastro('${esc(f.id)}')" title="Excluir">${SVG_EXCLUIR}</button>` : ''}
-              </td>
+              <td title="${esc([sit.aviso || sit.rotulo, av ? `Avaliado em ${_dataCurtaForn(av.avaliadoEm)}${av.avaliadoPor ? ' por ' + av.avaliadoPor : ''}` : ''].filter(Boolean).join(' — '))}">${_htmlBadge(_nivelSituacaoFornecedor(sit), sit.rotulo)}${sit.aviso ? ' <span style="color:#e65100;">⚠</span>' : ''}</td>
+              ${_htmlAcoesLinha([{ icone: SVG_EDITAR, titulo: podeMexer ? 'Editar / avaliar fornecedor' : 'Visualizar', onclick: `abrirDrawerFornecedorCadastro('${escJs(f.id)}')` },
+                podeMexer ? _acaoExcluir(`excluirFornecedorCadastro('${escJs(f.id)}')`) : null])}
             </tr>`;
-          }).join('') : `<tr><td colspan="10" class="vazio">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
+          }).join('') : `<tr><td colspan="9" class="vazio">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -22102,48 +22166,37 @@ function _optionsListaContrato(lista, atual, placeholder) {
 async function contratos() {
   const podeEditar = Perfis.podeEditarContratos(window.USER_PERFIS);
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Contratos</h2><p class="page-sub">Vigência, renovação, reajuste, prazos de aviso e eventos dos contratos com fornecedores</p></div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" onclick="exportarContratosCSV()">📤 Exportar CSV</button>
-        ${podeEditar ? '<button class="btn btn-primary" onclick="abrirDrawerContrato()">+ Novo Contrato</button>' : ''}
-      </div>
-    </div>
-    <div id="contratosPainel" style="margin-bottom:12px;"></div>
-    <!-- Filtros em 1 linha (15/10/2026): os de uso diario a vista, o resto em "Mais filtros". -->
-    <div class="filtros-linha">
-      <input type="search" id="buscaContrato" placeholder="Buscar contrato…" aria-label="Buscar contrato" oninput="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control field-control--busca filtros-linha__busca">
-      <select id="filtroContratoFornecedor" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Fornecedor" title="Fornecedor"><option value="">Fornecedor: todos</option></select>
-      <select id="filtroContratoStatus" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Status" title="Status"><option value="">Status: todos</option></select>
-      <select id="filtroContratoAlerta" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Alerta" title="Alerta">
-        <option value="">Alerta: todos</option>
-        <option value="__qualquer__">Com algum alerta</option>
-        <option value="vencido">Vencido</option>
-        <option value="vence_em">Vence em até 90 dias</option>
-        <option value="janela_cancelamento">Janela de aviso de cancelamento</option>
-        <option value="aviso_perdido">Prazo de aviso encerrado</option>
-        <option value="reajuste_proximo">Reajuste próximo</option>
-        <option value="sem_gestor">Sem gestor</option>
-        <option value="valores_divergentes">Valores divergentes</option>
-        <option value="__sla__">SLA incompatível com RTO/RPO</option>
+    ${_htmlCabecalhoLista({ titulo: 'Contratos', sub: 'Vigência, renovação, reajuste, prazos de aviso e eventos dos contratos com fornecedores.',
+      primario: podeEditar ? { rotulo: '+ Novo contrato', onclick: 'abrirDrawerContrato()' } : null,
+      maisAcoes: [{ rotulo: 'Exportar CSV', onclick: 'exportarContratosCSV()' }] })}
+    <!-- Barra única; Tipo, Área e Renovação em "Mais filtros" (topo compacto de 15/10/2026). -->
+    <div class="lista-barra filtros-linha">
+      <label class="lista-busca"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+        <input type="search" id="buscaContrato" placeholder="Buscar contrato…" aria-label="Buscar contrato" oninput="contratosPaginacao.reiniciar(); renderizarContratos()"></label>
+      <select id="filtroContratoFornecedor" onchange="_marcarFiltroLista(this);contratosPaginacao.reiniciar(); renderizarContratos()" class="lista-sel" aria-label="Fornecedor" title="Fornecedor"><option value="">Fornecedor: Todos</option></select>
+      <select id="filtroContratoStatus" onchange="_marcarFiltroLista(this);contratosPaginacao.reiniciar(); renderizarContratos()" class="lista-sel" aria-label="Status" title="Status"><option value="">Status: Todos</option></select>
+      <select id="filtroContratoAlerta" onchange="_marcarFiltroLista(this);contratosPaginacao.reiniciar(); renderizarContratos()" class="lista-sel" aria-label="Alerta" title="Alerta">
+        ${_opcoesFiltroLista('Alerta', [['__qualquer__', 'Com algum alerta'], ['__vencimento__', 'Vencidos ou vencem em 90 dias'], ['vencido', 'Vencido'], ['vence_em', 'Vence em até 90 dias'],
+          ['janela_cancelamento', 'Janela de aviso de cancelamento'], ['aviso_perdido', 'Prazo de aviso encerrado'], ['reajuste_proximo', 'Reajuste próximo'],
+          ['sem_gestor', 'Sem gestor'], ['valores_divergentes', 'Valores divergentes'], ['__sla__', 'SLA incompatível com RTO/RPO']], 'Todos')}
       </select>
       <button type="button" class="btn btn-ghost filtros-linha__mais" id="btnMaisFiltrosContratos" onclick="alternarMaisFiltrosContratos()">⚙ Mais filtros</button>
-      <a href="#" id="limparFiltrosContratos" onclick="limparFiltrosContratos();return false;" style="display:none;font-size:0.85em;color:#d60014;font-weight:600;white-space:nowrap;">Limpar filtros</a>
-      <span id="contadorContratos" class="filtros-linha__contador"></span>
+      <button type="button" class="lista-limpar" id="limparFiltrosContratos" onclick="limparFiltrosContratos()" style="display:none;">Limpar</button>
+      <span id="contadorContratos" class="lista-contador"></span>
     </div>
-    <div id="maisFiltrosContratos" class="filtros-linha filtros-linha--extra" style="display:none;">
-      <select id="filtroContratoTipo" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Tipo" title="Tipo"><option value="">Tipo: todos</option></select>
-      <select id="filtroContratoArea" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Área" title="Área"><option value="">Área: todas</option></select>
-      <select id="filtroContratoRenovacao" onchange="contratosPaginacao.reiniciar(); renderizarContratos()" class="field-control" aria-label="Renovação automática" title="Renovação automática">
-        <option value="">Renovação automática: todas</option><option value="sim">Renovação automática: sim</option><option value="nao">Renovação automática: não</option>
+    <div id="maisFiltrosContratos" class="lista-barra filtros-linha--extra" style="display:none;">
+      <select id="filtroContratoTipo" onchange="_marcarFiltroLista(this);contratosPaginacao.reiniciar(); renderizarContratos()" class="lista-sel" aria-label="Tipo" title="Tipo"><option value="">Tipo: Todos</option></select>
+      <select id="filtroContratoArea" onchange="_marcarFiltroLista(this);contratosPaginacao.reiniciar(); renderizarContratos()" class="lista-sel" aria-label="Área" title="Área"><option value="">Área: Todas</option></select>
+      <select id="filtroContratoRenovacao" onchange="_marcarFiltroLista(this);contratosPaginacao.reiniciar(); renderizarContratos()" class="lista-sel" aria-label="Renovação automática" title="Renovação automática">
+        ${_opcoesFiltroLista('Renovação automática', [['sim', 'sim'], ['nao', 'não']])}
       </select>
     </div>
     <div class="loading">⏳ Carregando...</div>
-    <div class="data-table" id="listaContratos" style="display:none;">
-      <table style="min-width:1575px;">
+    <div class="data-table data-table--lista" id="listaContratos" style="display:none;">
+      <table style="min-width:1520px;">
         <colgroup>
-          <col style="width:100px"><col style="width:210px"><col style="width:260px"><col style="width:175px"><col style="width:170px">
-          <col style="width:140px"><col style="width:110px"><col style="width:140px"><col style="width:170px"><col style="width:100px">
+          <col style="width:100px"><col style="width:200px"><col style="width:255px"><col style="width:175px"><col style="width:160px">
+          <col style="width:130px"><col style="width:120px"><col style="width:130px"><col style="width:140px"><col style="width:110px">
         </colgroup>
         <thead>
           <tr>
@@ -22156,7 +22209,7 @@ async function contratos() {
             <th onclick="ordenarContratos('dataFim')" style="cursor:pointer;" class="col-nw">Fim <span id="sort-contrato-dataFim"></span></th>
             <th onclick="ordenarContratos('valorMensal')" style="cursor:pointer;" class="col-r">Valor mensal <span id="sort-contrato-valorMensal"></span></th>
             <th>Alertas</th>
-            <th class="col-c col-sticky">Ações</th>
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody id="contratoRows"></tbody>
@@ -22206,19 +22259,19 @@ async function contratos() {
   const fornecedoresNaLista = [...new Map(contratosData.filter((c) => c.fornecedorId)
     .map((c) => [c.fornecedorId, c.fornecedorNome || _nomeNaLista(_contratoFornecedores, c.fornecedorId)])).entries()]
     .sort((a, b) => String(a[1]).localeCompare(String(b[1]), 'pt-BR'));
-  document.getElementById('filtroContratoFornecedor').innerHTML = '<option value="">Fornecedor: todos</option>' +
-    fornecedoresNaLista.map(([id, nome]) => `<option value="${esc(id)}">${esc(nome)}</option>`).join('');
-  document.getElementById('filtroContratoTipo').innerHTML = '<option value="">Tipo: todos</option>' + opcoes(tiposContratoData);
-  document.getElementById('filtroContratoStatus').innerHTML = '<option value="">Status: todos</option>' +
-    '<option value="__vigentes__">Somente vigentes</option>' + opcoes(statusContratoData);
+  const idNome = (lista) => lista.map((x) => [x.id, x.nome]);
+  _preencherFiltroLista('filtroContratoFornecedor', 'Fornecedor', fornecedoresNaLista, 'Todos');
+  _preencherFiltroLista('filtroContratoTipo', 'Tipo', idNome(tiposContratoData), 'Todos');
+  _preencherFiltroLista('filtroContratoStatus', 'Status', [['__vigentes__', 'Somente vigentes'], ...idNome(statusContratoData)], 'Todos');
   const areasNaLista = [...new Set(contratosData.map((c) => c.area).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  document.getElementById('filtroContratoArea').innerHTML = '<option value="">Área: todas</option>' +
-    areasNaLista.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
+  _preencherFiltroLista('filtroContratoArea', 'Área', areasNaLista.map((a) => [a, a]));
 
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaContratos').style.display = 'block';
   contratosPaginacao.reiniciar();
   contratosFiltroPainel = '';
+  // Veio de um número do Dashboard de Terceiros: abre já filtrado.
+  _aplicarFiltroInicialLista('contratos');
   renderizarContratos();
 
   // Deep links: #contratos?contrato=<id> (abrir) e #contratos?novo=1&fornecedor=<id>
@@ -22239,10 +22292,7 @@ window.filtrarContratosPainel = (modo) => {
   contratosPaginacao.reiniciar();
   renderizarContratos();
 };
-window.irParaFornecedoresSemContrato = () => {
-  window._fornFiltroInicial = 'semContrato';
-  window.location.hash = 'fornecedores';
-};
+window.irParaFornecedoresSemContrato = () => _abrirListaFiltrada('fornecedores', { filtroFornSituacao: 'semContrato', filtroFornTic: 'tic' });
 
 function _renderPainelContratos() {
   const painel = document.getElementById('contratosPainel');
@@ -22261,18 +22311,18 @@ function _renderPainelContratos() {
       <span class="kpi-chip__rotulo">${esc(x.t)}</span>
     </${x.onclick ? 'button' : 'div'}>`;
   const cards = [
-    { n: vigentes.length, t: 'vigentes', c: '#d60014', titulo: 'Filtrar vigentes', ativo: contratosFiltroPainel === 'vigentes', onclick: "filtrarContratosPainel('vigentes')" },
+    { n: vigentes.length, t: 'vigentes', c: '#d60014', titulo: 'Abrir os contratos vigentes', onclick: "_abrirListaFiltrada('contratos', { filtroContratoStatus: '__vigentes__' })" },
     { n: _formatarReais(Math.round(custoMensal * 100) / 100), t: 'por mês (vigentes)', c: '#2a2623', titulo: 'Soma do valor mensal dos contratos vigentes' },
-    { n: vencimento, t: 'vencem em 90 dias ou vencidos', c: vencimento ? '#c62828' : '#999', titulo: 'Filtrar vencimento próximo', ativo: contratosFiltroPainel === 'vencimento', onclick: "filtrarContratosPainel('vencimento')" },
-    { n: janela, t: 'na janela de aviso', c: janela ? '#f57c00' : '#999', titulo: 'Decidir agora se cancela: o prazo de aviso termina em até 30 dias', ativo: contratosFiltroPainel === 'janela', onclick: "filtrarContratosPainel('janela')" },
-    { n: reajuste, t: 'reajustes próximos', c: reajuste ? '#1565c0' : '#999', titulo: 'Filtrar reajustes próximos', ativo: contratosFiltroPainel === 'reajuste', onclick: "filtrarContratosPainel('reajuste')" },
-    { n: slaIncompativel, t: 'SLA abaixo do RTO/RPO', c: slaIncompativel ? '#c62828' : '#999', titulo: 'O fornecedor garante menos do que o BIA ou a dependência exige', ativo: contratosFiltroPainel === 'sla', onclick: "filtrarContratosPainel('sla')" },
+    { n: vencimento, t: 'vencem em 90 dias ou vencidos', c: vencimento ? '#c62828' : '#999', titulo: 'Abrir os vencidos ou que vencem em 90 dias', onclick: "_abrirListaFiltrada('contratos', { filtroContratoStatus: '__vigentes__', filtroContratoAlerta: '__vencimento__' })" },
+    { n: janela, t: 'na janela de aviso', c: janela ? '#f57c00' : '#999', titulo: 'Decidir agora se cancela: o prazo de aviso termina em até 30 dias', onclick: "_abrirListaFiltrada('contratos', { filtroContratoStatus: '__vigentes__', filtroContratoAlerta: 'janela_cancelamento' })" },
+    { n: reajuste, t: 'reajustes próximos', c: reajuste ? '#1565c0' : '#999', titulo: 'Abrir os reajustes próximos', onclick: "_abrirListaFiltrada('contratos', { filtroContratoStatus: '__vigentes__', filtroContratoAlerta: 'reajuste_proximo' })" },
+    { n: slaIncompativel, t: 'SLA abaixo do RTO/RPO', c: slaIncompativel ? '#c62828' : '#999', titulo: 'O fornecedor garante menos do que o BIA ou a dependência exige', onclick: "_abrirListaFiltrada('contratos', { filtroContratoStatus: '__vigentes__', filtroContratoAlerta: '__sla__' })" },
   ];
   // Só quem gerencia vê o catálogo inteiro de fornecedores (o gestor só tem
   // os contratos da área -- a conta sairia errada).
   if (Perfis.podeEditarContratos(window.USER_PERFIS) && _contratoFornecedores.length) {
     const semContrato = _contratoFornecedores.filter((f) => f.tic !== false && !_contratosVigentesDoFornecedor(f.id).length).length;
-    cards.push({ n: semContrato, t: 'fornecedores TIC sem contrato vigente', c: semContrato ? '#f57c00' : '#999', titulo: 'Abrir a lista desses fornecedores', onclick: 'irParaFornecedoresSemContrato()' });
+    cards.push({ n: semContrato, t: 'fornecedores TIC sem contrato vigente', c: semContrato ? '#f57c00' : '#999', titulo: 'Abrir a lista desses fornecedores', onclick: "_abrirListaFiltrada('fornecedores', { filtroFornSituacao: 'semContrato', filtroFornTic: 'tic' })" });
   }
   painel.innerHTML = `<div class="kpi-strip">${cards.map(card).join('')}</div>`;
 }
@@ -22288,7 +22338,7 @@ window.alternarMaisFiltrosContratos = () => {
 };
 
 window.limparFiltrosContratos = () => {
-  _FILTROS_CONTRATOS.forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+  _FILTROS_CONTRATOS.forEach((id) => { const el = document.getElementById(id); if (el) { el.value = ''; if (el.tagName === 'SELECT') _marcarFiltroLista(el); } });
   contratosFiltroPainel = '';
   contratosPaginacao.reiniciar();
   renderizarContratos();
@@ -22331,6 +22381,7 @@ function renderizarContratos() {
   if (fArea) data = data.filter((c) => c.area === fArea);
   const fAlerta = valor('filtroContratoAlerta');
   if (fAlerta === '__qualquer__') data = data.filter((c) => c._alertas.length);
+  else if (fAlerta === '__vencimento__') data = data.filter((c) => c._alertas.some((a) => a.codigo === 'vence_em' || a.codigo === 'vencido'));
   else if (fAlerta === '__sla__') data = data.filter((c) => c._alertas.some((a) => String(a.codigo).startsWith('sla_')));
   else if (fAlerta) data = data.filter((c) => c._alertas.some((a) => a.codigo === fAlerta));
   const fRenov = valor('filtroContratoRenovacao');
@@ -22377,29 +22428,20 @@ function renderizarContratos() {
     : 'Nenhum contrato encontrado com esses filtros.';
   document.getElementById('contratoRows').innerHTML = pagina.length
     ? pagina.map((c) => `
-      <tr style="cursor:pointer;" onclick="abrirDrawerContrato('${esc(c.id)}')">
-        <td class="title col-nw">${esc(c.codigo || '–')}</td>
-        <td>${esc(c.fornecedorNome || _nomeNaLista(_contratoFornecedores, c.fornecedorId) || '–')}</td>
-        <td><div class="title">${esc(c.objeto || '–')}</div>${c.numero ? `<div class="muted" style="font-size:0.82em;">Nº ${esc(c.numero)}</div>` : ''}</td>
+      <tr style="cursor:pointer;" onclick="abrirDrawerContrato('${escJs(c.id)}')">
+        ${_tdLista(c.codigo || '–', 'forte')}
+        ${_tdLista(c.fornecedorNome || _nomeNaLista(_contratoFornecedores, c.fornecedorId) || '–')}
+        <td title="${esc((c.objeto || '') + (c.numero ? ' — Nº ' + c.numero : ''))}">${esc(c.objeto || '–')}</td>
         <td>${_pillStatusContrato(c)}</td>
-        <td class="muted">${esc(_nomeNaLista(tiposContratoData, c.tipoId) || '–')}</td>
-        <td>${c.area ? `<span class="chip-area">${esc(c.area)}</span>` : '<span class="muted">–</span>'}${c.rateado ? '<div class="muted" style="font-size:0.78em;margin-top:3px;">Rateado</div>' : ''}</td>
-        <td class="col-nw">${esc(_dataBR(c.dataFim))}${c.renovacaoAutomatica ? '<div class="muted" style="font-size:0.78em;" title="Renovação automática">🔁 automática</div>' : ''}</td>
-        <td class="num col-r col-nw">${c.valorMensal != null ? esc(_formatarReais(c.valorMensal)) : '<span class="muted">–</span>'}</td>
-        <td>${c._alertas.map(_chipAlertaContrato).join('') || '<span class="muted">–</span>'}</td>
-        <td class="col-c col-sticky col-nw" onclick="event.stopPropagation();">
-          <button class="btn-icon" onclick="abrirDrawerContrato('${esc(c.id)}')" title="${podeEditar ? 'Editar' : 'Ver'}">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          ${podeEditar ? `<button class="btn-icon" onclick="clonarContrato('${esc(c.id)}')" title="Clonar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d60014" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>
-          <button class="btn-icon" onclick="excluirContrato('${esc(c.id)}')" title="Excluir">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>` : ''}
-        </td>
+        ${_tdLista(_nomeNaLista(tiposContratoData, c.tipoId) || '–')}
+        ${_tdLista(c.area ? c.area + (c.rateado ? ' (rateado)' : '') : '–')}
+        <td class="num" title="${c.renovacaoAutomatica ? 'Renovação automática' : ''}">${esc(_dataBR(c.dataFim))}${c.renovacaoAutomatica ? ' 🔁' : ''}</td>
+        <td class="num col-r">${c.valorMensal != null ? esc(_formatarReais(c.valorMensal)) : '<span class="muted">–</span>'}</td>
+        <td title="${esc(c._alertas.map((a) => a.texto || a.rotulo || a.codigo).join(' · '))}">${c._alertas.map(_chipAlertaContrato).join('') || '<span class="muted">–</span>'}</td>
+        ${_htmlAcoesLinha([{ icone: SVG_EDITAR, titulo: podeEditar ? 'Editar' : 'Ver', onclick: `abrirDrawerContrato('${escJs(c.id)}')` },
+          podeEditar ? _acaoClonar(`clonarContrato('${escJs(c.id)}')`) : null, podeEditar ? _acaoExcluir(`excluirContrato('${escJs(c.id)}')`) : null])}
       </tr>`).join('')
-    : `<tr><td colspan="10" style="text-align:center;color:#999;padding:40px;">${vazio}</td></tr>`;
+    : `<tr><td colspan="10" class="vazio">${vazio}</td></tr>`;
 
   const paginacao = document.getElementById('contratosPaginacao');
   if (paginacao) {

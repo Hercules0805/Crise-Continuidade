@@ -77,7 +77,7 @@ test('lista mostra o contrato, o status pela lista configuravel e os alertas de 
   assert.match(tela, /Vigente/);
   assert.match(tela, /Vence em 20 dia/);
   assert.match(tela, /Prazo de aviso encerrado/, 'fim em 20 dias com aviso de 30: ja passou da data-limite');
-  assert.match(tela, /\+ Novo Contrato/);
+  assert.match(tela, /\+ Novo contrato/);
   assert.match(tela, /excluirContrato\('c1'\)/);
 });
 
@@ -85,7 +85,8 @@ test('painel: custo mensal so dos vigentes e fornecedor TIC sem contrato vigente
   const { w, doc } = await carregar(['admin'], {
     getContratos: [contrato(), contrato({ id: 'c2', codigo: 'CT-0002', statusId: 's-enc', valorMensal: 5000, fornecedorId: 'f2' })],
   });
-  await w.contratos();
+  // Faixa de indicadores mora no Dashboard de Terceiros (23/10/2026).
+  await w.terceirosDashboard();
   const painel = doc.getElementById('contratosPainel').textContent;
   assert.match(painel, /R\$ 1\.000/);
   assert.doesNotMatch(painel, /6\.000/, 'contrato encerrado nao entra no custo');
@@ -97,14 +98,20 @@ test('gestor: ve a tela sem controles de edicao, e o drawer abre so para leitura
   const { w, doc } = await carregar(['gestor']);
   await w.contratos();
   const tela = html(doc);
-  assert.doesNotMatch(tela, /\+ Novo Contrato/);
+  assert.doesNotMatch(tela, /\+ Novo contrato/);
   assert.doesNotMatch(tela, /excluirContrato\(/);
-  assert.doesNotMatch(doc.getElementById('contratosPainel').textContent, /sem contrato vigente/, 'gestor nao ve o catalogo inteiro de fornecedores');
   w.abrirDrawerContrato('c1');
   assert.ok(doc.getElementById('drawerContrato').classList.contains('open'));
   assert.strictEqual(doc.getElementById('btnSalvarContrato').style.display, 'none');
   assert.ok(doc.getElementById('contratoObjeto').disabled);
   assert.strictEqual(doc.getElementById('contratoEventoForm').style.display, 'none');
+});
+
+test('Dashboard de Terceiros: gestor ve so a secao Contratos, sem o catalogo inteiro de fornecedores', async () => {
+  const { w, doc } = await carregar(['gestor']);
+  await w.terceirosDashboard();
+  assert.doesNotMatch(doc.getElementById('contratosPainel').textContent, /sem contrato vigente/, 'gestor nao ve o catalogo inteiro de fornecedores');
+  assert.doesNotMatch(doc.getElementById('terceirosPainel').textContent, /Fornecedores no catálogo/);
 });
 
 test('novo contrato: valida obrigatorios e grava com codigo sequencial, sem fechar', async () => {
@@ -381,7 +388,6 @@ test('SLA x RTO: RTO garantido acima do exigido vira alerta na grade, no filtro,
   const { w, doc } = await carregar(['admin'], { getContratos: [c], getDependencias: DEPS_SLA, getProcessos: PROC_SLA });
   await w.contratos();
   assert.match(doc.getElementById('contratoRows').textContent, /SLA: RTO incompatível \(2\)/, 'dependencia (4 h) e processo (< 4 horas)');
-  assert.match(doc.getElementById('contratosPainel').textContent, /\b1\s*SLA abaixo do RTO\/RPO/);
   doc.getElementById('filtroContratoAlerta').value = '__sla__';
   w.renderizarContratos();
   assert.match(doc.getElementById('contratoRows').textContent, /CT-0001/);
@@ -391,6 +397,13 @@ test('SLA x RTO: RTO garantido acima do exigido vira alerta na grade, no filtro,
   assert.match(vinc, /SLA × RTO\/RPO exigido/);
   assert.match(vinc, /Processo Varredura \(TI\)/);
   assert.match(vinc, /RTO incompatível/);
+});
+
+test('SLA x RTO: a faixa do Dashboard de Terceiros conta o contrato com SLA abaixo do exigido', async () => {
+  const c = contrato({ dataFim: CC.somarMeses(HOJE, 10), sla: { rtoMin: 480 }, dependenciasCobertas: [{ id: 'd-qualys', categoria: 'Sistemas', nome: 'Qualys Cloud' }] });
+  const { w, doc } = await carregar(['admin'], { getContratos: [c], getDependencias: DEPS_SLA, getProcessos: PROC_SLA });
+  await w.terceirosDashboard();
+  assert.match(doc.getElementById('contratosPainel').textContent, /\b1\s*SLA abaixo do RTO\/RPO/);
 });
 
 test('SLA x RTO: contrato sem SLA cadastrado nao acusa nada', async () => {
