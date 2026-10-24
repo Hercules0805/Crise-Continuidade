@@ -113,7 +113,7 @@ test('salvar com tipo grava tipo, subtipo e metodo', async () => {
 test('grade: coluna Tipo com subtipo; sem tipo = "Não classificada"; filtro Tipo e "Não classificada"', async () => {
   const { w, doc } = await carregar();
   const linha = (id) => doc.querySelector(`.chk-vulnerabilidade[data-id="${id}"]`).closest('tr');
-  assert.match(linha('v1').textContent, /Não Conformidade\s*Licenciamento/);
+  assert.match(linha('v1').textContent, /Não Conformidade\s*·?\s*Licenciamento/);
   assert.match(linha('v2').textContent, /Não classificada/);
   assert.equal(doc.querySelectorAll('thead th').length, linha('v1').children.length);
   assert.equal(doc.querySelectorAll('colgroup col').length, linha('v1').children.length);

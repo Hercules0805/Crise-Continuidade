@@ -91,13 +91,11 @@ test('vulnerabilidade: selo "Atrasada" e filtro Atrasadas (corrigida não conta)
   assert.deepStrictEqual([...doc.querySelectorAll('.chk-vulnerabilidade')].map((c) => c.dataset.id), ['v2']);
 });
 
-test('painel de exposição: em aberto por severidade, atrasadas e "acima do limiar sem risco" com atalho de seleção', async () => {
+test('lista: aviso "acima do limiar sem risco" com atalho de seleção (a exposição fica no Painel de Vulnerabilidades)', async () => {
   const { w, doc } = await carregar();
   await w.vulnerabilidades();
   const painel = doc.getElementById('vulnPainelExposicao').textContent.replace(/\s+/g, ' ');
-  assert.match(painel, /Em aberto: 3/);
-  assert.match(painel, /Crítica: 1/);
-  assert.match(painel, /Atrasadas: 1/);
+  assert.doesNotMatch(painel, /Em aberto/, 'a exposição saiu da lista');
   assert.match(painel, /Acima do limiar sem risco: 1/);
   w.selecionarVulnSemRisco();
   assert.match(doc.getElementById('btnExportarVulnRiscos').textContent, /\(1\)/);
@@ -113,7 +111,7 @@ test('limiar: Admin edita e salva; Segurança só vê o valor', async () => {
   const si = await carregar({ perfis: ['seguranca'] });
   await si.w.vulnerabilidades();
   assert.equal(si.doc.getElementById('vulnLimiarCvss'), null);
-  assert.match(si.doc.getElementById('vulnPainelExposicao').textContent, /CVSS\s*7/);
+  assert.match(si.doc.getElementById('vulnLimiarBox').textContent, /CVSS\s*7/);
 });
 
 // ---------------------------------------------------------------- Registro de Riscos

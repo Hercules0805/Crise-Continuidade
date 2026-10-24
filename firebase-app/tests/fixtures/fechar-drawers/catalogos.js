@@ -189,7 +189,7 @@ window.__rodar = async () => {
   ok(_nomeProdutoVuln({ produtoSoftwareId: 'ps1', produto: 'Área Restrita' }) === 'Fortes RH', 'grade: com vinculo mostra o nome do produto do catalogo');
   ok(_nomeProdutoVuln({ produtoSoftwareId: '', produto: '.NET' }) === '.NET', 'grade: sem vinculo mostra o texto antigo');
   ok(_nomeProdutoVuln({ produtoSoftwareId: 'sumiu', produto: '' }) === '(produto removido)', 'grade: vinculo para produto removido e sem texto mostra "(produto removido)"');
-  ok(/Fortes RH<div[^>]*>Ativo: Área Restrita<\/div>/.test(_htmlCelulaProdutoVuln({ produtoSoftwareId: 'ps1', produto: 'Área Restrita' })), 'grade: produto vinculado + ativo afetado diferente mostra "Ativo: …" embaixo');
+  ok(/Fortes RH <span[^>]*>· Ativo: Área Restrita<\/span>/.test(_htmlCelulaProdutoVuln({ produtoSoftwareId: 'ps1', produto: 'Área Restrita' })), 'grade: produto vinculado + ativo afetado diferente mostra "· Ativo: …" na mesma linha');
   ok(_htmlCelulaProdutoVuln({ produtoSoftwareId: 'ps1', produto: 'fortes rh' }) === 'Fortes RH', 'grade: ativo igual ao nome do produto nao se repete');
   ok(_htmlCelulaProdutoVuln({ produtoSoftwareId: '', produto: '.NET' }) === '.NET' && _htmlCelulaProdutoVuln({}) === '-', 'grade: sem vinculo, igual a antes; sem nada, traco');
   ok(!/<img/.test(_htmlCelulaProdutoVuln({ produtoSoftwareId: '', produto: '<img src=x>' })), 'grade: texto do ativo sai escapado');

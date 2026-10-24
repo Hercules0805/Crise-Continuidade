@@ -10888,8 +10888,8 @@ function _optionsListaFixaVuln(lista, valorAtual, rotuloVazio) {
 
 /** Celula "Tipo" da grade: tipo + subtipo em cinza; sem tipo = pill neutra "Não classificada". */
 function _htmlCelulaTipoVuln(v) {
-  if (!v.tipo) return '<span style="display:inline-block;padding:3px 10px;border-radius:10px;font-size:0.78em;font-weight:600;color:#777;background:#f0f0f0;">Não classificada</span>';
-  return esc(v.tipo) + (v.subtipo ? `<div style="font-size:0.78em;color:#888;">${esc(v.subtipo)}</div>` : '');
+  if (!v.tipo) return '<span class="badge badge-gray">Não classificada</span>';
+  return `<span title="${esc([v.tipo, v.subtipo].filter(Boolean).join(' · '))}">${esc(v.tipo)}${v.subtipo ? ` <span class="muted">· ${esc(v.subtipo)}</span>` : ''}</span>`;
 }
 
 /**
@@ -10933,54 +10933,26 @@ function _tempoCorrecaoDias(dataDeteccao, dataCorrecao) {
 
 async function vulnerabilidades() {
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Vulnerabilidades</h2><p class="page-sub">Catálogo de vulnerabilidades reportadas, com severidade e abertura automática de risco</p></div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" onclick="abrirDrawerVulnerabilidadeLote()" id="btnEditarVulnLote" style="color:#1565c0;border-color:#1565c0;display:none;">✏️ Editar selecionadas</button>
-        <button class="btn btn-ghost" onclick="clonarVulnerabilidadesSelecionadas()" id="btnClonarVulnSelecionadas" style="color:#d60014;border-color:#d60014;display:none;">📋 Clonar selecionadas</button>
-        <button class="btn btn-ghost" onclick="exportarVulnerabilidadesParaRiscos()" id="btnExportarVulnRiscos" style="color:#2e7d32;border-color:#2e7d32;display:none;">📤 Exportar para Riscos</button>
-        <button class="btn btn-primary" onclick="abrirDrawerVulnerabilidade()">+ Nova Vulnerabilidade</button>
-      </div>
-    </div>
-    <div id="vulnPainelExposicao" style="margin-bottom:14px;"></div>
-    <div class="filters">
-      <input type="search" id="buscaVulnerabilidade" placeholder="Buscar vulnerabilidade…" aria-label="Buscar vulnerabilidade" oninput="renderizarVulnerabilidades()" class="field-control field-control--busca">
-      <div class="field">
-        <label class="field-label">Produto</label>
-        <select id="filtroVulnProduto" onchange="renderizarVulnerabilidades()" class="field-control">
-          <option value="">Todos</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Severidade</label>
-        <select id="filtroVulnSeveridade" onchange="renderizarVulnerabilidades()" class="field-control">
-          <option value="">Todas</option>
-          <option value="Crítica">Crítica</option>
-          <option value="Alta">Alta</option>
-          <option value="Média">Média</option>
-          <option value="Baixa">Baixa</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Status da Correção</label>
-        <select id="filtroVulnStatus" onchange="renderizarVulnerabilidades()" class="field-control">
-          <option value="">Todos</option>
-          ${VULNERABILIDADE_STATUS_CORRECAO.map((s) => `<option value="${s}">${s}</option>`).join('')}
-          <option value="__atrasadas__">Atrasadas</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Tipo</label>
-        <select id="filtroVulnTipo" onchange="vulnerabilidadesPaginacao.reiniciar(); renderizarVulnerabilidades()" class="field-control">
-          <option value="">Todos</option>
-          ${VULNERABILIDADE_TIPOS.map((t) => `<option value="${esc(t.tipo)}">${esc(t.tipo)}</option>`).join('')}
-          <option value="__sem_tipo__">Não classificada</option>
-        </select>
-      </div>
-      <span id="contadorVulnerabilidades" style="font-size:0.82em;color:#888;padding:8px 0;"></span>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Vulnerabilidades', sub: 'Catálogo de vulnerabilidades reportadas, com severidade e abertura automática de risco.',
+      primario: { rotulo: '+ Nova vulnerabilidade', onclick: 'abrirDrawerVulnerabilidade()' },
+      extra: `<button class="btn btn-ghost" onclick="abrirDrawerVulnerabilidadeLote()" id="btnEditarVulnLote" style="display:none;">Editar selecionadas</button>
+        <button class="btn btn-ghost" onclick="clonarVulnerabilidadesSelecionadas()" id="btnClonarVulnSelecionadas" style="display:none;">Clonar selecionadas</button>
+        <button class="btn btn-ghost" onclick="exportarVulnerabilidadesParaRiscos()" id="btnExportarVulnRiscos" style="display:none;">Exportar para Riscos</button>`,
+      maisAcoes: [
+        _seVeTela('vulnerabilidades-painel', 'x') ? { rotulo: 'Painel de Vulnerabilidades', onclick: "location.hash='#vulnerabilidades-painel'" } : null,
+        { rotulo: 'Risco automático (limiar de CVSS)', onclick: 'abrirConfigLista()' },
+      ] })}
+    ${_htmlBarraLista({ busca: { id: 'buscaVulnerabilidade', placeholder: 'Buscar vulnerabilidade…' }, aoMudar: 'filtrarVulnerabilidadesBarra', contadorId: 'contadorVulnerabilidades',
+      filtros: [
+        { id: 'filtroVulnProduto', rotulo: 'Produto', todos: 'Todos', opcoes: [] },
+        { id: 'filtroVulnSeveridade', rotulo: 'Severidade', opcoes: ['Crítica', 'Alta', 'Média', 'Baixa'].map((s) => [s, s]) },
+        { id: 'filtroVulnStatus', rotulo: 'Correção', todos: 'Todas', opcoes: [...VULNERABILIDADE_STATUS_CORRECAO.map((s) => [s, s]), ['__atrasadas__', 'Atrasadas']] },
+        { id: 'filtroVulnTipo', rotulo: 'Tipo', todos: 'Todos', opcoes: [...VULNERABILIDADE_TIPOS.map((x) => [x.tipo, x.tipo]), ['__sem_tipo__', 'Não classificada']] },
+      ] })}
+    <div id="vulnPainelExposicao"></div>
+    ${_htmlDrawerConfigLista('Risco automático a partir de CVSS', 'vulnLimiarBox')}
     <div class="loading">⏳ Carregando...</div>
-    <div class="data-table" id="listaVulnerabilidades" style="display:none;">
+    <div class="data-table data-table--lista" id="listaVulnerabilidades" style="display:none;">
       <table style="min-width:1470px;">
         <colgroup>
           <col style="width:44px"><col style="width:100px"><col style="width:170px"><col style="width:300px"><col style="width:200px"><col style="width:130px">
@@ -10997,7 +10969,7 @@ async function vulnerabilidades() {
             <th onclick="ordenarVulnerabilidades('statusCorrecao')" style="cursor:pointer;">Status da Correção <span id="sort-vuln-statusCorrecao"></span></th>
             <th onclick="ordenarVulnerabilidades('dataDeteccao')" style="cursor:pointer;">Detecção <span id="sort-vuln-dataDeteccao"></span></th>
             <th>Responsável</th>
-            <th class="col-c">Ações</th>
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody id="vulnerabilidadeRows"></tbody>
@@ -11035,11 +11007,8 @@ async function vulnerabilidades() {
     return;
   }
 
-  const filtroProduto = document.getElementById('filtroVulnProduto');
-  if (filtroProduto) {
-    const produtos = [...new Set(vulnerabilidadesData.map(_nomeProdutoVuln).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
-    filtroProduto.innerHTML = '<option value="">Todos</option>' + produtos.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('');
-  }
+  const produtosVuln = [...new Set(vulnerabilidadesData.map(_nomeProdutoVuln).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  _preencherFiltroLista('filtroVulnProduto', 'Produto', produtosVuln.map((p) => [p, p]), 'Todos');
 
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaVulnerabilidades').style.display = 'block';
@@ -11086,7 +11055,9 @@ function _htmlCelulaProdutoVuln(v) {
   if (deps.length) linha = `Dependências: ${deps.join(', ')}`;
   else if (ativo && v.produtoSoftwareId && ativo.toLowerCase() !== nome.toLowerCase()) linha = `Ativo: ${ativo}`;
   if (!nome && !linha) return '-';
-  return (nome ? esc(nome) : '<span style="color:#999;">—</span>') + (linha ? `<div style="font-size:0.78em;color:#888;">${esc(linha)}</div>` : '');
+  // Uma linha só: o complemento (dependências ou ativo) segue depois de " · ".
+  if (!linha) return esc(nome);
+  return `${nome ? esc(nome) : '<span class="muted">—</span>'} <span class="muted" title="${esc(linha)}">· ${esc(linha)}</span>`;
 }
 
 function renderizarVulnerabilidades() {
@@ -11124,11 +11095,7 @@ function renderizarVulnerabilidades() {
   });
   vulnerabilidadesOrdenacao.atualizarSetas('sort-vuln-', ['codigo', 'produto', 'nome', 'tipo', 'severidade', 'statusCorrecao', 'dataDeteccao']);
 
-  const contador = document.getElementById('contadorVulnerabilidades');
-  if (contador) {
-    const total = vulnerabilidadesData.length;
-    contador.textContent = data.length === total ? `${total} vulnerabilidade${total !== 1 ? 's' : ''}` : `${data.length} de ${total} vulnerabilidade${total !== 1 ? 's' : ''}`;
-  }
+  _atualizarBarraLista('contadorVulnerabilidades', data.length, ['vulnerabilidade', 'vulnerabilidades']);
 
   const totalFiltrado = data.length;
   const pagInfo = vulnerabilidadesPaginacao.aplicar(data);
@@ -11140,29 +11107,19 @@ function renderizarVulnerabilidades() {
         const faixa = VulnerabilidadeSeveridade.faixa(v);
         const riscoAberto = (riscosData || []).find((r) => r.origem === 'Vulnerabilidade' && String(r.vulnerabilidadeId) === String(v.id) && r.status !== 'Encerrado');
         return `<tr style="cursor:pointer;" onclick="abrirDrawerVulnerabilidade('${esc(v.id)}')">
-        <td style="text-align:center;padding-left:6px;padding-right:6px;" onclick="event.stopPropagation();"><input type="checkbox" class="chk-vulnerabilidade" data-id="${esc(v.id)}" ${vulnerabilidadesSelecionadas.has(String(v.id)) ? 'checked' : ''} onchange="toggleVulnerabilidadeSelecionada('${esc(v.id)}', this.checked)"></td>
-        <td style="font-weight:600;">${esc(v.codigo || '-')}</td>
+        <td class="col-c" onclick="event.stopPropagation();"><input type="checkbox" class="chk-vulnerabilidade" data-id="${esc(v.id)}" ${vulnerabilidadesSelecionadas.has(String(v.id)) ? 'checked' : ''} onchange="toggleVulnerabilidadeSelecionada('${escJs(v.id)}', this.checked)" aria-label="Selecionar"></td>
+        ${_tdLista(v.codigo || '–', 'forte')}
         <td>${_htmlCelulaProdutoVuln(v)}</td>
-        <td>${esc(v.nome || '-')}${riscoAberto ? `<br><a href="#riscos?risco=${esc(riscoAberto.id)}" onclick="event.stopPropagation();" style="font-size:0.78em;color:#c62828;font-weight:600;">⚠️ ${riscoAberto.status === 'Aceito' ? 'Risco aceito' : 'Risco aberto'}</a>` : ''}</td>
+        <td title="${esc(v.nome || '')}">${esc(v.nome || '–')}${riscoAberto ? ` <a href="#riscos?risco=${esc(riscoAberto.id)}" onclick="event.stopPropagation();" class="badge badge-red" style="text-decoration:none;">${riscoAberto.status === 'Aceito' ? 'Risco aceito' : 'Risco aberto'}</a>` : ''}</td>
         <td>${_htmlCelulaTipoVuln(v)}</td>
         <td>${_htmlBadge(_nivelSeveridadeVulnerabilidade(faixa.rotulo), faixa.rotulo)}</td>
-        <td>${_pillStatusCorrecaoVulnerabilidade(v.statusCorrecao)}${_vulnAtrasada(v) ? ' <span class="vuln-atrasada" title="Data prevista de correção já passou" style="display:inline-block;margin-top:3px;padding:2px 8px;border-radius:10px;font-size:0.72em;font-weight:700;color:#c62828;background:#fdecea;">Atrasada</span>' : ''}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(v.dataDeteccao ? new Date(v.dataDeteccao + 'T00:00:00').toLocaleDateString('pt-BR') : '-')}</td>
-        <td style="font-size:0.85em;color:#555;">${esc(v.responsavel || '-')}</td>
-        <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
-          <button class="btn-icon" onclick="abrirDrawerVulnerabilidade('${esc(v.id)}')" title="Editar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="btn-icon" onclick="clonarVulnerabilidade('${esc(v.id)}')" title="Clonar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d60014" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>
-          <button class="btn-icon" onclick="excluirVulnerabilidade('${esc(v.id)}')" title="Excluir">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>
-        </td>
+        <td>${_pillStatusCorrecaoVulnerabilidade(v.statusCorrecao)}${_vulnAtrasada(v) ? ' <span class="vuln-atrasada badge badge-red" title="Data prevista de correção já passou">Atrasada</span>' : ''}</td>
+        <td class="num">${esc(v.dataDeteccao ? new Date(v.dataDeteccao + 'T00:00:00').toLocaleDateString('pt-BR') : '–')}</td>
+        ${_tdLista(v.responsavel || '–')}
+        ${_htmlAcoesLinha([_acaoEditar(`abrirDrawerVulnerabilidade('${escJs(v.id)}')`), _acaoClonar(`clonarVulnerabilidade('${escJs(v.id)}')`), _acaoExcluir(`excluirVulnerabilidade('${escJs(v.id)}')`)])}
       </tr>`;
       }).join('')
-    : `<tr><td colspan="10" class="vazio">Nenhuma vulnerabilidade encontrada.</td></tr>`;
+    : `<tr><td colspan="10" class="vazio">${vulnerabilidadesData.length ? 'Nenhuma vulnerabilidade encontrada com esses filtros.' : 'Nenhuma vulnerabilidade cadastrada.'}</td></tr>`;
   _sincronizarSelecaoVulnerabilidades();
 
   const paginacao = document.getElementById('vulnPaginacao');
@@ -11201,33 +11158,35 @@ function _vulnSemRiscoAcimaDoLimiar(v) {
   return _vulnEmAberto(v) && nota !== null && nota >= vulnLimiarCvss && !_riscoAbertoDaVuln(v.id);
 }
 
+/**
+ * Lista de Vulnerabilidades (23/10/2026): a exposição (em aberto por severidade,
+ * atrasadas) está no Painel de Vulnerabilidades. Aqui fica só o aviso que pede
+ * ação -- vulnerabilidade acima do limiar sem risco aberto, com o atalho para
+ * selecioná-las -- e o limiar de CVSS, no drawer "Configurar".
+ */
 function _renderPainelExposicaoVuln() {
   const cont = document.getElementById('vulnPainelExposicao');
-  if (!cont) return;
-  const abertas = (vulnerabilidadesData || []).filter(_vulnEmAberto);
-  const porFaixa = { 'Crítica': 0, 'Alta': 0, 'Média': 0, 'Baixa': 0, 'Não informado': 0 };
-  abertas.forEach((v) => { const r = VulnerabilidadeSeveridade.faixa(v).rotulo; porFaixa[r] = (porFaixa[r] || 0) + 1; });
-  const atrasadas = abertas.filter(_vulnAtrasada).length;
   const semRisco = (vulnerabilidadesData || []).filter(_vulnSemRiscoAcimaDoLimiar);
+  if (cont) {
+    cont.innerHTML = semRisco.length ? `<div class="lista-alerta">⚠️ Acima do limiar sem risco: ${semRisco.length}
+      — vulnerabilidade com CVSS de ${vulnLimiarCvss} ou mais sem risco aberto no Registro.
+      <button type="button" class="link-acao" onclick="selecionarVulnSemRisco()">Selecionar para exportar</button></div>` : '';
+  }
+  const box = document.getElementById('vulnLimiarBox');
+  if (!box) return;
   const podeRegua = Perfis.podeEditarRegua(window.USER_PERFIS);
-  const chip = (txt, cor, fundo) => `<span style="display:inline-block;padding:4px 10px;border-radius:12px;font-size:0.8em;font-weight:600;color:${cor};background:${fundo};">${txt}</span>`;
-  cont.innerHTML = `
-    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;background:#fafafa;border:1px solid #eee;border-radius:10px;padding:10px 14px;">
-      <strong style="font-size:0.85em;color:#444;">Em aberto: ${abertas.length}</strong>
-      ${['Crítica', 'Alta', 'Média', 'Baixa'].map((f) => chip(`${f}: ${porFaixa[f]}`, '#444', '#f0f0f0')).join('')}
-      ${atrasadas ? chip(`⏰ Atrasadas: ${atrasadas}`, '#c62828', '#fdecea') : ''}
-      ${semRisco.length ? `${chip(`⚠️ Acima do limiar sem risco: ${semRisco.length}`, '#e65100', '#fff3e0')}
-        <button class="btn btn-ghost" onclick="selecionarVulnSemRisco()" style="padding:4px 10px;font-size:0.8em;">Selecionar para exportar</button>` : ''}
-      <a href="#vulnerabilidades-painel" style="font-size:0.8em;font-weight:600;color:var(--red);">Ver painel completo →</a>
-      <span style="margin-left:auto;font-size:0.8em;color:#666;display:inline-flex;align-items:center;gap:6px;">
-        Risco automático a partir de CVSS
+  box.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;font-size:0.9em;color:#555;">
+      <span>Vulnerabilidade com CVSS a partir deste valor abre risco automaticamente no Registro de Riscos.</span>
+      <span style="display:inline-flex;align-items:center;gap:8px;">Risco automático a partir de CVSS
         ${podeRegua
-          ? `<input type="number" id="vulnLimiarCvss" min="0" max="10" step="0.1" value="${vulnLimiarCvss}" style="width:64px;padding:4px 6px;border:1px solid #ddd;border-radius:6px;">
-             <button class="btn btn-ghost" onclick="salvarLimiarVulnerabilidade()" style="padding:4px 10px;font-size:0.9em;">Salvar</button>`
+          ? `<input type="number" id="vulnLimiarCvss" min="0" max="10" step="0.1" value="${vulnLimiarCvss}" style="width:72px;padding:6px 8px;border:1px solid #ddd;border-radius:6px;">
+             <button class="btn btn-ghost" onclick="salvarLimiarVulnerabilidade()">Salvar</button>`
           : `<strong>${vulnLimiarCvss}</strong>`}
       </span>
     </div>`;
 }
+
+window.filtrarVulnerabilidadesBarra = () => { vulnerabilidadesPaginacao.reiniciar(); renderizarVulnerabilidades(); };
 
 window.selecionarVulnSemRisco = () => {
   (vulnerabilidadesData || []).filter(_vulnSemRiscoAcimaDoLimiar).forEach((v) => vulnerabilidadesSelecionadas.add(String(v.id)));
@@ -11728,7 +11687,7 @@ function _sincronizarSelecaoVulnerabilidades() {
     chkTodas.indeterminate = !todas && chks.some((el) => vulnerabilidadesSelecionadas.has(el.dataset.id));
   }
   const n = vulnerabilidadesSelecionadas.size;
-  [['btnEditarVulnLote', '✏️ Editar selecionadas'], ['btnClonarVulnSelecionadas', '📋 Clonar selecionadas'], ['btnExportarVulnRiscos', '📤 Exportar para Riscos']].forEach(([id, rotulo]) => {
+  [['btnEditarVulnLote', 'Editar selecionadas'], ['btnClonarVulnSelecionadas', 'Clonar selecionadas'], ['btnExportarVulnRiscos', 'Exportar para Riscos']].forEach(([id, rotulo]) => {
     const btn = document.getElementById(id);
     if (!btn) return;
     btn.style.display = n > 0 ? 'inline-block' : 'none';
