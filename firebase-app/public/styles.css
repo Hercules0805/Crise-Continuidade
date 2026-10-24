@@ -589,3 +589,8 @@ button.mm-grupo__rotulo:hover { background: var(--brand-tint); }
 .lista-alerta { margin-bottom: 12px; padding: 8px 12px; border: 1px solid #ffe0b2; border-radius: var(--r-md); background: #fff8e1; color: #a15c00; font-size: 13px; }
 .badge-azul { background: #e3f2fd; color: #1565c0; }
 .painel-secao { font-size: 13px; font-weight: 700; color: var(--ink); margin: 8px 0 10px; }
+/* Processos: BIA, BCP e DRP numa coluna só ("Planos") -- 23/10/2026 */
+.plano-mark { display: inline-block; margin-right: 4px; padding: 1px 6px; border-radius: var(--r-sm); font-size: 11px; font-weight: 700; letter-spacing: .3px; }
+.plano-mark--ok { background: #e8f5e9; color: #2e7d32; }
+.plano-mark--andamento { background: #fff3e0; color: #a15c00; }
+.plano-mark--vazio { background: var(--surface-sunken); color: var(--ink-muted); }

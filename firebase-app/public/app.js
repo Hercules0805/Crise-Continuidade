@@ -2695,11 +2695,13 @@ async function processos() {
       ] })}
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table data-table--lista" id="lista" style="display:none;">
-      <!-- Larguras em px: abaixo de 1364px a grade rola e Ações fica fixa. -->
-      <table style="min-width:1364px;">
+      <!-- 8 colunas que cabem em ~960px (23/10/2026): Score vai no selo do Tier e
+           BIA/BCP/DRP numa coluna "Planos" -- antes eram 10 e a coluna Ações, fixa,
+           cobria Score, BIA, BCP e DRP em telas menores. -->
+      <table style="min-width:960px;">
         <colgroup>
-          <col style="width:44px"><col style="width:150px"><col style="width:250px"><col style="width:150px"><col style="width:150px">
-          <col style="width:96px"><col style="width:110px"><col style="width:110px"><col style="width:110px"><col style="width:184px">
+          <col style="width:40px"><col style="width:115px"><col style="width:205px"><col style="width:125px"><col style="width:135px">
+          <col style="width:160px"><col style="width:180px">
         </colgroup>
         <thead>
           <tr>
@@ -2707,11 +2709,8 @@ async function processos() {
             <th onclick="ordenarProcessos('area')" style="cursor:pointer;">Área <span id="sort-area"></span></th>
             <th onclick="ordenarProcessos('processo')" style="cursor:pointer;">Processo de Negócio <span id="sort-processo"></span></th>
             <th onclick="ordenarProcessos('responsavel')" style="cursor:pointer;">Responsável <span id="sort-responsavel"></span></th>
-            <th onclick="ordenarProcessos('status')" style="cursor:pointer;">Tier <span id="sort-status"></span></th>
-            <th class="col-c" onclick="ordenarProcessos('score')" style="cursor:pointer;">Score <span id="sort-score"></span></th>
-            <th onclick="ordenarProcessos('biaHomologada')" style="cursor:pointer;">BIA <span id="sort-biaHomologada"></span></th>
-            <th onclick="ordenarProcessos('bcpStatus')" style="cursor:pointer;">BCP <span id="sort-bcpStatus"></span></th>
-            <th onclick="ordenarProcessos('drpStatus')" style="cursor:pointer;">DRP <span id="sort-drpStatus"></span></th>
+            <th onclick="ordenarProcessos('score')" style="cursor:pointer;" title="Tier e score do questionário BIA (ordena pelo score)">Tier · Score <span id="sort-score"></span></th>
+            <th title="Situação do BIA, do BCP (PCN) e do DRP do processo">Planos</th>
             <th class="col-acoes">Ações</th>
           </tr>
         </thead>
@@ -3138,9 +3137,8 @@ function renderizarProcessos() {
         return `<tr style="cursor:pointer;" onclick="${soLeituraProcessos ? 'verDetalhesProcesso' : 'editarProcesso'}('${p.id}')">
         ${soLeituraProcessos ? '<td></td>' : `<td style="text-align:center;padding-left:6px;padding-right:6px;" onclick="event.stopPropagation();"><input type="checkbox" class="chk-processo" data-id="${esc(p.id)}" ${processosSelecionados.has(p.id) ? 'checked' : ''} onchange="toggleProcessoSelecionado('${p.id}', this.checked)"></td>`}
         ${_tdLista(p.area)}${_tdLista(p.processo, 'forte')}${_tdLista(p.responsavelArea || p.responsavel)}
-        <td>${_htmlBadge(_nivelTierProcesso(status), status)}</td>
-        <td class="col-c num" style="font-weight:700;color:${p.avaliado || p.score > 0 ? statusColor : 'var(--ink-muted)'};">${p.avaliado || p.score > 0 ? p.score : '–'}</td>
-        ${_tdLista(p.biaHomologada || '–')}${_tdLista(p.bcpStatus || '–')}${_tdLista(p.drpStatus || '–')}
+        <td title="${esc(status + (p.avaliado || p.score > 0 ? ' — score ' + p.score : ' — ainda sem avaliação'))}">${_htmlBadge(_nivelTierProcesso(status), Criticidade.tierCurto(p) + (p.avaliado || p.score > 0 ? ' · ' + p.score : ''))}</td>
+        <td>${_htmlPlanosProcesso(p)}</td>
         ${soLeituraProcessos ? _htmlAcoesLinha([{ icone: SVG_VER, titulo: 'Ver detalhes', onclick: `verDetalhesProcesso('${escJs(p.id)}')` }]) : _htmlAcoesLinha([
           _acaoEditar(`editarProcesso('${escJs(p.id)}')`),
           { icone: SVG_AVALIAR, titulo: 'Avaliar', onclick: `avaliarProcesso('${escJs(p.id)}')` },
@@ -3151,7 +3149,7 @@ function renderizarProcessos() {
         ])}
       </tr>`;
       }).join('')
-    : `<tr><td colspan="10" class="vazio">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
+    : `<tr><td colspan="7" class="vazio">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
 
   // Coerência da seleção com a lista filtrada: linhas escondidas por filtro
   // continuam marcadas em processosSelecionados (não perde seleção ao trocar
@@ -3406,6 +3404,20 @@ window.aplicarEdicaoLoteProcessos = async () => {
     }
   });
 };
+
+/**
+ * Coluna "Planos" da grade de Processos: BIA, BCP e DRP como três marcadores
+ * curtos (verde = Realizado, laranja = em andamento/pendente, cinza = sem
+ * status). O status completo de cada um fica no title.
+ */
+function _htmlPlanosProcesso(p) {
+  const marca = (sigla, valor) => {
+    const v = String(valor || '').trim();
+    const classe = !v ? 'plano-mark--vazio' : /realizado/i.test(v) ? 'plano-mark--ok' : 'plano-mark--andamento';
+    return `<span class="plano-mark ${classe}" title="${esc(sigla + ': ' + (v || 'sem status'))}">${sigla}</span>`;
+  };
+  return marca('BIA', p.biaHomologada) + marca('BCP', p.bcpStatus) + marca('DRP', p.drpStatus);
+}
 
 window.filtrarPorArea = (area) => {
   processosFiltroArea = area;
