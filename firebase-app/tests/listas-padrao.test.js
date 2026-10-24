@@ -15,7 +15,11 @@ const SCRIPTS = ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js'
 
 const DADOS = {
   getAreas: [{ id: 'a1', nome: 'TI', responsavel: 'Ana Souza', email: 'ana@fortestecnologia.com.br', telefone: '(85) 99999-0000' }],
-  getDependencias: [{ id: 'p1', categoria: 'Pessoas', nome: 'Ana Souza', detalhes: 'Gerente', setor: 'TI', email: 'ana@fortestecnologia.com.br' }],
+  getDependencias: [{ id: 'p1', categoria: 'Pessoas', nome: 'Ana Souza', detalhes: 'Gerente', setor: 'TI', email: 'ana@fortestecnologia.com.br' }, { id: 'd1', categoria: 'Servidor', nome: 'SRV-01', detalhes: 'Banco do ERP' }],
+  getServicos: [{ id: 'sv1', nome: 'ERP', descricao: 'Sistema de gestão', dependenciaItens: [] }],
+  getBackups: [{ id: 'b1', nome: 'Backup ERP', servicoIds: ['sv1'], jobs: [] }],
+  getProcessos: [{ id: 'pr1', area: 'TI', processo: 'Folha de pagamento', score: 0 }],
+  getIndicadoresSeguranca: [{ id: 'i1', nome: 'Patches aplicados', pilar: 'Proteger', responsavel: 'Ana Souza', tipo: 'Percentual', metaMinima: 90 }],
   getProdutosSoftware: [{ id: 's1', nome: 'Fortes Ponto', ativo: true }],
   getPerfis: [{ email: 'ana@fortestecnologia.com.br', perfis: ['gestor'], area: 'TI' }],
   getCategoriasFornecedor: [{ id: 'c1', nome: 'Nuvem', ativo: true }],
@@ -45,6 +49,7 @@ const TELAS = [
   ['fornecedoresCategorias', true], ['fornecedoresSubcategorias', true], ['fornecedoresCriterios', true], ['fornecedoresCriticidadePerguntas', true],
   ['contratosTipos', false], ['contratosStatus', false], ['contratosIndexadores', false], ['catalogoBackupFerramentas', false],
   ['perguntas', false],
+  ['dependencias', true], ['servicos', true], ['catalogoBackup', true], ['processos', true], ['indicadoresCadastro', true],
 ];
 
 for (const [tela, temGrade] of TELAS) {

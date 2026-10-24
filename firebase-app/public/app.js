@@ -711,11 +711,12 @@ function _htmlErroCarga(mensagem, funcaoTela) {
 // ============================================================
 
 /** `primario` = { rotulo, onclick } (ou null sem permissão); `maisAcoes` = [{ rotulo, onclick }]. */
-function _htmlCabecalhoLista({ titulo, sub, primario, maisAcoes }) {
+function _htmlCabecalhoLista({ titulo, sub, primario, maisAcoes, extra }) {
   const mais = (maisAcoes || []).filter(Boolean);
   return `<div class="page-header lista-cab">
       <div><h2>${esc(titulo)}</h2>${sub ? `<p class="page-sub">${esc(sub)}</p>` : ''}</div>
       <div class="lista-cab__acoes">
+        ${extra || ''}
         ${mais.length ? `<div class="mais-acoes">
           <button type="button" class="btn btn-ghost" aria-haspopup="true" aria-expanded="false" onclick="_alternarMaisAcoes(this, event)">⋯ Mais ações</button>
           <div class="mais-acoes__menu" role="menu">${mais.map((a) => `<button type="button" role="menuitem" onclick="_fecharMaisAcoes();${a.onclick}">${esc(a.rotulo)}</button>`).join('')}</div>
@@ -772,7 +773,7 @@ function _htmlBarraLista({ busca, filtros, aoMudar, contadorId }) {
 window._marcarFiltroLista = (sel) => { if (sel) sel.classList.toggle('lista-sel--ativo', !!sel.value); };
 window._limparBarraLista = (botao) => {
   const barra = botao.closest('.lista-barra');
-  barra.querySelectorAll('input, select').forEach((c) => { c.value = ''; if (c.tagName === 'SELECT') _marcarFiltroLista(c); });
+  barra.querySelectorAll('input:not(:disabled), select:not(:disabled)').forEach((c) => { c.value = ''; if (c.tagName === 'SELECT') _marcarFiltroLista(c); });
 };
 /** Contador da barra ("18 áreas") e o "Limpar", que só aparece com algum filtro ativo. */
 function _atualizarBarraLista(contadorId, total, [singular, plural]) {
@@ -780,7 +781,7 @@ function _atualizarBarraLista(contadorId, total, [singular, plural]) {
   if (!el) return;
   el.textContent = `${total} ${total === 1 ? singular : plural}`;
   const barra = el.closest('.lista-barra');
-  const ativo = Array.from(barra.querySelectorAll('input, select')).some((c) => c.value);
+  const ativo = Array.from(barra.querySelectorAll('input:not(:disabled), select:not(:disabled)')).some((c) => c.value);
   const limpar = barra.querySelector('.lista-limpar');
   if (limpar) limpar.hidden = !ativo;
 }
@@ -797,6 +798,16 @@ function _htmlAcoesLinha(acoes) {
 }
 const _acaoEditar = (onclick) => ({ icone: SVG_EDITAR, titulo: 'Editar', onclick });
 const _acaoExcluir = (onclick) => ({ icone: SVG_EXCLUIR, titulo: 'Excluir', onclick });
+// Ícones das ações extras de linha (16px, mesmo traço): Processos e afins.
+const _svgAcao = (cor, corpo) => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${cor}" stroke-width="2" aria-hidden="true">${corpo}</svg>`;
+const SVG_VER = _svgAcao('#5c5550', '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>');
+const SVG_AVALIAR = _svgAcao('#d60014', '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>');
+const SVG_EMAIL = _svgAcao('#2e7d32', '<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>');
+const SVG_DOCUMENTO = _svgAcao('#1565c0', '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>');
+const SVG_LEVANTAMENTO = _svgAcao('#2e7d32', '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h6"/>');
+// Clonar (Backup, Vulnerabilidade, Risco, Contrato): mesmo traço do lápis.
+const SVG_CLONAR = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const _acaoClonar = (onclick, titulo) => ({ icone: SVG_CLONAR, titulo: titulo || 'Clonar', onclick });
 
 /**
  * Grade de cadastro no padrão de lista: filtra pela busca da barra, ordena,
@@ -2667,59 +2678,26 @@ let processosSelecionados = new Set();
 
 async function processos() {
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Processos de Negócio</h2><p class="page-sub">Cadastre os processos críticos de cada área</p></div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" onclick="abrirDrawerProcessosLote()" id="btnEditarProcessosLote" style="color:#1565c0;border-color:#1565c0;display:none;">✏️ Editar selecionados</button>
-        ${Perfis.podeEditarProcessos(window.USER_PERFIS) ? '<button class="btn btn-primary" onclick="abrirModalProcesso()">+ Novo Processo</button>' : ''}
-      </div>
-    </div>
-    <div class="filters">
-      <div class="field">
-        <label class="field-label">Área</label>
-        <select id="filtroArea" onchange="filtrarPorArea(this.value)" class="field-control">
-          <option value="">Todas as áreas</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Tier</label>
-        <select id="filtroTier" onchange="filtrarPorTier(this.value)" class="field-control">
-          <option value="">Todos os tiers</option>
-          <option value="Tier 1">Tier 1 (Crítico)</option>
-          <option value="Tier 2">Tier 2 (Essencial)</option>
-          <option value="Tier 3">Tier 3 (Suporte)</option>
-          <option value="Pendente">Pendente</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">PCN</label>
-        <select id="filtroPCN" onchange="filtrarProcessos()" class="field-control" style="min-width:140px;">
-          <option value="">Todos</option>
-          <option value="com">Com PCN</option>
-          <option value="sem">Sem PCN</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">&nbsp;</label>
-        <input type="search" id="buscaProcesso" placeholder="Buscar processo…" aria-label="Buscar processo" oninput="filtrarProcessos()" class="field-control field-control--busca">
-      </div>
-      <div class="field">
-        <label class="field-label">&nbsp;</label>
-        <span id="contadorProcessos" class="muted" style="font-size:13px;line-height:40px;white-space:nowrap;"></span>
-      </div>
-      <div style="margin-left:auto;display:flex;gap:8px;">
-        <!-- Ações da área filtrada: .btn-ghost com a cor de status (convenção do guia), não botão sólido solto. -->
-        <button id="btnEnviarArea" class="btn btn-ghost" onclick="enviarParaArea()" style="display:none;color:#1565c0;border-color:#1565c0;">✉️ Enviar Questionário para Área</button>
-        <button id="btnRelatorioArea" class="btn btn-ghost" onclick="enviarRelatorioArea()" style="display:none;color:#2e7d32;border-color:#2e7d32;">📄 Enviar Relatório da Área</button>
-      </div>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Processos de Negócio', sub: 'Processos críticos de cada área, com BIA, PCN e DRP.',
+      primario: Perfis.podeEditarProcessos(window.USER_PERFIS) ? { rotulo: '+ Novo processo', onclick: 'abrirModalProcesso()' } : null,
+      extra: '<button class="btn btn-ghost" onclick="abrirDrawerProcessosLote()" id="btnEditarProcessosLote" style="display:none;">Editar selecionados</button>',
+      maisAcoes: _limitadoAArea() ? [] : [
+        { rotulo: 'Enviar questionário para a área', onclick: 'enviarParaArea()' },
+        { rotulo: 'Enviar relatório da área', onclick: 'enviarRelatorioArea()' },
+      ] })}
+    ${_htmlBarraLista({ busca: { id: 'buscaProcesso', placeholder: 'Buscar processo…' }, aoMudar: 'filtrarProcessosBarra', contadorId: 'contadorProcessos',
+      filtros: [
+        { id: 'filtroArea', rotulo: 'Área', opcoes: [] },
+        { id: 'filtroTier', rotulo: 'Tier', todos: 'Todos', opcoes: [['Tier 1', 'Tier 1 (Crítico)'], ['Tier 2', 'Tier 2 (Essencial)'], ['Tier 3', 'Tier 3 (Suporte)'], ['Pendente', 'Pendente']] },
+        { id: 'filtroPCN', rotulo: 'PCN', todos: 'Todos', opcoes: [['com', 'Com PCN'], ['sem', 'Sem PCN']] },
+      ] })}
     <div class="loading">⏳ Carregando...</div>
-    <div class="data-table" id="lista" style="display:none;">
-      <!-- Larguras em px (somavam 94% em %): abaixo de 1364px a grade rola e Ações fica fixa. -->
+    <div class="data-table data-table--lista" id="lista" style="display:none;">
+      <!-- Larguras em px: abaixo de 1364px a grade rola e Ações fica fixa. -->
       <table style="min-width:1364px;">
         <colgroup>
-          <col style="width:44px"><col style="width:160px"><col style="width:240px"><col style="width:150px"><col style="width:160px">
-          <col style="width:90px"><col style="width:120px"><col style="width:120px"><col style="width:130px"><col style="width:150px">
+          <col style="width:44px"><col style="width:150px"><col style="width:250px"><col style="width:150px"><col style="width:150px">
+          <col style="width:96px"><col style="width:110px"><col style="width:110px"><col style="width:110px"><col style="width:184px">
         </colgroup>
         <thead>
           <tr>
@@ -2732,7 +2710,7 @@ async function processos() {
             <th onclick="ordenarProcessos('biaHomologada')" style="cursor:pointer;">BIA <span id="sort-biaHomologada"></span></th>
             <th onclick="ordenarProcessos('bcpStatus')" style="cursor:pointer;">BCP <span id="sort-bcpStatus"></span></th>
             <th onclick="ordenarProcessos('drpStatus')" style="cursor:pointer;">DRP <span id="sort-drpStatus"></span></th>
-            <th class="col-c col-sticky">Ações</th>
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
@@ -3040,7 +3018,14 @@ async function processos() {
       </div>
     </div>`;
 
-  const [processos, areas, perguntas] = await Promise.all([API.getProcessos(), API.getAreas(), API.getPerguntas()]);
+  let processos, areas, perguntas;
+  try {
+    [processos, areas, perguntas] = await Promise.all([API.getProcessos(), API.getAreas(), API.getPerguntas()]);
+  } catch (e) {
+    console.error('processos: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar os processos.', 'processos');
+    return;
+  }
   window.processosPerguntas = perguntas.filter(p => p.ativa);
   try { window.configRespostas = await API.getConfigRespostas(); } catch(e) { window.configRespostas = null; }
   try { window.dependenciasCatalogo = await API.getDependencias(); } catch(e) { window.dependenciasCatalogo = []; }
@@ -3055,17 +3040,13 @@ async function processos() {
   // de outras áreas. Admin e SI veem tudo.
   if (_limitadoAArea() && window.USER_AREA) {
     processosFiltroArea = window.USER_AREA;
-    filtroArea.innerHTML = `<option value="${window.USER_AREA}">${window.USER_AREA}</option>`;
+    filtroArea.innerHTML = `<option value="${esc(window.USER_AREA)}">Área: ${esc(window.USER_AREA)}</option>`;
     filtroArea.disabled = true;
-    const btnEnviar = document.getElementById('btnEnviarArea');
-    const btnRelatorio = document.getElementById('btnRelatorioArea');
-    if (btnEnviar) btnEnviar.style.display = 'none';
-    if (btnRelatorio) btnRelatorio.style.display = 'none';
   } else if (_limitadoAArea() && !window.USER_AREA) {
     // Gestor sem área: bloquear acesso
-    const loadingEl = document.getElementById('loading');
+    const loadingEl = document.querySelector('.loading');
     if (loadingEl) loadingEl.style.display = 'none';
-    const listaEl = document.getElementById('listaProcessos');
+    const listaEl = document.getElementById('lista');
     if (listaEl) {
       listaEl.style.display = 'block';
       listaEl.innerHTML = `
@@ -3077,8 +3058,7 @@ async function processos() {
     }
     return;
   } else {
-    filtroArea.innerHTML = '<option value="">Todas as áreas</option>' +
-      areasUnicas.map(a => `<option value="${a}">${a}</option>`).join('');
+    _preencherFiltroLista('filtroArea', 'Área', areasUnicas.map((a) => [a, a]));
   }
   
   // Enriquecer processos com dados da área
@@ -3141,15 +3121,7 @@ function renderizarProcessos() {
   processosOrdenacao.atualizarSetas('sort-', ['area', 'processo', 'status', 'score', 'responsavel', 'solucao', 'biaHomologada', 'bcpStatus', 'drpStatus']);
 
   // Atualizar contador de processos
-  const contadorEl = document.getElementById('contadorProcessos');
-  const total = window.processosData.length;
-  if (contadorEl) {
-    if (data.length === total) {
-      contadorEl.textContent = `${total} processo${total !== 1 ? 's' : ''}`;
-    } else {
-      contadorEl.textContent = `${data.length} de ${total} processo${total !== 1 ? 's' : ''}`;
-    }
-  }
+  _atualizarBarraLista('contadorProcessos', data.length, ['processo', 'processos']);
   
   // Operador Administrativo so consulta: o clique da linha abre o detalhe
   // (somente leitura) e as acoes de editar/avaliar/enviar/excluir somem.
@@ -3163,48 +3135,18 @@ function renderizarProcessos() {
         const statusColor = Criticidade.corDoTier(status);
         return `<tr style="cursor:pointer;" onclick="${soLeituraProcessos ? 'verDetalhesProcesso' : 'editarProcesso'}('${p.id}')">
         ${soLeituraProcessos ? '<td></td>' : `<td style="text-align:center;padding-left:6px;padding-right:6px;" onclick="event.stopPropagation();"><input type="checkbox" class="chk-processo" data-id="${esc(p.id)}" ${processosSelecionados.has(p.id) ? 'checked' : ''} onchange="toggleProcessoSelecionado('${p.id}', this.checked)"></td>`}
-        <td>${esc(p.area)}</td>
-        <td><strong>${esc(p.processo)}</strong></td>
-        <td>${esc(p.responsavelArea || p.responsavel || '')}</td>
+        ${_tdLista(p.area)}${_tdLista(p.processo, 'forte')}${_tdLista(p.responsavelArea || p.responsavel)}
         <td>${_htmlBadge(_nivelTierProcesso(status), status)}</td>
-        <td style="text-align:center;font-weight:700;color:${p.avaliado || p.score > 0 ? statusColor : '#bbb'};font-size:0.95em;">${p.avaliado || p.score > 0 ? p.score : '-'}</td>
-        <td style="font-size:0.8em;color:#555;">${p.biaHomologada || '-'}</td>
-        <td style="font-size:0.8em;color:#555;">${p.bcpStatus || '-'}</td>
-        <td style="font-size:0.8em;color:#555;">${p.drpStatus || '-'}</td>
-        ${soLeituraProcessos ? `<td class="col-c col-nw col-sticky" onclick="event.stopPropagation();"><button class="btn-icon" onclick="verDetalhesProcesso('${p.id}')" title="Ver detalhes">👁️</button></td>` : `<td class="col-c col-nw col-sticky" onclick="event.stopPropagation();">
-          <button class="btn-icon" onclick="editarProcesso('${p.id}')" title="Editar">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
-          </button>
-          <button class="btn-icon" onclick="avaliarProcesso('${p.id}')" title="Avaliar">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d60014" stroke-width="2">
-              <path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
-            </svg>
-          </button>
-          <button class="btn-icon" onclick="abrirModalEnviar('${p.id}')" title="Enviar por e-mail">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path>
-              <polyline points="22,6 12,13 2,6"></polyline>
-            </svg>
-          </button>
-          ${p.pcnSalvo ? `<button class="btn-icon" onclick="abrirPCNDireto('${p.id}')" title="Abrir PCN">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#1565c0" stroke-width="2">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
-            </svg>
-          </button>` : ''}
-          ${p.levantamentoPCN ? `<button class="btn-icon" onclick="abrirLevantamentoDireto('${p.id}')" title="Abrir Levantamento PCN" style="color:#2e7d32;">📋</button>` : ''}
-          <button class="btn-icon" onclick="excluirProcesso('${p.id}')" title="Excluir">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
-        </td>`}
+        <td class="col-c num" style="font-weight:700;color:${p.avaliado || p.score > 0 ? statusColor : 'var(--ink-muted)'};">${p.avaliado || p.score > 0 ? p.score : '–'}</td>
+        ${_tdLista(p.biaHomologada || '–')}${_tdLista(p.bcpStatus || '–')}${_tdLista(p.drpStatus || '–')}
+        ${soLeituraProcessos ? _htmlAcoesLinha([{ icone: SVG_VER, titulo: 'Ver detalhes', onclick: `verDetalhesProcesso('${escJs(p.id)}')` }]) : _htmlAcoesLinha([
+          _acaoEditar(`editarProcesso('${escJs(p.id)}')`),
+          { icone: SVG_AVALIAR, titulo: 'Avaliar', onclick: `avaliarProcesso('${escJs(p.id)}')` },
+          { icone: SVG_EMAIL, titulo: 'Enviar por e-mail', onclick: `abrirModalEnviar('${escJs(p.id)}')` },
+          p.pcnSalvo ? { icone: SVG_DOCUMENTO, titulo: 'Abrir PCN', onclick: `abrirPCNDireto('${escJs(p.id)}')` } : null,
+          p.levantamentoPCN ? { icone: SVG_LEVANTAMENTO, titulo: 'Abrir Levantamento PCN', onclick: `abrirLevantamentoDireto('${escJs(p.id)}')` } : null,
+          _acaoExcluir(`excluirProcesso('${escJs(p.id)}')`),
+        ])}
       </tr>`;
       }).join('')
     : `<tr><td colspan="10" class="vazio">${processosFiltroArea ? 'Nenhum processo encontrado para esta área.' : 'Nenhum processo cadastrado.'}</td></tr>`;
@@ -3252,7 +3194,7 @@ function _atualizarBotaoLoteProcessos() {
   if (!btn) return;
   const n = processosSelecionados.size;
   btn.style.display = n > 0 ? 'inline-block' : 'none';
-  btn.textContent = n > 0 ? `✏️ Editar selecionados (${n})` : '✏️ Editar selecionados';
+  btn.textContent = n > 0 ? `Editar selecionados (${n})` : 'Editar selecionados';
 }
 
 // ============================================================
@@ -3465,10 +3407,6 @@ window.aplicarEdicaoLoteProcessos = async () => {
 
 window.filtrarPorArea = (area) => {
   processosFiltroArea = area;
-  const btn = document.getElementById('btnEnviarArea');
-  if (btn) btn.style.display = area ? 'inline-flex' : 'none';
-  const btnRel = document.getElementById('btnRelatorioArea');
-  if (btnRel) btnRel.style.display = area ? 'inline-flex' : 'none';
   filtrarProcessos();
 };
 
@@ -3477,9 +3415,17 @@ window.filtrarPorTier = (tier) => {
   filtrarProcessos();
 };
 
+// Barra única de Processos: Área e Tier moram em variáveis (o Gestor tem a área travada).
+window.filtrarProcessosBarra = () => {
+  const area = document.getElementById('filtroArea');
+  processosFiltroArea = area ? area.value : '';
+  processosFiltroTier = (document.getElementById('filtroTier') || {}).value || '';
+  filtrarProcessos();
+};
+
 window.enviarRelatorioArea = async () => {
   const area = processosFiltroArea;
-  if (!area) return;
+  if (!area) return showToast('Escolha a área no filtro "Área" primeiro.', '#e65100');
   const areaObj = window.areasDisponiveis.find(a => a.nome === area);
   if (!areaObj || !areaObj.email) return showToast('E-mail do responsável não cadastrado para esta área.', '#e65100');
   if (!await confirmarAcao(`Enviar relatório de "${area}" para ${areaObj.responsavel} (${areaObj.email})?`)) return;
@@ -3495,7 +3441,7 @@ window.enviarRelatorioArea = async () => {
 
 window.enviarParaArea = async () => {
   const area = processosFiltroArea;
-  if (!area) return;
+  if (!area) return showToast('Escolha a área no filtro "Área" primeiro.', '#e65100');
   const areaObj = window.areasDisponiveis.find(a => a.nome === area);
   if (!areaObj || !areaObj.email) return showToast('E-mail do responsável não cadastrado para esta área.', '#e65100');
   if (!await confirmarAcao(`Enviar questionário para ${areaObj.responsavel} (${areaObj.email})?`)) return;
@@ -4409,35 +4355,22 @@ const DEPENDENCIA_ESTRATEGIAS_BACKUP = [
 
 async function dependencias() {
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Dependências</h2><p class="page-sub">Gerencie as dependências críticas reutilizáveis nos processos</p></div>
-      <button class="btn btn-primary" onclick="abrirDrawerDependencia()">+ Nova Dependência</button>
-    </div>
-    ${_seVeTela('fornecedores', `<div style="border:1px solid #e0e0e0;background:#f8f9ff;border-radius:9px;padding:11px 14px;margin-bottom:16px;font-size:0.86em;color:#555;">
-      Os <strong>fornecedores</strong> aparecem neste catálogo, mas são editados e avaliados em
-      <a href="#fornecedores" style="color:#d60014;font-weight:700;">Fornecedores</a>.
-      Clique num fornecedor para gerenciá-lo lá.
-    </div>`)}
-    <div class="filters">
-      <div class="field">
-        <label class="field-label">Categoria</label>
-        <select id="filtroDepCategoria" onchange="filtrarDependencias()" class="field-control">
-          <option value="">Todas as categorias</option>
-        </select>
-      </div>
-      <div>
-        <input type="search" id="buscaDep" placeholder="Buscar dependência…" aria-label="Buscar dependência" oninput="filtrarDependencias()" class="field-control field-control--busca">
-      </div>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Dependências', sub: 'Dependências críticas reutilizáveis nos processos.',
+      primario: { rotulo: '+ Nova dependência', onclick: 'abrirDrawerDependencia()' } })}
+    ${_htmlBarraLista({ busca: { id: 'buscaDep', placeholder: 'Buscar dependência…' }, aoMudar: 'filtrarDependencias', contadorId: 'dependenciasContador',
+      filtros: [{ id: 'filtroDepCategoria', rotulo: 'Categoria', opcoes: [] }] })}
+    ${_seVeTela('fornecedores', `<details class="lista-ajuda"><summary>Fornecedores nesta lista</summary>
+      <p>Os fornecedores aparecem neste catálogo, mas são editados e avaliados em <a href="#fornecedores">Fornecedores</a>. Clique num fornecedor para gerenciá-lo lá.</p></details>`)}
     <div class="loading">⏳ Carregando...</div>
-    <div class="data-table" id="listaDeps" style="display:none;">
-      <table>
+    <div class="data-table data-table--lista" id="listaDeps" style="display:none;">
+      <table style="min-width:900px;">
+        <colgroup><col style="width:280px"><col style="width:180px"><col style="width:420px"><col style="width:92px"></colgroup>
         <thead>
           <tr>
-            <th onclick="ordenarDependencias('categoria')" style="cursor:pointer;width:18%;">Categoria <span id="sort-dep-categoria"></span></th>
-            <th onclick="ordenarDependencias('nome')" style="cursor:pointer;width:25%;">Nome <span id="sort-dep-nome"></span></th>
-            <th style="width:45%;">Papel</th>
-            <th style="width:12%;text-align:center;">Ações</th>
+            <th onclick="ordenarDependencias('nome')" style="cursor:pointer;">Nome <span id="sort-dep-nome"></span></th>
+            <th onclick="ordenarDependencias('categoria')" style="cursor:pointer;">Categoria <span id="sort-dep-categoria"></span></th>
+            <th>Papel</th>
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody id="depRows"></tbody>
@@ -4468,8 +4401,7 @@ async function dependencias() {
   document.getElementById('listaDeps').style.display = 'block';
   // Popular filtro de categorias
   const cats = [...new Set(dependenciasData.map(d => d.categoria))].sort();
-  document.getElementById('filtroDepCategoria').innerHTML = '<option value="">Todas as categorias</option>' +
-    cats.map(c => `<option value="${c}">${c}</option>`).join('');
+  _preencherFiltroLista('filtroDepCategoria', 'Categoria', cats.map((c) => [c, c]));
   renderizarDependencias();
 }
 
@@ -4496,9 +4428,11 @@ function renderizarDependencias() {
   data = dependenciasOrdenacao.aplicar(data);
   dependenciasOrdenacao.atualizarSetas('sort-dep-', ['categoria', 'nome']);
 
+  _atualizarBarraLista('dependenciasContador', data.length, ['dependência', 'dependências']);
   const pag = dependenciasPaginacao.aplicar(data);
   const pagEl = document.getElementById('dependenciasPaginacao');
   if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaDependencias');
+  const filtrando = !!(busca.trim() || (filtro && filtro.value));
   document.getElementById('depRows').innerHTML = pag.itens.length
     ? pag.itens.map(d => {
         // Fornecedor e uma linha de /dependencias com categoria Fornecedores,
@@ -4508,30 +4442,19 @@ function renderizarDependencias() {
         const ehForn = Perfis.categoriaDeFornecedor(d.categoria);
         // Fornecedor é gerido em Fornecedores: quem não vê essa tela (TI) só consulta a linha.
         const veForn = Perfis.podeVerTela(window.USER_PERFIS, 'fornecedores');
-        const acao = ehForn ? (veForn ? `irParaFornecedor('${d.id}')` : '') : `editarDep('${d.id}')`;
-        const acoesCell = ehForn
-          ? (!veForn ? '' : `<button class="btn-icon" onclick="irParaFornecedor('${d.id}')" title="Gerenciar em Fornecedores">
-               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-             </button>`)
-          : `<button class="btn-icon" onclick="editarDep('${d.id}')" title="Editar">
-               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-             </button>
-             <button class="btn-icon" onclick="excluirDep('${d.id}')" title="Excluir">
-               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-             </button>`;
-        const papel = ehForn
-          ? `<span style="font-size:0.78em;color:#888;font-style:italic;">Gerenciado em Fornecedores</span>`
-          : esc(d.detalhes || '-');
+        const id = escJs(d.id);
+        const acao = ehForn ? (veForn ? `irParaFornecedor('${id}')` : '') : `editarDep('${id}')`;
+        const acoes = ehForn
+          ? (veForn ? [{ icone: SVG_EDITAR, titulo: 'Gerenciar em Fornecedores', onclick: `irParaFornecedor('${id}')` }] : [])
+          : [_acaoEditar(`editarDep('${id}')`), _acaoExcluir(`excluirDep('${id}')`)];
         return `<tr style="cursor:pointer;" onclick="${acao}">
-        <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#fce8ea;color:#d60014;">${esc(d.categoria)}</span></td>
-        <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
-        <td style="font-size:0.85em;color:#555;">${papel}</td>
-        <td style="text-align:center;white-space:nowrap;" onclick="event.stopPropagation();">
-          ${acoesCell}
-        </td>
+        ${_tdLista(d.nome, 'forte')}
+        <td title="${esc(d.categoria)}"><span class="badge badge-red">${esc(d.categoria)}</span></td>
+        ${ehForn ? '<td class="muted">Gerenciado em Fornecedores</td>' : _tdLista(d.detalhes)}
+        ${_htmlAcoesLinha(acoes)}
       </tr>`;
       }).join('')
-    : '<tr><td colspan="4" class="vazio">Nenhuma dependência cadastrada.</td></tr>';
+    : `<tr><td colspan="4" class="vazio">${filtrando ? 'Nenhuma dependência encontrada com esses filtros.' : 'Nenhuma dependência cadastrada.'}</td></tr>`;
 }
 
 /** Fornecedor é linha de /dependencias, mas editado/avaliado na tela Fornecedores.
@@ -8297,39 +8220,29 @@ let backupsData = [];
 
 async function servicos() {
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Serviços</h2><p class="page-sub">Agrupe dependências técnicas num serviço só, para organização e visão consolidada</p></div>
-      <div style="display:flex;gap:8px;">
-        ${_seVeTela('servicos-relatorio', '<button class="btn btn-ghost" onclick="location.hash=\'#servicos-relatorio\'">📄 Relatórios</button>')}
-        <button class="btn btn-primary" onclick="abrirDrawerServico()">+ Novo Serviço</button>
-      </div>
-    </div>
-    <div class="filters">
-      <input type="search" id="buscaServico" placeholder="Buscar serviço…" aria-label="Buscar serviço" oninput="renderizarServicos()" class="field-control field-control--busca">
-      <div class="field">
-        <label class="field-label" for="filtroComposicaoServico">Composição</label>
-        <select id="filtroComposicaoServico" class="field-control" onchange="renderizarServicos()">
-          <option value="">Todas</option>
-          ${Object.keys(ServicoComposicao.STATUS).map((k) => `<option value="${k}">${esc(ServicoComposicao.STATUS[k])}</option>`).join('')}
-        </select>
-      </div>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Serviços', sub: 'Dependências técnicas agrupadas num serviço, para organização e visão consolidada.',
+      primario: { rotulo: '+ Novo serviço', onclick: 'abrirDrawerServico()' },
+      maisAcoes: [_seVeTela('servicos-relatorio', 'x') ? { rotulo: 'Relatórios de Serviços', onclick: "location.hash='#servicos-relatorio'" } : null] })}
+    ${_htmlBarraLista({ busca: { id: 'buscaServico', placeholder: 'Buscar serviço…' }, aoMudar: 'filtrarServicos', contadorId: 'servicosContador',
+      filtros: [{ id: 'filtroComposicaoServico', rotulo: 'Composição', opcoes: Object.keys(ServicoComposicao.STATUS).map((k) => [k, ServicoComposicao.STATUS[k]]) }] })}
     <div class="loading">⏳ Carregando...</div>
-    <div class="data-table" id="listaServicos" style="display:none;">
-      <table>
+    <div class="data-table data-table--lista" id="listaServicos" style="display:none;">
+      <table style="min-width:980px;">
+        <colgroup><col style="width:240px"><col style="width:320px"><col style="width:120px"><col style="width:160px"><col style="width:100px"><col style="width:92px"></colgroup>
         <thead>
           <tr>
             <th onclick="ordenarServicos('nome')" style="cursor:pointer;">Nome <span id="sort-servico-nome"></span></th>
             <th>Descrição</th>
-            <th style="width:12%;text-align:center;">Dependências</th>
-            <th style="width:14%;text-align:center;">Composição</th>
-            <th style="width:10%;text-align:center;">Backups</th>
-            <th style="width:12%;text-align:center;">Ações</th>
+            <th class="col-c">Dependências</th>
+            <th>Composição</th>
+            <th class="col-c">Backups</th>
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody id="servicoRows"></tbody>
       </table>
     </div>
+    <div id="servicosPaginacao"></div>
     ${_htmlDrawerServico()}
     ${_htmlDrawerDependencia()}`;
 
@@ -8372,25 +8285,25 @@ function renderizarServicos() {
   if (filtroComp) data = data.filter((s) => avaliacoes.get(s.id).status === filtroComp);
   data = servicosOrdenacao.aplicar(data);
   servicosOrdenacao.atualizarSetas('sort-servico-', ['nome']);
+  _atualizarBarraLista('servicosContador', data.length, ['serviço', 'serviços']);
+  const pag = servicosPaginacao.aplicar(data);
+  const pagEl = document.getElementById('servicosPaginacao');
+  if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaServicos');
 
-  document.getElementById('servicoRows').innerHTML = data.length
-    ? data.map((s) => `<tr style="cursor:pointer;" onclick="abrirDrawerServico('${esc(s.id)}')">
-        <td style="font-weight:600;">${esc(s.nome)}</td>
-        <td>${esc(s.descricao || '')}</td>
-        <td style="text-align:center;">${(s.dependenciaItens || []).length}</td>
-        <td style="text-align:center;">${_htmlStatusComposicao(avaliacoes.get(s.id))}</td>
-        <td style="text-align:center;">${(backupsData || []).filter((b) => (b.servicoIds || []).includes(String(s.id))).length}</td>
-        <td style="text-align:center;" onclick="event.stopPropagation();">
-          <button class="btn-icon" onclick="abrirDrawerServico('${esc(s.id)}')" title="Editar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="btn-icon" onclick="excluirServico('${esc(s.id)}')" title="Excluir">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>
-        </td>
+  document.getElementById('servicoRows').innerHTML = pag.itens.length
+    ? pag.itens.map((s) => `<tr style="cursor:pointer;" onclick="abrirDrawerServico('${escJs(s.id)}')">
+        ${_tdLista(s.nome, 'forte')}${_tdLista(s.descricao)}
+        <td class="col-c num">${(s.dependenciaItens || []).length}</td>
+        <td>${_htmlStatusComposicao(avaliacoes.get(s.id))}</td>
+        <td class="col-c num">${(backupsData || []).filter((b) => (b.servicoIds || []).includes(String(s.id))).length}</td>
+        ${_htmlAcoesLinha([_acaoEditar(`abrirDrawerServico('${escJs(s.id)}')`), _acaoExcluir(`excluirServico('${escJs(s.id)}')`)])}
       </tr>`).join('')
     : `<tr><td colspan="6" class="vazio">${servicosData.length ? 'Nenhum serviço com estes filtros.' : 'Nenhum serviço cadastrado.'}</td></tr>`;
 }
+
+const servicosPaginacao = criarPaginacao(20);
+window.irParaPaginaServicos = (d) => { servicosPaginacao.mover(d); renderizarServicos(); };
+window.filtrarServicos = () => { servicosPaginacao.reiniciar(); renderizarServicos(); };
 
 // Composicao do Servico (21/10/2026): cores de status do guia de UI --
 // alerta = perigo, incompleto = aviso, ok = sucesso, sem dado = neutro.
@@ -9779,25 +9692,15 @@ function _nomesServicosBackup(b) {
 
 async function catalogoBackup() {
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Catálogo do Backup</h2><p class="page-sub">Política de backup dos Serviços: ferramenta, o que é copiado, servidor e jobs de execução</p></div>
-      <div style="display:flex;gap:8px;">
-        <a href="#catalogo-backup-ferramentas" class="btn btn-ghost">Ferramentas</a>
-        <button class="btn btn-primary" onclick="abrirDrawerBackup()">+ Novo Backup</button>
-      </div>
-    </div>
-    <div class="filters">
-      <input type="search" id="buscaBackup" placeholder="Buscar backup…" aria-label="Buscar backup" oninput="renderizarCatalogoBackup()" class="field-control field-control--busca">
-      <div class="field">
-        <label class="field-label">Serviço</label>
-        <select id="filtroBackupServico" onchange="renderizarCatalogoBackup()" class="field-control">
-          <option value="">Todos os serviços</option>
-        </select>
-      </div>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Catálogo do Backup', sub: 'Política de backup dos Serviços: ferramenta, o que é copiado, servidor e jobs.',
+      primario: { rotulo: '+ Novo backup', onclick: 'abrirDrawerBackup()' },
+      maisAcoes: [{ rotulo: 'Ferramentas de Backup', onclick: "location.hash='#catalogo-backup-ferramentas'" }] })}
+    ${_htmlBarraLista({ busca: { id: 'buscaBackup', placeholder: 'Buscar backup…' }, aoMudar: 'filtrarCatalogoBackup', contadorId: 'backupsContador',
+      filtros: [{ id: 'filtroBackupServico', rotulo: 'Serviço', todos: 'Todos', opcoes: [] }] })}
     <div class="loading">⏳ Carregando...</div>
-    <div class="data-table" id="listaBackups" style="display:none;">
-      <table>
+    <div class="data-table data-table--lista" id="listaBackups" style="display:none;">
+      <table style="min-width:1060px;">
+        <colgroup><col style="width:230px"><col style="width:200px"><col style="width:160px"><col style="width:160px"><col style="width:120px"><col style="width:80px"><col style="width:110px"></colgroup>
         <thead>
           <tr>
             <th onclick="ordenarCatalogoBackup('nome')" style="cursor:pointer;">Nome <span id="sort-backup-nome"></span></th>
@@ -9805,13 +9708,14 @@ async function catalogoBackup() {
             <th>Servidor</th>
             <th onclick="ordenarCatalogoBackup('ferramenta')" style="cursor:pointer;">Ferramenta <span id="sort-backup-ferramenta"></span></th>
             <th onclick="ordenarCatalogoBackup('modo')" style="cursor:pointer;">Modo <span id="sort-backup-modo"></span></th>
-            <th style="width:9%;text-align:center;">Jobs</th>
-            <th style="width:12%;text-align:center;">Ações</th>
+            <th class="col-c">Jobs</th>
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody id="backupRows"></tbody>
       </table>
     </div>
+    <div id="backupsPaginacao"></div>
     ${_htmlDrawerBackup()}
     ${_htmlDrawerServico()}
     ${_htmlDrawerPessoa()}
@@ -9839,11 +9743,8 @@ async function catalogoBackup() {
     return;
   }
 
-  const filtroServico = document.getElementById('filtroBackupServico');
-  if (filtroServico) {
-    filtroServico.innerHTML = '<option value="">Todos os serviços</option>' +
-      [...servicosData].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')).map((s) => `<option value="${esc(s.id)}">${esc(s.nome)}</option>`).join('');
-  }
+  _preencherFiltroLista('filtroBackupServico', 'Serviço',
+    [...servicosData].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR')).map((s) => [s.id, s.nome]), 'Todos');
 
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaBackups').style.display = 'block';
@@ -9867,29 +9768,23 @@ function renderizarCatalogoBackup() {
     ferramenta: (a, b, dir) => dir * _nomeFerramentaBackup(a).localeCompare(_nomeFerramentaBackup(b), 'pt-BR'),
   });
   backupsOrdenacao.atualizarSetas('sort-backup-', ['nome', 'servico', 'ferramenta', 'modo']);
+  _atualizarBarraLista('backupsContador', data.length, ['backup', 'backups']);
+  const pag = backupsPaginacao.aplicar(data);
+  const pagEl = document.getElementById('backupsPaginacao');
+  if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaBackups');
 
-  document.getElementById('backupRows').innerHTML = data.length
-    ? data.map((b) => `<tr style="cursor:pointer;" onclick="abrirDrawerBackup('${esc(b.id)}')">
-        <td style="font-weight:600;">${esc(b.nome)}</td>
-        <td>${esc(_nomesServicosBackup(b).join(', ') || '—')}</td>
-        <td>${esc(b.servidorNome || '-')}</td>
-        <td>${esc(_nomeFerramentaBackup(b) || '-')}</td>
-        <td>${esc(b.modo || '-')}</td>
-        <td style="text-align:center;">${(b.jobs || []).length}</td>
-        <td style="text-align:center;" onclick="event.stopPropagation();">
-          <button class="btn-icon" onclick="abrirDrawerBackup('${esc(b.id)}')" title="Editar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="btn-icon" onclick="clonarBackup('${esc(b.id)}')" title="Clonar (novo backup com os mesmos dados e jobs)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>
-          <button class="btn-icon" onclick="excluirBackup('${esc(b.id)}')" title="Excluir">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>
-        </td>
+  document.getElementById('backupRows').innerHTML = pag.itens.length
+    ? pag.itens.map((b) => `<tr style="cursor:pointer;" onclick="abrirDrawerBackup('${escJs(b.id)}')">
+        ${_tdLista(b.nome, 'forte')}${_tdLista(_nomesServicosBackup(b).join(', '))}${_tdLista(b.servidorNome)}${_tdLista(_nomeFerramentaBackup(b))}${_tdLista(b.modo)}
+        <td class="col-c num">${(b.jobs || []).length}</td>
+        ${_htmlAcoesLinha([_acaoEditar(`abrirDrawerBackup('${escJs(b.id)}')`), _acaoClonar(`clonarBackup('${escJs(b.id)}')`, 'Clonar (novo backup com os mesmos dados e jobs)'), _acaoExcluir(`excluirBackup('${escJs(b.id)}')`)])}
       </tr>`).join('')
-    : '<tr><td colspan="7" class="vazio">Nenhum backup cadastrado.</td></tr>';
+    : `<tr><td colspan="7" class="vazio">${backupsData.length ? 'Nenhum backup com esses filtros.' : 'Nenhum backup cadastrado.'}</td></tr>`;
 }
+
+const backupsPaginacao = criarPaginacao(20);
+window.irParaPaginaBackups = (d) => { backupsPaginacao.mover(d); renderizarCatalogoBackup(); };
+window.filtrarCatalogoBackup = () => { backupsPaginacao.reiniciar(); renderizarCatalogoBackup(); };
 
 window.ordenarCatalogoBackup = (coluna) => { backupsOrdenacao.ordenar(coluna); renderizarCatalogoBackup(); };
 
@@ -16414,34 +16309,18 @@ function _renderBarraFiltrosIndicadores(containerId, filtros, handler, { comMes 
   const el = document.getElementById(containerId);
   if (!el) return;
   const responsaveis = _responsaveisDisponiveis();
+  // Barra única das telas de lista (DECISÃO 23/10/2026): o nome do filtro vai dentro do campo.
+  const sel = (campo, rotulo, todos, opcoes) => `<select class="lista-sel${filtros[campo] ? ' lista-sel--ativo' : ''}" aria-label="${rotulo}" onchange="_marcarFiltroLista(this);${handler}('${campo}',this.value)">${_opcoesFiltroLista(rotulo, opcoes, todos, filtros[campo])}</select>`;
+  const campos = (comMes ? ['mes'] : []).concat(['pilar', 'responsavel', 'busca']);
   el.innerHTML = `
-    <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;">
-      ${comMes ? `
-      <div>
-        <label style="${_estiloFiltroLabel}">Mês</label>
-        <select onchange="${handler}('mes',this.value)" style="${_estiloFiltroInput}">
-          <option value="">Todos os meses</option>
-          ${_mesesDisponiveis().map(m => `<option value="${m}" ${filtros.mes === m ? 'selected' : ''}>${_formatMes(m)}</option>`).join('')}
-        </select>
-      </div>` : ''}
-      <div>
-        <label style="${_estiloFiltroLabel}">Pilar</label>
-        <select onchange="${handler}('pilar',this.value)" style="${_estiloFiltroInput}">
-          <option value="">Todos os pilares</option>
-          ${INDICADOR_PILARES.map(p => `<option value="${p}" ${filtros.pilar === p ? 'selected' : ''}>${p}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label style="${_estiloFiltroLabel}">Responsável</label>
-        <select onchange="${handler}('responsavel',this.value)" style="${_estiloFiltroInput}">
-          <option value="">Todos</option>
-          ${responsaveis.map(r => `<option value="${r}" ${filtros.responsavel === r ? 'selected' : ''}>${r}</option>`).join('')}
-        </select>
-      </div>
-      <div>
-        <label style="${_estiloFiltroLabel}">Indicador</label>
-        <input type="text" value="${filtros.busca}" oninput="${handler}('busca',this.value)" placeholder="Buscar indicador…" style="${_estiloFiltroInput}">
-      </div>
+    <div class="lista-barra">
+      <label class="lista-busca"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+        <input type="search" value="${esc(filtros.busca || '')}" placeholder="Buscar indicador…" aria-label="Buscar indicador" oninput="${handler}('busca',this.value)"></label>
+      ${comMes ? sel('mes', 'Mês', 'Todos', _mesesDisponiveis().map((m) => [m, _formatMes(m)])) : ''}
+      ${sel('pilar', 'Pilar', 'Todos', INDICADOR_PILARES.map((p) => [p, p]))}
+      ${sel('responsavel', 'Responsável', 'Todos', responsaveis.map((r) => [r, r]))}
+      <button type="button" class="lista-limpar" onclick="_limparBarraLista(this);${campos.map((c) => `${handler}('${c}','')`).join(';')}" hidden>Limpar</button>
+      <span class="lista-contador" id="${containerId}Contador"></span>
     </div>`;
 }
 
@@ -16684,14 +16563,10 @@ async function indicadoresCadastro() {
   indicadoresFiltrosCadastro = { pilar: '', responsavel: '', busca: '' };
   indicadoresSelecionados = new Set();
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Cadastro de Indicadores</h2><p class="page-sub">Pilar, tipo, responsável e meta mínima de cada indicador de segurança</p></div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" onclick="excluirIndicadoresSelecionados()" id="btnExcluirIndicadoresSelecionados" style="color:#c62828;border-color:#c62828;display:none;">🗑️ Excluir selecionados</button>
-        <button class="btn btn-primary" onclick="abrirModalIndicador()" id="btnNovoIndicador" style="display:none;">+ Novo Indicador</button>
-      </div>
-    </div>
-    <div id="indicadoresFiltrosCadastro" style="margin-bottom:16px;"></div>
+    ${_htmlCabecalhoLista({ titulo: 'Cadastro de Indicadores', sub: 'Pilar, tipo, responsável e meta mínima de cada indicador de segurança.',
+      primario: { rotulo: '+ Novo indicador', onclick: 'abrirModalIndicador()', id: 'btnNovoIndicador' },
+      extra: '<button class="btn btn-ghost" onclick="excluirIndicadoresSelecionados()" id="btnExcluirIndicadoresSelecionados" style="display:none;">Excluir selecionados</button>' })}
+    <div id="indicadoresFiltrosCadastro"></div>
     <div class="loading">⏳ Carregando...</div>
     <div id="indicadoresConteudoCadastro" style="display:none;"></div>
     ${_htmlModalIndicador()}
@@ -16799,36 +16674,29 @@ function renderizarIndicadoresCadastro() {
   indicadoresPaginaIds = pagina.map(d => d.id);
   const todosPaginaSelecionados = pagina.length > 0 && pagina.every(d => indicadoresSelecionados.has(d.id));
 
+  _atualizarBarraLista('indicadoresFiltrosCadastroContador', total, ['indicador', 'indicadores']);
   conteudo.innerHTML = `
-    <div class="data-table">
-      <table>
+    <div class="data-table data-table--lista">
+      <table style="min-width:${isAdmin ? 1000 : 956}px;">
+        <colgroup>${isAdmin ? '<col style="width:44px">' : ''}<col style="width:160px"><col style="width:180px"><col style="width:300px"><col style="width:130px"><col style="width:140px"><col style="width:92px"></colgroup>
         <thead>
           <tr>
-            ${isAdmin ? `<th style="width:4%;text-align:center;"><input type="checkbox" ${todosPaginaSelecionados ? 'checked' : ''} onchange="toggleTodosIndicadores(this.checked)" title="Selecionar todos desta página"></th>` : ''}
-            <th style="width:14%;">Pilar</th>
-            <th style="width:16%;">Responsável</th>
-            <th onclick="ordenarIndicadores('nome')" style="cursor:pointer;width:28%;">Indicador <span id="sort-ind-nome">${indicadoresOrdenacao.coluna === 'nome' ? (indicadoresOrdenacao.direcao === 'asc' ? '▲' : '▼') : ''}</span></th>
-            <th style="width:12%;">Tipo</th>
-            <th style="width:14%;">Meta Mínima</th>
-            <th style="width:12%;text-align:center;">Ações</th>
+            ${isAdmin ? `<th class="col-c"><input type="checkbox" ${todosPaginaSelecionados ? 'checked' : ''} onchange="toggleTodosIndicadores(this.checked)" title="Selecionar todos desta página" aria-label="Selecionar todos desta página"></th>` : ''}
+            <th>Pilar</th>
+            <th>Responsável</th>
+            <th onclick="ordenarIndicadores('nome')" style="cursor:pointer;">Indicador <span id="sort-ind-nome">${indicadoresOrdenacao.coluna === 'nome' ? (indicadoresOrdenacao.direcao === 'asc' ? '▲' : '▼') : ''}</span></th>
+            <th>Tipo</th>
+            <th>Meta mínima</th>
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody>
-          ${pagina.length ? pagina.map(d => `<tr>
-              ${isAdmin ? `<td style="text-align:center;"><input type="checkbox" class="chk-indicador" ${indicadoresSelecionados.has(d.id) ? 'checked' : ''} onchange="toggleIndicadorSelecionado('${d.id}', this.checked)"></td>` : ''}
-              <td><span style="display:inline-block;padding:3px 9px;border-radius:10px;font-size:0.8em;font-weight:600;background:#fce8ea;color:#d60014;">${esc(d.pilar || '-')}</span></td>
-              <td style="font-size:0.85em;color:#555;">${esc(d.responsavel || '-')}</td>
-              <td style="font-weight:600;color:#222;">${esc(d.nome)}</td>
-              <td style="font-size:0.85em;color:#555;">${esc(d.tipo || '-')}</td>
-              <td>${_htmlCelulaMetaMinima(d.id, d.metaMinima, isAdmin)}</td>
-              <td style="text-align:center;white-space:nowrap;">
-                ${isAdmin ? `<button class="btn-icon" onclick="editarIndicador('${d.id}')" title="Editar">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                </button>
-                <button class="btn-icon" onclick="excluirIndicador('${d.id}')" title="Excluir">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                </button>` : ''}
-              </td>
+          ${pagina.length ? pagina.map(d => `<tr${isAdmin ? ` style="cursor:pointer;" onclick="editarIndicador('${escJs(d.id)}')"` : ''}>
+              ${isAdmin ? `<td class="col-c" onclick="event.stopPropagation();"><input type="checkbox" class="chk-indicador" ${indicadoresSelecionados.has(d.id) ? 'checked' : ''} onchange="toggleIndicadorSelecionado('${escJs(d.id)}', this.checked)" aria-label="Selecionar"></td>` : ''}
+              <td title="${esc(d.pilar || '')}"><span class="badge badge-red">${esc(d.pilar || '–')}</span></td>
+              ${_tdLista(d.responsavel)}${_tdLista(d.nome, 'forte')}${_tdLista(d.tipo)}
+              <td onclick="event.stopPropagation();">${_htmlCelulaMetaMinima(d.id, d.metaMinima, isAdmin)}</td>
+              ${isAdmin ? _htmlAcoesLinha([_acaoEditar(`editarIndicador('${escJs(d.id)}')`), _acaoExcluir(`excluirIndicador('${escJs(d.id)}')`)]) : '<td class="col-acoes"></td>'}
             </tr>`).join('') : `<tr><td colspan="${isAdmin ? 7 : 6}" class="vazio">Nenhum indicador encontrado.</td></tr>`}
         </tbody>
       </table>
@@ -16844,7 +16712,7 @@ function _atualizarBotaoExcluirSelecionados() {
   const isAdmin = Perfis.podeEditarIndicadores(window.USER_PERFIS);
   const n = indicadoresSelecionados.size;
   btn.style.display = isAdmin && n > 0 ? 'inline-block' : 'none';
-  btn.textContent = `🗑️ Excluir selecionados (${n})`;
+  btn.textContent = `Excluir selecionados (${n})`;
 }
 
 window.toggleIndicadorSelecionado = (id, checked) => {
@@ -16996,6 +16864,7 @@ function renderizarGradeLancamentos() {
   const isAdmin = Perfis.podeEditarIndicadores(window.USER_PERFIS);
 
   let data = _filtrarLancamentos(_todosLancamentos(), indicadoresFiltrosLancamento);
+  _atualizarBarraLista('indicadoresFiltrosLancamentoContador', data.length, ['lançamento', 'lançamentos']);
   // Sempre decrescente por mês, independente do filtro aplicado.
   data.sort((a, b) => String(b.mes).localeCompare(String(a.mes)) || (a.indicadorNome || '').localeCompare(b.indicadorNome || ''));
 
@@ -17178,6 +17047,7 @@ function renderizarIndicadoresMatriz() {
   const conteudo = document.getElementById('indicadoresConteudoMatriz');
   if (!conteudo) return;
   const dadosFiltrados = _filtrarIndicadores(indicadoresData, indicadoresFiltrosMatriz);
+  _atualizarBarraLista('indicadoresFiltrosMatrizContador', dadosFiltrados.length, ['indicador', 'indicadores']);
   const meses = _mesesDisponiveis().slice().sort();
 
   if (!dadosFiltrados.length) {

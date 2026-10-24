@@ -98,7 +98,7 @@ test('Fornecedores: quem so consulta ve o lapis "Visualizar" (nao um botao "Ver"
 
 const procs = Array.from({ length: 26 }, (_, i) => ({ id: 'p' + i, area: i % 2 ? 'TI' : 'RH', processo: 'Proc ' + i, score: i, avaliado: true, respostas: {} }));
 
-test('Processos: grade paginada, filtro por area volta para a 1a pagina, botoes de area sao .btn', async () => {
+test('Processos: grade paginada, filtro por area volta para a 1a pagina, acoes da area em Mais acoes', async () => {
   const w = carregar({ getProcessos: procs, getAreas: [{ nome: 'TI' }, { nome: 'RH' }], getPerguntas: [] });
   await w.processos();
   await espera();
@@ -110,9 +110,9 @@ test('Processos: grade paginada, filtro por area volta para a 1a pagina, botoes 
   w.filtrarPorArea('TI');
   assert.strictEqual(linhas(), 13);
   assert.match(doc.getElementById('processosPaginacao').textContent, /Mostrando 1–13 de 13/);
-  assert.ok(doc.getElementById('btnEnviarArea').classList.contains('btn'));
-  assert.strictEqual(doc.getElementById('btnEnviarArea').style.display, 'inline-flex');
-  assert.doesNotMatch(doc.querySelector('.filters').textContent, /:/, 'rotulos de filtro sem ":"');
+  // Padrão de lista (23/10/2026): as ações da área ficam em "Mais ações"; o filtro leva o nome dentro.
+  assert.match(doc.querySelector('.mais-acoes__menu').textContent, /Enviar questionário para a área/);
+  assert.strictEqual(doc.getElementById('filtroArea').options[0].textContent, 'Área: Todas');
   w.close();
 });
 
