@@ -13006,6 +13006,27 @@ window.excluirVulnerabilidade = async (id) => {
 // ============================================================
 // PÁGINA: ADMIN (Painel)
 // ============================================================
+/**
+ * Seção "Planos" do Dashboard de Continuidade (23/10/2026): os números que
+ * ficavam em cima das listas de PCNs e de DRP. Cada número abre a lista.
+ */
+function _htmlPlanosDashboardContinuidade(processosVisiveis, deps) {
+  const vePcn = Perfis.podeVerTela(window.USER_PERFIS, 'pcns');
+  const veDrp = Perfis.podeVerTela(window.USER_PERFIS, 'drp') && Array.isArray(deps);
+  if (!vePcn && !veDrp) return '';
+  const card = (label, value, cor, tela) => _htmlMetricCardFiltro({ label, value, cor, ativo: false, titulo: 'Abrir a lista', onclick: `location.hash='#${tela}'` });
+  const comPcn = processosVisiveis.filter((p) => p.pcnSalvo);
+  const t1 = processosVisiveis.filter((p) => Criticidade.ehTier(p, Criticidade.TIER.T1));
+  const t1SemPcn = t1.filter((p) => !p.pcnSalvo).length;
+  const tecnicas = veDrp ? deps.filter((d) => !['Pessoas', 'Pessoa'].includes(d.categoria)) : [];
+  const comDrp = tecnicas.filter((d) => d.drpSalvo && _parsePCNVersoes(d.drpSalvo).length).length;
+  return `<div class="painel-secao">Planos</div>
+    <div class="painel-metricas painel-metricas--auto metricas-filtro">
+      ${vePcn ? card('Processos com PCN', comPcn.length, '#d60014', 'pcns') + card('Tier 1 sem PCN', t1SemPcn, t1SemPcn ? '#c62828' : '#999', 'pcns') : ''}
+      ${veDrp ? card('Dependências com DRP', comDrp, '#d60014', 'drp') + card('Dependências sem DRP', tecnicas.length - comDrp, tecnicas.length - comDrp ? '#e65100' : '#999', 'drp') : ''}
+    </div>`;
+}
+
 async function admin() {
   app.innerHTML = `
     <div class="page-header">
@@ -13015,9 +13036,11 @@ async function admin() {
     <div id="painel" style="display:none;"></div>
   `;
 
-  let processos, areas;
+  let processos, areas, depsPlanos;
   try {
-    [processos, areas] = await Promise.all([API.getProcessos(), API.getAreas()]);
+    [processos, areas, depsPlanos] = await Promise.all([API.getProcessos(), API.getAreas(),
+      // Só para os números de DRP (seção Planos); sem eles o dashboard abre igual.
+      Perfis.podeVerTela(window.USER_PERFIS, 'drp') ? API.getDependencias().catch(() => null) : null]);
   } catch (e) {
     console.error('admin: falha ao carregar', e);
     document.getElementById('loading').outerHTML = _htmlErroCarga('Não foi possível carregar o dashboard.', 'admin');
@@ -13083,6 +13106,7 @@ async function admin() {
       ${_htmlMetricCard({ label: 'Pendentes', value: pendentes })}
       ${_htmlMetricCard({ label: 'Tier 1 (Crítico)', value: tier1, level: tier1 ? 'critical' : null })}
     </div>
+    ${_htmlPlanosDashboardContinuidade(processosVisiveis, depsPlanos)}
 
     <div class="painel-card">
       <div class="painel-card__titulo">Cobertura dos Processos Críticos (Tier 1)</div>
@@ -18803,13 +18827,8 @@ window.renderVinculosProcesso = async () => {
 // ============================================================
 async function pcns() {
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Planos de Continuidade (PCN)</h2><p class="page-sub">Navegue pelos PCNs gerados, organizados por área</p></div>
-    </div>
-    <div id="pcns-resumo" style="display:none;margin-bottom:20px;"></div>
-    <div class="filters">
-      <input type="search" id="pcnBusca" placeholder="Buscar processo…" aria-label="Buscar processo" oninput="filtrarPCNs()" class="field-control field-control--busca">
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Planos de Continuidade (PCN)', sub: 'PCNs gerados, organizados por área.' })}
+    ${_htmlBarraLista({ busca: { id: 'pcnBusca', placeholder: 'Buscar processo…' }, aoMudar: 'filtrarPCNs', contadorId: 'pcnsContador' })}
     <div class="loading" id="loading">
       <div class="skeleton-table">
         <div class="skeleton-row"><div class="skeleton skeleton-cell" style="width:100%;height:40px;border-radius:8px;"></div></div>
@@ -18844,31 +18863,17 @@ async function pcns() {
     window._pcnData = comPCN;
 
     if (!comPCN.length) {
+      _atualizarBarraLista('pcnsContador', 0, ['PCN', 'PCNs']);
       document.getElementById('pcns-lista').innerHTML = `
         <div class="vazio"><span class="vazio__titulo">Nenhum PCN gerado ainda</span>Gere PCNs na tela de Processos clicando em "🤖 Gerar PCN".</div>`;
       return;
     }
 
-    // Cards de resumo
-    const tier1 = comPCN.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T1)).length;
-    const tier2 = comPCN.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T2)).length;
-    const tier3 = comPCN.filter(p => Criticidade.ehTier(p, Criticidade.TIER.T3)).length;
-    document.getElementById('pcns-resumo').style.display = 'block';
-    document.getElementById('pcns-resumo').innerHTML = `
-      <div class="painel-metricas painel-metricas--auto">
-        ${_htmlMetricCard({ label: 'Total de PCNs', value: comPCN.length })}
-        ${_htmlMetricCard({ label: 'Tier 1', value: tier1, level: tier1 ? 'critical' : null })}
-        ${_htmlMetricCard({ label: 'Tier 2', value: tier2, level: tier2 ? 'high' : null })}
-        ${_htmlMetricCard({ label: 'Tier 3', value: tier3, level: tier3 ? 'medium' : null })}
-      </div>`;
-
+    // Os números (total e por Tier) estão no Dashboard de Continuidade.
     renderPCNLista(comPCN);
   } catch (err) {
-    document.getElementById('loading').innerHTML = `
-      <div style="color:#c62828;padding:20px;text-align:center;">
-        <h3>❌ Erro ao carregar PCNs</h3>
-        <p>${esc(err.message)}</p>
-      </div>`;
+    console.error('pcns: falha ao carregar', err);
+    document.getElementById('loading').innerHTML = _htmlErroCarga('Não foi possível carregar os PCNs.', 'pcns');
   }
 }
 
@@ -18892,6 +18897,7 @@ window.toggleAreaPCN = (areaId) => {
 };
 
 function renderPCNLista(comPCN) {
+  _atualizarBarraLista('pcnsContador', comPCN.length, ['PCN', 'PCNs']);
   const porArea = _agruparPorArea(comPCN);
   const tierLabel = (p) => Criticidade.tierCurto(p);
   // Excluir PCN: o mesmo recorte de gerar (o servidor confere PERFIS_PCN).
@@ -18965,16 +18971,15 @@ window.excluirPCN = async (id, area, processo) => {
 // ============================================================
 async function drp() {
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Planos de Recuperação (DRP)</h2><p class="page-sub">Gere, abra e gerencie os Parâmetros DRP das dependências, organizados por categoria</p></div>
-    </div>
-    <div id="drp-resumo" style="display:none;margin-bottom:20px;"></div>
-    <div class="filters">
-      <input type="search" id="drpBusca" placeholder="Buscar dependência…" aria-label="Buscar dependência" oninput="filtrarDRPs()" class="field-control field-control--busca">
-      <select id="drpFiltroTipo" onchange="filtrarDRPs()" class="field-control">
-        <option value="com">Com DRP gerado</option>
-        <option value="todas">Todas as dependências</option>
+    ${_htmlCabecalhoLista({ titulo: 'Planos de Recuperação (DRP)', sub: 'Parâmetros DRP das dependências, organizados por categoria.' })}
+    <div class="lista-barra">
+      <label class="lista-busca"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+        <input type="search" id="drpBusca" placeholder="Buscar dependência…" aria-label="Buscar dependência" oninput="filtrarDRPs()"></label>
+      <select id="drpFiltroTipo" onchange="filtrarDRPs()" class="lista-sel" aria-label="Mostrar">
+        <option value="com">Mostrar: Com DRP gerado</option>
+        <option value="todas">Mostrar: Todas as dependências</option>
       </select>
+      <span class="lista-contador" id="drpContador"></span>
     </div>
     <div class="loading" id="loading">
       <div class="skeleton-table">
@@ -19001,11 +19006,8 @@ async function drp() {
     renderDRPResumo();
     renderDRPListaComFiltro();
   } catch (err) {
-    document.getElementById('loading').innerHTML = `
-      <div style="color:#c62828;padding:20px;text-align:center;">
-        <h3>❌ Erro ao carregar DRPs</h3>
-        <p>${esc(err.message)}</p>
-      </div>`;
+    console.error('drp: falha ao carregar', err);
+    document.getElementById('loading').innerHTML = _htmlErroCarga('Não foi possível carregar os DRPs.', 'drp');
   }
 }
 
@@ -19043,6 +19045,8 @@ function renderDRPListaComFiltro() {
   const busca = ((document.getElementById('drpBusca') || {}).value || '').toLowerCase();
   let data = tipo === 'todas' ? (dependenciasData || []).slice() : _depsComDRP();
   if (busca) data = data.filter(d => (d.nome || '').toLowerCase().includes(busca) || (d.categoria || '').toLowerCase().includes(busca));
+  const cont = document.getElementById('drpContador');
+  if (cont) cont.textContent = `${data.length} dependência${data.length === 1 ? '' : 's'}`;
   window._drpData = data;
   renderDRPLista(data, tipo);
 }
@@ -24210,36 +24214,24 @@ const conformidadePaginacao = criarPaginacao(20);
 async function conformidade() {
   const podeCiclos = Perfis.podeEditarCiclos(window.USER_PERFIS);
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Conformidade de Continuidade</h2><p class="page-sub">BIA, PCN e DRP faltando, vencidos, com teste atrasado ou com status divergente do plano real</p></div>
-      ${podeCiclos ? '<button class="btn btn-ghost" onclick="abrirDrawerCiclos()">⚙️ Periodicidades</button>' : ''}
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Conformidade de Continuidade', sub: 'BIA, PCN e DRP faltando, vencidos, com teste atrasado ou com status divergente do plano real.',
+      maisAcoes: podeCiclos ? [{ rotulo: 'Periodicidades de revisão', onclick: 'abrirDrawerCiclos()' }] : [] })}
     <div class="loading">⏳ Carregando...</div>
     <div id="conformidadeConteudo" style="display:none;">
       <div class="painel-metricas painel-metricas--auto" id="conformidadeMetricas"></div>
       <p id="conformidadeCiclos" style="font-size:0.8em;color:#888;margin:4px 0 16px;"></p>
-      <div class="filters">
-        <div class="field"><label class="field-label" for="confTipo">Tipo</label>
-          <select id="confTipo" class="field-control" onchange="filtrarConformidade()"><option value="">Todos</option>
-            ${Object.entries(ConformidadeContinuidade.ROTULO_TIPO).map(([v, r]) => `<option value="${v}">${esc(r)}</option>`).join('')}
-          </select></div>
-        <div class="field"><label class="field-label" for="confSituacao">Situação</label>
-          <select id="confSituacao" class="field-control" onchange="filtrarConformidade()"><option value="">Todas</option>
-            ${Object.entries(ConformidadeContinuidade.ROTULO_SITUACAO).map(([v, r]) => `<option value="${v}">${esc(r)}</option>`).join('')}
-          </select></div>
-        <div class="field"><label class="field-label" for="confArea">Área</label>
-          <select id="confArea" class="field-control" onchange="filtrarConformidade()"><option value="">Todas</option></select></div>
-        <div class="field"><label class="field-label" for="confTier">Tier</label>
-          <select id="confTier" class="field-control" onchange="filtrarConformidade()"><option value="">Todos</option>
-            <option value="critico">Tier 1 e 2</option>
-            ${Object.values(Criticidade.TIER).map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('')}
-          </select></div>
-      </div>
-      <div class="data-table data-table--compact" style="overflow-x:auto;">
+      ${_htmlBarraLista({ aoMudar: 'filtrarConformidade', contadorId: 'conformidadeContador',
+        filtros: [
+          { id: 'confTipo', rotulo: 'Tipo', todos: 'Todos', opcoes: Object.entries(ConformidadeContinuidade.ROTULO_TIPO) },
+          { id: 'confSituacao', rotulo: 'Situação', opcoes: Object.entries(ConformidadeContinuidade.ROTULO_SITUACAO) },
+          { id: 'confArea', rotulo: 'Área', opcoes: [] },
+          { id: 'confTier', rotulo: 'Tier', todos: 'Todos', opcoes: [['critico', 'Tier 1 e 2'], ...Object.values(Criticidade.TIER).map((x) => [x, x])] },
+        ] })}
+      <div class="data-table data-table--lista" style="overflow-x:auto;">
         <table style="min-width:1090px;">
           <colgroup><col style="width:120px;"><col style="width:130px;"><col style="width:220px;"><col style="width:140px;"><col style="width:110px;"><col style="width:260px;"><col style="width:100px;"><col style="width:110px;"></colgroup>
           <thead><tr>
-            <th>Tipo</th><th>Situação</th><th>Processo / Dependência</th><th>Área</th><th>Tier</th><th>Pendência</th><th class="col-nw" title="Última revisão ou último teste registrado">Desde</th><th class="col-nw col-sticky">Ações</th>
+            <th>Tipo</th><th>Situação</th><th>Processo / Dependência</th><th>Área</th><th>Tier</th><th>Pendência</th><th class="col-nw" title="Última revisão ou último teste registrado">Desde</th><th class="col-acoes">Ações</th>
           </tr></thead>
           <tbody id="conformidadeRows"></tbody>
         </table>
@@ -24289,7 +24281,7 @@ async function conformidade() {
   }
 
   const areas = [...new Set(conformidadeDados.processos.map((p) => p.area).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  document.getElementById('confArea').insertAdjacentHTML('beforeend', areas.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join(''));
+  _preencherFiltroLista('confArea', 'Área', areas.map((a) => [a, a]));
   Object.assign(conformidadeFiltro, { tipo: '', situacao: '', area: '', tier: '' });
   conformidadePaginacao.reiniciar();
   document.querySelector('.loading').style.display = 'none';
@@ -24331,6 +24323,7 @@ function renderizarConformidade() {
     && (!f.situacao || p.situacao === f.situacao)
     && (!f.area || p.area === f.area)
     && (!f.tier || (f.tier === 'critico' ? ConformidadeContinuidade.ehTierCritico(p.tier) : p.tier === f.tier)));
+  _atualizarBarraLista('conformidadeContador', lista.length, ['pendência', 'pendências']);
   const pag = conformidadePaginacao.aplicar(lista);
   const dataBR = (d) => (d ? d.split('-').reverse().join('/') : '—');
 
@@ -24339,23 +24332,23 @@ function renderizarConformidade() {
     const abrir = `mapaAbrirCadastro('${ehDep ? 'dependencia' : 'processo'}','${escJs(p.id)}')`;
     const tipoPlano = p.tipo === 'teste-drp' ? 'drp' : p.tipo;
     const acoes = [
-      `<button class="btn-icon" onclick="${abrir}" title="${ehDep ? 'Abrir a dependência' : 'Abrir o processo'}">${SVG_EDITAR}</button>`,
-      p.tipo === 'pcn' && p.situacao !== 'faltando' ? `<button class="btn-icon" onclick="abrirPCNDireto('${escJs(p.id)}')" title="Abrir o PCN">📄</button>` : '',
-      ehDep && p.situacao !== 'faltando' && Perfis.podeVerConteudoDRP(window.USER_PERFIS) ? `<button class="btn-icon" onclick="abrirDRPDireto('${escJs(p.id)}')" title="Abrir o DRP">📄</button>` : '',
+      { icone: SVG_EDITAR, titulo: ehDep ? 'Abrir a dependência' : 'Abrir o processo', onclick: abrir },
+      p.tipo === 'pcn' && p.situacao !== 'faltando' ? { icone: SVG_DOCUMENTO, titulo: 'Abrir o PCN', onclick: `abrirPCNDireto('${escJs(p.id)}')` } : null,
+      ehDep && p.situacao !== 'faltando' && Perfis.podeVerConteudoDRP(window.USER_PERFIS) ? { icone: SVG_DOCUMENTO, titulo: 'Abrir o DRP', onclick: `abrirDRPDireto('${escJs(p.id)}')` } : null,
       ['bia', 'pcn', 'drp'].includes(p.tipo) && p.situacao !== 'faltando' && Perfis.podeRegistrarRevisao(window.USER_PERFIS, tipoPlano)
-        ? `<button class="btn-icon" onclick="abrirDrawerRevisao('${tipoPlano}','${escJs(p.id)}')" title="Registrar revisão">✅</button>` : '',
-    ].filter(Boolean).join(' ');
+        ? { icone: SVG_AVALIAR, titulo: 'Registrar revisão', onclick: `abrirDrawerRevisao('${tipoPlano}','${escJs(p.id)}')` } : null,
+    ];
     const procs = p.processos || [];
-    const sub = ehDep && procs.length ? `<div style="font-size:0.76em;color:#888;" title="${esc(procs.join(', '))}">${esc(procs.length === 1 ? procs[0] : procs.length + ' processos Tier 1/2')}</div>` : '';
+    const sub = ehDep && procs.length ? ` <span class="muted" title="${esc(procs.join(', '))}">· ${esc(procs.length === 1 ? procs[0] : procs.length + ' processos Tier 1/2')}</span>` : '';
     return `<tr style="cursor:pointer;" onclick="${abrir}">
       <td>${esc(ConformidadeContinuidade.ROTULO_TIPO[p.tipo] || p.tipo)}</td>
       <td>${_htmlBadge(_NIVEL_SITUACAO_CONFORMIDADE[p.situacao], ConformidadeContinuidade.ROTULO_SITUACAO[p.situacao] || p.situacao)}</td>
-      <td><strong>${esc(p.nome || '—')}</strong>${sub}</td>
-      <td>${esc(p.area || '—')}</td>
+      <td class="forte" title="${esc(p.nome || '')}">${esc(p.nome || '—')}${sub}</td>
+      ${_tdLista(p.area || '—')}
       <td>${p.tier ? _htmlBadge(_nivelTierProcesso(p.tier), Criticidade.tierCurto(p.tier)) : '<span class="muted">—</span>'}</td>
-      <td style="font-size:0.88em;">${esc(p.mensagem)}</td>
-      <td class="col-nw">${esc(dataBR(p.desde))}</td>
-      <td class="col-nw col-sticky" onclick="event.stopPropagation();">${acoes}</td>
+      ${_tdLista(p.mensagem)}
+      <td class="num">${esc(dataBR(p.desde))}</td>
+      ${_htmlAcoesLinha(acoes)}
     </tr>`;
   }).join('') : `<tr><td colspan="8" class="vazio">${resultado.pendencias.length ? 'Nenhuma pendência com estes filtros.' : 'Nenhuma pendência: BIA, PCN e DRP em dia.'}</td></tr>`;
   document.getElementById('conformidadePaginacao').innerHTML = _htmlPaginacao(pag, 'irParaPaginaConformidade');

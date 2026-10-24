@@ -19,6 +19,10 @@ const DADOS = {
   getServicos: [{ id: 'sv1', nome: 'ERP', descricao: 'Sistema de gestão', dependenciaItens: [] }],
   getBackups: [{ id: 'b1', nome: 'Backup ERP', servicoIds: ['sv1'], jobs: [] }],
   getProcessos: [{ id: 'pr1', area: 'TI', processo: 'Folha de pagamento', score: 0 }],
+  getRiscos: [{ id: 'r1', titulo: 'Queda do ERP', area: 'TI', status: 'Aberto', probabilidade: 'Alta', impacto: 'Alto' }],
+  getVulnerabilidades: [{ id: 'v1', codigo: '2026-001', nome: 'TLS antigo', severidade: 'Alta', statusCorrecao: 'Aberta' }],
+  getContratos: [{ id: 'c1', codigo: 'CT-0001', objeto: 'Nuvem', fornecedorId: 'f1', fornecedorNome: 'Alfa', statusId: 's1', area: 'TI', documentos: [], alertas: [] }],
+  getStatusContrato: [{ id: 's1', nome: 'Vigente', situacao: 'vigente', ativo: true }],
   getIndicadoresSeguranca: [{ id: 'i1', nome: 'Patches aplicados', pilar: 'Proteger', responsavel: 'Ana Souza', tipo: 'Percentual', metaMinima: 90 }],
   getProdutosSoftware: [{ id: 's1', nome: 'Fortes Ponto', ativo: true }],
   getPerfis: [{ email: 'ana@fortestecnologia.com.br', perfis: ['gestor'], area: 'TI' }],
@@ -50,6 +54,7 @@ const TELAS = [
   ['contratosTipos', false], ['contratosStatus', false], ['contratosIndexadores', false], ['catalogoBackupFerramentas', false],
   ['perguntas', false],
   ['dependencias', true], ['servicos', true], ['catalogoBackup', true], ['processos', true], ['indicadoresCadastro', true],
+  ['riscos', true], ['vulnerabilidades', true], ['contratos', true], ['fornecedores', false], ['pcns', false], ['drp', false], ['conformidade', false],
 ];
 
 for (const [tela, temGrade] of TELAS) {
@@ -131,5 +136,36 @@ test('Pessoas: falha de carga mostra erro com "Tentar de novo" (antes ficava car
   await espera();
   assert.match(w.document.getElementById('app').textContent, /Não foi possível carregar as pessoas/);
   assert.ok(w.document.querySelector('#app button[onclick="pessoas()"]'));
+  w.close();
+});
+
+test('dashboards novos: Terceiros e Riscos mostram números que abrem a lista filtrada', async () => {
+  const w = carregar();
+  await w.terceirosDashboard();
+  await espera();
+  const d = w.document;
+  assert.match(d.getElementById('terceirosPainel').textContent, /Fornecedores no catálogo/);
+  assert.ok(d.querySelector('#contratosPainel .kpi-strip'), 'faixa de Contratos no dashboard');
+  assert.match(d.querySelector('#terceirosPainel .bia-metric--filtro').getAttribute('onclick'), /_abrirListaFiltrada\('fornecedores'/);
+  await w.riscosDashboard();
+  await espera();
+  assert.ok(d.getElementById('painelRiscoConsolidado').textContent.length > 0, 'carga de risco no dashboard');
+  const situacoes = [...d.querySelectorAll('#riscosDashboardConteudo .bia-metric--filtro')].map((b) => b.getAttribute('onclick'));
+  assert.ok(situacoes.some((o) => /filtroRiscoSituacao/.test(o)));
+  // Lista não carrega mais o painel.
+  await w.riscos();
+  await espera();
+  assert.strictEqual(d.getElementById('painelRiscoConsolidado'), null);
+  w.close();
+});
+
+test('lista abre já filtrada quando vem de um número do dashboard', async () => {
+  const w = carregar();
+  w._abrirListaFiltrada('riscos', { filtroRiscoSituacao: 'apetite' });
+  await w.riscos();
+  await espera();
+  const sel = w.document.getElementById('filtroRiscoSituacao');
+  assert.strictEqual(sel.value, 'apetite');
+  assert.ok(sel.classList.contains('lista-sel--ativo'));
   w.close();
 });

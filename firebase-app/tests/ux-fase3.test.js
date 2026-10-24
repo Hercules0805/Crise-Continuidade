@@ -128,7 +128,9 @@ test('Dashboard de Continuidade: cards padrao, sem o degrade do indigo antigo, T
   await espera();
   const html = w.document.getElementById('painel').innerHTML;
   assert.doesNotMatch(html, /#3949ab/, 'sem o indigo antigo');
-  assert.strictEqual(w.document.querySelectorAll('#painel .painel-metricas .bia-metric').length, 4);
+  assert.strictEqual(w.document.querySelectorAll('#painel .painel-metricas:not(.metricas-filtro) .bia-metric').length, 4);
+  // Seção "Planos" (23/10/2026): os números de PCN que saíram da lista de PCNs.
+  assert.match(w.document.getElementById('painel').textContent, /Processos com PCN/);
   assert.strictEqual(w.document.querySelectorAll('#painel .painel-card .data-table').length, 2);
   // Tier 3 no resumo por area = o mesmo numero do card de distribuicao
   const t3Card = lista.filter((p) => w.Criticidade.ehTier(p, w.Criticidade.TIER.T3)).length;
