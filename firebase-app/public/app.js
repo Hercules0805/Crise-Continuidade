@@ -693,22 +693,178 @@ function _seVeTela(pagina, html) {
 function _htmlErroCarga(mensagem, funcaoTela) {
   return `<div style="text-align:center;padding:40px;color:var(--ink-muted);">
       <div>${esc(mensagem)}</div>
-      <button class="btn btn-ghost" onclick="${funcaoTela}()" style="margin-top:12px;">Tentar de novo</button>
+      <button class="btn btn-ghost" onclick="${funcaoTela.includes('(') ? funcaoTela : funcaoTela + '()'}" style="margin-top:12px;">Tentar de novo</button>
     </div>`;
 }
+
+// ============================================================
+// TELAS DE LISTA (DECISÃO 23/10/2026, protótipo "opção A · barra única",
+// layout/listas/opcao-a.html). Cadastros e grades seguem o mesmo esqueleto:
+//  - cabeçalho: título + 1 frase; UM botão primário; o resto em "⋯ Mais ações";
+//  - barra única: busca + selects compactos com o nome do filtro dentro
+//    ("Área: Todas") + "Limpar" + contador à direita;
+//  - grade .data-table--lista: linha de 40px em uma linha só (reticências e o
+//    texto inteiro no title), Ações fixa à direita com SVG_EDITAR/SVG_EXCLUIR;
+//  - paginação sempre; vazio em td.vazio; erro de carga em _htmlErroCarga.
+// Cards, gráficos e números estratégicos não ficam na lista: vão para o
+// Dashboard da seção do menu.
+// ============================================================
+
+/** `primario` = { rotulo, onclick } (ou null sem permissão); `maisAcoes` = [{ rotulo, onclick }]. */
+function _htmlCabecalhoLista({ titulo, sub, primario, maisAcoes }) {
+  const mais = (maisAcoes || []).filter(Boolean);
+  return `<div class="page-header lista-cab">
+      <div><h2>${esc(titulo)}</h2>${sub ? `<p class="page-sub">${esc(sub)}</p>` : ''}</div>
+      <div class="lista-cab__acoes">
+        ${mais.length ? `<div class="mais-acoes">
+          <button type="button" class="btn btn-ghost" aria-haspopup="true" aria-expanded="false" onclick="_alternarMaisAcoes(this, event)">⋯ Mais ações</button>
+          <div class="mais-acoes__menu" role="menu">${mais.map((a) => `<button type="button" role="menuitem" onclick="_fecharMaisAcoes();${a.onclick}">${esc(a.rotulo)}</button>`).join('')}</div>
+        </div>` : ''}
+        ${primario ? `<button class="btn btn-primary"${primario.id ? ` id="${primario.id}"` : ''} onclick="${primario.onclick}">${esc(primario.rotulo)}</button>` : ''}
+      </div>
+    </div>`;
+}
+window._alternarMaisAcoes = (botao, ev) => {
+  if (ev) ev.stopPropagation();
+  const caixa = botao.closest('.mais-acoes');
+  const abrir = !caixa.classList.contains('open');
+  _fecharMaisAcoes();
+  caixa.classList.toggle('open', abrir);
+  botao.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+};
+window._fecharMaisAcoes = () => {
+  document.querySelectorAll('.mais-acoes.open').forEach((c) => {
+    c.classList.remove('open');
+    const b = c.querySelector('[aria-haspopup]');
+    if (b) b.setAttribute('aria-expanded', 'false');
+  });
+};
+document.addEventListener('click', (e) => { if (!e.target.closest || !e.target.closest('.mais-acoes')) _fecharMaisAcoes(); });
+
+/** Opções de um filtro da barra: o nome do filtro vai dentro ("Área: Todas", "Área: TI"). */
+function _opcoesFiltroLista(rotulo, opcoes, todos, valorAtual) {
+  return `<option value="">${esc(rotulo)}: ${esc(todos || 'Todas')}</option>` +
+    (opcoes || []).map(([v, t]) => `<option value="${esc(v)}"${String(v) === String(valorAtual || '') ? ' selected' : ''}>${esc(rotulo)}: ${esc(t)}</option>`).join('');
+}
+/** Repreenche um filtro já na tela (opções que só existem depois de carregar), mantendo a escolha. */
+function _preencherFiltroLista(id, rotulo, opcoes, todos) {
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const atual = sel.value;
+  sel.innerHTML = _opcoesFiltroLista(rotulo, opcoes, todos, atual);
+  _marcarFiltroLista(sel);
+}
+
+/**
+ * Barra única de filtros. `aoMudar` = nome da função global chamada a cada
+ * mudança (ela volta para a página 1 e redesenha). `busca` = { id, placeholder };
+ * `filtros` = [{ id, rotulo, opcoes: [[valor, texto]], todos }].
+ */
+function _htmlBarraLista({ busca, filtros, aoMudar, contadorId }) {
+  return `<div class="lista-barra">
+      ${busca ? `<label class="lista-busca"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg>
+        <input type="search" id="${busca.id}" placeholder="${esc(busca.placeholder)}" aria-label="${esc(busca.placeholder)}" oninput="${aoMudar}()"></label>` : ''}
+      ${(filtros || []).map((f) => `<select id="${f.id}" class="lista-sel" aria-label="${esc(f.rotulo)}" onchange="_marcarFiltroLista(this);${aoMudar}()">${_opcoesFiltroLista(f.rotulo, f.opcoes, f.todos)}</select>`).join('')}
+      <button type="button" class="lista-limpar" onclick="_limparBarraLista(this);${aoMudar}()" hidden>Limpar</button>
+      <span class="lista-contador" id="${contadorId}"></span>
+    </div>`;
+}
+window._marcarFiltroLista = (sel) => { if (sel) sel.classList.toggle('lista-sel--ativo', !!sel.value); };
+window._limparBarraLista = (botao) => {
+  const barra = botao.closest('.lista-barra');
+  barra.querySelectorAll('input, select').forEach((c) => { c.value = ''; if (c.tagName === 'SELECT') _marcarFiltroLista(c); });
+};
+/** Contador da barra ("18 áreas") e o "Limpar", que só aparece com algum filtro ativo. */
+function _atualizarBarraLista(contadorId, total, [singular, plural]) {
+  const el = document.getElementById(contadorId);
+  if (!el) return;
+  el.textContent = `${total} ${total === 1 ? singular : plural}`;
+  const barra = el.closest('.lista-barra');
+  const ativo = Array.from(barra.querySelectorAll('input, select')).some((c) => c.value);
+  const limpar = barra.querySelector('.lista-limpar');
+  if (limpar) limpar.hidden = !ativo;
+}
+
+/** Célula de grade em uma linha: o texto inteiro fica no title (a célula corta com reticências). */
+function _tdLista(texto, classe) {
+  const t = texto == null ? '' : String(texto);
+  return `<td${classe ? ` class="${classe}"` : ''}${t ? ` title="${esc(t)}"` : ''}>${esc(t)}</td>`;
+}
+/** Coluna Ações da grade: [{ icone, titulo, onclick }] (onclick já escapado por quem chama). */
+function _htmlAcoesLinha(acoes) {
+  return `<td class="col-acoes" onclick="event.stopPropagation();">${(acoes || []).filter(Boolean).map((a) =>
+    `<button type="button" class="btn-icon" onclick="${a.onclick}" title="${esc(a.titulo)}" aria-label="${esc(a.titulo)}">${a.icone}</button>`).join('')}</td>`;
+}
+const _acaoEditar = (onclick) => ({ icone: SVG_EDITAR, titulo: 'Editar', onclick });
+const _acaoExcluir = (onclick) => ({ icone: SVG_EXCLUIR, titulo: 'Excluir', onclick });
+
+/**
+ * Grade de cadastro no padrão de lista: filtra pela busca da barra, ordena,
+ * pagina e desenha (ou o vazio). `colunas` = [{ rotulo, w (px), ordem? }];
+ * `linha(item)` devolve o <tr> inteiro (a última célula é a de Ações).
+ */
+function _renderGradeLista(o) {
+  const alvo = document.getElementById(o.alvoId);
+  if (!alvo) return;
+  if (!o.itens.length) {
+    _atualizarBarraLista(o.contadorId, 0, o.contador);
+    alvo.innerHTML = o.vazioHtml || _htmlVazio(o.vazio, o.vazioDetalhe);
+    return;
+  }
+  const termo = ((document.getElementById(o.buscaId) || {}).value || '').trim().toLowerCase();
+  let data = o.itens.filter((x) => !termo || o.camposBusca.some((c) => String((typeof c === 'function' ? c(x) : x[c]) || '').toLowerCase().includes(termo)));
+  if (o.filtrar) data = data.filter(o.filtrar);
+  data = o.ordenacao.aplicar(data, o.comparadores);
+  _atualizarBarraLista(o.contadorId, data.length, o.contador);
+  const pag = o.paginacao.aplicar(data);
+  const largura = o.colunas.reduce((s, c) => s + c.w, 0) + 92;
+  alvo.innerHTML = `
+    <div class="data-table data-table--lista">
+      <table style="min-width:${largura}px;">
+        <colgroup>${o.colunas.map((c) => `<col style="width:${c.w}px">`).join('')}<col style="width:92px"></colgroup>
+        <thead><tr>${o.colunas.map((c) => c.ordem
+          ? `<th onclick="${o.fnOrdenar}('${c.ordem}')" style="cursor:pointer;">${c.rotulo} <span id="${o.prefixoSeta}${c.ordem}"></span></th>`
+          : `<th>${c.rotulo}</th>`).join('')}<th class="col-acoes">Ações</th></tr></thead>
+        <tbody>${pag.itens.length ? pag.itens.map(o.linha).join('')
+          : `<tr><td colspan="${o.colunas.length + 1}" class="vazio">Nada encontrado com essa busca.</td></tr>`}</tbody>
+      </table>
+    </div>
+    ${_htmlPaginacao(pag, o.fnPagina)}
+    ${o.depois || ''}`;
+  o.ordenacao.atualizarSetas(o.prefixoSeta, o.colunas.filter((c) => c.ordem).map((c) => c.ordem));
+}
+const _badgeAtivo = (ativo, fem) => ativo ? `<span class="badge badge-green">${fem ? 'Ativa' : 'Ativo'}</span>` : `<span class="badge badge-gray">${fem ? 'Inativa' : 'Inativo'}</span>`;
+
+/** Drawer "Configurar" de uma tela de lista (ajuste que não é cadastro: limiar, apetite…). */
+function _htmlDrawerConfigLista(titulo, corpoId) {
+  return `
+    <div class="drawer-overlay" id="drawerOverlayConfigLista" onclick="fecharConfigLista()"></div>
+    <div class="drawer" id="drawerConfigLista" style="width:520px;">
+      <div class="drawer-header">
+        <h3>${esc(titulo)}</h3>
+        <button onclick="fecharConfigLista()" aria-label="Fechar" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" id="${corpoId}"></div>
+      <div class="drawer-footer"><button class="btn btn-ghost" onclick="fecharConfigLista()">Fechar</button></div>
+    </div>`;
+}
+window.abrirConfigLista = () => {
+  document.getElementById('drawerConfigLista').classList.add('open');
+  document.getElementById('drawerOverlayConfigLista').classList.add('open');
+};
+window.fecharConfigLista = () => {
+  document.getElementById('drawerConfigLista').classList.remove('open');
+  document.getElementById('drawerOverlayConfigLista').classList.remove('open');
+};
 
 // ============================================================
 // PÁGINA: PERGUNTAS
 // ============================================================
 async function perguntas() {
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Perguntas do BIA</h2><p class="page-sub">Gerencie as perguntas e as opções de resposta por categoria</p></div>
-      <button class="btn btn-primary" onclick="abrirModalPergunta()">+ Nova Pergunta</button>
-    </div>
-    <div class="filters">
-      <input type="search" id="buscaPergunta" placeholder="Buscar pergunta…" aria-label="Buscar pergunta" oninput="filtrarPerguntas()" class="field-control field-control--busca">
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Perguntas do BIA', sub: 'Perguntas do questionário BIA e as opções de resposta de cada categoria.',
+      primario: { rotulo: '+ Nova pergunta', onclick: 'abrirModalPergunta()' } })}
+    ${_htmlBarraLista({ busca: { id: 'buscaPergunta', placeholder: 'Buscar pergunta…' }, aoMudar: 'filtrarPerguntas', contadorId: 'perguntasContador' })}
     <div class="loading" id="loading">⏳ Carregando...</div>
     <div id="lista"></div>
     <div id="lista-respostas" style="margin-top:32px;"></div>
@@ -759,7 +915,8 @@ async function perguntas() {
         </div>
       </div>`).join('')}</div>`;
   }).join('');
-  
+  filtrarPerguntas();
+
   window.perguntasData = data;
 
   // Popular dropdown de categorias dinamicamente
@@ -819,10 +976,14 @@ window.filtrarPerguntas = () => {
   const termo = busca.toLowerCase();
   const lista = document.getElementById('lista');
   if (!lista) return;
+  let visiveis = 0;
   lista.querySelectorAll('.list-row').forEach(row => {
     const text = row.textContent.toLowerCase();
-    row.style.display = (!termo || text.includes(termo)) ? '' : 'none';
+    const ve = !termo || text.includes(termo);
+    row.style.display = ve ? '' : 'none';
+    if (ve) visiveis++;
   });
+  _atualizarBarraLista('perguntasContador', visiveis, ['pergunta', 'perguntas']);
 };
 window.trocarAbaProcesso = (aba) => {
   // BCP e Avaliacao so sao desenhadas ao abrir a aba, e so entram no payload
@@ -1198,28 +1359,26 @@ let pessoasData = [];
 
 async function areas() {
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Áreas</h2><p class="page-sub">Cadastre as áreas da empresa que participam do BIA</p></div>
-      ${Perfis.podeMexerNaArea(window.USER_PERFIS) ? '<button class="btn btn-primary" onclick="abrirModalArea()">+ Nova Área</button>' : ''}
-    </div>
-    <div class="filters">
-      <input type="search" id="buscaArea" placeholder="Buscar área…" aria-label="Buscar área" oninput="renderizarAreas()" class="field-control field-control--busca">
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Áreas', sub: 'Áreas da empresa que participam do BIA.',
+      primario: Perfis.podeMexerNaArea(window.USER_PERFIS) ? { rotulo: '+ Nova área', onclick: 'abrirModalArea()' } : null })}
+    ${_htmlBarraLista({ busca: { id: 'buscaArea', placeholder: 'Buscar área…' }, aoMudar: 'filtrarAreas', contadorId: 'areasContador' })}
     <div class="loading">⏳ Carregando...</div>
-    <div class="data-table" id="lista" style="display:none;">
-      <table>
+    <div class="data-table data-table--lista" id="lista" style="display:none;">
+      <table style="min-width:840px;">
+        <colgroup><col style="width:240px"><col style="width:220px"><col style="width:300px"><col style="width:160px"><col style="width:92px"></colgroup>
         <thead>
           <tr>
             <th onclick="ordenarAreas('nome')" style="cursor:pointer;">Área <span id="sort-nome"></span></th>
             <th onclick="ordenarAreas('responsavel')" style="cursor:pointer;">Responsável <span id="sort-responsavel"></span></th>
-            <th onclick="ordenarAreas('email')" style="cursor:pointer;">Email <span id="sort-email"></span></th>
+            <th onclick="ordenarAreas('email')" style="cursor:pointer;">E-mail <span id="sort-email"></span></th>
             <th onclick="ordenarAreas('telefone')" style="cursor:pointer;">Telefone <span id="sort-telefone"></span></th>
-            <th style="width:100px;text-align:center;">Ações</th>
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
+    <div id="areasPaginacao"></div>
     ${_htmlModalArea()}`;
 
   let data, deps;
@@ -1254,32 +1413,25 @@ function renderizarAreas() {
   
   data = areasOrdenacao.aplicar(data);
   areasOrdenacao.atualizarSetas('sort-', ['nome', 'responsavel', 'email', 'telefone']);
+  _atualizarBarraLista('areasContador', data.length, ['área', 'áreas']);
 
   // Quem nao mexe em Areas (ex.: Operador Administrativo) so consulta.
   const soLeituraAreas = !Perfis.podeMexerNaArea(window.USER_PERFIS);
-  document.getElementById('rows').innerHTML = data.length
-    ? data.map(a => `<tr ${soLeituraAreas ? '' : `style="cursor:pointer;" onclick="editarArea('${a.id}')"`}>
-        <td>${esc(a.nome)}</td>
-        <td>${esc(a.responsavel || '')}</td>
-        <td>${esc(a.email || '')}</td>
-        <td>${esc(a.telefone || '')}</td>
-        ${soLeituraAreas ? '<td></td>' : `<td style="text-align:center;" onclick="event.stopPropagation();">
-          <button class="btn-icon" onclick="editarArea('${a.id}')" title="Editar">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
-          </button>
-          <button class="btn-icon" onclick="excluirArea('${a.id}')" title="Excluir">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
-        </td>`}
+  const pag = areasPaginacao.aplicar(data);
+  const pagEl = document.getElementById('areasPaginacao');
+  if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaAreas');
+  const filtrando = !!busca.trim();
+  document.getElementById('rows').innerHTML = pag.itens.length
+    ? pag.itens.map((a) => `<tr ${soLeituraAreas ? '' : `style="cursor:pointer;" onclick="editarArea('${escJs(a.id)}')"`}>
+        ${_tdLista(a.nome, 'forte')}${_tdLista(a.responsavel)}${_tdLista(a.email)}${_tdLista(a.telefone)}
+        ${soLeituraAreas ? '<td class="col-acoes"></td>' : _htmlAcoesLinha([_acaoEditar(`editarArea('${escJs(a.id)}')`), _acaoExcluir(`excluirArea('${escJs(a.id)}')`)])}
       </tr>`).join('')
-    : '<tr><td colspan="5" class="vazio">Nenhuma área cadastrada.</td></tr>';
+    : `<tr><td colspan="5" class="vazio">${filtrando ? 'Nenhuma área encontrada com essa busca.' : 'Nenhuma área cadastrada.'}</td></tr>`;
 }
+
+const areasPaginacao = criarPaginacao(20);
+window.irParaPaginaAreas = (d) => { areasPaginacao.mover(d); renderizarAreas(); };
+window.filtrarAreas = () => { areasPaginacao.reiniciar(); renderizarAreas(); };
 
 window.ordenarAreas = (coluna) => {
   areasOrdenacao.ordenar(coluna);
@@ -1530,26 +1682,19 @@ function _htmlDrawerPessoa() {
 
 async function pessoas() {
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Pessoas</h2><p class="page-sub">Usadas como gestor de contrato, pessoa relacionada a fornecedores e Responsável (Áreas)</p></div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" onclick="abrirModalOrganograma()" style="color:#d60014;border-color:#d60014;">🗂️ Gerar organograma</button>
-        ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button class="btn btn-primary" onclick="abrirModalPessoa()">+ Nova Pessoa</button>' : ''}
-      </div>
-    </div>
-    <div class="filters">
-      <input type="search" id="buscaPessoa" placeholder="Buscar pessoa…" aria-label="Buscar pessoa" oninput="filtrarPessoas()" class="field-control field-control--busca">
-      <select id="filtroPessoaArea" onchange="filtrarPessoas()" class="field-control"><option value="">Todas as áreas</option></select>
-      <select id="filtroPessoaLider" onchange="filtrarPessoas()" class="field-control"><option value="">Todos os líderes</option></select>
-      <select id="filtroPessoaFuncao" onchange="filtrarPessoas()" class="field-control">
-        <option value="">Todas as funções</option>
-        <option value="techLead">Tech Lead</option>
-        <option value="teamLead">Team Lead</option>
-      </select>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Pessoas', sub: 'Gestores de contrato, contatos de fornecedores e responsáveis de área.',
+      primario: Perfis.podeEditarPessoas(window.USER_PERFIS) ? { rotulo: '+ Nova pessoa', onclick: 'abrirModalPessoa()' } : null,
+      maisAcoes: [{ rotulo: 'Gerar organograma', onclick: 'abrirModalOrganograma()' }] })}
+    ${_htmlBarraLista({ busca: { id: 'buscaPessoa', placeholder: 'Buscar pessoa…' }, aoMudar: 'filtrarPessoas', contadorId: 'pessoasContador',
+      filtros: [
+        { id: 'filtroPessoaArea', rotulo: 'Área', opcoes: [] },
+        { id: 'filtroPessoaLider', rotulo: 'Líder', opcoes: [], todos: 'Todos' },
+        { id: 'filtroPessoaFuncao', rotulo: 'Função', opcoes: [['techLead', 'Tech Lead'], ['teamLead', 'Team Lead']] },
+      ] })}
     <div class="loading" id="loadingPessoas">⏳ Carregando...</div>
-    <div class="data-table" id="listaPessoas" style="display:none;">
-      <table>
+    <div class="data-table data-table--lista" id="listaPessoas" style="display:none;">
+      <table style="min-width:1080px;">
+        <colgroup><col style="width:210px"><col style="width:140px"><col style="width:180px"><col style="width:170px"><col style="width:140px"><col style="width:250px"><col style="width:92px"></colgroup>
         <thead>
           <tr>
             <th onclick="ordenarPessoas('nome')" style="cursor:pointer;">Nome <span id="sort-pessoa-nome"></span></th>
@@ -1557,8 +1702,8 @@ async function pessoas() {
             <th onclick="ordenarPessoas('setor')" style="cursor:pointer;">Área <span id="sort-pessoa-setor"></span></th>
             <th>Liderança</th>
             <th onclick="ordenarPessoas('telefone')" style="cursor:pointer;">Telefone <span id="sort-pessoa-telefone"></span></th>
-            <th onclick="ordenarPessoas('email')" style="cursor:pointer;">Email <span id="sort-pessoa-email"></span></th>
-            <th style="width:100px;text-align:center;">Ações</th>
+            <th onclick="ordenarPessoas('email')" style="cursor:pointer;">E-mail <span id="sort-pessoa-email"></span></th>
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody id="rowsPessoas"></tbody>
@@ -1588,12 +1733,19 @@ async function pessoas() {
       </div>
     </div>`;
 
-  const [deps, areas, perfis, produtos] = await Promise.all([
-    API.getDependencias(), API.getAreas(), API.getPerfis(),
-    // Produtos de Software (Tech Lead/Team Lead). Se falhar, a tela abre igual,
-    // só sem os nomes dos produtos.
-    API.getProdutosSoftware().catch((e) => { console.error('Pessoas: produtos não carregaram', e); return null; }),
-  ]);
+  let deps, areas, perfis, produtos;
+  try {
+    [deps, areas, perfis, produtos] = await Promise.all([
+      API.getDependencias(), API.getAreas(), API.getPerfis(),
+      // Produtos de Software (Tech Lead/Team Lead). Se falhar, a tela abre igual,
+      // só sem os nomes dos produtos.
+      API.getProdutosSoftware().catch((e) => { console.error('Pessoas: produtos não carregaram', e); return null; }),
+    ]);
+  } catch (e) {
+    console.error('pessoas: falha ao carregar', e);
+    document.getElementById('loadingPessoas').outerHTML = _htmlErroCarga('Não foi possível carregar as pessoas.', 'pessoas');
+    return;
+  }
   pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
   // Opções de "Instalação (lotação)" no drawer da Pessoa.
   window._instalacoesData = deps.filter((d) => _ehInstalacao(d.categoria));
@@ -1611,24 +1763,15 @@ async function pessoas() {
         .map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
   }
   // Filtro por Área -- une todas as áreas de todas as pessoas (multi + setor).
-  const filtroAreaSel = document.getElementById('filtroPessoaArea');
-  if (filtroAreaSel) {
-    const todas = [];
-    pessoasData.forEach((p) => _areasDaPessoa(p).forEach((a) => todas.push(a)));
-    const areasUsadas = [...new Set(todas.filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
-    filtroAreaSel.innerHTML = '<option value="">Todas as áreas</option>' +
-      areasUsadas.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
-  }
+  const todasAreas = [];
+  pessoasData.forEach((p) => _areasDaPessoa(p).forEach((a) => todasAreas.push(a)));
+  const areasUsadas = [...new Set(todasAreas.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  _preencherFiltroLista('filtroPessoaArea', 'Área', areasUsadas.map((a) => [a, a]));
   // Filtro por Líder Imediato -- só as pessoas que são líder de alguém.
-  const filtroLiderSel = document.getElementById('filtroPessoaLider');
-  if (filtroLiderSel) {
-    const idsLideres = new Set(pessoasData.map((p) => p.liderImediato).filter(Boolean).map(String));
-    const lideres = pessoasData.filter((p) => idsLideres.has(String(p.id)))
-      .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
-    filtroLiderSel.innerHTML = '<option value="">Todos os líderes</option>' +
-      lideres.map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('');
-  }
+  const idsLideres = new Set(pessoasData.map((p) => p.liderImediato).filter(Boolean).map(String));
+  const lideres = pessoasData.filter((p) => idsLideres.has(String(p.id)))
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  _preencherFiltroLista('filtroPessoaLider', 'Líder', lideres.map((p) => [p.id, p.nome]), 'Todos');
   document.getElementById('loadingPessoas').style.display = 'none';
   document.getElementById('listaPessoas').style.display = 'block';
   renderizarPessoas();
@@ -1670,31 +1813,21 @@ function renderizarPessoas() {
   // Operador Administrativo (e quem nao edita pessoas) so consulta: sem clique de
   // edicao e sem botoes. Espelha as regras do banco (/dependencias).
   const soLeituraPessoas = !Perfis.podeEditarPessoas(window.USER_PERFIS);
-  const pag = pessoasPaginacao.aplicar(data);  const pagEl = document.getElementById('pessoasPaginacao');  if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaPessoas');  document.getElementById('rowsPessoas').innerHTML = pag.itens.length
-    ? pag.itens.map((p) => `<tr ${soLeituraPessoas ? '' : `style="cursor:pointer;" onclick="abrirModalPessoa('${esc(p.id)}')"`}>
-        <td style="font-weight:600;">${esc(p.nome)}</td>
-        <td>${esc(p.detalhes || '')}</td>
-        <td>${esc(_areasDaPessoa(p).join(', '))}</td>
-        <td style="font-size:0.85em;">${_resumoLiderancaPessoa(p).map((l) =>
-          `<div><span style="display:inline-block;padding:1px 8px;border-radius:10px;font-size:0.82em;font-weight:700;background:#fce8ea;color:#d60014;">${esc(l.rotulo)}</span> ${l.nomes.length ? esc(l.nomes.join(', ')) : '<span style="color:#bbb;">sem produto</span>'}</div>`).join('')}</td>
-        <td>${esc(p.telefone || '')}</td>
-        <td>${esc(p.email || '')}</td>
-        ${soLeituraPessoas ? '<td></td>' : `<td style="text-align:center;" onclick="event.stopPropagation();">
-          <button class="btn-icon" onclick="abrirModalPessoa('${esc(p.id)}')" title="Editar">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2">
-              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-            </svg>
-          </button>
-          <button class="btn-icon" onclick="excluirPessoaCadastro('${esc(p.id)}')" title="Excluir">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
-        </td>`}
-      </tr>`).join('')
-    : '<tr><td colspan="7" class="vazio">Nenhuma pessoa cadastrada.</td></tr>';
+  _atualizarBarraLista('pessoasContador', data.length, ['pessoa', 'pessoas']);
+  const pag = pessoasPaginacao.aplicar(data);
+  const pagEl = document.getElementById('pessoasPaginacao');
+  if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaPessoas');
+  const filtrando = !!(busca.trim() || filtroArea || filtroLider || filtroFuncao);
+  document.getElementById('rowsPessoas').innerHTML = pag.itens.length
+    ? pag.itens.map((p) => {
+      // Liderança numa linha só: "Tech Lead: Produto A, Produto B · Team Lead: …"
+      const lideranca = _resumoLiderancaPessoa(p).map((l) => `${l.rotulo}: ${l.nomes.length ? l.nomes.join(', ') : 'sem produto'}`).join(' · ');
+      return `<tr ${soLeituraPessoas ? '' : `style="cursor:pointer;" onclick="abrirModalPessoa('${escJs(p.id)}')"`}>
+        ${_tdLista(p.nome, 'forte')}${_tdLista(p.detalhes)}${_tdLista(_areasDaPessoa(p).join(', '))}${_tdLista(lideranca)}${_tdLista(p.telefone)}${_tdLista(p.email)}
+        ${soLeituraPessoas ? '<td class="col-acoes"></td>' : _htmlAcoesLinha([_acaoEditar(`abrirModalPessoa('${escJs(p.id)}')`), _acaoExcluir(`excluirPessoaCadastro('${escJs(p.id)}')`)])}
+      </tr>`;
+    }).join('')
+    : `<tr><td colspan="7" class="vazio">${filtrando ? 'Nenhuma pessoa encontrada com esses filtros.' : 'Nenhuma pessoa cadastrada.'}</td></tr>`;
 }
 
 const pessoasPaginacao = criarPaginacao(20);
@@ -13989,10 +14122,7 @@ async function monitor() {
   } catch (e) {
     console.error('Monitor: falha ao carregar', e);
     document.getElementById('loadingMonitor').style.display = 'none';
-    document.getElementById('monitorConteudo').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
-      Não foi possível carregar o histórico.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="monitor()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    document.getElementById('monitorConteudo').innerHTML = _htmlErroCarga('Não foi possível carregar o histórico.', 'monitor');
     return;
   }
   document.getElementById('loadingMonitor').style.display = 'none';
@@ -19224,11 +19354,11 @@ async function fornecedoresCriterios() {
   // Permissao, nao perfil: o perfil de fornecedores tambem gerencia os criterios.
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Critérios de Avaliação</h2><p class="page-sub">A régua com que todo fornecedor é avaliado — cada critério vale um peso</p></div>
-      <button class="btn btn-primary" onclick="abrirModalCriterio()" id="btnNovoCriterio" style="display:none;">+ Novo Critério</button>
-    </div>
-    <div id="fornLimiarBox" style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 16px;background:#fff;margin-bottom:18px;"></div>
+    ${_htmlCabecalhoLista({ titulo: 'Critérios de Avaliação', sub: 'A régua com que todo fornecedor é avaliado: cada critério vale um peso.',
+      primario: { rotulo: '+ Novo critério', onclick: 'abrirModalCriterio()', id: 'btnNovoCriterio' },
+      maisAcoes: [{ rotulo: 'Configurar nota que abre risco', onclick: 'abrirConfigLista()' }] })}
+    ${_htmlBarraLista({ busca: { id: 'buscaCriterio', placeholder: 'Buscar critério…' }, aoMudar: 'filtrarCriterios', contadorId: 'criteriosContador' })}
+    ${_htmlDrawerConfigLista('Nota que abre risco', 'fornLimiarBox')}
     <div class="loading" id="loadingCriterios">⏳ Carregando...</div>
     <div id="listaCriterios"></div>
     <div class="modal-overlay" id="modalCriterio"><div class="modal" onclick="event.stopPropagation()">
@@ -19260,10 +19390,7 @@ async function fornecedoresCriterios() {
     // de leitura: e indistinguivel de cadastro vazio, e alguem recadastra tudo.
     console.error('Critérios de fornecedor: falha ao carregar', e);
     document.getElementById('loadingCriterios').style.display = 'none';
-    document.getElementById('listaCriterios').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
-      Não foi possível carregar os critérios.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="fornecedoresCriterios()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    document.getElementById('listaCriterios').innerHTML = _htmlErroCarga('Não foi possível carregar os critérios.', 'fornecedoresCriterios');
     return;
   }
   document.getElementById('loadingCriterios').style.display = 'none';
@@ -19278,7 +19405,7 @@ function renderLimiarFornecedor() {
   const box = document.getElementById('fornLimiarBox');
   if (!box) return;
   box.innerHTML = `
-    <div style="display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap;">
+    <div style="display:flex;flex-direction:column;gap:14px;">
       <div>
         <label style="font-size:0.78em;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:0.5px;display:block;margin-bottom:6px;">Nota que abre risco</label>
         <div style="display:flex;align-items:center;gap:8px;">
@@ -19311,59 +19438,31 @@ window.ordenarCriterios = (coluna) => { criteriosOrdenacao.ordenar(coluna); rend
 
 function renderizarCriterios() {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
-  const lista = document.getElementById('listaCriterios');
-  if (!lista) return;
-
-  if (!criteriosFornecedorData.length) {
-    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
-      Nenhum critério cadastrado ainda.<br>
-      <span style="font-size:0.9em;">Sem critério não existe nota: o fornecedor aparece como "Não avaliado".</span></div>`;
-    return;
-  }
-
   const ativos = criteriosFornecedorData.filter((c) => c.ativo);
   const pesoTotal = ativos.reduce((t, c) => t + c.peso, 0);
   const comparadorPeso = (a, b, dir) => dir * ((a.peso || 0) - (b.peso || 0));
-  const data = criteriosOrdenacao.aplicar(criteriosFornecedorData, { peso: comparadorPeso, valeNaNota: comparadorPeso });
-  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarCriterios('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-crit-${coluna}"></span></th>`;
-
-  lista.innerHTML = `
-    <div class="data-table">
-      <table>
-        <thead>
-          <tr>
-            ${th('nome', 'Critério', 'width:32%;')}
-            <th style="width:38%;">Descrição</th>
-            ${th('peso', 'Peso', 'width:8%;text-align:center;')}
-            ${th('valeNaNota', 'Vale na nota', 'width:12%;text-align:center;')}
-            <th style="width:10%;text-align:center;">Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map((c) => `
-            <tr style="cursor:pointer;${c.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalCriterio('${c.id}')">
-              <td style="font-weight:600;">${esc(c.nome)}${c.ativo ? '' : ' <span style="font-size:0.78em;color:#888;font-weight:400;">(desativado)</span>'}</td>
-              <td style="color:#666;font-size:0.9em;">${esc(c.descricao)}</td>
-              <td style="text-align:center;font-weight:700;">${c.peso}</td>
-              <td style="text-align:center;color:#666;font-size:0.9em;">${c.ativo && pesoTotal ? Math.round((c.peso / pesoTotal) * 100) + '%' : '–'}</td>
-              <td style="text-align:center;" onclick="event.stopPropagation();">
-                ${isAdmin ? `
-                  <button class="btn-icon" onclick="abrirModalCriterio('${c.id}')" title="Editar">${SVG_EDITAR}</button>
-                  <button class="btn-icon" onclick="excluirCriterio('${c.id}')" title="Excluir">${SVG_EXCLUIR}</button>` : '–'}
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>
-    <div style="font-size:0.76em;color:#999;margin-top:10px;line-height:1.5;">
-      ${ativos.length} critério${ativos.length === 1 ? '' : 's'} ativo${ativos.length === 1 ? '' : 's'}, peso total ${pesoTotal}.
+  _renderGradeLista({
+    alvoId: 'listaCriterios', itens: criteriosFornecedorData, buscaId: 'buscaCriterio', camposBusca: ['nome', 'descricao'],
+    ordenacao: criteriosOrdenacao, comparadores: { peso: comparadorPeso, valeNaNota: comparadorPeso },
+    prefixoSeta: 'sort-crit-', fnOrdenar: 'ordenarCriterios', paginacao: criteriosPaginacao, fnPagina: 'irParaPaginaCriterios',
+    contadorId: 'criteriosContador', contador: ['critério', 'critérios'],
+    vazio: 'Nenhum critério cadastrado ainda.', vazioDetalhe: 'Sem critério não existe nota: o fornecedor aparece como "Não avaliado".',
+    colunas: [{ rotulo: 'Critério', w: 300, ordem: 'nome' }, { rotulo: 'Descrição', w: 360 }, { rotulo: 'Peso', w: 80, ordem: 'peso' }, { rotulo: 'Vale na nota', w: 120, ordem: 'valeNaNota' }],
+    linha: (c) => `<tr style="cursor:pointer;${c.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalCriterio('${escJs(c.id)}')">
+      ${_tdLista(c.nome + (c.ativo ? '' : ' (desativado)'), 'forte')}${_tdLista(c.descricao)}<td class="num">${c.peso}</td>
+      ${_tdLista(c.ativo && pesoTotal ? Math.round((c.peso / pesoTotal) * 100) + '%' : '–', 'num')}
+      ${isAdmin ? _htmlAcoesLinha([_acaoEditar(`abrirModalCriterio('${escJs(c.id)}')`), _acaoExcluir(`excluirCriterio('${escJs(c.id)}')`)]) : '<td class="col-acoes"></td>'}</tr>`,
+    depois: `<details class="lista-ajuda" style="margin-top:12px;"><summary>Como a nota é calculada</summary>
+      <p>${ativos.length} critério${ativos.length === 1 ? '' : 's'} ativo${ativos.length === 1 ? '' : 's'}, peso total ${pesoTotal}.
       A nota é o quanto o fornecedor aproveita desse peso: Sim vale o peso inteiro, Parcial vale a metade, Não vale zero.
       "Não se aplica" tira o critério da conta, sem dar nem tirar ponto.
-      Mudar peso ou ativar critério sobe a versão da régua — as avaliações antigas guardam a versão que as pontuou e não mudam de nota sozinhas.
-    </div>`;
-
-  criteriosOrdenacao.atualizarSetas('sort-crit-', ['nome', 'peso', 'valeNaNota']);
+      Mudar peso ou ativar critério sobe a versão da régua — as avaliações antigas guardam a versão que as pontuou e não mudam de nota sozinhas.</p></details>`,
+  });
 }
+const criteriosPaginacao = criarPaginacao(20);
+window.irParaPaginaCriterios = (d) => { criteriosPaginacao.mover(d); renderizarCriterios(); };
+window.filtrarCriterios = () => { criteriosPaginacao.reiniciar(); renderizarCriterios(); };
+
 
 window.abrirModalCriterio = (id) => {
   const c = id ? criteriosFornecedorData.find((x) => x.id === id) : null;
@@ -19431,10 +19530,9 @@ let categoriasFornecedorData = [];
 async function fornecedoresCategorias() {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Categorias de Fornecedores</h2><p class="page-sub">O segmento de negócio de cada fornecedor</p></div>
-      <button class="btn btn-primary" onclick="abrirModalCategoriaFornecedor()" id="btnNovaCategoriaForn" style="display:none;">+ Nova Categoria</button>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Categorias de Fornecedores', sub: 'O segmento de negócio de cada fornecedor.',
+      primario: { rotulo: '+ Nova categoria', onclick: 'abrirModalCategoriaFornecedor()', id: 'btnNovaCategoriaForn' } })}
+    ${_htmlBarraLista({ busca: { id: 'buscaCategoriaForn', placeholder: 'Buscar categoria…' }, aoMudar: 'filtrarCategoriasForn', contadorId: 'categoriasFornContador' })}
     <div class="loading" id="loadingCategoriasForn">⏳ Carregando...</div>
     <div id="listaCategoriasForn"></div>
     <div class="modal-overlay" id="modalCategoriaForn"><div class="modal" onclick="event.stopPropagation()">
@@ -19457,10 +19555,7 @@ async function fornecedoresCategorias() {
   } catch (e) {
     console.error('Categorias de fornecedor: falha ao carregar', e);
     document.getElementById('loadingCategoriasForn').style.display = 'none';
-    document.getElementById('listaCategoriasForn').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
-      Não foi possível carregar as categorias.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="fornecedoresCategorias()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    document.getElementById('listaCategoriasForn').innerHTML = _htmlErroCarga('Não foi possível carregar as categorias.', 'fornecedoresCategorias');
     return;
   }
   document.getElementById('loadingCategoriasForn').style.display = 'none';
@@ -19472,50 +19567,22 @@ window.ordenarCategoriasForn = (coluna) => { categoriasFornOrdenacao.ordenar(col
 
 function renderizarCategoriasFornecedor() {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
-  const lista = document.getElementById('listaCategoriasForn');
-  if (!lista) return;
-
-  if (!categoriasFornecedorData.length) {
-    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
-      Nenhuma categoria cadastrada ainda.<br>
-      <span style="font-size:0.9em;">Sem categoria, o cadastro de fornecedores fica sem essa opção pra escolher.</span></div>`;
-    return;
-  }
-
-  const data = categoriasFornOrdenacao.aplicar(categoriasFornecedorData, {
-    status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
+  _renderGradeLista({
+    alvoId: 'listaCategoriasForn', itens: categoriasFornecedorData, buscaId: 'buscaCategoriaForn', camposBusca: ['nome'],
+    ordenacao: categoriasFornOrdenacao, comparadores: { status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)) },
+    prefixoSeta: 'sort-catforn-', fnOrdenar: 'ordenarCategoriasForn', paginacao: categoriasFornPaginacao, fnPagina: 'irParaPaginaCategoriasForn',
+    contadorId: 'categoriasFornContador', contador: ['categoria', 'categorias'],
+    vazio: 'Nenhuma categoria cadastrada ainda.', vazioDetalhe: 'Sem categoria, o cadastro de fornecedores fica sem essa opção pra escolher.',
+    colunas: [{ rotulo: 'Categoria', w: 420, ordem: 'nome' }, { rotulo: 'Status', w: 120, ordem: 'status' }],
+    linha: (c) => `<tr style="cursor:pointer;${c.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalCategoriaFornecedor('${escJs(c.id)}')">
+      ${_tdLista(c.nome, 'forte')}<td>${_badgeAtivo(c.ativo, true)}</td>
+      ${isAdmin ? _htmlAcoesLinha([_acaoEditar(`abrirModalCategoriaFornecedor('${escJs(c.id)}')`), _acaoExcluir(`excluirCategoriaFornecedor('${escJs(c.id)}')`)]) : '<td class="col-acoes"></td>'}</tr>`,
   });
-  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarCategoriasForn('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-catforn-${coluna}"></span></th>`;
-
-  lista.innerHTML = `
-    <div class="data-table">
-      <table>
-        <thead>
-          <tr>
-            ${th('nome', 'Categoria', 'width:70%;')}
-            ${th('status', 'Status', 'width:15%;text-align:center;')}
-            <th style="width:15%;text-align:center;">Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map((c) => `
-            <tr style="cursor:pointer;${c.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalCategoriaFornecedor('${c.id}')">
-              <td style="font-weight:600;">${esc(c.nome)}</td>
-              <td style="text-align:center;">${c.ativo
-                ? '<span class=\"badge badge-green\">Ativa</span>'
-                : '<span class=\"badge badge-gray\">Inativa</span>'}</td>
-              <td style="text-align:center;" onclick="event.stopPropagation();">
-                ${isAdmin ? `
-                  <button class="btn-icon" onclick="abrirModalCategoriaFornecedor('${c.id}')" title="Editar">${SVG_EDITAR}</button>
-                  <button class="btn-icon" onclick="excluirCategoriaFornecedor('${c.id}')" title="Excluir">${SVG_EXCLUIR}</button>` : '–'}
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>`;
-
-  categoriasFornOrdenacao.atualizarSetas('sort-catforn-', ['nome', 'status']);
 }
+const categoriasFornPaginacao = criarPaginacao(20);
+window.irParaPaginaCategoriasForn = (d) => { categoriasFornPaginacao.mover(d); renderizarCategoriasFornecedor(); };
+window.filtrarCategoriasForn = () => { categoriasFornPaginacao.reiniciar(); renderizarCategoriasFornecedor(); };
+
 
 window.abrirModalCategoriaFornecedor = (id) => {
   const c = id ? categoriasFornecedorData.find((x) => x.id === id) : null;
@@ -19574,10 +19641,10 @@ let criticidadeFornecedorPerguntasData = [];
 async function fornecedoresSubcategorias() {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Subcategorias de Fornecedores</h2><p class="page-sub">Refinamento da Categoria de cada fornecedor</p></div>
-      <button class="btn btn-primary" onclick="abrirModalSubcategoriaFornecedor()" id="btnNovaSubcategoriaForn" style="display:none;">+ Nova Subcategoria</button>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Subcategorias de Fornecedores', sub: 'Refinamento da Categoria de cada fornecedor.',
+      primario: { rotulo: '+ Nova subcategoria', onclick: 'abrirModalSubcategoriaFornecedor()', id: 'btnNovaSubcategoriaForn' } })}
+    ${_htmlBarraLista({ busca: { id: 'buscaSubcategoriaForn', placeholder: 'Buscar subcategoria…' }, aoMudar: 'filtrarSubcategoriasForn', contadorId: 'subcategoriasFornContador',
+      filtros: [{ id: 'filtroSubcategoriaFornCategoria', rotulo: 'Categoria', opcoes: [] }] })}
     <div class="loading" id="loadingSubcategoriasForn">⏳ Carregando...</div>
     <div id="listaSubcategoriasForn"></div>
     <div class="modal-overlay" id="modalSubcategoriaForn"><div class="modal" onclick="event.stopPropagation()">
@@ -19605,10 +19672,7 @@ async function fornecedoresSubcategorias() {
   } catch (e) {
     console.error('Subcategorias de fornecedor: falha ao carregar', e);
     document.getElementById('loadingSubcategoriasForn').style.display = 'none';
-    document.getElementById('listaSubcategoriasForn').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
-      Não foi possível carregar as subcategorias.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="fornecedoresSubcategorias()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    document.getElementById('listaSubcategoriasForn').innerHTML = _htmlErroCarga('Não foi possível carregar as subcategorias.', 'fornecedoresSubcategorias');
     return;
   }
   document.getElementById('loadingSubcategoriasForn').style.display = 'none';
@@ -19625,53 +19689,30 @@ function _nomeCategoriaFornecedorPorId(id) {
 
 function renderizarSubcategoriasFornecedor() {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
-  const lista = document.getElementById('listaSubcategoriasForn');
-  if (!lista) return;
-
-  if (!subcategoriasFornecedorData.length) {
-    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
-      Nenhuma subcategoria cadastrada ainda.<br>
-      <span style="font-size:0.9em;">Sem subcategoria, o cadastro de fornecedores fica sem essa opção pra escolher.</span></div>`;
-    return;
-  }
-
-  const data = subcategoriasFornOrdenacao.aplicar(subcategoriasFornecedorData, {
-    categoria: (a, b, dir) => dir * _nomeCategoriaFornecedorPorId(a.categoriaId).localeCompare(_nomeCategoriaFornecedorPorId(b.categoriaId), 'pt-BR'),
-    status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
+  const usadas = [...new Set(subcategoriasFornecedorData.map((s) => s.categoriaId).filter(Boolean))];
+  _preencherFiltroLista('filtroSubcategoriaFornCategoria', 'Categoria',
+    usadas.map((id) => [id, _nomeCategoriaFornecedorPorId(id) || '(categoria não encontrada)']).sort((a, b) => a[1].localeCompare(b[1], 'pt-BR')));
+  const categoria = (document.getElementById('filtroSubcategoriaFornCategoria') || {}).value || '';
+  _renderGradeLista({
+    alvoId: 'listaSubcategoriasForn', itens: subcategoriasFornecedorData, buscaId: 'buscaSubcategoriaForn',
+    camposBusca: ['nome', (s) => _nomeCategoriaFornecedorPorId(s.categoriaId)],
+    filtrar: categoria ? (s) => s.categoriaId === categoria : null,
+    ordenacao: subcategoriasFornOrdenacao, comparadores: {
+      categoria: (a, b, dir) => dir * _nomeCategoriaFornecedorPorId(a.categoriaId).localeCompare(_nomeCategoriaFornecedorPorId(b.categoriaId), 'pt-BR'),
+      status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
+    },
+    prefixoSeta: 'sort-subcatforn-', fnOrdenar: 'ordenarSubcategoriasForn', paginacao: subcategoriasFornPaginacao, fnPagina: 'irParaPaginaSubcategoriasForn',
+    contadorId: 'subcategoriasFornContador', contador: ['subcategoria', 'subcategorias'],
+    vazio: 'Nenhuma subcategoria cadastrada ainda.', vazioDetalhe: 'Sem subcategoria, o cadastro de fornecedores fica sem essa opção pra escolher.',
+    colunas: [{ rotulo: 'Subcategoria', w: 320, ordem: 'nome' }, { rotulo: 'Categoria', w: 260, ordem: 'categoria' }, { rotulo: 'Status', w: 120, ordem: 'status' }],
+    linha: (s) => `<tr style="cursor:pointer;${s.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalSubcategoriaFornecedor('${escJs(s.id)}')">
+      ${_tdLista(s.nome, 'forte')}${_tdLista(_nomeCategoriaFornecedorPorId(s.categoriaId) || '(categoria não encontrada)')}<td>${_badgeAtivo(s.ativo, true)}</td>
+      ${isAdmin ? _htmlAcoesLinha([_acaoEditar(`abrirModalSubcategoriaFornecedor('${escJs(s.id)}')`), _acaoExcluir(`excluirSubcategoriaFornecedor('${escJs(s.id)}')`)]) : '<td class="col-acoes"></td>'}</tr>`,
   });
-  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarSubcategoriasForn('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-subcatforn-${coluna}"></span></th>`;
-
-  lista.innerHTML = `
-    <div class="data-table">
-      <table>
-        <thead>
-          <tr>
-            ${th('nome', 'Subcategoria', 'width:40%;')}
-            ${th('categoria', 'Categoria', 'width:30%;')}
-            ${th('status', 'Status', 'width:15%;text-align:center;')}
-            <th style="width:15%;text-align:center;">Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map((s) => `
-            <tr style="cursor:pointer;${s.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalSubcategoriaFornecedor('${s.id}')">
-              <td style="font-weight:600;">${esc(s.nome)}</td>
-              <td>${esc(_nomeCategoriaFornecedorPorId(s.categoriaId)) || '<span style="color:#c62828;">(categoria não encontrada)</span>'}</td>
-              <td style="text-align:center;">${s.ativo
-                ? '<span class=\"badge badge-green\">Ativa</span>'
-                : '<span class=\"badge badge-gray\">Inativa</span>'}</td>
-              <td style="text-align:center;" onclick="event.stopPropagation();">
-                ${isAdmin ? `
-                  <button class="btn-icon" onclick="abrirModalSubcategoriaFornecedor('${s.id}')" title="Editar">${SVG_EDITAR}</button>
-                  <button class="btn-icon" onclick="excluirSubcategoriaFornecedor('${s.id}')" title="Excluir">${SVG_EXCLUIR}</button>` : '–'}
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>`;
-
-  subcategoriasFornOrdenacao.atualizarSetas('sort-subcatforn-', ['nome', 'categoria', 'status']);
 }
+const subcategoriasFornPaginacao = criarPaginacao(20);
+window.irParaPaginaSubcategoriasForn = (d) => { subcategoriasFornPaginacao.mover(d); renderizarSubcategoriasFornecedor(); };
+window.filtrarSubcategoriasForn = () => { subcategoriasFornPaginacao.reiniciar(); renderizarSubcategoriasFornecedor(); };
 
 window.abrirModalSubcategoriaFornecedor = (id) => {
   const s = id ? subcategoriasFornecedorData.find((x) => x.id === id) : null;
@@ -19742,10 +19783,9 @@ window.ordenarCriticidadePerguntas = (coluna) => { criticidadePerguntaOrdenacao.
 async function fornecedoresCriticidadePerguntas() {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Perguntas de Criticidade</h2><p class="page-sub">Perguntas e pesos usados para avaliar a criticidade operacional de um fornecedor</p></div>
-      <button class="btn btn-primary" onclick="abrirDrawerCriticidadePergunta()" id="btnNovaCriticidadePergunta" style="display:none;">+ Nova Pergunta</button>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Perguntas de Criticidade', sub: 'Perguntas e pesos da avaliação de criticidade operacional do fornecedor.',
+      primario: { rotulo: '+ Nova pergunta', onclick: 'abrirDrawerCriticidadePergunta()', id: 'btnNovaCriticidadePergunta' } })}
+    ${_htmlBarraLista({ busca: { id: 'buscaCriticidadePergunta', placeholder: 'Buscar pergunta…' }, aoMudar: 'filtrarCriticidadePerguntas', contadorId: 'criticidadePerguntasContador' })}
     <div class="loading" id="loadingCriticidadePerguntas">⏳ Carregando...</div>
     <div id="listaCriticidadePerguntas"></div>
     ${_htmlDrawerCriticidadePergunta()}`;
@@ -19757,10 +19797,7 @@ async function fornecedoresCriticidadePerguntas() {
   } catch (e) {
     console.error('Perguntas de Criticidade: falha ao carregar', e);
     document.getElementById('loadingCriticidadePerguntas').style.display = 'none';
-    document.getElementById('listaCriticidadePerguntas').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
-      Não foi possível carregar as perguntas.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="fornecedoresCriticidadePerguntas()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    document.getElementById('listaCriticidadePerguntas').innerHTML = _htmlErroCarga('Não foi possível carregar as perguntas.', 'fornecedoresCriticidadePerguntas');
     return;
   }
   document.getElementById('loadingCriticidadePerguntas').style.display = 'none';
@@ -19769,52 +19806,22 @@ async function fornecedoresCriticidadePerguntas() {
 
 function renderizarCriticidadeFornecedorPerguntas() {
   const isAdmin = Perfis.podeGerenciarFornecedores(window.USER_PERFIS);
-  const lista = document.getElementById('listaCriticidadePerguntas');
-  if (!lista) return;
-
-  if (!criticidadeFornecedorPerguntasData.length) {
-    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
-      Nenhuma pergunta cadastrada ainda.<br>
-      <span style="font-size:0.9em;">Sem pergunta ativa, a aba Criticidade do Fornecedor fica sem o que perguntar.</span></div>`;
-    return;
-  }
-
-  const data = criticidadePerguntaOrdenacao.aplicar(criticidadeFornecedorPerguntasData, {
-    status: (a, b, dir) => dir * ((a.ativa ? 1 : 0) - (b.ativa ? 1 : 0)),
+  _renderGradeLista({
+    alvoId: 'listaCriticidadePerguntas', itens: criticidadeFornecedorPerguntasData, buscaId: 'buscaCriticidadePergunta', camposBusca: ['texto'],
+    ordenacao: criticidadePerguntaOrdenacao, comparadores: { status: (a, b, dir) => dir * ((a.ativa ? 1 : 0) - (b.ativa ? 1 : 0)) },
+    prefixoSeta: 'sort-critperg-', fnOrdenar: 'ordenarCriticidadePerguntas', paginacao: criticidadePerguntasPaginacao, fnPagina: 'irParaPaginaCriticidadePerguntas',
+    contadorId: 'criticidadePerguntasContador', contador: ['pergunta', 'perguntas'],
+    vazio: 'Nenhuma pergunta cadastrada ainda.', vazioDetalhe: 'Sem pergunta ativa, a aba Criticidade do Fornecedor fica sem o que perguntar.',
+    colunas: [{ rotulo: 'Pergunta', w: 480, ordem: 'texto' }, { rotulo: 'Opções', w: 120 }, { rotulo: 'Status', w: 120, ordem: 'status' }],
+    linha: (p) => `<tr style="cursor:pointer;${p.ativa ? '' : 'opacity:0.5;'}" onclick="abrirDrawerCriticidadePergunta('${escJs(p.id)}')">
+      ${_tdLista(p.texto, 'forte')}${_tdLista(`${p.opcoes.length} opç${p.opcoes.length === 1 ? 'ão' : 'ões'}`)}<td>${_badgeAtivo(p.ativa, true)}</td>
+      ${isAdmin ? _htmlAcoesLinha([_acaoEditar(`abrirDrawerCriticidadePergunta('${escJs(p.id)}')`), _acaoExcluir(`excluirCriticidadeFornecedorPergunta('${escJs(p.id)}')`)]) : '<td class="col-acoes"></td>'}</tr>`,
   });
-  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarCriticidadePerguntas('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-critperg-${coluna}"></span></th>`;
-
-  lista.innerHTML = `
-    <div class="data-table">
-      <table>
-        <thead>
-          <tr>
-            ${th('texto', 'Pergunta', 'width:50%;')}
-            <th style="width:20%;">Opções</th>
-            ${th('status', 'Status', 'width:15%;text-align:center;')}
-            <th style="width:15%;text-align:center;">Ações</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map((p) => `
-            <tr style="cursor:pointer;${p.ativa ? '' : 'opacity:0.5;'}" onclick="abrirDrawerCriticidadePergunta('${p.id}')">
-              <td style="font-weight:600;">${esc(p.texto)}</td>
-              <td style="font-size:0.85em;color:#555;">${p.opcoes.length} opção${p.opcoes.length === 1 ? '' : 'ões'}</td>
-              <td style="text-align:center;">${p.ativa
-                ? '<span class=\"badge badge-green\">Ativa</span>'
-                : '<span class=\"badge badge-gray\">Inativa</span>'}</td>
-              <td style="text-align:center;" onclick="event.stopPropagation();">
-                ${isAdmin ? `
-                  <button class="btn-icon" onclick="abrirDrawerCriticidadePergunta('${p.id}')" title="Editar">${SVG_EDITAR}</button>
-                  <button class="btn-icon" onclick="excluirCriticidadeFornecedorPergunta('${p.id}')" title="Excluir">${SVG_EXCLUIR}</button>` : '–'}
-              </td>
-            </tr>`).join('')}
-        </tbody>
-      </table>
-    </div>`;
-
-  criticidadePerguntaOrdenacao.atualizarSetas('sort-critperg-', ['texto', 'status']);
 }
+const criticidadePerguntasPaginacao = criarPaginacao(20);
+window.irParaPaginaCriticidadePerguntas = (d) => { criticidadePerguntasPaginacao.mover(d); renderizarCriticidadeFornecedorPerguntas(); };
+window.filtrarCriticidadePerguntas = () => { criticidadePerguntasPaginacao.reiniciar(); renderizarCriticidadeFornecedorPerguntas(); };
+
 
 function _htmlDrawerCriticidadePergunta() {
   const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
@@ -20291,10 +20298,7 @@ async function fornecedores() {
   } catch (e) {
     console.error('Fornecedores: falha ao carregar', e);
     document.getElementById('loadingFornecedores').style.display = 'none';
-    document.getElementById('listaFornecedores').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
-      Não foi possível carregar os fornecedores.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="fornecedores()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    document.getElementById('listaFornecedores').innerHTML = _htmlErroCarga('Não foi possível carregar os fornecedores.', 'fornecedores');
     return;
   }
   document.getElementById('loadingFornecedores').style.display = 'none';
@@ -20708,13 +20712,9 @@ let produtosSoftwareOrdenacao = criarOrdenacao('nome', 'asc');
 async function produtosSoftware() {
   const isAdmin = Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS);
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Produtos de Software</h2><p class="page-sub">Os produtos da empresa — usados para indicar quem é Tech Lead e Team Lead de cada um</p></div>
-      <button class="btn btn-primary" onclick="abrirModalProdutoSoftware()" id="btnNovoProdutoSoftware" style="display:none;">+ Novo Produto</button>
-    </div>
-    <div class="filters">
-      <input type="search" id="buscaProdutoSoftware" placeholder="Buscar produto…" aria-label="Buscar produto" oninput="renderizarProdutosSoftware()" class="field-control field-control--busca">
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Produtos de Software', sub: 'Produtos da empresa, para indicar o Tech Lead e o Team Lead de cada um.',
+      primario: { rotulo: '+ Novo produto', onclick: 'abrirModalProdutoSoftware()', id: 'btnNovoProdutoSoftware' } })}
+    ${_htmlBarraLista({ busca: { id: 'buscaProdutoSoftware', placeholder: 'Buscar produto…' }, aoMudar: 'filtrarProdutosSoftware', contadorId: 'produtosSoftwareContador' })}
     <div class="loading" id="loadingProdutosSoftware">⏳ Carregando...</div>
     <div id="listaProdutosSoftware"></div>
     ${_htmlModalProdutoSoftware()}`;
@@ -20732,10 +20732,7 @@ async function produtosSoftware() {
   } catch (e) {
     console.error('Produtos de software: falha ao carregar', e);
     document.getElementById('loadingProdutosSoftware').style.display = 'none';
-    document.getElementById('listaProdutosSoftware').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
-      Não foi possível carregar os produtos.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="produtosSoftware()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    document.getElementById('listaProdutosSoftware').innerHTML = _htmlErroCarga('Não foi possível carregar os produtos.', 'produtosSoftware');
     return;
   }
   document.getElementById('loadingProdutosSoftware').style.display = 'none';
@@ -20760,9 +20757,8 @@ function renderizarProdutosSoftware() {
   if (!lista) return;
 
   if (!produtosSoftwareData.length) {
-    lista.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
-      Nenhum produto cadastrado ainda.<br>
-      <span style="font-size:0.9em;">Sem produtos, a Pessoa não tem o que associar como Tech Lead ou Team Lead.</span></div>`;
+    _atualizarBarraLista('produtosSoftwareContador', 0, ['produto', 'produtos']);
+    lista.innerHTML = _htmlVazio('Nenhum produto cadastrado ainda.', 'Sem produtos, a Pessoa não tem o que associar como Tech Lead ou Team Lead.');
     return;
   }
 
@@ -20771,45 +20767,45 @@ function renderizarProdutosSoftware() {
   data = produtosSoftwareOrdenacao.aplicar(data, {
     status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
   });
-  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarProdutosSoftware('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-prodsoft-${coluna}"></span></th>`;
-  const nomes = (pessoas) => pessoas.length ? pessoas.map((p) => esc(p.nome)).join(', ') : '<span style="color:#bbb;">–</span>';
+  _atualizarBarraLista('produtosSoftwareContador', data.length, ['produto', 'produtos']);
+  const pag = produtosSoftwarePaginacao.aplicar(data);
+  const th = (coluna, rotulo) => `<th onclick="ordenarProdutosSoftware('${coluna}')" style="cursor:pointer;">${rotulo} <span id="sort-prodsoft-${coluna}"></span></th>`;
+  const nomes = (pessoas) => pessoas.map((p) => p.nome).join(', ');
 
   lista.innerHTML = `
-    <div class="data-table">
-      <table>
+    <div class="data-table data-table--lista">
+      <table style="min-width:820px;">
+        <colgroup><col style="width:240px"><col style="width:220px"><col style="width:220px"><col style="width:110px"><col style="width:92px"></colgroup>
         <thead>
           <tr>
-            ${th('nome', 'Produto', 'width:28%;')}
-            <th style="width:26%;">Tech Lead</th>
-            <th style="width:26%;">Team Lead</th>
-            ${th('status', 'Status', 'width:10%;text-align:center;')}
-            <th style="width:10%;text-align:center;">Ações</th>
+            ${th('nome', 'Produto')}
+            <th>Tech Lead</th>
+            <th>Team Lead</th>
+            ${th('status', 'Status')}
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody>
-          ${data.length ? data.map((p) => {
+          ${pag.itens.length ? pag.itens.map((p) => {
             const l = _lideresDoProduto(p.id);
             return `
-            <tr style="cursor:pointer;${p.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalProdutoSoftware('${esc(p.id)}')">
-              <td style="font-weight:600;">${esc(p.nome)}</td>
-              <td style="font-size:0.88em;color:#444;">${nomes(l.techLead)}</td>
-              <td style="font-size:0.88em;color:#444;">${nomes(l.teamLead)}</td>
-              <td style="text-align:center;">${p.ativo
-                ? '<span class=\"badge badge-green\">Ativo</span>'
-                : '<span class=\"badge badge-gray\">Inativo</span>'}</td>
-              <td style="text-align:center;" onclick="event.stopPropagation();">
-                ${isAdmin ? `
-                  <button class="btn-icon" onclick="abrirModalProdutoSoftware('${esc(p.id)}')" title="Editar">${SVG_EDITAR}</button>
-                  <button class="btn-icon" onclick="excluirProdutoSoftware('${esc(p.id)}')" title="Excluir">${SVG_EXCLUIR}</button>` : '–'}
-              </td>
+            <tr style="cursor:pointer;${p.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalProdutoSoftware('${escJs(p.id)}')">
+              ${_tdLista(p.nome, 'forte')}${_tdLista(nomes(l.techLead))}${_tdLista(nomes(l.teamLead))}
+              <td>${p.ativo ? '<span class="badge badge-green">Ativo</span>' : '<span class="badge badge-gray">Inativo</span>'}</td>
+              ${isAdmin ? _htmlAcoesLinha([_acaoEditar(`abrirModalProdutoSoftware('${escJs(p.id)}')`), _acaoExcluir(`excluirProdutoSoftware('${escJs(p.id)}')`)]) : '<td class="col-acoes"></td>'}
             </tr>`;
-          }).join('') : '<tr><td colspan="5" class="vazio">Nenhum produto encontrado.</td></tr>'}
+          }).join('') : '<tr><td colspan="5" class="vazio">Nenhum produto encontrado com essa busca.</td></tr>'}
         </tbody>
       </table>
-    </div>`;
+    </div>
+    ${_htmlPaginacao(pag, 'irParaPaginaProdutosSoftware')}`;
 
   produtosSoftwareOrdenacao.atualizarSetas('sort-prodsoft-', ['nome', 'status']);
 }
+
+const produtosSoftwarePaginacao = criarPaginacao(20);
+window.irParaPaginaProdutosSoftware = (d) => { produtosSoftwarePaginacao.mover(d); renderizarProdutosSoftware(); };
+window.filtrarProdutosSoftware = () => { produtosSoftwarePaginacao.reiniciar(); renderizarProdutosSoftware(); };
 
 function _htmlModalProdutoSoftware() {
   return `
@@ -20901,32 +20897,21 @@ let perfisAreasCache = [];
 async function perfis() {
   const podeGerenciar = Perfis.podeGerenciarPerfis(window.USER_PERFIS);
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Perfis de Acesso</h2><p class="page-sub">Quem tem qual acesso ao sistema</p></div>
-      <button class="btn btn-primary" onclick="abrirModalPerfil()" id="btnNovoPerfil" style="display:none;">+ Dar acesso a alguém</button>
-    </div>
-    <div style="border:1px solid #e0e0e0;border-radius:10px;padding:14px 16px;background:#fff;margin-bottom:18px;">
-      <div class="painel-kpi__rotulo" style="text-align:left;margin-bottom:10px;">O que cada perfil pode</div>
-      ${Perfis.CATALOGO.map((p) => `
-        <div style="display:flex;gap:10px;margin-bottom:7px;font-size:0.86em;">
-          <span style="font-weight:700;color:#d60014;min-width:130px;">${esc(p.rotulo)}</span>
-          <span style="color:#666;">${esc(p.descricao)}</span>
-        </div>`).join('')}
-      <div style="font-size:0.75em;color:#e65100;margin-top:10px;line-height:1.5;">
-        Quem entra no sistema sem estar nesta lista recebe o menor acesso (Gestor de área) e, sem área definida, não altera nada.
-        Somente administrador mexe nesta tela — se outro perfil pudesse, ele se promoveria a administrador.
-      </div>
-    </div>
-    <div class="filters">
-      <input type="search" id="buscaPerfil" placeholder="Buscar por e-mail…" aria-label="Buscar por e-mail" oninput="filtrarPerfis()" class="field-control field-control--busca">
-      <select id="filtroPerfilTipo" onchange="filtrarPerfis()" class="field-control">
-        <option value="">Todos os perfis</option>
-        ${Perfis.CATALOGO.map((p) => `<option value="${esc(p.valor)}">${esc(p.rotulo)}</option>`).join('')}
-      </select>
-      <select id="filtroPerfilArea" onchange="filtrarPerfis()" class="field-control">
-        <option value="">Todas as áreas</option>
-      </select>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Perfis de Acesso', sub: 'Quem tem qual acesso ao sistema.',
+      primario: { rotulo: '+ Dar acesso a alguém', onclick: 'abrirModalPerfil()', id: 'btnNovoPerfil' } })}
+    ${_htmlBarraLista({ busca: { id: 'buscaPerfil', placeholder: 'Buscar por e-mail…' }, aoMudar: 'filtrarPerfis', contadorId: 'perfisContador',
+      filtros: [
+        { id: 'filtroPerfilTipo', rotulo: 'Perfil', todos: 'Todos', opcoes: Perfis.CATALOGO.map((p) => [p.valor, p.rotulo]) },
+        { id: 'filtroPerfilArea', rotulo: 'Área', opcoes: [] },
+      ] })}
+    <details class="lista-ajuda">
+      <summary>O que cada perfil pode</summary>
+      ${Perfis.CATALOGO.map((p) => `<div class="lista-ajuda__linha"><b>${esc(p.rotulo)}</b><span>${esc(p.descricao)}</span></div>`).join('')}
+      <p>Quem entra no sistema sem estar nesta lista recebe o menor acesso (Gestor de área) e, sem área definida, não altera nada.
+        Somente administrador mexe nesta tela — se outro perfil pudesse, ele se promoveria a administrador.</p>
+      <p>Remover alguém desta lista não bloqueia o acesso ao sistema: a pessoa volta ao menor acesso (Gestor de área) e,
+        sem área, não consegue alterar nada. Para impedir a entrada, o acesso tem que ser retirado na conta Google dela.</p>
+    </details>
     <div class="loading" id="loadingPerfis">⏳ Carregando...</div>
     <div id="listaPerfis"></div>
     <div class="modal-overlay" id="modalPerfil"><div class="modal" onclick="event.stopPropagation()">
@@ -20975,10 +20960,7 @@ async function perfis() {
   } catch (e) {
     console.error('Perfis: falha ao carregar', e);
     document.getElementById('loadingPerfis').style.display = 'none';
-    document.getElementById('listaPerfis').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
-      Não foi possível carregar os perfis.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="perfis()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    document.getElementById('listaPerfis').innerHTML = _htmlErroCarga('Não foi possível carregar os perfis.', 'perfis');
     return;
   }
   document.getElementById('loadingPerfis').style.display = 'none';
@@ -21009,15 +20991,9 @@ function renderizarPerfis() {
   // Preenche o select de Area com as areas que aparecem nos perfis (so gestor
   // tem area), preservando a selecao atual. Feito aqui e nao no HTML porque a
   // lista de areas so existe depois de carregar os perfis.
-  const filtroAreaSel = document.getElementById('filtroPerfilArea');
-  const areaSelecionada = (filtroAreaSel || {}).value || '';
-  if (filtroAreaSel) {
-    const areasUsadas = [...new Set(perfisData.map((p) => p.area).filter(Boolean))]
-      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
-    filtroAreaSel.innerHTML = '<option value="">Todas as áreas</option>' +
-      areasUsadas.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
-    filtroAreaSel.value = areaSelecionada;
-  }
+  const areaSelecionada = (document.getElementById('filtroPerfilArea') || {}).value || '';
+  _preencherFiltroLista('filtroPerfilArea', 'Área',
+    [...new Set(perfisData.map((p) => p.area).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')).map((a) => [a, a]));
 
   let filtrada = perfisData;
   if (termoNorm) {
@@ -21031,53 +21007,43 @@ function renderizarPerfis() {
   }
   const houveBusca = !!(termoNorm || tipo || areaSelecionada);
   const data = perfisOrdenacao.aplicar(filtrada);
+  _atualizarBarraLista('perfisContador', data.length, ['pessoa com acesso', 'pessoas com acesso']);
   const pag = perfisPaginacao.aplicar(data);
-  const th = (coluna, rotulo, estilo) => `<th onclick="ordenarPerfis('${coluna}')" style="cursor:pointer;${estilo || ''}">${rotulo} <span id="sort-perfil-${coluna}"></span></th>`;
-
+  const th = (coluna, rotulo) => `<th onclick="ordenarPerfis('${coluna}')" style="cursor:pointer;">${rotulo} <span id="sort-perfil-${coluna}"></span></th>`;
   lista.innerHTML = `
-    ${admins.length === 1 ? `<div style="border:1px solid #ffe0b2;background:#fff8e1;border-radius:9px;padding:12px 14px;color:#e65100;font-size:0.86em;margin-bottom:14px;">
-      Existe um único administrador (${esc(admins[0].email)}). Se esse acesso for perdido, ninguém consegue dar acesso a mais ninguém sem entrar no console do Firebase.
-    </div>` : ''}
-    <div class="data-table">
-      <table>
+    ${admins.length === 1 ? `<div class="lista-alerta">Existe um único administrador (${esc(admins[0].email)}). Se esse acesso for perdido, ninguém consegue dar acesso a mais ninguém sem entrar no console do Firebase.</div>` : ''}
+    <div class="data-table data-table--lista">
+      <table style="min-width:900px;">
+        <colgroup><col style="width:300px"><col style="width:260px"><col style="width:200px"><col style="width:120px"><col style="width:92px"></colgroup>
         <thead>
           <tr>
-            ${th('email', 'E-mail', 'width:34%;')}
-            ${th('perfil', 'Perfil', 'width:20%;')}
-            ${th('area', 'Área', 'width:20%;')}
-            ${th('atualizadoEm', 'Alterado em', 'width:16%;')}
-            <th style="width:10%;text-align:center;">Ações</th>
+            ${th('email', 'E-mail')}
+            ${th('perfil', 'Perfil')}
+            ${th('area', 'Área')}
+            ${th('atualizadoEm', 'Alterado em')}
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody>
           ${pag.itens.length ? pag.itens.map((p) => {
             const euMesmo = p.email === meuEmail;
             const desconhecido = p.perfilGravado && !Perfis.conhecido(p.perfilGravado);
+            const rotulos = (p.perfis || [p.perfil]).map((v) => Perfis.rotulo(v));
             return `
-            <tr${podeGerenciar ? ` style="cursor:pointer;" onclick="abrirModalPerfil('${esc(p.email)}')"` : ''}>
-              <td style="font-weight:600;">${esc(p.email)}${euMesmo ? ' <span style="font-size:0.75em;color:#888;font-weight:400;">(você)</span>' : ''}</td>
-              <td>
-                ${(p.perfis || [p.perfil]).map((v) => `<span style="display:inline-block;margin:0 4px 4px 0;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;background:${v === Perfis.PERFIL.ADMIN ? '#fce8ea' : '#f5f5f5'};color:${v === Perfis.PERFIL.ADMIN ? '#d60014' : '#555'};">${esc(Perfis.rotulo(v))}</span>`).join('')}
-                ${desconhecido ? `<div style="font-size:0.72em;color:#e65100;margin-top:3px;">Gravado como "${esc(p.perfilGravado)}", que não existe — está valendo o menor acesso</div>` : ''}
-              </td>
-              <td style="color:#666;">${esc(p.area || (Perfis.exigeArea(p.perfis || p.perfil) ? '— sem área, não altera nada' : '–'))}</td>
-              <td style="color:#666;font-size:0.88em;">${p.atualizadoEm ? new Date(p.atualizadoEm).toLocaleDateString('pt-BR') : '–'}</td>
-              <td style="text-align:center;" onclick="event.stopPropagation();">
-                ${podeGerenciar ? `
-                  <button class="btn-icon" onclick="abrirModalPerfil('${esc(p.email)}')" title="Alterar">${SVG_EDITAR}</button>
-                  ${euMesmo ? '' : `<button class="btn-icon" onclick="excluirPerfilAcesso('${esc(p.email)}')" title="Remover acesso">${SVG_EXCLUIR}</button>`}` : '–'}
-              </td>
+            <tr${podeGerenciar ? ` style="cursor:pointer;" onclick="abrirModalPerfil('${escJs(p.email)}')"` : ''}>
+              <td class="forte" title="${esc(p.email)}">${esc(p.email)}${euMesmo ? ' <span class="muted" style="font-weight:400;">(você)</span>' : ''}</td>
+              <td title="${esc(rotulos.join(', '))}">${(p.perfis || [p.perfil]).map((v) => `<span class="badge ${v === Perfis.PERFIL.ADMIN ? 'badge-red' : 'badge-gray'}">${esc(Perfis.rotulo(v))}</span>`).join(' ')}${desconhecido
+                ? ` <span class="badge badge-orange" title="Gravado como &quot;${esc(p.perfilGravado)}&quot;, que não existe — está valendo o menor acesso">perfil desconhecido</span>` : ''}</td>
+              ${_tdLista(p.area || (Perfis.exigeArea(p.perfis || p.perfil) ? '— sem área, não altera nada' : ''))}
+              ${_tdLista(p.atualizadoEm ? new Date(p.atualizadoEm).toLocaleDateString('pt-BR') : '')}
+              ${podeGerenciar ? _htmlAcoesLinha([{ icone: SVG_EDITAR, titulo: 'Alterar', onclick: `abrirModalPerfil('${escJs(p.email)}')` },
+                euMesmo ? null : { icone: SVG_EXCLUIR, titulo: 'Remover acesso', onclick: `excluirPerfilAcesso('${escJs(p.email)}')` }]) : '<td class="col-acoes"></td>'}
             </tr>`;
           }).join('') : `<tr><td colspan="5" class="vazio">${houveBusca ? 'Nenhum perfil corresponde à busca.' : 'Ninguém cadastrado. Todo mundo que entrar cai no menor acesso.'}</td></tr>`}
         </tbody>
       </table>
     </div>
-    ${_htmlPaginacao(pag, 'irParaPaginaPerfis')}
-    <div style="font-size:0.75em;color:#999;margin-top:10px;line-height:1.5;">
-      Remover alguém desta lista não bloqueia o acesso ao sistema: a pessoa volta ao menor acesso (Gestor de área) e,
-      sem área, não consegue alterar nada. Para impedir a entrada, o acesso tem que ser retirado na conta Google dela.
-    </div>`;
-
+    ${_htmlPaginacao(pag, 'irParaPaginaPerfis')}`;
   perfisOrdenacao.atualizarSetas('sort-perfil-', ['email', 'perfil', 'area', 'atualizadoEm']);
 }
 
@@ -22362,10 +22328,7 @@ async function contratos() {
     _contratoRiscos = riscosList || [];
   } catch (e) {
     console.error('Contratos: falha ao carregar', e);
-    document.querySelector('.loading').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">
-      Não foi possível carregar os contratos.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="contratos()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    document.querySelector('.loading').innerHTML = _htmlErroCarga('Não foi possível carregar os contratos.', 'contratos');
     return;
   }
 
@@ -23637,19 +23600,19 @@ window.abrirOutroContrato = async (id) => {
 const LISTAS_CONTRATO = {
   tipos: {
     titulo: 'Tipos de Contrato', sub: 'A natureza de cada contrato (prestação de serviços, SaaS, licenciamento...)',
-    rotulo: 'Tipo', novo: '+ Novo Tipo', placeholder: 'Ex.: Assinatura de software (SaaS)', campoContrato: 'tipoId',
+    rotulo: 'Tipo', novo: '+ Novo tipo', placeholder: 'Ex.: Assinatura de software (SaaS)', campoContrato: 'tipoId',
     get: () => API.getTiposContrato(), salvar: (x) => API.salvarTipoContrato(x), excluir: (id) => API.excluirTipoContrato(id),
     padroes: () => ContratoCiclo.PADROES.tipos, tela: 'contratos-tipos',
   },
   indexadores: {
     titulo: 'Indexadores de Reajuste', sub: 'Os índices de mercado usados na correção anual dos contratos',
-    rotulo: 'Indexador', novo: '+ Novo Indexador', placeholder: 'Ex.: IPCA', campoContrato: 'indexadorId',
+    rotulo: 'Indexador', novo: '+ Novo indexador', placeholder: 'Ex.: IPCA', campoContrato: 'indexadorId',
     get: () => API.getIndexadoresReajuste(), salvar: (x) => API.salvarIndexadorReajuste(x), excluir: (id) => API.excluirIndexadorReajuste(id),
     padroes: () => ContratoCiclo.PADROES.indexadores, tela: 'contratos-indexadores',
   },
   status: {
     titulo: 'Status de Contrato', sub: 'As etapas do ciclo de vida. A situação de cada status diz se o contrato conta como vigente (e gera alertas de prazo)',
-    rotulo: 'Status', novo: '+ Novo Status', placeholder: 'Ex.: Vigente', campoContrato: 'statusId', situacao: true,
+    rotulo: 'Status', novo: '+ Novo status', placeholder: 'Ex.: Vigente', campoContrato: 'statusId', situacao: true,
     get: () => API.getStatusContrato(), salvar: (x) => API.salvarStatusContrato(x), excluir: (id) => API.excluirStatusContrato(id),
     padroes: () => ContratoCiclo.PADROES.status, tela: 'contratos-status',
   },
@@ -23658,7 +23621,7 @@ const LISTAS_CONTRATO = {
   // nas listas de Contrato é fixo: quem edita, a volta, e onde se conta o uso.
   ferramentasBackup: {
     titulo: 'Ferramentas de Backup', sub: 'Com que software ou serviço cada backup é feito (campo Ferramenta do Catálogo do Backup)',
-    rotulo: 'Ferramenta', novo: '+ Nova Ferramenta', placeholder: 'Ex.: Veeam Backup & Replication', campoContrato: 'ferramentaId',
+    rotulo: 'Ferramenta', novo: '+ Nova ferramenta', placeholder: 'Ex.: Veeam Backup & Replication', campoContrato: 'ferramentaId',
     get: () => API.getFerramentasBackup(), salvar: (x) => API.salvarFerramentaBackup(x), excluir: (id) => API.excluirFerramentaBackup(id),
     padroes: () => FERRAMENTAS_BACKUP_PADRAO, tela: 'catalogo-backup-ferramentas',
     podeEditar: () => Perfis.podeVerTela(window.USER_PERFIS, 'catalogo-backup'),
@@ -23727,17 +23690,15 @@ async function _telaListaSimples(chave) {
   const cfg = _cfgListaContrato(chave);
   _listaContratoChave = chave;
   _listaContratoOrdenacao = criarOrdenacao('nome', 'asc');
+  listaContratoPaginacao.reiniciar();
   const podeEditar = cfg.podeEditar();
   const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
   const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>${esc(cfg.titulo)}</h2><p class="page-sub">${esc(cfg.sub)}</p></div>
-      <div style="display:flex;gap:8px;">
-        <a href="${esc(cfg.voltar.href)}" class="btn btn-ghost">${esc(cfg.voltar.rotulo)}</a>
-        ${podeEditar ? `<button class="btn btn-primary" onclick="abrirDrawerListaContrato()">${esc(cfg.novo)}</button>` : ''}
-      </div>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: cfg.titulo, sub: cfg.sub,
+      primario: podeEditar ? { rotulo: cfg.novo, onclick: 'abrirDrawerListaContrato()' } : null,
+      maisAcoes: [{ rotulo: cfg.voltar.rotulo.replace(/^← /, 'Ir para '), onclick: `location.hash='${escJs(cfg.voltar.href)}'` }] })}
+    ${_htmlBarraLista({ busca: { id: 'buscaListaContrato', placeholder: 'Buscar…' }, aoMudar: 'filtrarListaContrato', contadorId: 'listaContratoContador' })}
     <div class="loading">⏳ Carregando...</div>
     <div id="listaContratoItens"></div>
     ${_htmlDrawerListaContrato(chave)}`;
@@ -23751,9 +23712,7 @@ async function _telaListaSimples(chave) {
       if (id) _listaContratoUso[id] = (_listaContratoUso[id] || 0) + 1;
     });
   } catch (e) {
-    document.querySelector('.loading').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">Não foi possível carregar a lista.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="_telaListaSimples('${chave}')" style="margin-top:12px;">Tentar de novo</button></div>`;
+    document.querySelector('.loading').innerHTML = _htmlErroCarga('Não foi possível carregar a lista.', `_telaListaSimples('${escJs(chave)}')`);
     return;
   }
   document.querySelector('.loading').style.display = 'none';
@@ -23765,52 +23724,33 @@ window.ordenarListaContrato = (coluna) => { _listaContratoOrdenacao.ordenar(colu
 function renderizarListaContrato() {
   const cfg = _cfgListaContrato(_listaContratoChave);
   const podeEditar = cfg.podeEditar();
-  const cont = document.getElementById('listaContratoItens');
-  if (!cont) return;
-  if (!_listaContratoItens.length) {
-    cont.innerHTML = `<div style="padding:28px;text-align:center;color:#888;border:1px dashed #ddd;border-radius:10px;">
-      Nenhum item cadastrado ainda.
-      ${podeEditar ? `<br><button class="btn btn-ghost" id="btnPadroesListaContrato" onclick="cadastrarPadroesListaContrato()" style="margin-top:12px;">Cadastrar valores padrão (${cfg.padroes().length})</button>
-      <div style="font-size:0.85em;margin-top:6px;">${esc(cfg.padroes().map((p) => p.nome).join(', '))}</div>` : ''}</div>`;
-    return;
-  }
-  const data = _listaContratoOrdenacao.aplicar(_listaContratoItens, {
-    status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
-    uso: (a, b, dir) => dir * ((_listaContratoUso[a.id] || 0) - (_listaContratoUso[b.id] || 0)),
-    situacao: (a, b, dir) => dir * (ContratoCiclo.SITUACOES.indexOf(a.situacao) - ContratoCiclo.SITUACOES.indexOf(b.situacao)),
-  });
-  const th = (coluna, rotulo, cls) => `<th onclick="ordenarListaContrato('${coluna}')" style="cursor:pointer;" class="${cls || ''}">${rotulo} <span id="sort-listacontrato-${coluna}"></span></th>`;
   const pillSit = (s) => {
-    const k = { pre: ['#1565c0', '#e3f2fd'], vigente: ['#2e7d32', '#e8f5e9'], expirada: ['#e65100', '#fff3e0'], encerrado: ['#757575', '#f5f5f5'] }[s] || ['#e65100', '#fff3e0'];
-    return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:600;color:${k[0]};background:${k[1]};">${esc(ROTULO_SITUACAO_CONTRATO[s] || 'Sem situação')}</span>`;
+    const k = { pre: 'badge-azul', vigente: 'badge-green', expirada: 'badge-orange', encerrado: 'badge-gray' }[s] || 'badge-orange';
+    return `<span class="badge ${k}">${esc(ROTULO_SITUACAO_CONTRATO[s] || 'Sem situação')}</span>`;
   };
-  cont.innerHTML = `
-    <div class="data-table"><table>
-      <thead><tr>
-        ${th('nome', esc(cfg.rotulo))}
-        ${cfg.situacao ? th('situacao', 'Situação') : ''}
-        ${th('uso', esc(cfg.rotuloUso), 'col-c')}
-        ${th('status', 'Ativo', 'col-c')}
-        <th class="col-c">Ações</th>
-      </tr></thead>
-      <tbody>
-        ${data.map((x) => `
-          <tr style="cursor:pointer;${x.ativo ? '' : 'opacity:0.5;'}" onclick="abrirDrawerListaContrato('${esc(x.id)}')">
-            <td class="title">${esc(x.nome)}</td>
-            ${cfg.situacao ? `<td>${pillSit(x.situacao)}</td>` : ''}
-            <td class="col-c num">${_listaContratoUso[x.id] || 0}</td>
-            <td class="col-c">${x.ativo ? '<span class="badge badge-green">Ativo</span>' : '<span class="badge badge-gray">Inativo</span>'}</td>
-            <td class="col-c col-nw" onclick="event.stopPropagation();">${podeEditar ? `
-              <button class="btn-icon" onclick="abrirDrawerListaContrato('${esc(x.id)}')" title="Editar">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg></button>
-              <button class="btn-icon" onclick="excluirItemListaContrato('${esc(x.id)}')" title="Excluir">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>` : '–'}
-            </td>
-          </tr>`).join('')}
-      </tbody>
-    </table></div>`;
-  _listaContratoOrdenacao.atualizarSetas('sort-listacontrato-', ['nome', 'situacao', 'uso', 'status']);
+  _renderGradeLista({
+    alvoId: 'listaContratoItens', itens: _listaContratoItens, buscaId: 'buscaListaContrato', camposBusca: ['nome'],
+    ordenacao: _listaContratoOrdenacao, comparadores: {
+      status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
+      uso: (a, b, dir) => dir * ((_listaContratoUso[a.id] || 0) - (_listaContratoUso[b.id] || 0)),
+      situacao: (a, b, dir) => dir * (ContratoCiclo.SITUACOES.indexOf(a.situacao) - ContratoCiclo.SITUACOES.indexOf(b.situacao)),
+    },
+    prefixoSeta: 'sort-listacontrato-', fnOrdenar: 'ordenarListaContrato', paginacao: listaContratoPaginacao, fnPagina: 'irParaPaginaListaContrato',
+    contadorId: 'listaContratoContador', contador: ['item', 'itens'],
+    vazioHtml: `<div class="vazio">Nenhum item cadastrado ainda.
+      ${podeEditar ? `<div><button class="btn btn-ghost" id="btnPadroesListaContrato" onclick="cadastrarPadroesListaContrato()" style="margin-top:12px;">Cadastrar valores padrão (${cfg.padroes().length})</button></div>
+      <div class="vazio__detalhe">${esc(cfg.padroes().map((p) => p.nome).join(', '))}</div>` : ''}</div>`,
+    colunas: [{ rotulo: esc(cfg.rotulo), w: 320, ordem: 'nome' }].concat(cfg.situacao ? [{ rotulo: 'Situação', w: 180, ordem: 'situacao' }] : [],
+      [{ rotulo: esc(cfg.rotuloUso), w: 120, ordem: 'uso' }, { rotulo: 'Ativo', w: 110, ordem: 'status' }]),
+    linha: (x) => `<tr style="cursor:pointer;${x.ativo ? '' : 'opacity:0.5;'}" onclick="abrirDrawerListaContrato('${escJs(x.id)}')">
+      ${_tdLista(x.nome, 'forte')}${cfg.situacao ? `<td>${pillSit(x.situacao)}</td>` : ''}<td class="num">${_listaContratoUso[x.id] || 0}</td><td>${_badgeAtivo(x.ativo)}</td>
+      ${podeEditar ? _htmlAcoesLinha([_acaoEditar(`abrirDrawerListaContrato('${escJs(x.id)}')`), _acaoExcluir(`excluirItemListaContrato('${escJs(x.id)}')`)]) : '<td class="col-acoes"></td>'}</tr>`,
+  });
 }
+const listaContratoPaginacao = criarPaginacao(20);
+window.irParaPaginaListaContrato = (d) => { listaContratoPaginacao.mover(d); renderizarListaContrato(); };
+window.filtrarListaContrato = () => { listaContratoPaginacao.reiniciar(); renderizarListaContrato(); };
+
 
 const _edListaContrato = criarRastreadorEdicao(() => _coletarItemListaContrato());
 
@@ -24166,9 +24106,7 @@ async function notificacoesEmail() {
     configNotificacoesData = cfg;
     notificacoesEmailData = lista;
   } catch (e) {
-    document.querySelector('.loading').innerHTML = `<div style="padding:24px;text-align:center;color:#c62828;">Não foi possível carregar as notificações.<br>
-      <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-      <button class="btn btn-ghost" onclick="notificacoesEmail()" style="margin-top:12px;">Tentar de novo</button></div>`;
+    document.querySelector('.loading').innerHTML = _htmlErroCarga('Não foi possível carregar as notificações.', 'notificacoesEmail');
     return;
   }
   document.querySelector('.loading').style.display = 'none';

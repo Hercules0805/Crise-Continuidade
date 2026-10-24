@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Listas Opção B</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap">
+<style>
+:root {
+  --surface: #ffffff; --surface-sunken: #f6f4f2; --ink: #2a2623; --ink-muted: #5c5550;
+  --border: #d8d2cd; --border-strong: #8a817b; --red: #d50014; --on-red: #ffffff; --red-tint: #fde8ea;
+  --ok: #2e7d32; --ok-tint: #e8f5e9; --warn: #a15c00; --warn-tint: #fff3e0; --crit: #b3261e; --crit-tint: #fdecea;
+  --info: #1f5fa8; --info-tint: #e7f0fa; --shadow: 0 10px 28px rgba(42,38,35,0.16);
+  --r-sm: 4px; --r-md: 8px; --r-pill: 999px; --topo-h: 64px; --menu-w: 248px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --surface: #1c1917; --surface-sunken: #14110f; --ink: #f4f1ef; --ink-muted: #b9b1ab; --border: #4a423d; --border-strong: #8f857e;
+    --red: #ff4d5c; --on-red: #1c1917; --red-tint: #3b1a1d; --ok: #7bc47f; --ok-tint: #1d2e1e; --warn: #f0a94a; --warn-tint: #33240f;
+    --crit: #ff8a80; --crit-tint: #3a1a18; --info: #8ab8ec; --info-tint: #16263a; --shadow: 0 10px 28px rgba(0,0,0,0.5); color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --surface: #1c1917; --surface-sunken: #14110f; --ink: #f4f1ef; --ink-muted: #b9b1ab; --border: #4a423d; --border-strong: #8f857e;
+  --red: #ff4d5c; --on-red: #1c1917; --red-tint: #3b1a1d; --ok: #7bc47f; --ok-tint: #1d2e1e; --warn: #f0a94a; --warn-tint: #33240f;
+  --crit: #ff8a80; --crit-tint: #3a1a18; --info: #8ab8ec; --info-tint: #16263a; --shadow: 0 10px 28px rgba(0,0,0,0.5); color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--surface); color: var(--ink); font: 400 14px/20px "Open Sans", "Segoe UI", system-ui, sans-serif; overflow-x: hidden; }
+button, input, select { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+svg.ic { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+
+/* Topo + menu lateral (o mesmo do sistema, resumido) */
+.topo { position: sticky; top: 0; z-index: 30; height: var(--topo-h); display: flex; align-items: center; gap: 10px; padding: 0 16px 0 14px; background: var(--surface); border-bottom: 1px solid var(--border); }
+.logo { font-weight: 800; font-size: 30px; letter-spacing: -0.6px; line-height: 1; color: var(--ink); }
+.logo b { color: var(--red); font-weight: 800; }
+.topo .usuario { margin-left: auto; display: flex; align-items: center; gap: 10px; font-weight: 600; }
+.topo .avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--red-tint); color: var(--red); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; }
+.selo-proto { font-size: 12px; font-weight: 700; color: var(--info); background: var(--info-tint); border-radius: var(--r-pill); padding: 3px 10px; white-space: nowrap; }
+.menu { position: fixed; top: var(--topo-h); left: 0; bottom: 0; width: var(--menu-w); overflow-y: auto; background: var(--surface); border-right: 1px solid var(--border); padding: 12px 8px; }
+.menu .grupo { display: flex; align-items: center; gap: 12px; padding: 9px 12px; font-weight: 600; font-size: 13.5px; color: var(--ink); }
+.menu .grupo.ativo { color: var(--red); }
+.menu .sub { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--ink-muted); padding: 8px 12px 4px 42px; }
+.menu a { display: block; padding: 6px 12px 6px 42px; border-left: 3px solid transparent; border-radius: var(--r-md); color: var(--ink-muted); text-decoration: none; font-size: 13.5px; }
+.menu a.sub-item { padding-left: 58px; }
+.menu a:hover { background: var(--surface-sunken); color: var(--ink); }
+.menu a.ativo { background: var(--red-tint); color: var(--red); font-weight: 700; border-left-color: var(--red); }
+.menu a.novo::after { content: "novo"; margin-left: 6px; font-size: 10px; font-weight: 700; color: var(--info); background: var(--info-tint); border-radius: var(--r-pill); padding: 1px 6px; }
+.menu a.inativo { opacity: .55; pointer-events: none; }
+.menu .sep { border-top: 1px solid var(--border); margin: 8px 4px; }
+main { margin-left: var(--menu-w); padding: 24px 24px 60px; min-width: 0; }
+
+/* Cabeçalho da lista: título + 1 frase; 1 primário; "Mais ações" */
+.cab { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+.cab h1 { margin: 0; font-size: 24px; line-height: 32px; }
+.cab p { margin: 2px 0 0; color: var(--ink-muted); }
+.cab .acoes { margin-left: auto; display: flex; gap: 8px; flex-shrink: 0; position: relative; }
+.btn { height: 36px; padding: 0 16px; border-radius: var(--r-md); border: 1px solid var(--border-strong); background: var(--surface); font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.btn:hover { background: var(--surface-sunken); }
+.btn-primario { background: var(--red); border-color: var(--red); color: var(--on-red); }
+.btn-primario:hover { background: var(--red); filter: brightness(.95); }
+.btn-ghost { border-color: transparent; color: var(--ink-muted); }
+.btn-sm { height: 32px; padding: 0 12px; font-size: 13px; }
+.popover { display: none; position: absolute; right: 0; top: calc(100% + 6px); min-width: 220px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 6px; z-index: 20; }
+.popover.open { display: block; }
+.popover button { display: block; width: 100%; text-align: left; padding: 8px 12px; border: none; background: none; border-radius: var(--r-sm); cursor: pointer; }
+.popover button:hover { background: var(--surface-sunken); }
+
+/* Grade */
+.grade { border: 1px solid var(--border); border-radius: var(--r-md); overflow: hidden; background: var(--surface); }
+.grade .rolagem { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+th { text-align: left; font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--ink-muted); background: var(--surface-sunken); padding: 0 12px; height: 40px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }
+th.sem-ordem { cursor: default; }
+th .seta { margin-left: 4px; }
+td { padding: 0 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+tbody tr { cursor: pointer; }
+tbody tr:hover td { background: var(--surface-sunken); }
+tbody tr:last-child td { border-bottom: none; }
+.forte { font-weight: 600; }
+.muted { color: var(--ink-muted); }
+.col-acoes { width: 84px; text-align: right; position: sticky; right: 0; background: var(--surface); box-shadow: -1px 0 0 var(--border); }
+th.col-acoes { background: var(--surface-sunken); }
+.icone { width: 30px; height: 30px; border: none; background: none; border-radius: var(--r-sm); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; color: var(--ink-muted); }
+.icone:hover { background: var(--surface-sunken); color: var(--ink); }
+.icone.perigo:hover { color: var(--crit); background: var(--crit-tint); }
+.badge { display: inline-block; padding: 1px 8px; border-radius: var(--r-pill); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.b-ok { background: var(--ok-tint); color: var(--ok); } .b-warn { background: var(--warn-tint); color: var(--warn); }
+.b-crit { background: var(--crit-tint); color: var(--crit); } .b-info { background: var(--info-tint); color: var(--info); }
+.b-neutro { background: var(--surface-sunken); color: var(--ink-muted); }
+.paginacao { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); color: var(--ink-muted); font-size: 13px; }
+.paginacao .espaco { flex: 1; }
+.vazio { padding: 32px 16px; text-align: center; color: var(--ink-muted); }
+
+/* Dashboard da seção */
+.metricas { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px; margin-bottom: 20px; }
+.metrica { text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 14px 16px; cursor: pointer; }
+.metrica:hover { border-color: var(--border-strong); }
+.metrica .rot { font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--ink-muted); }
+.metrica .val { font-size: 26px; font-weight: 700; line-height: 34px; margin-top: 4px; }
+.metrica .ir { font-size: 12px; color: var(--ink-muted); }
+.secao-dash { font-size: 13px; font-weight: 700; margin: 4px 0 10px; }
+.paineis { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); gap: 16px; }
+.painel { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); padding: 16px; }
+.painel h3 { margin: 0 0 12px; font-size: 14px; }
+.barra-linha { display: grid; grid-template-columns: 110px 1fr 44px; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+.barra-linha .trilho { height: 10px; background: var(--surface-sunken); border-radius: var(--r-pill); overflow: hidden; }
+.barra-linha .trilho span { display: block; height: 100%; border-radius: var(--r-pill); }
+.lista-curta { margin: 0; padding: 0; list-style: none; }
+.lista-curta li { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.lista-curta li:last-child { border-bottom: none; }
+.lista-curta li span:last-child { margin-left: auto; white-space: nowrap; }
+
+.aviso { display: block; background: var(--info-tint); border: 1px solid var(--border); border-left: 4px solid var(--info); border-radius: var(--r-md); padding: 10px 14px; margin-bottom: 16px; font-size: 13px; }
+.aviso a { color: var(--info); font-weight: 700; }
+
+@media (max-width: 1024px) {
+  .menu { display: none; }
+  main { margin-left: 0; padding: 16px; }
+  .cab { flex-wrap: wrap; }
+  .cab .acoes { margin-left: 0; }
+  .selo-proto { display: none; }
+}
+
+/* Opção B: busca + painel de filtros recolhível + chips; células de duas linhas (52px) */
+.barra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+.busca { position: relative; width: 340px; max-width: 100%; }
+.busca .ic { position: absolute; left: 10px; top: 9px; color: var(--ink-muted); }
+.busca input { width: 100%; height: 36px; padding: 0 10px 0 36px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface); }
+.btn-filtros.ativo { border-color: var(--red); color: var(--red); }
+.btn-filtros .n { background: var(--red); color: var(--on-red); border-radius: var(--r-pill); font-size: 11px; font-weight: 700; padding: 0 7px; line-height: 18px; }
+.contador { margin-left: auto; color: var(--ink-muted); font-size: 13px; white-space: nowrap; }
+.painel-filtros { display: none; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 12px; align-items: end; background: var(--surface-sunken); border: 1px solid var(--border); border-radius: var(--r-md); padding: 12px 14px; margin-bottom: 8px; }
+.painel-filtros.open { display: grid; }
+.painel-filtros label { display: flex; flex-direction: column; gap: 4px; font-size: 11px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; color: var(--ink-muted); }
+.painel-filtros select { height: 34px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface); padding: 0 8px; font-size: 13px; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--ink); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; min-height: 0; }
+.chip { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 6px 0 10px; border-radius: var(--r-pill); background: var(--red-tint); color: var(--red); font-size: 12.5px; font-weight: 600; border: none; cursor: pointer; }
+.chip .ic { width: 14px; height: 14px; }
+.chip-limpar { background: none; color: var(--ink-muted); }
+.dupla td { height: 52px; }
+.cel { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.l2 { font-size: 12.5px; color: var(--ink-muted); }
+</style>
+</head>
+<body>
+<header class="topo"><span class="logo"><b>B</b>IA</span><span class="selo-proto">Protótipo B · Busca + painel de filtros</span>
+  <span class="usuario"><span class="avatar">HO</span>Hercules O.</span></header>
+<nav class="menu" id="menu" aria-label="Menu"></nav>
+<main id="conteudo"></main>
+<script>
+const AVISO_PROTO = '<b>Opção B · Busca + painel de filtros</b> — só a busca fica à vista; os filtros abrem num painel e os ativos viram etiquetas removíveis. Informações ligadas dividem a célula em 2 linhas (menos colunas). Cards e números foram para o <a href="#dash-terceiros">Dashboard de Terceiros</a>.';
+const AVISO_DASH = '<b>Opção B</b> — o Dashboard é igual nas duas opções: é para onde vão os cards e números que hoje ficam em cima das listas.';
+const CLASSE_TABELA = 'dupla';
+// ---- Dados de exemplo (fictícios) ----
+const NOMES = ['Ana Souza', 'Bruno Lima', 'Carla Dias', 'Daniel Rocha', 'Elisa Martins', 'Fábio Nunes', 'Gabriela Costa', 'Heitor Alves', 'Isabela Freitas', 'João Melo',
+  'Karina Lopes', 'Lucas Prado', 'Marina Teixeira', 'Nelson Barros', 'Olívia Santos', 'Paulo Reis', 'Quésia Moura', 'Rafael Pinto', 'Sabrina Gomes', 'Tiago Ramos',
+  'Úrsula Campos', 'Vítor Araújo', 'Wagner Duarte', 'Yasmin Cardoso', 'Zeca Fontes', 'Alice Monteiro', 'Bernardo Vieira', 'Cecília Ribeiro', 'Diego Moreira', 'Eduarda Castro',
+  'Felipe Correia', 'Giovana Pires', 'Henrique Batista', 'Ingrid Farias', 'Jorge Mendes', 'Larissa Rezende', 'Mateus Cunha', 'Natália Sales', 'Otávio Brito', 'Priscila Aguiar',
+  'Renato Peixoto', 'Sofia Andrade', 'Tânia Queiroz', 'Ulisses Braga', 'Valéria Lacerda'];
+const AREAS_NOMES = ['Administrativo', 'Audiovisual', 'Comercial Contábil', 'Comercial Corporativo', 'Comunicação Interna', 'Controladoria', 'Desenvolvimento P&D', 'Facilities',
+  'Financeiro', 'Infraestrutura de TI', 'Jurídico', 'Marketing', 'Produto', 'Recursos Humanos', 'Segurança da Informação', 'Suporte ao Cliente', 'Treinamento', 'Vendas Online'];
+const CARGOS = ['Analista', 'Coordenador', 'Desenvolvedor', 'Gerente', 'Assistente', 'Especialista', 'Diretor'];
+const email = (n) => n.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z ]/g, '').replace(' ', '.').replace(/ /g, '') + '@fortestecnologia.com.br';
+const fone = (i) => `(85) 9${String(8100 + i * 37).slice(0, 4)}-${String(1000 + i * 271).slice(-4)}`;
+const AREAS = AREAS_NOMES.map((nome, i) => ({ nome, responsavel: NOMES[i], email: email(NOMES[i]), telefone: i % 3 === 2 ? '' : fone(i), processos: (i * 7) % 11 + 1 }));
+const PESSOAS = NOMES.map((nome, i) => ({ nome, cargo: CARGOS[i % CARGOS.length], area: AREAS_NOMES[(i * 5) % AREAS_NOMES.length],
+  lideranca: i % 6 === 0 ? 'Líder de área' : (i % 4 === 0 ? 'Líder de equipe' : '—'), telefone: i % 4 === 3 ? '' : fone(i + 3), email: email(nome) }));
+const EMPRESAS = ['Brisanet Telecom', 'Microsoft Brasil', 'Amazon Web Services', 'Totvs S.A.', 'Google Cloud', 'Oracle do Brasil', 'Claro Empresas', 'Senior Sistemas', 'Kaspersky Lab',
+  'Fortinet Brasil', 'Dell Technologies', 'Locaweb', 'Zendesk', 'Salesforce', 'Cisco Systems', 'Algar Telecom', 'Vivo Empresas', 'Sophos', 'Adobe Systems', 'Atlassian',
+  'Veeam Software', 'Ingram Micro', 'Positivo Tecnologia', 'Elastic', 'Datadog', 'Cloudflare', 'Unimed Fortaleza', 'Sodexo', 'Correios', 'Serasa Experian'];
+const CATEGORIAS = ['Telecom', 'Software', 'Nuvem', 'Segurança', 'Hardware', 'Serviços gerais'];
+const SITUACOES = [['Avaliado', 'b-ok'], ['Sem avaliação', 'b-neutro'], ['Avaliação vencida', 'b-warn'], ['Abaixo do limiar', 'b-crit']];
+const FORNECEDORES = EMPRESAS.map((nome, i) => {
+  const sit = SITUACOES[[0, 0, 1, 0, 2, 0, 3, 0, 1, 2][i % 10]];
+  return { nome, categoria: CATEGORIAS[i % CATEGORIAS.length], area: AREAS_NOMES[(i * 3) % AREAS_NOMES.length], gestor: NOMES[(i * 7) % NOMES.length],
+    nota: sit[0] === 'Sem avaliação' ? null : (sit[0] === 'Abaixo do limiar' ? 38 + i % 9 : 62 + (i * 7) % 35), criticidade: ['Alta', 'Média', 'Média', 'Baixa', 'Baixa', 'Média', 'Alta', 'Baixa', 'Baixa', 'Média'][i % 10],
+    situacao: sit[0], situacaoCor: sit[1], avaliadoEm: sit[0] === 'Sem avaliação' ? '' : `${String(1 + (i * 3) % 28).padStart(2, '0')}/${String(1 + i % 9).padStart(2, '0')}/2026`,
+    tic: i % 3 !== 2, contratoVigente: i % 7 !== 4 };
+});
+
+// ---- Telas ----
+const opcoes = (lista, campo) => [...new Set(lista.map((x) => x[campo]).filter((v) => v && v !== '—'))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+const TELAS = {
+  areas: { titulo: 'Áreas', sub: 'Áreas da empresa que participam do BIA.', primario: '+ Nova área', mais: ['Exportar CSV'],
+    dados: AREAS, busca: ['nome', 'responsavel', 'email'], filtros: [], contador: ['área', 'áreas'], ordem: 'nome', grupo: 'config' },
+  pessoas: { titulo: 'Pessoas', sub: 'Gestores de contrato, contatos de fornecedores e responsáveis de área.', primario: '+ Nova pessoa', mais: ['Gerar organograma', 'Exportar CSV'],
+    dados: PESSOAS, busca: ['nome', 'email', 'cargo'], contador: ['pessoa', 'pessoas'], ordem: 'nome', grupo: 'config',
+    filtros: [{ id: 'area', rot: 'Área', op: opcoes(PESSOAS, 'area') }, { id: 'lideranca', rot: 'Liderança', op: ['Líder de área', 'Líder de equipe'] }, { id: 'cargo', rot: 'Cargo', op: opcoes(PESSOAS, 'cargo') }] },
+  fornecedores: { titulo: 'Fornecedores', sub: 'Catálogo de fornecedores, avaliação e criticidade.', primario: '+ Novo fornecedor', mais: ['Critérios de avaliação', 'Exportar CSV'],
+    dados: FORNECEDORES, busca: ['nome', 'gestor', 'categoria'], contador: ['fornecedor', 'fornecedores'], ordem: 'nome', grupo: 'terceiros',
+    filtros: [{ id: 'categoria', rot: 'Categoria', op: CATEGORIAS.slice().sort() }, { id: 'area', rot: 'Área', op: opcoes(FORNECEDORES, 'area') },
+      { id: 'gestor', rot: 'Gestor', op: opcoes(FORNECEDORES, 'gestor') }, { id: 'situacao', rot: 'Situação', op: SITUACOES.map((s) => s[0]) }] },
+};
+const estado = {};
+Object.keys(TELAS).forEach((k) => { estado[k] = { busca: '', filtros: {}, pagina: 1, ordem: TELAS[k].ordem, dir: 1 }; });
+const POR_PAGINA = 12;
+
+const ICONES = {
+  editar: '<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"/>',
+  excluir: '<path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/>',
+  busca: '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/>',
+  filtro: '<path d="M4 5h16l-6 8v6l-4-2v-4z"/>',
+  mais: '<circle cx="5" cy="12" r="1.3"/><circle cx="12" cy="12" r="1.3"/><circle cx="19" cy="12" r="1.3"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
+  escudo: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/>', alerta: '<path d="M12 3.5l9 16H3z"/><path d="M12 10v4"/>',
+  predio: '<rect x="4" y="3" width="16" height="18" rx="1.5"/><path d="M9 7h1.5M13.5 7H15M9 11h1.5M13.5 11H15"/>', ajustes: '<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>',
+  grafico: '<path d="M3 20h18"/><path d="M6 16v-4M11 16V6M16 16V9M20 16v-2"/>', servidor: '<rect x="3" y="4" width="18" height="7" rx="1.5"/><rect x="3" y="13" width="18" height="7" rx="1.5"/>',
+};
+const ic = (n) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONES[n]}</svg>`;
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const cel = (txt, cls = '') => `<div class="cel ${cls}" title="${esc(txt)}">${esc(txt) || '<span class="muted">—</span>'}</div>`;
+const plural = (n, [s, p]) => `${n} ${n === 1 ? s : p}`;
+
+// ---- Menu ----
+function renderMenu(atual) {
+  const a = (h, t, extra = '') => `<a href="#${h}" class="${h === atual ? 'ativo' : ''} ${extra}">${t}</a>`;
+  document.getElementById('menu').innerHTML = `
+    <div class="grupo">${ic('escudo')}Continuidade de Negócio</div>
+    <div class="grupo">${ic('alerta')}Riscos e Vulnerabilidades</div>
+    <div class="grupo ${['fornecedores', 'dash-terceiros'].includes(atual) ? 'ativo' : ''}">${ic('predio')}Terceiros</div>
+    ${a('dash-terceiros', 'Dashboard de Terceiros', 'novo')}${a('fornecedores', 'Fornecedores')}<a class="inativo">Contratos</a>
+    <div class="grupo">${ic('servidor')}Serviços de TI</div>
+    <div class="grupo">${ic('grafico')}Indicadores</div>
+    <div class="sep"></div>
+    <div class="grupo ${['areas', 'pessoas'].includes(atual) ? 'ativo' : ''}">${ic('ajustes')}Configurações</div>
+    <div class="sub">Organização</div>${a('areas', 'Áreas', 'sub-item')}${a('pessoas', 'Pessoas', 'sub-item')}<a class="sub-item inativo">Produtos de Software</a>`;
+}
+
+// ---- Lista: casca (uma vez por tela) + grade (a cada filtro) ----
+function aplicar(k) {
+  const t = TELAS[k], st = estado[k];
+  const termo = st.busca.trim().toLowerCase();
+  let lista = t.dados.filter((x) => (!termo || t.busca.some((c) => String(x[c] || '').toLowerCase().includes(termo)))
+    && Object.entries(st.filtros).every(([f, v]) => !v || x[f] === v));
+  lista = lista.slice().sort((a, b) => {
+    const va = a[st.ordem], vb = b[st.ordem];
+    if (typeof va === 'number' || typeof vb === 'number') return ((va == null ? -1 : va) - (vb == null ? -1 : vb)) * st.dir;
+    return String(va || '').localeCompare(String(vb || ''), 'pt-BR') * st.dir;
+  });
+  return lista;
+}
+function renderLista(k) {
+  const t = TELAS[k];
+  document.getElementById('conteudo').innerHTML = `
+    <div class="aviso">${AVISO_PROTO}</div>
+    <div class="cab"><div><h1>${t.titulo}</h1><p>${t.sub}</p></div>
+      <div class="acoes"><button class="btn btn-ghost" type="button" onclick="alternarMais(event)">${ic('mais')} Mais ações</button>
+        <button class="btn btn-primario" type="button">${t.primario}</button>
+        <div class="popover" id="maisAcoes">${t.mais.map((m) => `<button type="button">${m}</button>`).join('')}</div></div></div>
+    ${renderBarra(k)}
+    <div class="grade"><div class="rolagem"><table class="${CLASSE_TABELA}" id="tabela"></table></div><div class="paginacao" id="paginacao"></div></div>`;
+  ligarBarra(k);
+  renderGrade(k);
+}
+function renderGrade(k) {
+  const st = estado[k], cols = COLUNAS[k];
+  const lista = aplicar(k);
+  const total = lista.length, paginas = Math.max(1, Math.ceil(total / POR_PAGINA));
+  st.pagina = Math.min(st.pagina, paginas);
+  const ini = (st.pagina - 1) * POR_PAGINA, itens = lista.slice(ini, ini + POR_PAGINA);
+  const larguraMin = cols.reduce((s, c) => s + c.w, 0) + 84;
+  document.getElementById('tabela').style.minWidth = larguraMin + 'px';
+  document.getElementById('tabela').innerHTML = `<colgroup>${cols.map((c) => `<col style="width:${c.w}px">`).join('')}<col style="width:84px"></colgroup>
+    <thead><tr>${cols.map((c) => `<th${c.ordem ? ` onclick="ordenar('${k}','${c.ordem}')"` : ' class="sem-ordem"'}>${c.rot}${st.ordem === c.ordem ? `<span class="seta">${st.dir > 0 ? '▲' : '▼'}</span>` : ''}</th>`).join('')}<th class="col-acoes sem-ordem">Ações</th></tr></thead>
+    <tbody>${itens.length ? itens.map((x) => `<tr>${cols.map((c) => `<td>${c.v(x)}</td>`).join('')}<td class="col-acoes"><button class="icone" type="button" title="Editar" aria-label="Editar">${ic('editar')}</button><button class="icone perigo" type="button" title="Excluir" aria-label="Excluir">${ic('excluir')}</button></td></tr>`).join('')
+      : `<tr><td colspan="${cols.length + 1}"><div class="vazio">Nenhum registro com esses filtros.</div></td></tr>`}</tbody>`;
+  document.getElementById('paginacao').innerHTML = total ? `<span>Mostrando ${ini + 1}–${Math.min(ini + POR_PAGINA, total)} de ${total}</span><span class="espaco"></span>
+    <button class="btn btn-sm" type="button" ${st.pagina <= 1 ? 'disabled' : ''} onclick="mover('${k}',-1)">‹ Anterior</button>
+    <button class="btn btn-sm" type="button" ${st.pagina >= paginas ? 'disabled' : ''} onclick="mover('${k}',1)">Próxima ›</button>` : '';
+  aposGrade(k, total);
+}
+window.ordenar = (k, c) => { const st = estado[k]; st.dir = st.ordem === c ? -st.dir : 1; st.ordem = c; renderGrade(k); };
+window.mover = (k, d) => { estado[k].pagina += d; renderGrade(k); };
+window.alternarMais = (e) => { e.stopPropagation(); document.getElementById('maisAcoes').classList.toggle('open'); };
+document.addEventListener('click', (e) => { const p = document.getElementById('maisAcoes'); if (p && !e.target.closest('.acoes')) p.classList.remove('open'); });
+function setBusca(k, v) { estado[k].busca = v; estado[k].pagina = 1; renderGrade(k); }
+function setFiltro(k, id, v) { estado[k].filtros[id] = v; estado[k].pagina = 1; renderGrade(k); }
+
+// ---- Dashboard de Terceiros (o que saiu da lista de Fornecedores e de Contratos) ----
+function renderDashTerceiros() {
+  const conta = (f) => FORNECEDORES.filter(f).length;
+  const card = (rot, val, cor, filtro, ir) => `<button class="metrica" type="button" onclick="abrirFiltrado(${filtro ? esc(JSON.stringify(filtro)) : 'null'})">
+    <div class="rot">${rot}</div><div class="val" style="color:${cor}">${val}</div><div class="ir">${ir}</div></button>`;
+  const crit = ['Alta', 'Média', 'Baixa'].map((c) => [c, conta((f) => f.criticidade === c)]);
+  const max = Math.max(...crit.map((x) => x[1]));
+  document.getElementById('conteudo').innerHTML = `
+    <div class="aviso">${AVISO_DASH}</div>
+    <div class="cab"><div><h1>Dashboard de Terceiros</h1><p>Situação dos fornecedores e dos contratos. Clique num número para abrir a lista já filtrada.</p></div></div>
+    <div class="secao-dash">Fornecedores</div>
+    <div class="metricas">
+      ${card('No catálogo', FORNECEDORES.length, 'var(--ink)', {}, 'Ver todos →')}
+      ${card('Sem avaliação', conta((f) => f.situacao === 'Sem avaliação'), 'var(--ink-muted)', { situacao: 'Sem avaliação' }, 'Abrir na lista →')}
+      ${card('Avaliação vencida', conta((f) => f.situacao === 'Avaliação vencida'), 'var(--warn)', { situacao: 'Avaliação vencida' }, 'Abrir na lista →')}
+      ${card('Abaixo do limiar', conta((f) => f.situacao === 'Abaixo do limiar'), 'var(--crit)', { situacao: 'Abaixo do limiar' }, 'Abrir na lista →')}
+      ${card('Sem contrato vigente', conta((f) => !f.contratoVigente), 'var(--warn)', null, 'Em Contratos')}
+    </div>
+    <div class="secao-dash">Contratos</div>
+    <div class="metricas">
+      ${card('Vigentes', 41, 'var(--ink)', null, 'Em Contratos')}
+      ${card('Valor mensal', 'R$ 312 mil', 'var(--ink)', null, 'Soma dos vigentes')}
+      ${card('Vencem em 90 dias', 6, 'var(--warn)', null, 'Em Contratos')}
+      ${card('Reajuste pendente', 3, 'var(--crit)', null, 'Em Contratos')}
+    </div>
+    <div class="paineis">
+      <div class="painel"><h3>Fornecedores por criticidade</h3>
+        ${crit.map(([c, n]) => `<div class="barra-linha"><span>${c}</span><span class="trilho"><span style="width:${Math.round(n / max * 100)}%;background:${c === 'Alta' ? 'var(--crit)' : c === 'Média' ? 'var(--warn)' : 'var(--ok)'}"></span></span><b>${n}</b></div>`).join('')}</div>
+      <div class="painel"><h3>Contratos que vencem nos próximos 90 dias</h3><ul class="lista-curta">
+        <li><b>CT-0142</b><span>Microsoft Brasil · Licenças M365</span><span>12/11/2026</span></li>
+        <li><b>CT-0098</b><span>Brisanet Telecom · Link dedicado</span><span>28/11/2026</span></li>
+        <li><b>CT-0177</b><span>Veeam Software · Backup</span><span>05/12/2026</span></li>
+        <li><b>CT-0061</b><span>Locaweb · Hospedagem</span><span>19/12/2026</span></li></ul></div>
+    </div>`;
+}
+window.abrirFiltrado = (filtro) => {
+  if (!filtro) return;
+  const st = estado.fornecedores;
+  st.filtros = Object.assign({}, filtro); st.busca = ''; st.pagina = 1;
+  location.hash = 'fornecedores';
+};
+
+// ---- Rotas ----
+function rota() {
+  const k = (location.hash || '#pessoas').slice(1);
+  renderMenu(k);
+  if (k === 'dash-terceiros') renderDashTerceiros();
+  else if (TELAS[k]) renderLista(k);
+  else { location.hash = 'pessoas'; return; }
+  window.scrollTo(0, 0);
+}
+window.addEventListener('hashchange', rota);
+
+
+const duas = (l1, l2, cls = '') => `${cel(l1, cls)}<div class="cel l2" title="${esc(l2)}">${esc(l2) || '—'}</div>`;
+const COLUNAS = {
+  areas: [
+    { rot: 'Área', w: 260, ordem: 'nome', v: (x) => duas(x.nome, plural(x.processos, ['processo', 'processos']), 'forte') },
+    { rot: 'Responsável', w: 330, ordem: 'responsavel', v: (x) => duas(x.responsavel, x.email) },
+    { rot: 'Telefone', w: 170, v: (x) => cel(x.telefone) },
+  ],
+  pessoas: [
+    { rot: 'Pessoa', w: 260, ordem: 'nome', v: (x) => duas(x.nome, x.cargo, 'forte') },
+    { rot: 'Área', w: 240, ordem: 'area', v: (x) => duas(x.area, x.lideranca === '—' ? 'Sem liderança' : x.lideranca) },
+    { rot: 'Contato', w: 330, ordem: 'email', v: (x) => duas(x.email, x.telefone || 'Sem telefone') },
+  ],
+  fornecedores: [
+    { rot: 'Fornecedor', w: 250, ordem: 'nome', v: (x) => duas(x.nome, x.categoria, 'forte') },
+    { rot: 'Área e gestor', w: 230, ordem: 'area', v: (x) => duas(x.area, x.gestor) },
+    { rot: 'Avaliação', w: 190, ordem: 'nota', v: (x) => `<div class="cel"><span class="badge ${x.criticidade === 'Alta' ? 'b-crit' : x.criticidade === 'Média' ? 'b-warn' : 'b-ok'}">${x.criticidade}</span> ${x.nota == null ? '' : `<b>${x.nota}</b>`}</div><div class="cel l2">${x.avaliadoEm ? 'em ' + x.avaliadoEm : 'Nunca avaliado'}</div>` },
+    { rot: 'Situação', w: 170, ordem: 'situacao', v: (x) => `<span class="badge ${x.situacaoCor}">${x.situacao}</span>` },
+  ],
+};
+
+function renderBarra(k) {
+  const t = TELAS[k], st = estado[k];
+  return `<div class="barra">
+    <label class="busca">${ic('busca')}<input type="search" id="busca" placeholder="Buscar ${t.contador[1]}…" value="${esc(st.busca)}" aria-label="Buscar"></label>
+    ${t.filtros.length ? `<button class="btn btn-filtros" type="button" id="btnFiltros" aria-expanded="false">${ic('filtro')} Filtros <span class="n" id="nFiltros"></span></button>` : ''}
+    <span class="contador" id="contador"></span></div>
+    ${t.filtros.length ? `<div class="painel-filtros" id="painelFiltros">${t.filtros.map((f) => `<label>${f.rot}<select data-f="${f.id}"><option value="">Todas</option>${f.op.map((o) => `<option value="${esc(o)}">${esc(o)}</option>`).join('')}</select></label>`).join('')}</div>` : ''}
+    <div class="chips" id="chips"></div>`;
+}
+function ligarBarra(k) {
+  document.getElementById('busca').addEventListener('input', (e) => setBusca(k, e.target.value));
+  const btn = document.getElementById('btnFiltros');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    const p = document.getElementById('painelFiltros');
+    p.classList.toggle('open');
+    btn.setAttribute('aria-expanded', p.classList.contains('open'));
+  });
+  document.querySelectorAll('#painelFiltros select').forEach((s) => s.addEventListener('change', () => setFiltro(k, s.dataset.f, s.value)));
+  document.getElementById('chips').addEventListener('click', (e) => {
+    const c = e.target.closest('.chip');
+    if (!c) return;
+    if (c.dataset.f) setFiltro(k, c.dataset.f, ''); else { estado[k].filtros = {}; renderGrade(k); }
+  });
+}
+function aposGrade(k, total) {
+  const t = TELAS[k], st = estado[k];
+  document.getElementById('contador').textContent = plural(total, t.contador);
+  const ativos = t.filtros.filter((f) => st.filtros[f.id]);
+  document.querySelectorAll('#painelFiltros select').forEach((s) => { s.value = st.filtros[s.dataset.f] || ''; });
+  const n = document.getElementById('nFiltros');
+  if (n) { n.textContent = ativos.length || ''; n.style.display = ativos.length ? '' : 'none'; document.getElementById('btnFiltros').classList.toggle('ativo', !!ativos.length); }
+  document.getElementById('chips').innerHTML = ativos.map((f) => `<button class="chip" type="button" data-f="${f.id}" title="Remover filtro">${f.rot}: ${esc(st.filtros[f.id])} ${ic('x')}</button>`).join('')
+    + (ativos.length > 1 ? '<button class="chip chip-limpar" type="button">Limpar todos</button>' : '');
+}
+rota();
+</script>
+</body>
+</html>

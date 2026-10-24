@@ -548,3 +548,43 @@ button.mm-grupo__rotulo:hover { background: var(--brand-tint); }
 .mm-grupo__rotulo .mm-grupo__seta { display: inline-block; width: 12px; color: inherit; }
 .mm-grupo__rotulo .mm-grupo__total { color: #999; font-weight: 600; }
 .mm-grupo__rotulo .mm-grupo__lacunas { color: #c62828; font-weight: 700; text-transform: none; letter-spacing: 0; }
+
+/* TELAS DE LISTA (DECISÃO 23/10/2026, opção A "barra única"; helpers _htmlCabecalhoLista,
+   _htmlBarraLista, _tdLista, _htmlAcoesLinha em app.js). Linha de 40px em uma linha só. */
+.lista-cab { align-items: flex-start; gap: 16px; margin-bottom: 16px; }
+.lista-cab__acoes { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+.mais-acoes { position: relative; }
+.mais-acoes__menu { display: none; position: absolute; right: 0; top: calc(100% + 6px); min-width: 220px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: 0 10px 28px rgba(42,38,35,0.16); z-index: 30; }
+.mais-acoes.open .mais-acoes__menu { display: block; }
+.mais-acoes__menu button { display: block; width: 100%; padding: 8px 12px; border: none; border-radius: var(--r-sm); background: none; color: var(--ink); font: inherit; font-size: 14px; text-align: left; white-space: nowrap; cursor: pointer; }
+.mais-acoes__menu button:hover { background: var(--surface-sunken); }
+.lista-barra { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.lista-busca { position: relative; width: 240px; max-width: 100%; }
+.lista-busca svg { position: absolute; left: 9px; top: 7px; width: 18px; height: 18px; fill: none; stroke: var(--ink-muted); stroke-width: 1.8; stroke-linecap: round; pointer-events: none; }
+.lista-busca input { width: 100%; height: 32px; padding: 0 10px 0 34px; border: 1px solid var(--border-strong); border-radius: var(--r-md); background: var(--surface); color: var(--ink); font: 400 14px var(--font-sans); }
+.lista-busca input:focus { outline: none; border-color: var(--red); box-shadow: 0 0 0 3px var(--red-tint); }
+.lista-sel { height: 32px; width: 168px; padding: 0 24px 0 10px; border: 1px solid var(--border); border-radius: var(--r-md); background-color: var(--surface); color: var(--ink); font: 400 13px var(--font-sans); text-overflow: ellipsis; cursor: pointer; }
+.lista-sel--ativo { border-color: var(--red); background-color: var(--red-tint); color: var(--red); font-weight: 600; }
+.lista-limpar { height: 32px; padding: 0 6px; border: none; background: none; color: var(--red); font: 600 13px var(--font-sans); cursor: pointer; }
+.lista-contador { margin-left: auto; color: var(--ink-muted); font-size: 13px; white-space: nowrap; }
+.data-table--lista td { height: 40px; padding-top: 0; padding-bottom: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.data-table--lista td.vazio { height: auto; padding: 40px 12px; white-space: normal; }
+.data-table--lista .col-acoes { width: 92px; text-align: right; overflow: visible; position: sticky; right: 0; background: var(--surface); box-shadow: -1px 0 0 var(--border); }
+.data-table--lista thead .col-acoes { background: var(--surface-sunken); }
+.data-table--lista tbody tr:hover .col-acoes { background: var(--surface-sunken); }
+.data-table--lista .col-acoes .btn-icon { padding: 4px 6px; }
+.data-table--lista td.forte { font-weight: 600; }
+.badge-red { background: var(--red-tint); color: var(--red); }
+.badge-orange { background: #fff3e0; color: #a15c00; }
+/* Ajuda recolhível de tela de lista (ex.: "O que cada perfil pode" em Perfis de Acesso) */
+.lista-ajuda { margin-bottom: 12px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); font-size: 13px; }
+.lista-ajuda summary { padding: 8px 12px; cursor: pointer; color: var(--ink-muted); font-weight: 600; }
+.lista-ajuda[open] summary { border-bottom: 1px solid var(--border); }
+.lista-ajuda > :not(summary) { margin: 8px 12px; }
+.lista-ajuda__linha { display: flex; gap: 12px; }
+.lista-ajuda__linha b { min-width: 160px; color: var(--ink); }
+.lista-ajuda__linha span, .lista-ajuda p { color: var(--ink-muted); }
+.lista-ajuda p { line-height: 1.5; }
+/* Alerta operacional de uma linha acima da grade (não é painel: é um aviso que pede ação) */
+.lista-alerta { margin-bottom: 12px; padding: 8px 12px; border: 1px solid #ffe0b2; border-radius: var(--r-md); background: #fff8e1; color: #a15c00; font-size: 13px; }
+.badge-azul { background: #e3f2fd; color: #1565c0; }
