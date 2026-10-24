@@ -23826,22 +23826,27 @@ function _dataHoraBR(iso) {
   return isNaN(d.getTime()) ? '–' : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 
+window.filtrarNotificacoesEmail = () => { notificacoesPaginacao.reiniciar(); renderizarNotificacoesEmail(); };
+
 async function notificacoesEmail() {
   const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
   const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
   const caixa = 'border:1px solid var(--border, #d8d2cd);border-radius:10px;padding:20px;margin-bottom:20px;background:#fff;';
   const chk = (id, rotulo, dica) => `<label class="check-label" style="margin-bottom:8px;"><input type="checkbox" id="${id}"> <span><strong style="font-weight:600;">${rotulo}</strong>${dica ? `<span style="display:block;font-size:0.8em;color:#888;">${dica}</span>` : ''}</span></label>`;
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Notificações por e-mail</h2><p class="page-sub">Alertas de contratos (prazos, renovação automática e resumo mensal), avisos de riscos registrados e encerrados e o resumo semanal de conformidade de continuidade</p></div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn btn-ghost" id="btnEmailTeste" onclick="enviarEmailTesteNotificacoes()">✉️ Enviar e-mail de teste</button>
-        <button class="btn btn-primary" id="btnSalvarConfigNotificacoes" onclick="salvarConfigNotificacoesTela()">Salvar configuração</button>
-      </div>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Notificações por e-mail', sub: 'E-mails enviados pelo sistema: alertas de contratos, avisos de riscos e o resumo de conformidade de continuidade.',
+      primario: { rotulo: 'Configurar envio', onclick: 'abrirConfigLista()' },
+      maisAcoes: [{ rotulo: 'Enviar e-mail de teste', onclick: 'enviarEmailTesteNotificacoes()' }, { rotulo: 'Atualizar log', onclick: 'recarregarNotificacoesEmail()' }] })}
     <div class="loading">⏳ Carregando...</div>
     <div id="notifConteudo" style="display:none;">
-      <div style="${caixa}">
+      <!-- Configuração de envio (antes em cima do log): drawer "Configurar envio". -->
+      <div class="drawer-overlay" id="drawerOverlayConfigLista" onclick="fecharConfigLista()"></div>
+      <div class="drawer" id="drawerConfigLista" style="width:760px;">
+        <div class="drawer-header">
+          <h3>Configurar envio de e-mails</h3>
+          <button onclick="fecharConfigLista()" aria-label="Fechar" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+        </div>
+        <div class="drawer-body">
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;">
           <div>
             <label style="${lbl}">Modo de envio</label>
@@ -23927,27 +23932,17 @@ async function notificacoesEmail() {
         </div>
         <div id="notifSegredosDica" style="font-size:0.78em;color:#5c5550;margin-top:10px;padding:8px 12px;background:#f6f4f2;border-radius:7px;"></div>
         <div id="notifAtualizado" style="font-size:0.78em;color:#888;margin-top:14px;"></div>
+        </div>
+        <div class="drawer-footer">
+          <button class="btn btn-ghost" onclick="fecharConfigLista()">Fechar</button>
+          <button class="btn btn-ghost" id="btnEmailTeste" onclick="enviarEmailTesteNotificacoes()">Enviar e-mail de teste</button>
+          <button class="btn btn-primary" id="btnSalvarConfigNotificacoes" onclick="salvarConfigNotificacoesTela()">Salvar configuração</button>
+        </div>
       </div>
 
-      <div class="filters">
-        <div class="field">
-          <label class="field-label">&nbsp;</label>
-          <input type="search" id="buscaNotificacoes" placeholder="Buscar por contrato, risco, destinatário ou assunto…" aria-label="Buscar notificação" oninput="notificacoesPaginacao.reiniciar(); renderizarNotificacoesEmail()" class="field-control field-control--busca">
-        </div>
-        <div class="field">
-          <label class="field-label">Status</label>
-          <select id="filtroNotificacaoStatus" onchange="notificacoesPaginacao.reiniciar(); renderizarNotificacoesEmail()" class="field-control">
-            <option value="">Todos</option>
-            ${Object.entries(NOTIF_STATUS).map(([k, v]) => `<option value="${k}">${v.rotulo}</option>`).join('')}
-          </select>
-        </div>
-        <div class="field">
-          <label class="field-label">&nbsp;</label>
-          <button class="btn btn-ghost" onclick="recarregarNotificacoesEmail()" style="height:40px;">🔄 Atualizar log</button>
-        </div>
-        <span id="contadorNotificacoes" style="font-size:0.82em;color:#888;padding:10px 0;"></span>
-      </div>
-      <div class="data-table">
+      ${_htmlBarraLista({ busca: { id: 'buscaNotificacoes', placeholder: 'Buscar contrato, risco, destinatário ou assunto…' }, aoMudar: 'filtrarNotificacoesEmail', contadorId: 'contadorNotificacoes',
+        filtros: [{ id: 'filtroNotificacaoStatus', rotulo: 'Status', todos: 'Todos', opcoes: Object.entries(NOTIF_STATUS).map(([k, v]) => [k, v.rotulo]) }] })}
+      <div class="data-table data-table--lista">
         <table style="min-width:1080px;">
           <colgroup><col style="width:140px"><col style="width:190px"><col style="width:120px"><col style="width:230px"><col style="width:300px"><col style="width:140px"></colgroup>
           <thead><tr><th>Data</th><th>Tipo</th><th>Referência</th><th>Para</th><th>Assunto</th><th>Status</th></tr></thead>
@@ -24142,8 +24137,7 @@ function renderizarNotificacoesEmail() {
   const status = (document.getElementById('filtroNotificacaoStatus') || {}).value || '';
   if (status) data = data.filter((n) => n.status === status);
 
-  const contador = document.getElementById('contadorNotificacoes');
-  if (contador) contador.textContent = `${data.length} de ${notificacoesEmailData.length} e-mail(s) recente(s)`;
+  _atualizarBarraLista('contadorNotificacoes', data.length, ['e-mail', 'e-mails']);
 
   const pagInfo = notificacoesPaginacao.aplicar(data);
   const { totalPaginas, inicio } = pagInfo;
@@ -24157,7 +24151,7 @@ function renderizarNotificacoesEmail() {
         <td class="title" title="${esc(n.contratoCodigo || n.riscoTitulo || n.referencia || '')}" style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(n.contratoCodigo || n.riscoTitulo || n.referencia || '–')}</td>
         <td title="${esc(n.para)}">${n.para ? esc(n.para) : '<span class="muted">—</span>'}</td>
         <td title="${esc(n.assunto)}" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(n.assunto)}</td>
-        <td>${_pillStatusNotificacao(n.status)}${n.status === 'erro' ? `<div class="muted" style="font-size:0.75em;">${n.tentativas} tentativa(s)</div>` : ''}</td>
+        <td title="${n.status === 'erro' ? esc(n.tentativas + ' tentativa(s)') : ''}">${_pillStatusNotificacao(n.status)}${n.status === 'erro' ? ` <span class="muted">${esc(String(n.tentativas))} tentativa(s)</span>` : ''}</td>
       </tr>`).join('')
     : `<tr><td colspan="6" class="vazio">${notificacoesEmailData.length ? 'Nenhum e-mail com esses filtros.' : 'Nenhum e-mail na fila ainda. Com o modo em Simulação ou Ativo, a varredura diária (05:00) começa a registrar aqui.'}</td></tr>`;
 

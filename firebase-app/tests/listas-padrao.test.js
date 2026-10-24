@@ -23,6 +23,12 @@ const DADOS = {
   getVulnerabilidades: [{ id: 'v1', codigo: '2026-001', nome: 'TLS antigo', severidade: 'Alta', statusCorrecao: 'Aberta' }],
   getContratos: [{ id: 'c1', codigo: 'CT-0001', objeto: 'Nuvem', fornecedorId: 'f1', fornecedorNome: 'Alfa', statusId: 's1', area: 'TI', documentos: [], alertas: [] }],
   getStatusContrato: [{ id: 's1', nome: 'Vigente', situacao: 'vigente', ativo: true }],
+  getConfigNotificacoes: {
+    modo: 'simulacao', remetenteNome: 'BIA · Contratos', responderPara: '',
+    grupos: { prazos: true, renovacaoReajuste: false, resumoMensal: true },
+    destinatarios: { gestor: true, area: false, operadores: true },
+    servidor: { provedor: 'sendgrid', host: '', porta: null, remetenteEmail: 'alertas@fortestecnologia.com.br' },
+  },
   getIndicadoresSeguranca: [{ id: 'i1', nome: 'Patches aplicados', pilar: 'Proteger', responsavel: 'Ana Souza', tipo: 'Percentual', metaMinima: 90 }],
   getProdutosSoftware: [{ id: 's1', nome: 'Fortes Ponto', ativo: true }],
   getPerfis: [{ email: 'ana@fortestecnologia.com.br', perfis: ['gestor'], area: 'TI' }],
@@ -54,7 +60,7 @@ const TELAS = [
   ['contratosTipos', false], ['contratosStatus', false], ['contratosIndexadores', false], ['catalogoBackupFerramentas', false],
   ['perguntas', false],
   ['dependencias', true], ['servicos', true], ['catalogoBackup', true], ['processos', true], ['indicadoresCadastro', true],
-  ['riscos', true], ['vulnerabilidades', true], ['contratos', true], ['fornecedores', false], ['pcns', false], ['drp', false], ['conformidade', false],
+  ['riscos', true], ['vulnerabilidades', true], ['contratos', true], ['fornecedores', false], ['pcns', false], ['drp', false], ['conformidade', false], ['notificacoesEmail', false],
 ];
 
 for (const [tela, temGrade] of TELAS) {
@@ -167,5 +173,16 @@ test('lista abre já filtrada quando vem de um número do dashboard', async () =
   const sel = w.document.getElementById('filtroRiscoSituacao');
   assert.strictEqual(sel.value, 'apetite');
   assert.ok(sel.classList.contains('lista-sel--ativo'));
+  w.close();
+});
+
+test('Notificações por e-mail: a configuração de envio fica no drawer "Configurar envio", fora da lista', async () => {
+  const w = carregar();
+  await w.notificacoesEmail();
+  await espera();
+  const d = w.document;
+  assert.ok(d.querySelector('#drawerConfigLista #notifModo'), 'modo de envio dentro do drawer');
+  assert.ok(d.querySelector('#drawerConfigLista #btnSalvarConfigNotificacoes'), 'salvar no rodapé do drawer');
+  assert.strictEqual(d.querySelector('.lista-cab .btn-primary').textContent.trim(), 'Configurar envio');
   w.close();
 });
