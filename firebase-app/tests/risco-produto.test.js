@@ -69,7 +69,7 @@ test('drawer: o formulario envia produtoSoftwareId', async () => {
 test('grade: filtro Produto (produtos dos riscos + Sem produto) e busca pelo nome do produto', async () => {
   const { w, doc } = await carregar();
   const filtro = doc.getElementById('filtroRiscoProduto');
-  assert.deepStrictEqual(opcoes(filtro).map((o) => o[1]), ['Todos', '(produto removido)', 'ERP', 'Legado', 'Sem produto']);
+  assert.deepStrictEqual(opcoes(filtro).map((o) => o[1]), ['Produto: Todos', 'Produto: (produto removido)', 'Produto: ERP', 'Produto: Legado', 'Produto: Sem produto']);
   const linhas = () => [...doc.querySelectorAll('#riscoRows tr')].map((tr) => tr.textContent).join(' | ');
   filtro.value = 'ps1'; w.filtrarRiscos();
   assert.match(linhas(), /Falha no ERP/);

@@ -66,6 +66,7 @@ test('menu lateral: operacao primeiro (continuidade no topo), configuracao e adm
 test('menu Riscos e Vulnerabilidades: subnivel Riscos primeiro, depois Vulnerabilidades', () => {
   const g = menu().find((x) => x.grupo === 'riscos');
   assert.deepStrictEqual(g.itens.map((i) => [i.sub, i.page]), [
+    ['Riscos', 'riscos-dashboard'],
     ['Riscos', 'riscos'],
     ['Riscos', 'monitor'],
     ['Riscos', 'riscos-relatorio'],

@@ -9,6 +9,7 @@ const pages = {
   'vulnerabilidades-painel': vulnerabilidadesPainel,
   'vulnerabilidades-relatorio': vulnerabilidadesRelatorio,
   'riscos-relatorio': riscosRelatorio,
+  'riscos-dashboard': riscosDashboard,
   'indicadores-dashboard': indicadoresDashboard,
   'indicadores-cadastro': indicadoresCadastro,
   'indicadores-lancamento': indicadoresLancamento,
@@ -13408,63 +13409,80 @@ function _formatarReais(v) {
   return 'R$ ' + (Number(v) || 0).toLocaleString('pt-BR');
 }
 
+// ============================================================
+// PÁGINA: DASHBOARD DE RISCOS (DECISÃO 23/10/2026 -- telas de lista enxutas)
+// A carga de risco consolidada (empresa e por área), que ficava em cima do
+// Registro de Riscos, e os números de atenção da governança NIST. Cada número
+// abre o Registro já filtrado pela Situação.
+// ============================================================
+async function riscosDashboard() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Dashboard de Riscos</h2><p class="page-sub">Carga de risco da empresa e por área, e o que pede atenção no Registro de Riscos.</p></div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="riscosDashboardConteudo"></div>`;
+  try {
+    const [riscos_, procs_, avalsForn_, cfgRiscos_, inds_] = await Promise.all([
+      API.getRiscos(),
+      API.getProcessos().catch((e) => { console.error('Dashboard de Riscos: processos não carregaram; peso padrão', e); return []; }),
+      API.getAvaliacoesFornecedor().catch(() => []),
+      API.getConfigRiscos().catch(() => ({ apetite: RiscoConsolidado.APETITE_PADRAO })),
+      API.getIndicadoresSeguranca().catch(() => []),
+    ]);
+    riscosData = riscos_;
+    riscosProcessosCache = procs_;
+    indicadoresData = inds_;
+    riscosApetite = (cfgRiscos_ && cfgRiscos_.apetite) || RiscoConsolidado.APETITE_PADRAO;
+    riscosCriticidadePorFornecedorCache = {};
+    (avalsForn_ || []).forEach((av) => { if (av && av.fornecedorId) riscosCriticidadePorFornecedorCache[String(av.fornecedorId)] = av.scoreCriticidade; });
+  } catch (e) {
+    console.error('Dashboard de Riscos: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar o Dashboard de Riscos.', 'riscosDashboard');
+    return;
+  }
+  document.querySelector('.loading').style.display = 'none';
+  const hoje = new Date().toISOString().slice(0, 10);
+  const abertos = riscosData.filter((r) => r.status !== 'Encerrado');
+  const conta = (f) => riscosData.filter(f).length;
+  const metricas = [
+    { t: 'Riscos abertos', n: abertos.length, c: '#d60014', filtro: {} },
+    { t: `Acima do apetite (${riscosApetite})`, n: conta((r) => RiscoConsolidado.acimaDoApetite(r, riscosApetite)), c: '#c62828', filtro: { filtroRiscoSituacao: 'apetite' } },
+    { t: 'Reavaliação vencida', n: conta((r) => RiscoConsolidado.reavaliacaoVencida(r, hoje)), c: '#e65100', filtro: { filtroRiscoSituacao: 'reavaliacao' } },
+    { t: 'Com alerta da automação', n: conta((r) => r.alertaAutomacao), c: '#6a1b9a', filtro: { filtroRiscoSituacao: 'alerta' } },
+    { t: 'KRI fora da meta', n: conta((r) => r.status !== 'Encerrado' && _riscoComKriForaDaMeta(r)), c: '#c62828', filtro: { filtroRiscoSituacao: 'kri' } },
+  ];
+  document.getElementById('riscosDashboardConteudo').innerHTML = `
+    <div class="painel-secao">Atenção</div>
+    <div class="painel-metricas painel-metricas--auto metricas-filtro">${metricas.map((x) => _htmlMetricCardFiltro({
+      label: x.t, value: x.n, cor: x.n ? x.c : '#999', ativo: false, titulo: 'Abrir o Registro de Riscos filtrado',
+      onclick: `_abrirListaFiltrada('riscos', ${esc(JSON.stringify(x.filtro))})` })).join('')}</div>
+    <div class="painel-secao">Carga de risco</div>
+    <div id="painelRiscoConsolidado"></div>`;
+  _renderPainelRiscoConsolidado();
+}
+
 async function riscos() {
   const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
   app.innerHTML = `
-    <div class="page-header">
-      <div><h2>Registro de Riscos</h2><p class="page-sub">Registro, análise, tratamento e monitoramento dos riscos identificados</p></div>
-      <div style="display:flex;gap:8px;">
-        ${_seVeTela('riscos-relatorio', '<button class="btn btn-ghost" onclick="location.hash=\'#riscos-relatorio\'">📄 Relatório</button>')}
-        <button class="btn btn-primary" onclick="abrirImportarRisco()" id="btnImportarRisco" style="display:none;">📥 Importar Risco</button>
-        <button class="btn btn-primary" onclick="abrirDrawerRisco()" id="btnNovoRisco" style="display:none;">+ Novo Risco</button>
-      </div>
-    </div>
-    <div id="riscoApetiteBox" style="margin-bottom:12px;"></div>
-    <div id="painelRiscoConsolidado" style="margin-bottom:20px;"></div>
-    <div class="filters">
-      <div class="field">
-        <label class="field-label">Área</label>
-        <select id="filtroRiscoArea" onchange="filtrarRiscos()" class="field-control">
-          <option value="">Todas as áreas</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Status</label>
-        <select id="filtroRiscoStatus" onchange="filtrarRiscos()" class="field-control">
-          <option value="">Todos os status</option>
-          ${RISCO_STATUS.map(s => `<option value="${s}">${s}</option>`).join('')}
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Fornecedor</label>
-        <select id="filtroRiscoFornecedor" onchange="filtrarRiscos()" class="field-control">
-          <option value="">Todos (inclui sem fornecedor)</option>
-          <option value="_qualquer_">Somente riscos de fornecedores</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Produto</label>
-        <select id="filtroRiscoProduto" onchange="filtrarRiscos()" class="field-control">
-          <option value="">Todos</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">Situação</label>
-        <select id="filtroRiscoSituacao" onchange="filtrarRiscos()" class="field-control">
-          <option value="">Todas</option>
-          <option value="apetite">Acima do apetite</option>
-          <option value="reavaliacao">Reavaliação vencida</option>
-          <option value="alerta">Com alerta da automação</option>
-          <option value="kri">KRI fora da meta</option>
-        </select>
-      </div>
-      <div class="field">
-        <label class="field-label">&nbsp;</label>
-        <input type="search" id="buscaRisco" placeholder="Buscar risco…" aria-label="Buscar risco" oninput="filtrarRiscos()" class="field-control field-control--busca">
-      </div>
-    </div>
+    ${_htmlCabecalhoLista({ titulo: 'Registro de Riscos', sub: 'Registro, análise, tratamento e monitoramento dos riscos identificados.',
+      primario: { rotulo: '+ Novo risco', onclick: 'abrirDrawerRisco()', id: 'btnNovoRisco' },
+      maisAcoes: [
+        isAdmin ? { rotulo: 'Importar risco', onclick: 'abrirImportarRisco()' } : null,
+        _seVeTela('riscos-relatorio', 'x') ? { rotulo: 'Relatório de Riscos', onclick: "location.hash='#riscos-relatorio'" } : null,
+        { rotulo: 'Apetite de risco', onclick: 'abrirConfigLista()' },
+      ] })}
+    ${_htmlBarraLista({ busca: { id: 'buscaRisco', placeholder: 'Buscar risco…' }, aoMudar: 'filtrarRiscos', contadorId: 'riscosContador',
+      filtros: [
+        { id: 'filtroRiscoArea', rotulo: 'Área', opcoes: [] },
+        { id: 'filtroRiscoStatus', rotulo: 'Status', todos: 'Todos', opcoes: RISCO_STATUS.map((s) => [s, s]) },
+        { id: 'filtroRiscoFornecedor', rotulo: 'Fornecedor', todos: 'Todos', opcoes: [['_qualquer_', 'Só riscos de fornecedores']] },
+        { id: 'filtroRiscoProduto', rotulo: 'Produto', todos: 'Todos', opcoes: [] },
+        { id: 'filtroRiscoSituacao', rotulo: 'Situação', opcoes: [['apetite', 'Acima do apetite'], ['reavaliacao', 'Reavaliação vencida'], ['alerta', 'Com alerta da automação'], ['kri', 'KRI fora da meta']] },
+      ] })}
+    ${_htmlDrawerConfigLista('Apetite de risco', 'riscoApetiteBox')}
     <div class="loading">⏳ Carregando...</div>
-    <div class="data-table data-table--compact" id="listaRiscos" style="display:none;">
+    <div class="data-table data-table--lista" id="listaRiscos" style="display:none;">
       <!-- Larguras em px (soma 2214) em vez de %: 16 colunas não cabem espremidas;
            abaixo disso a grade rola na horizontal e Ações fica fixa à direita. -->
       <table style="min-width:2516px;">
@@ -13493,7 +13511,7 @@ async function riscos() {
             <th class="col-c" title="Score x peso do Tier do processo (ou criticidade do fornecedor) -- quanto este risco soma na Carga de Risco da Empresa">Carga</th>
             <th class="col-r" title="Impacto financeiro">Impacto R$</th>
             <th>Prioridade</th>
-            <th class="col-c col-sticky">Ações</th>
+            <th class="col-acoes">Ações</th>
           </tr>
         </thead>
         <tbody id="riscoRows"></tbody>
@@ -13509,7 +13527,6 @@ async function riscos() {
   `;
 
   document.getElementById('btnNovoRisco').style.display = isAdmin ? 'inline-block' : 'none';
-  document.getElementById('btnImportarRisco').style.display = isAdmin ? 'inline-block' : 'none';
 
   try {
     // Indicadores entram aqui para que a sugestao de probabilidade funcione ao
@@ -13549,26 +13566,17 @@ async function riscos() {
     // concluir que nao havia riscos e recadastrar o que ja existia.
     console.error('Riscos: falha ao carregar', e);
     riscosData = []; riscosAreasCache = []; riscosFornecedoresCache = []; riscosCriticidadePorFornecedorCache = {};
-    const corpo = document.getElementById('riscoRows');
-    if (corpo) {
-      corpo.innerHTML = `<tr><td colspan="18" style="padding:24px;text-align:center;color:#c62828;">
-        Não foi possível carregar os riscos.<br>
-        <span style="color:#666;font-size:0.9em;">${esc(e.message || 'Erro desconhecido')}</span><br>
-        <button class="btn btn-ghost" onclick="riscos()" style="margin-top:12px;">Tentar de novo</button>
-      </td></tr>`;
-    }
-    showToast('❌ Não foi possível carregar os riscos.', '#c62828');
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar os riscos.', 'riscos');
     return;
   }
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaRiscos').style.display = 'block';
 
-  document.getElementById('filtroRiscoArea').innerHTML = '<option value="">Todas as áreas</option>' +
-    riscosAreasCache.map(a => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
-  document.getElementById('filtroRiscoFornecedor').innerHTML = '<option value="">Todos (inclui sem fornecedor)</option>' +
-    '<option value="_qualquer_">Somente riscos de fornecedores</option>' +
-    riscosFornecedoresCache.map(f => `<option value="${f.id}">${esc(f.nome)}</option>`).join('');
+  _preencherFiltroLista('filtroRiscoArea', 'Área', riscosAreasCache.map((a) => [a.nome, a.nome]));
+  _preencherFiltroLista('filtroRiscoFornecedor', 'Fornecedor', [['_qualquer_', 'Só riscos de fornecedores'], ...riscosFornecedoresCache.map((f) => [f.id, f.nome])], 'Todos');
   _popularFiltroProdutoRisco();
+  // Veio de um número do Dashboard de Riscos: abre já filtrado.
+  _aplicarFiltroInicialLista('riscos');
 
   renderizarRiscos();
 }
@@ -13616,9 +13624,9 @@ function _popularFiltroProdutoRisco() {
   const atual = sel.value;
   const ids = [...new Set((riscosData || []).map((r) => r.produtoSoftwareId).filter(Boolean).map(String))];
   const opcoes = ids.map((id) => ({ id, nome: _nomeProdutoRisco({ produtoSoftwareId: id }) })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
-  sel.innerHTML = '<option value="">Todos</option>' + opcoes.map((o) => `<option value="${esc(o.id)}">${esc(o.nome)}</option>`).join('')
-    + '<option value="__sem__">Sem produto</option>';
+  sel.innerHTML = _opcoesFiltroLista('Produto', [...opcoes.map((o) => [o.id, o.nome]), ['__sem__', 'Sem produto']], 'Todos');
   sel.value = [...sel.options].some((o) => o.value === atual) ? atual : '';
+  _marcarFiltroLista(sel);
 }
 
 /**
@@ -14188,6 +14196,7 @@ function renderizarRiscos() {
   });
 
   riscosOrdenacao.atualizarSetas('sort-risco-', ['dataIdentificacao', 'area', 'titulo', 'status', 'score']);
+  _atualizarBarraLista('riscosContador', data.length, ['risco', 'riscos']);
 
   const processosPorId = RiscoConsolidado.indexarProcessos(riscosProcessosCache);
 
@@ -14195,37 +14204,24 @@ function renderizarRiscos() {
   const pagEl = document.getElementById('riscosPaginacao');
   if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaRiscos');
   document.getElementById('riscoRows').innerHTML = pag.itens.length
-    ? pag.itens.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${r.id}')">
-        <td class="num col-nw">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '–'}</td>
-        <td>${r.area ? `<span class="chip-area" title="${esc(r.area)}">${esc(r.area)}</span>` : '<span class="muted">–</span>'}</td>
-        <td>${esc(r.responsavel || '–')}</td>
-        <td>${_nomeProdutoRisco(r) ? `<span title="${esc(_nomeProdutoRisco(r))}">${esc(_nomeProdutoRisco(r))}</span>` : '<span class="muted">–</span>'}</td>
-        <td>${esc(_rotuloOrigemRisco(r.origem))}</td>
-        <td>${r.processo ? esc(r.processo) : (r.fornecedorNome ? `🏢 ${esc(r.fornecedorNome)}` : '<span class="muted">Corporativo</span>')}</td>
-        <td class="muted">${esc((r.categorias || []).join(', ')) || '–'}</td>
-        <td class="title" title="${esc(r.titulo)}">${esc(r.titulo)}</td>
+    ? pag.itens.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${escJs(r.id)}')">
+        <td class="num">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '–'}</td>
+        ${_tdLista(r.area || '–')}${_tdLista(r.responsavel || '–')}${_tdLista(_nomeProdutoRisco(r) || '–')}${_tdLista(_rotuloOrigemRisco(r.origem))}
+        ${_tdLista(r.processo || (r.fornecedorNome ? 'Fornecedor: ' + r.fornecedorNome : 'Corporativo'))}
+        ${_tdLista((r.categorias || []).join(', ') || '–')}${_tdLista(r.titulo, 'title forte')}
         <td>${_badgeStatusRisco(r.status)}${_selosGovernancaRisco(r)}</td>
-        <td>${esc(r.reportadoPor || '–')}</td>
+        ${_tdLista(r.reportadoPor || '–')}
         <td>${_badgeProbImpactoRisco(r.probabilidade)}</td>
         <td>${_badgeProbImpactoRisco(r.impacto)}</td>
         <td class="col-c">${_badgeScoreRisco(r)}</td>
         <td class="col-c">${_badgeResidualRisco(r)}</td>
         <td class="col-c">${_badgeCargaRisco(r, processosPorId)}</td>
-        <td class="num col-r col-nw">${r.impactoFinanceiro === null || r.impactoFinanceiro === undefined ? '<span class="muted">–</span>' : _formatarReais(r.impactoFinanceiro)}</td>
+        <td class="num col-r">${r.impactoFinanceiro === null || r.impactoFinanceiro === undefined ? '<span class="muted">–</span>' : _formatarReais(r.impactoFinanceiro)}</td>
         <td>${_badgeProbImpactoRisco(r.prioridade)}</td>
-        <td class="col-c col-nw col-sticky" onclick="event.stopPropagation();">
-          <button class="btn-icon" onclick="editarRisco('${r.id}')" title="${isAdmin ? 'Editar' : 'Visualizar'}">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          ${isAdmin ? `<button class="btn-icon" onclick="clonarRisco('${r.id}')" title="Clonar">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d60014" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          </button>` : ''}
-          ${isAdmin ? `<button class="btn-icon" onclick="excluirRisco('${r.id}')" title="Excluir">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-          </button>` : ''}
-        </td>
+        ${_htmlAcoesLinha([{ icone: SVG_EDITAR, titulo: isAdmin ? 'Editar' : 'Visualizar', onclick: `editarRisco('${escJs(r.id)}')` },
+          isAdmin ? _acaoClonar(`clonarRisco('${escJs(r.id)}')`) : null, isAdmin ? _acaoExcluir(`excluirRisco('${escJs(r.id)}')`) : null])}
       </tr>`).join('')
-    : '<tr><td colspan="18" class="vazio">Nenhum risco cadastrado.</td></tr>';
+    : `<tr><td colspan="18" class="vazio">${riscosData.length ? 'Nenhum risco encontrado com esses filtros.' : 'Nenhum risco cadastrado.'}</td></tr>`;
 }
 
 // ------------------------------------------------------------
@@ -14235,7 +14231,7 @@ function renderizarRiscos() {
 // ------------------------------------------------------------
 function _selosGovernancaRisco(r) {
   const hoje = new Date().toISOString().slice(0, 10);
-  const selo = (txt, cor, fundo, title) => `<div><span title="${esc(title)}" style="display:inline-block;margin-top:3px;padding:2px 8px;border-radius:10px;font-size:0.72em;font-weight:700;color:${cor};background:${fundo};">${txt}</span></div>`;
+  const selo = (txt, cor, fundo, title) => ` <span title="${esc(title)}" style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:0.72em;font-weight:700;color:${cor};background:${fundo};">${txt}</span>`;
   let h = '';
   if (RiscoConsolidado.acimaDoApetite(r, riscosApetite)) h += selo('Acima do apetite', '#c62828', '#fdecea', `Nível acima do apetite (${riscosApetite}): precisa de tratamento ou de aceite aprovado.`);
   if (RiscoConsolidado.reavaliacaoVencida(r, hoje)) h += selo('Reavaliação vencida', '#e65100', '#fff3e0', `Próxima reavaliação era ${r.proximaReavaliacao}.`);
@@ -14249,7 +14245,7 @@ function _renderApetiteRiscos() {
   if (!box) return;
   const pode = Perfis.podeEditarRegua(window.USER_PERFIS);
   const acima = (riscosData || []).filter((r) => RiscoConsolidado.acimaDoApetite(r, riscosApetite)).length;
-  box.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:0.82em;color:#555;">
+  box.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;font-size:0.9em;color:#555;">
     <span><strong>Apetite de risco:</strong> até</span>
     ${pode
       ? `<select id="riscoApetiteSelect" onchange="salvarApetiteRiscos()" style="padding:4px 8px;border:1px solid #ddd;border-radius:6px;">${RiscoConsolidado.ORDEM_NIVEL.map((n) => `<option value="${n}" ${n === riscosApetite ? 'selected' : ''}>${n}</option>`).join('')}</select>`
