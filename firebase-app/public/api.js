@@ -2602,7 +2602,7 @@ async function _importarInventarioSoftware({ arquivo, itens, resumo }, aoProgred
     if (aoProgredir) aoProgredir(Math.min(itens.length, i + LOTE), itens.length);
   }
   return _appApi('POST', 'concluirImportacaoInventario', {
-    importacaoId, linhas: resumo.linhas, linhasDescartadas: resumo.descartadas, hosts: resumo.hosts,
+    importacaoId, linhas: resumo.linhas, linhasDescartadas: resumo.descartadas, hosts: resumo.hosts + (resumo.semHost || 0),
   });
 }
 

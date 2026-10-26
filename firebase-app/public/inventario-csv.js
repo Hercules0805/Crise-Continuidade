@@ -25,7 +25,9 @@
   // Ordem = ordem dos selects do mapeamento. Sinonimos ja normalizados
   // (minusculas, sem acento, so letras e numeros).
   var CAMPOS = [
-    { chave: 'host', rotulo: 'Hostname', obrigatorio: true,
+    // Hostname e opcional (DECISAO 26/10/2026): sem ele o software entra igual,
+    // so nao liga ao ativo do BIA nem lista os hosts afetados.
+    { chave: 'host', rotulo: 'Hostname', obrigatorio: false,
       sinonimos: ['hostname', 'host', 'computador', 'computer', 'computername', 'nomedocomputador', 'maquina', 'nomedamaquina', 'machine', 'machinename', 'devicename', 'dispositivo', 'nomedodispositivo', 'ativo', 'asset', 'assetname', 'systemname', 'equipamento'] },
     { chave: 'produto', rotulo: 'Software / Produto', obrigatorio: true,
       sinonimos: ['software', 'produto', 'softwarename', 'nomedosoftware', 'product', 'productname', 'aplicativo', 'application', 'applicationname', 'programa', 'displayname', 'nome', 'name'] },
@@ -142,7 +144,7 @@
 
   /**
    * Das colunas escolhidas na tela: { mapa, extras: [{indice, nome}], erros: [texto] }.
-   * Cada papel fixo vale para uma coluna so; Hostname e Software sao obrigatorios.
+   * Cada papel fixo vale para uma coluna so; so Software e obrigatorio.
    */
   function escolhaDeColunas(colunas) {
     var mapa = {};
@@ -187,11 +189,12 @@
     var ordem = [];
     var hostsTodos = {};
     var descartadas = 0;
+    var semHost = 0;
     var col = function (l, k) { return mapa[k] >= 0 ? _limpo(l[mapa[k]]) : ''; };
     (linhas || []).forEach(function (l) {
       var host = col(l, 'host');
       var produto = col(l, 'produto');
-      if (!host || !produto) { descartadas++; return; }
+      if (!produto) { descartadas++; return; }
       var fabricante = col(l, 'fabricante');
       var versao = col(l, 'versao');
       var k = [_chave(fabricante), _chave(produto), _chave(versao)].join('|');
@@ -200,13 +203,19 @@
         item = porChave[k] = { fabricante: fabricante, produto: produto, versao: versao, _hosts: {}, qtdHosts: 0, hosts: [], _so: {}, _extras: colExtras.map(function () { return []; }) };
         ordem.push(k);
       }
-      var hk = host.toLowerCase();
-      if (!item._hosts[hk]) {
-        item._hosts[hk] = true;
+      // Linha sem hostname conta como uma instalacao a mais (maquina sem nome).
+      if (!host) {
         item.qtdHosts++;
-        if (item.hosts.length < MAX_HOSTS_ITEM) item.hosts.push(host);
+        semHost++;
+      } else {
+        var hk = host.toLowerCase();
+        if (!item._hosts[hk]) {
+          item._hosts[hk] = true;
+          item.qtdHosts++;
+          if (item.hosts.length < MAX_HOSTS_ITEM) item.hosts.push(host);
+        }
+        hostsTodos[hk] = true;
       }
-      hostsTodos[hk] = true;
       var so = col(l, 'so');
       if (so) item._so[so] = true;
       colExtras.forEach(function (e, i) {
@@ -225,7 +234,7 @@
     });
     return {
       itens: itens,
-      resumo: { linhas: (linhas || []).length, descartadas: descartadas, hosts: Object.keys(hostsTodos).length, softwares: itens.length },
+      resumo: { linhas: (linhas || []).length, descartadas: descartadas, hosts: Object.keys(hostsTodos).length, semHost: semHost, softwares: itens.length },
     };
   }
 

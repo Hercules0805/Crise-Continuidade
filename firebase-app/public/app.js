@@ -25247,7 +25247,7 @@ window.lerCsvInventarioIntel = async (input) => {
     const dados = linhas.slice(1);
     intelCsvLido = { arquivo: arquivo.name, cabecalho, dados, colunas: InventarioCsv.colunasIniciais(cabecalho, dados, intelConfig.geral.mapeamentoCsv) };
     alvo.innerHTML = `<div style="${_lblIntel}margin-top:4px;">Colunas que sobem para o sistema</div>
-      <p style="font-size:0.8em;color:#888;margin:0 0 8px;">Marque o que deve ser gravado e diga o que cada coluna é. Hostname e Software são obrigatórios; "Outra informação" (IP, usuário, departamento…) fica no inventário e ajuda a IA na análise. O que ficar desmarcado é ignorado.</p>
+      <p style="font-size:0.8em;color:#888;margin:0 0 8px;">Marque o que deve ser gravado e diga o que cada coluna é. Só Software é obrigatório; sem Hostname o software entra igual, mas não liga aos ativos do BIA nem lista os hosts afetados. "Outra informação" (IP, usuário, departamento…) fica no inventário e ajuda a IA na análise. O que ficar desmarcado é ignorado.</p>
       <div id="inventarioIntelColunas"></div>
       <div id="inventarioIntelPrevia" style="margin-top:14px;"></div>`;
     _desenharColunasInventarioIntel();
@@ -25312,9 +25312,10 @@ window._previaInventarioIntel = () => {
   intelCsvLido.mapa = mapa;
   intelCsvLido.extras = extras;
   const avisos = [];
+  if (!(mapa.host >= 0)) avisos.push('Sem a coluna de hostname, os softwares não se ligam aos ativos do BIA (sem processo/Tier) e as ações não listam os hosts.');
   if (!(mapa.fabricante >= 0)) avisos.push('Sem a coluna de fabricante, o cruzamento com as notícias fica menos preciso.');
   if (!(mapa.versao >= 0)) avisos.push('Sem a coluna de versão, a IA não consegue dizer se a versão instalada é a vulnerável.');
-  alvo.innerHTML = `<div style="font-size:0.9em;line-height:1.6;">${resumo.linhas} linha(s) → <strong>${resumo.softwares} software(s)</strong> em <strong>${resumo.hosts} host(s)</strong>${resumo.descartadas ? `; ${resumo.descartadas} linha(s) sem host ou software serão ignoradas` : ''}.
+  alvo.innerHTML = `<div style="font-size:0.9em;line-height:1.6;">${resumo.linhas} linha(s) → <strong>${resumo.softwares} software(s)</strong>${mapa.host >= 0 ? ` em <strong>${resumo.hosts} host(s)</strong>` : ''}${resumo.semHost ? `${mapa.host >= 0 ? ' +' : ','} ${resumo.semHost} instalação(ões) sem hostname` : ''}${resumo.descartadas ? `; ${resumo.descartadas} linha(s) sem software serão ignoradas` : ''}.
       ${extras.length ? `<br>Outras informações: ${esc(extras.map((e) => e.nome).join(', '))}.` : ''}</div>
     ${avisos.map((a) => `<div style="font-size:0.8em;color:#e65100;margin-top:4px;">${esc(a)}</div>`).join('')}`;
   botao.disabled = !itens.length;

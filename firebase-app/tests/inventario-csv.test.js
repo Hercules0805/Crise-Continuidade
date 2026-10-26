@@ -26,9 +26,10 @@ test('autoMapear: nomes comuns de exportacao (pt e en) e mapeamento salvo vence'
   const salvo = { produto: 'Aplicação Instalada' };
   assert.strictEqual(IC.autoMapear(['Host', 'Software', 'Aplicação Instalada'], salvo).produto, 2);
   assert.deepStrictEqual(IC.faltando({ host: 0 }).map((c) => c.chave), ['produto']);
+  assert.deepStrictEqual(IC.faltando({ produto: 1 }), [], 'so o software e obrigatorio');
 });
 
-test('consolidar: agrupa por fabricante+produto+versao, conta hosts unicos e descarta linha incompleta', () => {
+test('consolidar: agrupa por fabricante+produto+versao, conta hosts unicos; sem host conta a instalacao, sem software descarta', () => {
   const mapa = { host: 0, produto: 1, fabricante: 2, versao: 3, so: 4 };
   const r = IC.consolidar([
     ['SRV01', 'Google Chrome', 'Google LLC', '120.0', 'Windows Server'],
@@ -38,9 +39,10 @@ test('consolidar: agrupa por fabricante+produto+versao, conta hosts unicos e des
     ['', 'Sem host', 'X', '1', ''],
     ['PC03', '', 'X', '1', ''],
   ], mapa);
-  assert.strictEqual(r.itens.length, 2);
+  assert.strictEqual(r.itens.length, 3, 'linha sem host entra');
+  assert.deepStrictEqual(r.itens[2], { fabricante: 'X', produto: 'Sem host', versao: '1', qtdHosts: 1, hosts: [], sistemasOperacionais: [], extras: [] });
   assert.deepStrictEqual(r.itens[0], { fabricante: 'Google LLC', produto: 'Google Chrome', versao: '120.0', qtdHosts: 2, hosts: ['SRV01', 'PC02'], sistemasOperacionais: ['Windows Server', 'Windows 11'], extras: [] });
-  assert.deepStrictEqual(r.resumo, { linhas: 6, descartadas: 2, hosts: 2, softwares: 2 });
+  assert.deepStrictEqual(r.resumo, { linhas: 6, descartadas: 1, hosts: 2, semHost: 1, softwares: 3 });
   assert.deepStrictEqual(IC.mapaPorNome(['H', 'S', 'F', 'V', 'O'], mapa), { host: 'H', produto: 'S', fabricante: 'F', versao: 'V', so: 'O', extras: [] });
 });
 
@@ -71,8 +73,10 @@ test('escolhaDeColunas: papel repetido, obrigatorio faltando e desmarcada ignora
   assert.deepStrictEqual(ok, { mapa: { host: 0, produto: 1 }, extras: [{ indice: 2, nome: 'IP' }], erros: [] });
   const dup = IC.escolhaDeColunas(base.map((c) => (c.indice === 3 ? Object.assign({}, c, { subir: true }) : c)));
   assert.match(dup.erros[0], /mais de uma coluna/);
-  const sem = IC.escolhaDeColunas(base.map((c) => (c.indice === 0 ? Object.assign({}, c, { subir: false }) : c)));
-  assert.deepStrictEqual(sem.erros, ['Marque a coluna de Hostname.']);
+  const semHost = IC.escolhaDeColunas(base.map((c) => (c.indice === 0 ? Object.assign({}, c, { subir: false }) : c)));
+  assert.deepStrictEqual(semHost.erros, [], 'hostname e opcional');
+  const semSoftware = IC.escolhaDeColunas(base.map((c) => (c.indice === 1 ? Object.assign({}, c, { subir: false }) : c)));
+  assert.deepStrictEqual(semSoftware.erros, ['Marque a coluna de Software / Produto.']);
 });
 
 test('consolidar leva as colunas extras: valores distintos por software; mapaPorNome guarda os nomes', () => {
