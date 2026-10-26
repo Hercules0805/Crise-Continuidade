@@ -24811,7 +24811,7 @@ function renderizarThreatIntel() {
     const inv = intelConfig.inventario || {};
     _renderGradeLista(Object.assign(comum, {
       itens: intelInventarioData,
-      camposBusca: ['produto', 'fabricante', 'versao', (s) => s.hosts.join(' ')],
+      camposBusca: ['produto', 'fabricante', 'versao', (s) => s.hosts.join(' '), (s) => (s.extras || []).map((e) => e.valores.join(' ')).join(' ')],
       filtrar: (s) => !vinculo || (vinculo === 'com') === (s.dependencias.length > 0),
       comparadores: { qtdHosts: (a, b, dir) => dir * (a.qtdHosts - b.qtdHosts) },
       colunas: [
@@ -24824,7 +24824,7 @@ function renderizarThreatIntel() {
       contador: ['software', 'softwares'],
       vazio: 'Nenhum inventário de software importado.',
       vazioDetalhe: 'Use "Mais ações → Importar inventário de software" com o CSV do sistema de inventário.',
-      linha: (s) => `<tr title="${esc(s.hosts.join(', '))}">
+      linha: (s) => `<tr title="${esc(['Hosts: ' + s.hosts.join(', ')].concat((s.extras || []).map((e) => `${e.coluna}: ${e.valores.join(', ')}`)).join(' · '))}">
           ${_tdLista(s.produto, 'forte')}
           ${_tdLista(s.fabricante || '—')}
           ${_tdLista(s.versao || '—')}
@@ -25244,15 +25244,13 @@ window.lerCsvInventarioIntel = async (input) => {
     const linhas = InventarioCsv.parseCsv(texto);
     if (linhas.length < 2) { alvo.innerHTML = '<div class="lista-alerta">O arquivo não tem linhas de dados.</div>'; return; }
     const cabecalho = linhas[0];
-    intelCsvLido = { arquivo: arquivo.name, cabecalho, dados: linhas.slice(1) };
-    const mapa = InventarioCsv.autoMapear(cabecalho, intelConfig.geral.mapeamentoCsv);
-    alvo.innerHTML = `<div style="${_lblIntel}margin-top:4px;">Colunas do arquivo</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
-        ${InventarioCsv.CAMPOS.map((c) => `<div><label style="font-size:0.82em;color:#555;" for="mapaIntel_${c.chave}">${esc(c.rotulo)}${c.obrigatorio ? ' <span class="req" aria-hidden="true">*</span>' : ''}</label>
-          <select id="mapaIntel_${c.chave}" style="${_inpIntel}" onchange="_previaInventarioIntel()"><option value="">${c.obrigatorio ? 'Selecione...' : '(não tem)'}</option>
-          ${cabecalho.map((h, i) => `<option value="${i}"${mapa[c.chave] === i ? ' selected' : ''}>${esc(h || `Coluna ${i + 1}`)}</option>`).join('')}</select></div>`).join('')}
-      </div>
+    const dados = linhas.slice(1);
+    intelCsvLido = { arquivo: arquivo.name, cabecalho, dados, colunas: InventarioCsv.colunasIniciais(cabecalho, dados, intelConfig.geral.mapeamentoCsv) };
+    alvo.innerHTML = `<div style="${_lblIntel}margin-top:4px;">Colunas que sobem para o sistema</div>
+      <p style="font-size:0.8em;color:#888;margin:0 0 8px;">Marque o que deve ser gravado e diga o que cada coluna é. Hostname e Software são obrigatórios; "Outra informação" (IP, usuário, departamento…) fica no inventário e ajuda a IA na análise. O que ficar desmarcado é ignorado.</p>
+      <div id="inventarioIntelColunas"></div>
       <div id="inventarioIntelPrevia" style="margin-top:14px;"></div>`;
+    _desenharColunasInventarioIntel();
     _previaInventarioIntel();
   } catch (e) {
     console.error('inventário: falha ao ler o CSV', e);
@@ -25260,33 +25258,64 @@ window.lerCsvInventarioIntel = async (input) => {
   }
 };
 
-function _mapaInventarioIntel() {
-  const mapa = {};
-  InventarioCsv.CAMPOS.forEach((c) => {
-    const v = (document.getElementById('mapaIntel_' + c.chave) || {}).value;
-    if (v !== '' && v !== undefined) mapa[c.chave] = Number(v);
-  });
-  return mapa;
+const _PAPEIS_COLUNA_INTEL = () => InventarioCsv.CAMPOS.map((c) => [c.chave, c.rotulo + (c.obrigatorio ? ' *' : '')])
+  .concat([[InventarioCsv.PAPEL_EXTRA, 'Outra informação']]);
+
+function _desenharColunasInventarioIntel() {
+  const alvo = document.getElementById('inventarioIntelColunas');
+  if (!alvo || !intelCsvLido) return;
+  const papeis = _PAPEIS_COLUNA_INTEL();
+  const marcadas = intelCsvLido.colunas.filter((c) => c.subir).length;
+  alvo.innerHTML = `<div class="data-table data-table--lista" style="max-height:340px;overflow:auto;">
+      <table>
+        <colgroup><col style="width:60px"><col style="width:180px"><col style="width:180px"><col style="width:180px"></colgroup>
+        <thead><tr>
+          <th><input type="checkbox" aria-label="Marcar todas" title="Marcar/desmarcar todas" ${marcadas === intelCsvLido.colunas.length ? 'checked' : ''} onchange="_marcarTodasColunasIntel(this.checked)"></th>
+          <th>Coluna do arquivo</th><th>Exemplo</th><th>É o quê</th></tr></thead>
+        <tbody>${intelCsvLido.colunas.map((c) => `<tr>
+          <td><input type="checkbox" aria-label="Subir ${esc(c.nome)}" ${c.subir ? 'checked' : ''} onchange="_alterarColunaIntel(${c.indice}, 'subir', this.checked)"></td>
+          ${_tdLista(c.nome, 'forte')}
+          ${_tdLista(c.exemplo || '—')}
+          <td><select aria-label="Papel de ${esc(c.nome)}" style="${_inpIntel}padding:4px 8px;" ${c.subir ? '' : 'disabled'} onchange="_alterarColunaIntel(${c.indice}, 'papel', this.value)">
+            ${papeis.map(([v, t]) => `<option value="${esc(v)}"${v === c.papel ? ' selected' : ''}>${esc(t)}</option>`).join('')}</select></td>
+        </tr>`).join('')}</tbody>
+      </table>
+    </div>`;
+  _previaInventarioIntel();
 }
+
+window._alterarColunaIntel = (indice, campo, valor) => {
+  const c = intelCsvLido && intelCsvLido.colunas.find((x) => x.indice === indice);
+  if (!c) return;
+  c[campo] = valor;
+  _desenharColunasInventarioIntel();
+};
+
+window._marcarTodasColunasIntel = (marcar) => {
+  if (!intelCsvLido) return;
+  intelCsvLido.colunas.forEach((c) => { c.subir = marcar; });
+  _desenharColunasInventarioIntel();
+};
 
 window._previaInventarioIntel = () => {
   const alvo = document.getElementById('inventarioIntelPrevia');
   const botao = document.getElementById('btnImportarInventarioIntel');
   if (!intelCsvLido || !alvo) return;
-  const mapa = _mapaInventarioIntel();
-  const faltam = InventarioCsv.faltando(mapa);
-  if (faltam.length) {
-    alvo.innerHTML = `<div class="lista-alerta">Escolha a coluna de: ${esc(faltam.map((c) => c.rotulo).join(', '))}.</div>`;
+  const { mapa, extras, erros } = InventarioCsv.escolhaDeColunas(intelCsvLido.colunas);
+  if (erros.length) {
+    alvo.innerHTML = erros.map((e) => `<div class="lista-alerta">${esc(e)}</div>`).join('');
     botao.disabled = true;
     return;
   }
-  const { itens, resumo } = InventarioCsv.consolidar(intelCsvLido.dados, mapa);
+  const { itens, resumo } = InventarioCsv.consolidar(intelCsvLido.dados, mapa, extras);
   intelCsvLido.consolidado = { itens, resumo };
   intelCsvLido.mapa = mapa;
+  intelCsvLido.extras = extras;
   const avisos = [];
   if (!(mapa.fabricante >= 0)) avisos.push('Sem a coluna de fabricante, o cruzamento com as notícias fica menos preciso.');
   if (!(mapa.versao >= 0)) avisos.push('Sem a coluna de versão, a IA não consegue dizer se a versão instalada é a vulnerável.');
-  alvo.innerHTML = `<div style="font-size:0.9em;line-height:1.6;">${resumo.linhas} linha(s) → <strong>${resumo.softwares} software(s)</strong> em <strong>${resumo.hosts} host(s)</strong>${resumo.descartadas ? `; ${resumo.descartadas} linha(s) sem host ou software serão ignoradas` : ''}.</div>
+  alvo.innerHTML = `<div style="font-size:0.9em;line-height:1.6;">${resumo.linhas} linha(s) → <strong>${resumo.softwares} software(s)</strong> em <strong>${resumo.hosts} host(s)</strong>${resumo.descartadas ? `; ${resumo.descartadas} linha(s) sem host ou software serão ignoradas` : ''}.
+      ${extras.length ? `<br>Outras informações: ${esc(extras.map((e) => e.nome).join(', '))}.` : ''}</div>
     ${avisos.map((a) => `<div style="font-size:0.8em;color:#e65100;margin-top:4px;">${esc(a)}</div>`).join('')}`;
   botao.disabled = !itens.length;
 };
@@ -25301,7 +25330,7 @@ window.importarInventarioIntelTela = async () => {
       const r = await API.importarInventarioSoftware({ arquivo: lido.arquivo, itens: lido.consolidado.itens, resumo: lido.consolidado.resumo },
         (feitos, total) => { if (previa) previa.innerHTML = `<div style="font-size:0.9em;">Enviando… ${feitos} de ${total} softwares.</div>`; });
       // O mapeamento fica para a próxima importação (nomes de coluna, não posição).
-      try { await API.salvarConfigThreatIntel({ mapeamentoCsv: InventarioCsv.mapaPorNome(lido.cabecalho, lido.mapa) }); } catch (e) { console.error('inventário: mapeamento não salvo', e); }
+      try { await API.salvarConfigThreatIntel({ mapeamentoCsv: InventarioCsv.mapaPorNome(lido.cabecalho, lido.mapa, lido.extras) }); } catch (e) { console.error('inventário: mapeamento não salvo', e); }
       fecharDrawerInventarioIntel();
       showToast(`✅ Inventário importado: ${r.softwares} software(s)${r.hostsSemVinculo ? `; ${r.hostsSemVinculo} host(s) sem ativo no BIA` : ''}.`, '#2e7d32');
       const [config, inv] = await Promise.all([API.getConfigThreatIntel(), API.getInventarioSoftware()]);

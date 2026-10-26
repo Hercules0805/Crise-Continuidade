@@ -38,6 +38,11 @@
   ];
 
   var MAX_HOSTS_ITEM = 200;
+  // Colunas "Outra informacao" (IP, usuario, departamento...): por software,
+  // os valores distintos de cada uma, com teto -- e contexto, nao cadastro.
+  var PAPEL_EXTRA = 'extra';
+  var MAX_EXTRAS = 15;
+  var MAX_VALORES_EXTRA = 20;
 
   function _chave(s) {
     return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '');
@@ -116,26 +121,68 @@
     return mapa;
   }
 
+  /**
+   * Uma linha por coluna do arquivo, para a tela de escolha: { indice, nome,
+   * exemplo, subir, papel } -- papel = chave de CAMPOS ou PAPEL_EXTRA. Sobem
+   * de inicio as colunas reconhecidas e as "Outra informacao" da importacao
+   * anterior (salvo.extras, por nome); o resto comeca desmarcado.
+   */
+  function colunasIniciais(cabecalho, linhas, salvo) {
+    var mapa = autoMapear(cabecalho, salvo);
+    var papelDe = {};
+    Object.keys(mapa).forEach(function (k) { papelDe[mapa[k]] = k; });
+    var extrasSalvos = (salvo && Array.isArray(salvo.extras) ? salvo.extras : []).map(_chave);
+    return (cabecalho || []).map(function (h, i) {
+      var exemplo = '';
+      for (var j = 0; j < (linhas || []).length && j < 50 && !exemplo; j++) exemplo = _limpo((linhas[j] || [])[i]);
+      var extra = !papelDe[i] && extrasSalvos.indexOf(_chave(h)) >= 0;
+      return { indice: i, nome: String(h || '') || 'Coluna ' + (i + 1), exemplo: exemplo.slice(0, 80), subir: !!papelDe[i] || extra, papel: papelDe[i] || PAPEL_EXTRA };
+    });
+  }
+
+  /**
+   * Das colunas escolhidas na tela: { mapa, extras: [{indice, nome}], erros: [texto] }.
+   * Cada papel fixo vale para uma coluna so; Hostname e Software sao obrigatorios.
+   */
+  function escolhaDeColunas(colunas) {
+    var mapa = {};
+    var extras = [];
+    var erros = [];
+    (colunas || []).filter(function (c) { return c.subir; }).forEach(function (c) {
+      if (c.papel === PAPEL_EXTRA) { extras.push({ indice: c.indice, nome: c.nome }); return; }
+      var campo = CAMPOS.filter(function (x) { return x.chave === c.papel; })[0];
+      if (!campo) return;
+      if (mapa[c.papel] >= 0) erros.push('"' + campo.rotulo + '" está em mais de uma coluna.');
+      else mapa[c.papel] = c.indice;
+    });
+    faltando(mapa).forEach(function (c) { erros.push('Marque a coluna de ' + c.rotulo + '.'); });
+    if (extras.length > MAX_EXTRAS) erros.push('No máximo ' + MAX_EXTRAS + ' colunas de "Outra informação".');
+    return { mapa: mapa, extras: extras, erros: erros };
+  }
+
   /** Campos obrigatorios sem coluna. */
   function faltando(mapa) {
     return CAMPOS.filter(function (c) { return c.obrigatorio && !(mapa && mapa[c.chave] >= 0); });
   }
 
-  /** Mapeamento por NOME de coluna (o que fica salvo para a proxima importacao). */
-  function mapaPorNome(cabecalho, mapa) {
+  /** Mapeamento por NOME de coluna (o que fica salvo para a proxima importacao), com as extras. */
+  function mapaPorNome(cabecalho, mapa, extras) {
     var r = {};
     CAMPOS.forEach(function (c) {
       if (mapa && mapa[c.chave] >= 0) r[c.chave] = String(cabecalho[mapa[c.chave]] || '');
     });
+    r.extras = (extras || []).map(function (e) { return String(e.nome || ''); });
     return r;
   }
 
   /**
    * Consolida as linhas (sem o cabecalho) por fabricante + produto + versao.
-   * Devolve { itens: [{ fabricante, produto, versao, qtdHosts, hosts, sistemasOperacionais }],
+   * `extras` = [{indice, nome}] das colunas "Outra informacao".
+   * Devolve { itens: [{ fabricante, produto, versao, qtdHosts, hosts, sistemasOperacionais, extras: [{coluna, valores}] }],
    *           resumo: { linhas, descartadas, hosts, softwares } }.
    */
-  function consolidar(linhas, mapa) {
+  function consolidar(linhas, mapa, extras) {
+    var colExtras = (extras || []).slice(0, MAX_EXTRAS);
     var porChave = {};
     var ordem = [];
     var hostsTodos = {};
@@ -150,7 +197,7 @@
       var k = [_chave(fabricante), _chave(produto), _chave(versao)].join('|');
       var item = porChave[k];
       if (!item) {
-        item = porChave[k] = { fabricante: fabricante, produto: produto, versao: versao, _hosts: {}, qtdHosts: 0, hosts: [], _so: {} };
+        item = porChave[k] = { fabricante: fabricante, produto: produto, versao: versao, _hosts: {}, qtdHosts: 0, hosts: [], _so: {}, _extras: colExtras.map(function () { return []; }) };
         ordem.push(k);
       }
       var hk = host.toLowerCase();
@@ -162,10 +209,19 @@
       hostsTodos[hk] = true;
       var so = col(l, 'so');
       if (so) item._so[so] = true;
+      colExtras.forEach(function (e, i) {
+        var v = _limpo(l[e.indice]);
+        var lista = item._extras[i];
+        if (v && lista.length < MAX_VALORES_EXTRA && lista.indexOf(v) < 0) lista.push(v.slice(0, 200));
+      });
     });
     var itens = ordem.map(function (k) {
       var x = porChave[k];
-      return { fabricante: x.fabricante, produto: x.produto, versao: x.versao, qtdHosts: x.qtdHosts, hosts: x.hosts, sistemasOperacionais: Object.keys(x._so).slice(0, 20) };
+      return {
+        fabricante: x.fabricante, produto: x.produto, versao: x.versao, qtdHosts: x.qtdHosts, hosts: x.hosts,
+        sistemasOperacionais: Object.keys(x._so).slice(0, 20),
+        extras: colExtras.map(function (e, i) { return { coluna: e.nome, valores: x._extras[i] }; }).filter(function (e) { return e.valores.length; }),
+      };
     });
     return {
       itens: itens,
@@ -180,6 +236,10 @@
 
   return {
     CAMPOS: CAMPOS,
+    PAPEL_EXTRA: PAPEL_EXTRA,
+    MAX_EXTRAS: MAX_EXTRAS,
+    colunasIniciais: colunasIniciais,
+    escolhaDeColunas: escolhaDeColunas,
     detectarSeparador: detectarSeparador,
     parseCsv: parseCsv,
     autoMapear: autoMapear,

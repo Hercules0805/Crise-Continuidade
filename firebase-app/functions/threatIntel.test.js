@@ -379,3 +379,19 @@ test('resumo de Threat Intel: so Seguranca do dominio; so Critica/Alta pendentes
   assert.strictEqual(N.normalizarConfig({}).threatIntel.resumoDiario, true);
   assert.strictEqual(N.normalizarConfig({ threatIntel: { resumoDiario: false } }).threatIntel.resumoDiario, false);
 });
+
+test('colunas extras do inventario: tetos na gravacao e contexto no prompt', () => {
+  const ex = TI.extrasDoInventario([
+    { coluna: 'IP', valores: ['10.0.0.1', '10.0.0.1', '', ...Array(30).fill(0).map((_, i) => `10.0.1.${i}`)] },
+    { coluna: 'IP', valores: ['dup'] },
+    { coluna: '', valores: ['x'] },
+    { coluna: 'Vazia', valores: [] },
+    'lixo',
+  ]);
+  assert.strictEqual(ex.length, 1);
+  assert.strictEqual(ex[0].valores.length, 20);
+  const doc = TI.documentoDeInventario({ produto: 'Chrome', hosts: ['h'], extras: [{ coluna: 'Exposição', valores: ['Internet'] }] }, new Map());
+  assert.deepStrictEqual(doc.doc.extras, [{ coluna: 'Exposição', valores: ['Internet'] }]);
+  const p = TI.promptAnalise({ titulo: 'T', resumo: '', cves: [] }, [Object.assign({ id: 's1' }, doc.doc)]);
+  assert.match(p, /"outrasInformacoes":\{"Exposição":\["Internet"\]\}/);
+});

@@ -2585,6 +2585,8 @@ async function _lerInventarioSoftware() {
     qtdHosts: Number(x.qtdHosts) || 0,
     hosts: Array.isArray(x.hosts) ? x.hosts : [],
     dependencias: Array.isArray(x.dependencias) ? x.dependencias : [],
+    // Colunas "Outra informação" escolhidas na importação: [{ coluna, valores }].
+    extras: Array.isArray(x.extras) ? x.extras : [],
   }));
 }
 
