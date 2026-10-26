@@ -172,6 +172,24 @@ async function _cadeia(db, cache) {
   return cache.cadeia;
 }
 
+/**
+ * Softwares do inventario que casaram com a noticia (pre-filtro), com a
+ * conclusao da IA para cada um: afetado true/false, ou null quando a IA nao
+ * respondeu. E o que a tela mostra em "No parque" -- sem isso, uma noticia
+ * analisada sem acao nao dizia qual software a levou para a IA.
+ */
+function _correspondencias(candidatos, idsAfetados) {
+  const afetados = idsAfetados ? new Set(idsAfetados) : null;
+  return candidatos.map((s) => ({
+    id: s.id,
+    fabricante: s.fabricante || '',
+    produto: s.produto || '',
+    versao: s.versao || '',
+    qtdHosts: Number(s.qtdHosts) || 0,
+    afetado: afetados ? afetados.has(s.id) : null,
+  }));
+}
+
 function _comProcessos(candidato, cadeia) {
   const deps = Array.isArray(candidato.dependencias) ? candidato.dependencias : [];
   const processos = deps.length
@@ -195,7 +213,7 @@ async function analisarNoticia(db, noticiaId, noticia, deps, cache) {
   const candidatos = TI.candidatosDoInventario(noticia, c.inventario).slice(0, TI.MAX_CANDIDATOS_IA);
 
   if (!candidatos.length) {
-    await ref.set({ status: TI.STATUS_NOTICIA.SEM_CORRESPONDENCIA, analisadaEm: agora, analise: null, erro: '' }, { merge: true });
+    await ref.set({ status: TI.STATUS_NOTICIA.SEM_CORRESPONDENCIA, analisadaEm: agora, analise: null, erro: '', correspondencias: [] }, { merge: true });
     return { status: TI.STATUS_NOTICIA.SEM_CORRESPONDENCIA, acoes: [], usouIA: false };
   }
 
@@ -206,7 +224,7 @@ async function analisarNoticia(db, noticiaId, noticia, deps, cache) {
     analise = TI.sanitizarAnalise(await deps.chamarIA(TI.promptAnalise(noticia, enriquecidos)), enriquecidos.map((x) => x.id));
     if (!analise) throw _erro(deps, 'A IA respondeu fora do formato esperado.');
   } catch (err) {
-    await ref.set({ status: TI.STATUS_NOTICIA.ERRO, erro: String((err && err.message) || 'erro').slice(0, 300), analisadaEm: agora }, { merge: true });
+    await ref.set({ status: TI.STATUS_NOTICIA.ERRO, erro: String((err && err.message) || 'erro').slice(0, 300), analisadaEm: agora, correspondencias: _correspondencias(candidatos, null) }, { merge: true });
     return { status: TI.STATUS_NOTICIA.ERRO, acoes: [], usouIA: true, erro: err && err.message };
   }
 
@@ -232,6 +250,7 @@ async function analisarNoticia(db, noticiaId, noticia, deps, cache) {
     analisadaEm: agora,
     revisao,
     erro: '',
+    correspondencias: _correspondencias(candidatos, analise.softwaresAfetados),
     analise: {
       relevante: analise.relevante,
       justificativa: analise.justificativa,

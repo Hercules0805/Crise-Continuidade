@@ -24607,6 +24607,15 @@ function _pillTriagemIntel(a) {
   return _pillIntel('Pendente', '#e65100', '#fff3e0');
 }
 
+/** Célula "No parque": o software do inventário que levou a notícia à IA (os afetados primeiro), o resto no title. */
+function _tdNoParqueIntel(n) {
+  const lista = [...(n.correspondencias || [])].sort((a, b) => (b.afetado === true) - (a.afetado === true));
+  if (!lista.length) return _tdLista('–');
+  const nome = (c) => `${c.produto} ${c.versao}`.trim();
+  const titulo = lista.map((c) => `${[c.fabricante, nome(c)].filter(Boolean).join(' · ')} (${c.qtdHosts} host(s))${c.afetado === true ? ' — afetado' : c.afetado === false ? ' — não afetado' : ''}`).join('\n');
+  return `<td title="${esc(titulo)}">${esc(nome(lista[0]))}${lista.length > 1 ? ` <span class="muted">+${lista.length - 1}</span>` : ''}</td>`;
+}
+
 function _pillSituacaoNoticia(status) {
   const s = INTEL_SITUACAO_NOTICIA[status] || { rotulo: status || '—', cor: '#999', fundo: '#f5f5f5' };
   return _pillIntel(s.rotulo, s.cor, s.fundo);
@@ -24779,17 +24788,17 @@ function renderizarThreatIntel() {
     const origem = _valorFiltroIntel('filtroIntelOrigem');
     _renderGradeLista(Object.assign(comum, {
       itens: intelNoticiasData,
-      camposBusca: ['titulo', 'fonte', (n) => n.cves.join(' ')],
+      camposBusca: ['titulo', 'fonte', (n) => n.cves.join(' '), (n) => n.correspondencias.map((c) => `${c.fabricante} ${c.produto} ${c.versao}`).join(' ')],
       filtrar: (n) => (!situacao || n.status === situacao) && (!origem || n.origem === origem),
       comparadores: {
         coletadoEm: (a, b, dir) => dir * String(a.coletadoEm).localeCompare(String(b.coletadoEm)),
         publicadoEm: (a, b, dir) => dir * String(a.publicadoEm).localeCompare(String(b.publicadoEm)),
       },
       colunas: [
-        { rotulo: 'Notícia', w: 330, ordem: 'titulo' },
-        { rotulo: 'Fonte', w: 120, ordem: 'fonte' },
+        { rotulo: 'Notícia', w: 280, ordem: 'titulo' },
+        { rotulo: 'Fonte', w: 100, ordem: 'fonte' },
         { rotulo: 'Publicada', w: 90, ordem: 'publicadoEm' },
-        { rotulo: 'CVE', w: 125 },
+        { rotulo: 'No parque', w: 180 },
         { rotulo: 'Situação', w: 150 },
         { rotulo: 'Ações', w: 60 },
       ],
@@ -24797,10 +24806,10 @@ function renderizarThreatIntel() {
       vazio: 'Nenhuma notícia coletada ainda.',
       vazioDetalhe: 'A coleta roda todo dia às 06:30; use "Coletar agora" para não esperar.',
       linha: (n) => `<tr onclick="abrirDrawerNoticiaIntel('${escJs(n.id)}')" style="cursor:pointer;">
-          ${_tdLista(n.titulo, 'forte')}
+          <td class="forte" title="${esc([n.titulo, n.cves.join(', ')].filter(Boolean).join(' · '))}">${esc(n.titulo)}</td>
           ${_tdLista(n.fonte)}
           ${_tdLista(n.publicadoEm ? _dataBR(n.publicadoEm) : '–')}
-          ${_tdLista(n.cves.join(', ') || '—')}
+          ${_tdNoParqueIntel(n)}
           <td${n.erro ? ` title="${esc(n.erro)}"` : ''}>${_pillSituacaoNoticia(n.status)}</td>
           ${_tdLista(n.analise ? String(n.analise.acoes) : '–')}
           ${_htmlAcoesLinha([{ icone: SVG_VER, titulo: 'Ver notícia', onclick: `abrirDrawerNoticiaIntel('${escJs(n.id)}')` }])}
@@ -25046,7 +25055,6 @@ window.abrirDrawerNoticiaIntel = (id) => {
   const acoes = intelAcoesData.filter((a) => a.noticiaId === id);
   const analise = n.analise
     ? `<div style="font-size:0.92em;white-space:pre-wrap;">${esc(n.analise.justificativa || (n.analise.relevante ? '—' : 'A IA concluiu que a notícia não afeta o ambiente.'))}</div>`
-      + (n.analise.softwaresAfetados.length ? `<div style="font-size:0.82em;color:#666;margin-top:6px;">Softwares: ${esc(n.analise.softwaresAfetados.map((s) => `${s.produto} ${s.versao}`.trim()).join(', '))}</div>` : '')
     : `<span class="vazio-inline">${n.status === 'sem_correspondencia' ? 'Não cita nenhum software do inventário: não foi para a IA.' : n.status === 'erro' ? 'A análise falhou. Use "Analisar de novo".' : 'Ainda não analisada (fila da próxima coleta).'}</span>`;
   document.getElementById('noticiaIntelCorpo').innerHTML = `
     <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:16px;">${_pillSituacaoNoticia(n.status)}${n.origem === 'kev' ? ' ' + _htmlBadge('critical', 'Explorada ativamente (CISA KEV)') : ''}</div>
@@ -25054,6 +25062,7 @@ window.abrirDrawerNoticiaIntel = (id) => {
       <div style="font-size:0.8em;color:#888;margin-top:2px;">Publicada em ${esc(n.publicadoEm ? _dataBR(n.publicadoEm) : '–')} · coletada em ${esc(_dataHoraIntel(n.coletadoEm))}${n.coletadoPor ? ' por ' + esc(n.coletadoPor) : ''}${n.cves.length ? ' · ' + esc(n.cves.join(', ')) : ''}</div>`)}
     ${n.kev ? _secaoIntel('CISA KEV', `<div style="font-size:0.9em;">${esc([n.kev.fabricante, n.kev.produto].filter(Boolean).join(' · '))}${n.kev.prazo ? ` · prazo da CISA ${esc(_dataBR(n.kev.prazo))}` : ''}${n.kev.ransomware ? ' · usada em ransomware' : ''}</div>`) : ''}
     ${_secaoIntel('Resumo', `<div style="font-size:0.9em;white-space:pre-wrap;max-height:260px;overflow:auto;">${esc(n.resumo || '—')}</div>`)}
+    ${_secaoIntel('Softwares do parque', _htmlCorrespondenciasIntel(n))}
     ${_secaoIntel('Análise', analise)}
     ${_secaoIntel(`Ações geradas (${acoes.length})`, acoes.length
       ? `<ul style="margin:0;padding-left:18px;font-size:0.9em;">${acoes.map((a) => `<li><a href="javascript:void(0)" onclick="fecharDrawerNoticiaIntel();abrirDrawerAcaoIntel('${escJs(a.id)}')">${esc(a.titulo)}</a> ${_pillTriagemIntel(a)}</li>`).join('')}</ul>`
@@ -25061,6 +25070,21 @@ window.abrirDrawerNoticiaIntel = (id) => {
   document.getElementById('drawerNoticiaIntel').classList.add('open');
   document.getElementById('drawerOverlayNoticiaIntel').classList.add('open');
 };
+
+/** Lista do drawer da notícia: cada software do inventário que casou e a conclusão da IA. */
+function _htmlCorrespondenciasIntel(n) {
+  const lista = n.correspondencias || [];
+  if (!lista.length) {
+    if (n.status === 'sem_correspondencia') return '<span class="vazio-inline">Nenhum software do inventário citado pela notícia.</span>';
+    if (n.status === 'analisada') return '<span class="vazio-inline">Analisada antes desta lista existir. Use "Analisar de novo" para ver os softwares.</span>';
+    return '<span class="vazio-inline">—</span>';
+  }
+  const selo = (c) => (c.afetado === true ? _pillIntel('Afetado', '#c62828', '#ffebee')
+    : c.afetado === false ? _pillIntel('Não afetado', '#2e7d32', '#e8f5e9')
+      : _pillIntel('Sem conclusão da IA', '#999', '#f5f5f5'));
+  return `<ul style="margin:0;padding-left:18px;font-size:0.9em;">${lista.map((c) => `<li style="margin-bottom:4px;">${esc([c.fabricante, c.produto].filter(Boolean).join(' · '))} <strong>${esc(c.versao || 'versão não informada')}</strong> <span class="muted">(${c.qtdHosts} host${c.qtdHosts === 1 ? '' : 's'})</span> ${selo(c)}</li>`).join('')}</ul>
+    <span style="font-size:0.72em;color:#888;display:block;margin-top:4px;">Casaram pelo fabricante/produto citados na notícia; a IA decide se a versão instalada é afetada.</span>`;
+}
 
 window.fecharDrawerNoticiaIntel = () => {
   document.getElementById('drawerNoticiaIntel').classList.remove('open');

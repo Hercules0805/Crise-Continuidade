@@ -238,11 +238,14 @@ test('analisarNoticia: sem correspondencia nao chama a IA; com, grava acoes e re
   const r0 = await S.analisarNoticia(db, semRel.id, semRel.noticia, d);
   assert.strictEqual(r0.status, 'sem_correspondencia');
   assert.strictEqual(d.chamadas.length, 0);
+  assert.deepStrictEqual(db._store.intel_noticias[semRel.id].correspondencias, []);
 
   const [n] = await S.registrarNoticias(db, [TI.noticiaManual({ titulo: 'Fortinet corrige falha no FortiClient VPN', texto: 'Versões 7.2.0 a 7.2.4 afetadas.' })]);
   const r1 = await S.analisarNoticia(db, n.id, n.noticia, d);
   assert.strictEqual(r1.status, 'analisada');
   assert.strictEqual(r1.acoes.length, 1);
+  const corr = db._store.intel_noticias[n.id].correspondencias;
+  assert.deepStrictEqual(corr.map((x) => [x.produto, x.versao, x.qtdHosts, x.afetado]), [['FortiClient VPN', '7.2.1', 1, true]]);
   const acao = db._store.intel_acoes[r1.acoes[0]];
   assert.strictEqual(acao.statusTriagem, 'Pendente');
   assert.strictEqual(acao.prioridade, 'Alta');
@@ -263,6 +266,7 @@ test('analisarNoticia: resposta invalida marca erro sem gravar acao', async () =
   const r = await S.analisarNoticia(db, n.id, n.noticia, deps('não é objeto'));
   assert.strictEqual(r.status, 'erro');
   assert.strictEqual(db._store.intel_noticias[n.id].status, 'erro');
+  assert.strictEqual(db._store.intel_noticias[n.id].correspondencias[0].afetado, null, 'sem resposta da IA');
   assert.strictEqual(db._store.intel_acoes, undefined);
 });
 

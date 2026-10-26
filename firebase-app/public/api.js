@@ -2517,6 +2517,12 @@ async function _lerIntelNoticias() {
       coletadoEm: n.coletadoEm || '',
       coletadoPor: n.coletadoPor || '',
       analisadaEm: n.analisadaEm || '',
+      // Softwares do inventario que casaram, com a conclusao da IA (afetado
+      // true/false/null). Noticia analisada antes de 26/10/2026 nao tem a
+      // lista: cai nos afetados da analise (os nao afetados so com "Analisar de novo").
+      correspondencias: Array.isArray(n.correspondencias)
+        ? n.correspondencias
+        : (an && Array.isArray(an.softwaresAfetados) ? an.softwaresAfetados.map((x) => Object.assign({ afetado: true }, x)) : []),
       analise: an ? {
         relevante: !!an.relevante,
         justificativa: an.justificativa || '',
