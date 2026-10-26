@@ -557,6 +557,30 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // ---- Threat Intelligence (26/10/2026) ----
+    // Noticias, acoes recomendadas e inventario de software: so o servidor
+    // grava (coleta agendada e acoes do appApi, que conferem o perfil).
+    // Leitura so de quem faz a triagem: o inventario diz o que esta instalado
+    // e onde, e as acoes apontam o que esta vulneravel.
+    match /intel_noticias/{id} {
+      allow read: if isAdmin() || isSeguranca();
+      allow write: if false;
+    }
+    match /intel_acoes/{id} {
+      allow read: if isAdmin() || isSeguranca();
+      allow write: if false;
+    }
+    match /inventario_software/{id} {
+      allow read: if isAdmin() || isSeguranca();
+      allow write: if false;
+    }
+    // "geral" (fontes, teto de IA, mapeamento do CSV) e editado pela tela;
+    // "inventario" (importacao atual) so pelo servidor.
+    match /config_threat_intel/{id} {
+      allow read: if isAdmin() || isSeguranca();
+      allow write: if (isAdmin() || isSeguranca()) && id == 'geral';
+    }
+
     // ---- Tokens ----
     // FECHADO PARA TODO MUNDO, de propósito (20/09/2026).
     //

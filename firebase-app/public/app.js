@@ -33,6 +33,7 @@ const pages = {
   'notificacoes-email': notificacoesEmail,
   perfis,
   conformidade,
+  'threat-intel': threatIntel,
 };
 
 // Paleta rotativa de 10 cores para tags de categoria dinâmicas (dependências/BIA).
@@ -10884,7 +10885,7 @@ function _configSeveridadeVuln(tipo) {
 }
 
 /** Como a vulnerabilidade foi descoberta (o "quem reportou" continua em origemDeteccao, rotulo "Reportado por"). */
-const VULNERABILIDADE_METODOS_DETECCAO = ['Scan Automatizado', 'Pentest', 'Auditoria Interna', 'Auditoria Externa', 'Report Interno', 'Report de Cliente', 'Outro'];
+const VULNERABILIDADE_METODOS_DETECCAO = ['Scan Automatizado', 'Pentest', 'Threat Intelligence', 'Auditoria Interna', 'Auditoria Externa', 'Report Interno', 'Report de Cliente', 'Outro'];
 
 function _tipoVulnerabilidade(tipo) {
   return VULNERABILIDADE_TIPOS.find((t) => t.tipo === tipo) || null;
@@ -23917,6 +23918,17 @@ async function notificacoesEmail() {
             ${chk('notifContDestGestores', 'Gestores de área', 'Cada gestor recebe só as pendências dos processos da própria área.')}
           </div>
         </div>
+        <div style="${lbl}margin-top:22px;padding-top:16px;border-top:1px solid #eee;">Threat Intelligence</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;">
+          <div>
+            <div style="${lbl}">O que envia</div>
+            ${chk('notifIntelResumo', 'Resumo diário da triagem (06:30, depois da coleta)', 'Ações recomendadas de prioridade crítica ou alta geradas na coleta do dia. Sem ação nova crítica ou alta, não há e-mail.')}
+          </div>
+          <div>
+            <div style="${lbl}">Para quem</div>
+            <div style="font-size:0.85em;color:#555;">Usuários com o perfil Segurança da Informação, que fazem a triagem.</div>
+          </div>
+        </div>
         <div style="${lbl}margin-top:22px;padding-top:16px;border-top:1px solid #eee;">Servidor de envio</div>
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;">
           <div>
@@ -24014,6 +24026,7 @@ function _popularConfigNotificacoes(c) {
   document.getElementById('notifContResumo').checked = !!ct.resumoSemanal;
   document.getElementById('notifContDestOperadores').checked = !!ct.destinatarios.operadoresProcessos;
   document.getElementById('notifContDestGestores').checked = !!ct.destinatarios.gestores;
+  document.getElementById('notifIntelResumo').checked = !!(c.threatIntel || {}).resumoDiario;
   const sv = c.servidor || { provedor: 'sendgrid' };
   document.getElementById('notifProvedor').value = sv.provedor || 'sendgrid';
   document.getElementById('notifRemetenteEmail').value = sv.remetenteEmail || '';
@@ -24081,6 +24094,9 @@ function _coletarConfigNotificacoes() {
         operadoresProcessos: document.getElementById('notifContDestOperadores').checked,
         gestores: document.getElementById('notifContDestGestores').checked,
       },
+    },
+    threatIntel: {
+      resumoDiario: document.getElementById('notifIntelResumo').checked,
     },
     servidor: {
       provedor: document.getElementById('notifProvedor').value,
@@ -24540,6 +24556,812 @@ window.salvarCiclosTela = async () => {
       fecharDrawerCiclos();
       showToast('✅ Periodicidades salvas.', '#2e7d32');
       conformidade();
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar. Tente de novo.'), '#c62828');
+    }
+  });
+};
+
+// ============================================================
+// PÁGINA: THREAT INTELLIGENCE (26/10/2026)
+// Substitui o processo manual (busca de notícias -> Google Gem -> planilha de
+// ações -> triagem). A coleta diária (CISA KEV + RSS) e a notícia registrada
+// aqui passam por um pré-filtro contra o inventário de software (importado por
+// CSV, nunca digitado) e, se citam algo instalado, a IA sugere ações. A
+// Segurança faz a triagem: aprovar cria a Vulnerabilidade (o Risco vem pelo
+// gatilho de sempre); descartar exige motivo. Regra no servidor:
+// functions/threatIntel.js e threatIntelServico.js.
+// ============================================================
+let intelAcoesData = [];
+let intelNoticiasData = [];
+let intelInventarioData = [];
+let intelConfig = { geral: { feeds: [], limiteAnalisesDia: 30, ultimaColeta: null }, inventario: {} };
+let intelAba = 'acoes';
+let intelAcaoAberta = null;
+let intelCsvLido = null;
+const intelOrdenacao = { acoes: criarOrdenacao('criadoEm', 'desc'), noticias: criarOrdenacao('coletadoEm', 'desc'), inventario: criarOrdenacao('qtdHosts', 'desc') };
+const intelPaginacao = { acoes: criarPaginacao(20), noticias: criarPaginacao(20), inventario: criarPaginacao(20) };
+
+const INTEL_PRIORIDADES = ['Crítica', 'Alta', 'Média', 'Baixa'];
+const INTEL_ORIGENS = [['kev', 'CISA KEV'], ['rss', 'RSS'], ['manual', 'Manual']];
+const INTEL_SITUACAO_NOTICIA = {
+  analisada: { rotulo: 'Analisada', cor: '#1565c0', fundo: '#e3f2fd' },
+  sem_correspondencia: { rotulo: 'Sem correspondência', cor: '#555', fundo: '#f0f0f0' },
+  pendente_analise: { rotulo: 'Aguardando análise', cor: '#e65100', fundo: '#fff3e0' },
+  erro: { rotulo: 'Erro na análise', cor: '#c62828', fundo: '#ffebee' },
+};
+
+/** Prioridade da ação recomendada -> nível do chip (rótulo do módulo preservado). */
+function _nivelPrioridadeIntel(p) {
+  return { 'Crítica': 'critical', 'Alta': 'high', 'Média': 'medium', 'Baixa': 'low' }[p] || null;
+}
+
+function _pillIntel(rotulo, cor, fundo) {
+  return `<span style="display:inline-block;padding:3px 10px;border-radius:10px;font-size:0.78em;font-weight:600;color:${cor};background:${fundo};">${esc(rotulo)}</span>`;
+}
+
+/** Status da triagem (workflow, não severidade): pill própria, como o status de correção da Vulnerabilidade. */
+function _pillTriagemIntel(a) {
+  if (a.statusTriagem === 'Aprovada') return _pillIntel(a.vulnerabilidadeCodigo ? `Aprovada · ${a.vulnerabilidadeCodigo}` : 'Aprovada', '#2e7d32', '#e8f5e9');
+  if (a.statusTriagem === 'Descartada') return _pillIntel('Descartada', '#555', '#f0f0f0');
+  return _pillIntel('Pendente', '#e65100', '#fff3e0');
+}
+
+function _pillSituacaoNoticia(status) {
+  const s = INTEL_SITUACAO_NOTICIA[status] || { rotulo: status || '—', cor: '#999', fundo: '#f5f5f5' };
+  return _pillIntel(s.rotulo, s.cor, s.fundo);
+}
+
+function _rotuloOrigemIntel(origem) {
+  return (INTEL_ORIGENS.find(([v]) => v === origem) || [origem, origem || '—'])[1];
+}
+
+function _dataHoraIntel(iso) {
+  return iso ? new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '–';
+}
+
+async function threatIntel() {
+  intelAba = 'acoes';
+  const abas = [['acoes', 'Ações para triagem'], ['noticias', 'Notícias coletadas'], ['inventario', 'Inventário de software']];
+  app.innerHTML = `
+    ${_htmlCabecalhoLista({ titulo: 'Threat Intelligence', sub: 'Notícias de segurança cruzadas com o inventário de software; a triagem decide o que vira vulnerabilidade.',
+      primario: { rotulo: '+ Registrar notícia', onclick: 'abrirDrawerRegistrarNoticiaIntel()' },
+      maisAcoes: [
+        { rotulo: 'Coletar agora', onclick: 'coletarThreatIntelAgora()' },
+        { rotulo: 'Importar inventário de software', onclick: 'abrirDrawerInventarioIntel()' },
+        { rotulo: 'Configurar fontes', onclick: 'abrirConfigThreatIntel()' },
+      ] })}
+    <details class="lista-ajuda"><summary>Como funciona</summary>
+      <div class="lista-ajuda__linha"><b>1. Coleta</b><span>Todo dia às 06:30: catálogo CISA KEV (falhas exploradas ativamente) e os feeds RSS configurados. Notícia de outra fonte entra por "+ Registrar notícia".</span></div>
+      <div class="lista-ajuda__linha"><b>2. Cruzamento</b><span>Só vai para a IA a notícia que cita um fabricante ou produto do inventário de software. O resto fica como "Sem correspondência".</span></div>
+      <div class="lista-ajuda__linha"><b>3. Ações recomendadas</b><span>A IA compara a versão instalada, aponta os hosts e sugere ações com prioridade e prazo.</span></div>
+      <div class="lista-ajuda__linha"><b>4. Triagem</b><span>Aprovar cria a Vulnerabilidade (que abre o Risco pela régua de sempre). Descartar exige motivo.</span></div>
+    </details>
+    <div id="intelAvisos"></div>
+    <div role="tablist" style="display:flex;gap:4px;border-bottom:2px solid var(--brand-tint);margin-bottom:12px;">
+      ${abas.map(([id, rot]) => `<button type="button" id="tab-intel-${id}" onclick="trocarAbaIntel('${id}')" style="padding:10px 20px;font-size:0.88em;background:none;border:none;cursor:pointer;font-weight:700;">${esc(rot)}</button>`).join('')}
+    </div>
+    <div id="intelBarra"></div>
+    <div id="intelLista"><div class="loading">⏳ Carregando...</div></div>
+    ${_htmlDrawerAcaoIntel()}
+    ${_htmlDrawerNoticiaIntel()}
+    ${_htmlDrawerRegistrarNoticiaIntel()}
+    ${_htmlDrawerInventarioIntel()}
+    ${_htmlDrawerConfigLista('Configurar fontes', 'corpoConfigIntel')}`;
+  abas.forEach(([id]) => _marcarAba(document.getElementById('tab-intel-' + id), id === intelAba));
+  _desenharBarraIntel();
+
+  try {
+    const [acoes, noticias, config, deps, areas] = await Promise.all([
+      API.getIntelAcoes(), API.getIntelNoticias(), API.getConfigThreatIntel(), API.getDependencias(), API.getAreas(),
+    ]);
+    intelAcoesData = acoes || [];
+    intelNoticiasData = noticias || [];
+    intelConfig = {
+      geral: Object.assign({ feeds: [], limiteAnalisesDia: 30, ultimaColeta: null, mapeamentoCsv: null }, (config && config.geral) || {}),
+      inventario: (config && config.inventario) || {},
+    };
+    pessoasData = (deps || []).filter((d) => d.categoria === 'Pessoas');
+    window.areasData = areas || [];
+  } catch (e) {
+    console.error('threatIntel: falha ao carregar', e);
+    document.getElementById('intelLista').innerHTML = _htmlErroCarga('Não foi possível carregar o Threat Intelligence.', 'threatIntel');
+    return;
+  }
+  // Inventário pode ser grande: se falhar, a triagem abre igual.
+  try { intelInventarioData = await API.getInventarioSoftware() || []; } catch (e) { console.error('threatIntel: inventário não carregou', e); intelInventarioData = []; }
+  _desenharAvisosIntel();
+  renderizarThreatIntel();
+}
+
+function _desenharAvisosIntel() {
+  const el = document.getElementById('intelAvisos');
+  if (!el) return;
+  const inv = intelConfig.inventario || {};
+  const avisos = [];
+  if (!inv.importacaoAtual) {
+    avisos.push('Nenhum inventário de software importado: sem ele nenhuma notícia é cruzada com o ambiente. <button type="button" class="link-acao" onclick="abrirDrawerInventarioIntel()">Importar agora</button>');
+  }
+  const uc = intelConfig.geral.ultimaColeta;
+  if (uc && Array.isArray(uc.erros) && uc.erros.length) {
+    avisos.push(`Na última coleta (${esc(_dataHoraIntel(uc.em))}) ${uc.erros.length === 1 ? 'uma fonte falhou' : uc.erros.length + ' fontes falharam'}: ${uc.erros.map((x) => esc(x.feed)).join(', ')}.`);
+  }
+  el.innerHTML = avisos.map((a) => `<div class="lista-alerta">${a}</div>`).join('');
+}
+
+window.trocarAbaIntel = (aba) => {
+  intelAba = aba;
+  ['acoes', 'noticias', 'inventario'].forEach((id) => _marcarAba(document.getElementById('tab-intel-' + id), id === aba));
+  _desenharBarraIntel();
+  renderizarThreatIntel();
+};
+
+function _desenharBarraIntel() {
+  const barra = document.getElementById('intelBarra');
+  if (!barra) return;
+  if (intelAba === 'acoes') {
+    barra.innerHTML = _htmlBarraLista({ busca: { id: 'buscaIntel', placeholder: 'Buscar ação, CVE, software ou host…' }, aoMudar: 'filtrarThreatIntel', contadorId: 'intelContador',
+      filtros: [
+        { id: 'filtroIntelStatus', rotulo: 'Status', opcoes: [['Pendente', 'Pendente'], ['Aprovada', 'Aprovada'], ['Descartada', 'Descartada']], todos: 'Todos' },
+        { id: 'filtroIntelPrioridade', rotulo: 'Prioridade', opcoes: INTEL_PRIORIDADES.map((p) => [p, p]) },
+        { id: 'filtroIntelOrigem', rotulo: 'Origem', opcoes: INTEL_ORIGENS },
+      ] });
+    // A triagem abre no que falta decidir.
+    const st = document.getElementById('filtroIntelStatus');
+    st.value = 'Pendente';
+    _marcarFiltroLista(st);
+  } else if (intelAba === 'noticias') {
+    barra.innerHTML = _htmlBarraLista({ busca: { id: 'buscaIntel', placeholder: 'Buscar notícia, fonte ou CVE…' }, aoMudar: 'filtrarThreatIntel', contadorId: 'intelContador',
+      filtros: [
+        { id: 'filtroIntelSituacao', rotulo: 'Situação', opcoes: Object.entries(INTEL_SITUACAO_NOTICIA).map(([v, s]) => [v, s.rotulo]) },
+        { id: 'filtroIntelOrigem', rotulo: 'Origem', opcoes: INTEL_ORIGENS },
+      ] });
+  } else {
+    barra.innerHTML = _htmlBarraLista({ busca: { id: 'buscaIntel', placeholder: 'Buscar software, fabricante ou host…' }, aoMudar: 'filtrarThreatIntel', contadorId: 'intelContador',
+      filtros: [{ id: 'filtroIntelVinculo', rotulo: 'Ativo no BIA', opcoes: [['com', 'Vinculado'], ['sem', 'Sem vínculo']], todos: 'Todos' }] });
+  }
+}
+
+window.filtrarThreatIntel = () => { intelPaginacao[intelAba].reiniciar(); renderizarThreatIntel(); };
+window.moverPaginaIntel = (d) => { intelPaginacao[intelAba].mover(d); renderizarThreatIntel(); };
+window.ordenarThreatIntel = (col) => { intelOrdenacao[intelAba].ordenar(col); intelPaginacao[intelAba].reiniciar(); renderizarThreatIntel(); };
+
+function _valorFiltroIntel(id) {
+  return (document.getElementById(id) || {}).value || '';
+}
+
+function renderizarThreatIntel() {
+  const comum = {
+    alvoId: 'intelLista', buscaId: 'buscaIntel', contadorId: 'intelContador',
+    ordenacao: intelOrdenacao[intelAba], paginacao: intelPaginacao[intelAba],
+    fnPagina: 'moverPaginaIntel', fnOrdenar: 'ordenarThreatIntel', prefixoSeta: 'sort-intel-',
+  };
+  const ordemPrioridade = (p) => { const i = INTEL_PRIORIDADES.indexOf(p); return i < 0 ? 9 : i; };
+  if (intelAba === 'acoes') {
+    const status = _valorFiltroIntel('filtroIntelStatus');
+    const prioridade = _valorFiltroIntel('filtroIntelPrioridade');
+    const origem = _valorFiltroIntel('filtroIntelOrigem');
+    _renderGradeLista(Object.assign(comum, {
+      itens: intelAcoesData,
+      camposBusca: ['titulo', 'noticiaTitulo', 'fonte', (a) => a.cves.join(' '), (a) => a.softwares.map((s) => `${s.fabricante} ${s.produto} ${s.versao}`).join(' '), (a) => a.hosts.join(' ')],
+      filtrar: (a) => (!status || a.statusTriagem === status) && (!prioridade || a.prioridade === prioridade) && (!origem || a.origem === origem),
+      comparadores: {
+        prioridade: (a, b, dir) => dir * (ordemPrioridade(a.prioridade) - ordemPrioridade(b.prioridade)),
+        qtdHosts: (a, b, dir) => dir * (a.qtdHosts - b.qtdHosts),
+        criadoEm: (a, b, dir) => dir * String(a.criadoEm).localeCompare(String(b.criadoEm)),
+        prazoSugerido: (a, b, dir) => dir * String(a.prazoSugerido).localeCompare(String(b.prazoSugerido)),
+      },
+      colunas: [
+        { rotulo: 'Ação recomendada', w: 290, ordem: 'titulo' },
+        { rotulo: 'Prioridade', w: 100, ordem: 'prioridade' },
+        { rotulo: 'CVE', w: 125 },
+        { rotulo: 'Hosts', w: 65, ordem: 'qtdHosts' },
+        { rotulo: 'Origem', w: 100 },
+        { rotulo: 'Prazo', w: 85, ordem: 'prazoSugerido' },
+        { rotulo: 'Status', w: 110 },
+      ],
+      contador: ['ação', 'ações'],
+      vazio: intelConfig.inventario.importacaoAtual ? 'Nenhuma ação recomendada ainda.' : 'Nenhuma ação recomendada: importe o inventário de software.',
+      vazioDetalhe: 'As ações aparecem quando uma notícia cita um software instalado.',
+      linha: (a) => `<tr onclick="abrirDrawerAcaoIntel('${escJs(a.id)}')" style="cursor:pointer;">
+          ${_tdLista(a.titulo, 'forte')}
+          <td>${_htmlBadge(_nivelPrioridadeIntel(a.prioridade), a.prioridade || '—')}</td>
+          ${_tdLista(a.cves.join(', ') || '—')}
+          ${_tdLista(String(a.qtdHosts || 0))}
+          ${_tdLista(a.exploracaoAtiva ? 'KEV · explorada' : _rotuloOrigemIntel(a.origem))}
+          ${_tdLista(a.prazoSugerido ? _dataBR(a.prazoSugerido) : '–')}
+          <td>${_pillTriagemIntel(a)}</td>
+          ${_htmlAcoesLinha([{ icone: SVG_AVALIAR, titulo: 'Triar', onclick: `abrirDrawerAcaoIntel('${escJs(a.id)}')` }])}
+        </tr>`,
+    }));
+  } else if (intelAba === 'noticias') {
+    const situacao = _valorFiltroIntel('filtroIntelSituacao');
+    const origem = _valorFiltroIntel('filtroIntelOrigem');
+    _renderGradeLista(Object.assign(comum, {
+      itens: intelNoticiasData,
+      camposBusca: ['titulo', 'fonte', (n) => n.cves.join(' ')],
+      filtrar: (n) => (!situacao || n.status === situacao) && (!origem || n.origem === origem),
+      comparadores: {
+        coletadoEm: (a, b, dir) => dir * String(a.coletadoEm).localeCompare(String(b.coletadoEm)),
+        publicadoEm: (a, b, dir) => dir * String(a.publicadoEm).localeCompare(String(b.publicadoEm)),
+      },
+      colunas: [
+        { rotulo: 'Notícia', w: 330, ordem: 'titulo' },
+        { rotulo: 'Fonte', w: 120, ordem: 'fonte' },
+        { rotulo: 'Publicada', w: 90, ordem: 'publicadoEm' },
+        { rotulo: 'CVE', w: 125 },
+        { rotulo: 'Situação', w: 150 },
+        { rotulo: 'Ações', w: 60 },
+      ],
+      contador: ['notícia', 'notícias'],
+      vazio: 'Nenhuma notícia coletada ainda.',
+      vazioDetalhe: 'A coleta roda todo dia às 06:30; use "Coletar agora" para não esperar.',
+      linha: (n) => `<tr onclick="abrirDrawerNoticiaIntel('${escJs(n.id)}')" style="cursor:pointer;">
+          ${_tdLista(n.titulo, 'forte')}
+          ${_tdLista(n.fonte)}
+          ${_tdLista(n.publicadoEm ? _dataBR(n.publicadoEm) : '–')}
+          ${_tdLista(n.cves.join(', ') || '—')}
+          <td${n.erro ? ` title="${esc(n.erro)}"` : ''}>${_pillSituacaoNoticia(n.status)}</td>
+          ${_tdLista(n.analise ? String(n.analise.acoes) : '–')}
+          ${_htmlAcoesLinha([{ icone: SVG_VER, titulo: 'Ver notícia', onclick: `abrirDrawerNoticiaIntel('${escJs(n.id)}')` }])}
+        </tr>`,
+    }));
+  } else {
+    const vinculo = _valorFiltroIntel('filtroIntelVinculo');
+    const inv = intelConfig.inventario || {};
+    _renderGradeLista(Object.assign(comum, {
+      itens: intelInventarioData,
+      camposBusca: ['produto', 'fabricante', 'versao', (s) => s.hosts.join(' ')],
+      filtrar: (s) => !vinculo || (vinculo === 'com') === (s.dependencias.length > 0),
+      comparadores: { qtdHosts: (a, b, dir) => dir * (a.qtdHosts - b.qtdHosts) },
+      colunas: [
+        { rotulo: 'Software', w: 280, ordem: 'produto' },
+        { rotulo: 'Fabricante', w: 180, ordem: 'fabricante' },
+        { rotulo: 'Versão', w: 130, ordem: 'versao' },
+        { rotulo: 'Hosts', w: 70, ordem: 'qtdHosts' },
+        { rotulo: 'Ativos no BIA', w: 210 },
+      ],
+      contador: ['software', 'softwares'],
+      vazio: 'Nenhum inventário de software importado.',
+      vazioDetalhe: 'Use "Mais ações → Importar inventário de software" com o CSV do sistema de inventário.',
+      linha: (s) => `<tr title="${esc(s.hosts.join(', '))}">
+          ${_tdLista(s.produto, 'forte')}
+          ${_tdLista(s.fabricante || '—')}
+          ${_tdLista(s.versao || '—')}
+          ${_tdLista(String(s.qtdHosts))}
+          ${_tdLista(s.dependencias.map((d) => d.nome).join(', ') || '—')}
+          <td class="col-acoes"></td>
+        </tr>`,
+      depois: inv.importadoEm ? `<p style="font-size:0.8em;color:#888;margin-top:8px;">Importado em ${esc(_dataHoraIntel(inv.importadoEm))} por ${esc(inv.importadoPor || '—')} (${esc(inv.arquivo || 'CSV')}). ${Number(inv.hostsVinculados) || 0} de ${Number(inv.hosts) || 0} hosts com ativo no BIA.</p>` : '',
+    }));
+  }
+}
+
+// ---------------- Drawer da ação (triagem) ----------------
+const _lblIntel = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+const _inpIntel = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+
+function _htmlDrawerAcaoIntel() {
+  return `
+    <div class="drawer-overlay" id="drawerOverlayAcaoIntel" onclick="fecharDrawerAcaoIntel()"></div>
+    <div class="drawer" id="drawerAcaoIntel">
+      <div class="drawer-header">
+        <h3 id="acaoIntelTitulo">Ação recomendada</h3>
+        <button onclick="fecharDrawerAcaoIntel()" aria-label="Fechar" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" id="acaoIntelCorpo"></div>
+      <div class="drawer-footer" id="acaoIntelRodape"></div>
+    </div>
+    <div class="modal-overlay modal-sobre-drawer" id="modalDescartarIntel">
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tituloDescartarIntel" style="max-width:480px;">
+        <h3 id="tituloDescartarIntel">Descartar ação</h3>
+        <label for="motivoDescarteIntel">Motivo <span class="req" aria-hidden="true">*</span></label>
+        <textarea id="motivoDescarteIntel" rows="4" placeholder="Ex.: versão instalada já corrigida; módulo afetado não é usado; host desativado."></textarea>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-ghost" onclick="fecharModalDescartarIntel()">Cancelar</button>
+          <button type="button" class="btn btn-primary" id="btnConfirmarDescarteIntel" onclick="confirmarDescarteIntel()">Descartar</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function _secaoIntel(titulo, corpo) {
+  return `<div style="margin-bottom:18px;"><div style="${_lblIntel}">${esc(titulo)}</div>${corpo}</div>`;
+}
+
+window.abrirDrawerAcaoIntel = (id) => {
+  const a = intelAcoesData.find((x) => x.id === id);
+  if (!a) return;
+  intelAcaoAberta = a;
+  document.getElementById('acaoIntelTitulo').textContent = a.titulo || 'Ação recomendada';
+  const selos = [
+    _htmlBadge(_nivelPrioridadeIntel(a.prioridade), a.prioridade || 'Sem prioridade'),
+    a.exploracaoAtiva ? _htmlBadge('critical', 'Explorada ativamente (CISA KEV)') : '',
+    a.ransomware ? _htmlBadge('critical', 'Usada em ransomware') : '',
+    _pillTriagemIntel(a),
+  ].filter(Boolean).join(' ');
+  const noticia = `<div style="font-size:0.92em;">${a.noticiaUrl ? `<a href="${esc(a.noticiaUrl)}" target="_blank" rel="noopener noreferrer">${esc(a.noticiaTitulo || a.noticiaUrl)}</a>` : esc(a.noticiaTitulo || '—')}</div>
+    <div style="font-size:0.8em;color:#888;margin-top:2px;">${esc(a.fonte || _rotuloOrigemIntel(a.origem))}${a.cves.length ? ' · ' + esc(a.cves.join(', ')) : ''} · recebida em ${esc(_dataHoraIntel(a.criadoEm))}</div>`;
+  const softwares = a.softwares.length
+    ? `<ul style="margin:0;padding-left:18px;font-size:0.9em;">${a.softwares.map((s) => `<li>${esc([s.fabricante, s.produto].filter(Boolean).join(' · '))} <strong>${esc(s.versao || 'versão não informada')}</strong> <span class="muted">(${s.qtdHosts} host${s.qtdHosts === 1 ? '' : 's'})</span></li>`).join('')}</ul>`
+      + (a.hosts.length ? `<div style="font-size:0.8em;color:#666;margin-top:6px;">Hosts: ${esc(a.hosts.join(', '))}${a.qtdHosts > a.hosts.length ? ` e mais ${a.qtdHosts - a.hosts.length}` : ''}</div>` : '')
+    : '<span class="vazio-inline">Nenhum software identificado.</span>';
+  const ativos = a.ativosAfetados.length ? a.ativosAfetados.map((d) => `<span class="chip-area">${esc(d.nome)}</span>`).join(' ') : '<span class="vazio-inline">Nenhum host com ativo cadastrado no BIA.</span>';
+  const processos = a.processosAfetados.length
+    ? `<div style="display:flex;flex-wrap:wrap;gap:6px;">${a.processosAfetados.map((p) => `<span title="${esc(p.area || '')}">${esc(p.processo)} ${_htmlBadge(_nivelTierProcesso(p.tier), (p.tier || 'Pendente').split(' (')[0])}</span>`).join('')}</div>`
+    : '<span class="vazio-inline">Nenhum processo de negócio ligado a esses ativos.</span>';
+
+  let triagem = '';
+  let rodape = '<button class="btn btn-ghost" onclick="fecharDrawerAcaoIntel()">Fechar</button>';
+  if (a.statusTriagem === 'Pendente') {
+    const sev = INTEL_PRIORIDADES.includes(a.prioridade) ? a.prioridade : 'Média';
+    triagem = `<div style="border-top:1px solid #eee;padding-top:16px;">
+      <div style="font-weight:700;margin-bottom:12px;">Aprovar como vulnerabilidade</div>
+      <div style="margin-bottom:14px;"><label style="${_lblIntel}" for="intelVulnNome">Título da vulnerabilidade <span class="req" aria-hidden="true">*</span></label>
+        <input type="text" id="intelVulnNome" style="${_inpIntel}" value="${esc(a.titulo)}"></div>
+      <div style="margin-bottom:14px;"><label style="${_lblIntel}" for="intelVulnDescricao">O que fazer</label>
+        <textarea id="intelVulnDescricao" rows="4" style="${_inpIntel}">${esc(a.descricao)}</textarea>
+        <span style="font-size:0.72em;color:#888;display:block;margin-top:4px;">A notícia, os softwares, os hosts e a análise entram na descrição da vulnerabilidade automaticamente.</span></div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;">
+        <div><label style="${_lblIntel}" for="intelVulnResponsavel">Responsável <span class="req" aria-hidden="true">*</span></label>
+          <select id="intelVulnResponsavel" style="${_inpIntel}" onchange="_equipePelaPessoaIntel()"><option value="">Selecione...</option>${[...(pessoasData || [])].sort((x, y) => (x.nome || '').localeCompare(y.nome || '', 'pt-BR')).map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('')}</select></div>
+        <div><label style="${_lblIntel}" for="intelVulnEquipe">Equipe</label>
+          <select id="intelVulnEquipe" style="${_inpIntel}"><option value="">Selecione...</option>${[...new Set((window.areasData || []).map((x) => x.nome).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'pt-BR')).map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></div>
+        <div><label style="${_lblIntel}" for="intelVulnPrazo">Prazo de correção</label>
+          <input type="date" id="intelVulnPrazo" style="${_inpIntel}" value="${esc(a.prazoSugerido)}"></div>
+        <div><label style="${_lblIntel}" for="intelVulnSeveridade">Severidade</label>
+          <select id="intelVulnSeveridade" style="${_inpIntel}">${INTEL_PRIORIDADES.map((p) => `<option value="${esc(p)}"${p === sev ? ' selected' : ''}>${esc(p)}</option>`).join('')}</select></div>
+        <div><label style="${_lblIntel}" for="intelVulnCvss">CVSS (opcional)</label>
+          <input type="number" id="intelVulnCvss" min="0" max="10" step="0.1" style="${_inpIntel}" placeholder="Ex.: 9.8"></div>
+      </div>
+      <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Com CVSS, a severidade sai dele (régua da Vulnerabilidade). Prazo sugerido pela prioridade${a.exploracaoAtiva ? ' e pelo prazo da CISA' : ''}.</span>
+    </div>`;
+    rodape += `<button class="btn btn-ghost" onclick="abrirModalDescartarIntel()" style="color:#555;border-color:#999;">Descartar</button>
+      <button class="btn btn-primary" id="btnAprovarIntel" onclick="aprovarAcaoIntelTela()">Aprovar e criar vulnerabilidade</button>`;
+  } else if (a.statusTriagem === 'Aprovada') {
+    triagem = `<div style="border-top:1px solid #eee;padding-top:16px;font-size:0.92em;">Aprovada por ${esc(a.triadoPor || '—')} em ${esc(_dataHoraIntel(a.triadoEm))}: virou a vulnerabilidade <strong>${esc(a.vulnerabilidadeCodigo || '')}</strong>.
+      ${_seVeTela('vulnerabilidades', ' <a href="#vulnerabilidades" onclick="fecharDrawerAcaoIntel()">Abrir Vulnerabilidades</a>')}</div>`;
+  } else {
+    triagem = `<div style="border-top:1px solid #eee;padding-top:16px;font-size:0.92em;">Descartada por ${esc(a.triadoPor || '—')} em ${esc(_dataHoraIntel(a.triadoEm))}.<div style="margin-top:6px;color:#555;">Motivo: ${esc(a.motivoDescarte || '—')}</div></div>`;
+    rodape += '<button class="btn btn-ghost" id="btnReabrirIntel" onclick="reabrirAcaoIntelTela()">Reabrir para triagem</button>';
+  }
+
+  document.getElementById('acaoIntelCorpo').innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:16px;">${selos}</div>
+    ${_secaoIntel('Notícia', noticia)}
+    ${a.statusTriagem !== 'Pendente' ? _secaoIntel('Ação recomendada', `<div style="font-size:0.92em;white-space:pre-wrap;">${esc(a.descricao || '—')}</div>`) : ''}
+    ${_secaoIntel('Por que afeta o ambiente', `<div style="font-size:0.92em;white-space:pre-wrap;">${esc(a.justificativa || '—')}</div>`)}
+    ${_secaoIntel('Software instalado', softwares)}
+    ${_secaoIntel('Ativos no BIA', ativos)}
+    ${_secaoIntel('Processos de negócio', processos)}
+    ${triagem}`;
+  document.getElementById('acaoIntelRodape').innerHTML = rodape;
+  document.getElementById('drawerAcaoIntel').classList.add('open');
+  document.getElementById('drawerOverlayAcaoIntel').classList.add('open');
+};
+
+window.fecharDrawerAcaoIntel = () => {
+  document.getElementById('drawerAcaoIntel').classList.remove('open');
+  document.getElementById('drawerOverlayAcaoIntel').classList.remove('open');
+  intelAcaoAberta = null;
+};
+
+/** A equipe acompanha a pessoa (mesma regra do drawer de Vulnerabilidade). */
+window._equipePelaPessoaIntel = () => {
+  const nome = document.getElementById('intelVulnResponsavel').value;
+  const pessoa = nome ? (pessoasData || []).find((p) => p.nome === nome) : null;
+  const areas = pessoa ? _areasDaPessoa(pessoa) : [];
+  if (!areas.length) return;
+  const sel = document.getElementById('intelVulnEquipe');
+  if (![...sel.options].some((o) => o.value === areas[0])) sel.add(new Option(areas[0], areas[0]));
+  sel.value = areas[0];
+};
+
+window.aprovarAcaoIntelTela = async () => {
+  const a = intelAcaoAberta;
+  if (!a) return;
+  const v = (id) => document.getElementById(id).value.trim();
+  if (!v('intelVulnNome')) return _avisarCampo('intelVulnNome', 'Informe o título da vulnerabilidade.');
+  if (!v('intelVulnResponsavel')) return _avisarCampo('intelVulnResponsavel', 'Escolha o responsável pela correção.');
+  const cvss = v('intelVulnCvss');
+  if (cvss && !(Number(cvss) >= 0 && Number(cvss) <= 10)) return _avisarCampo('intelVulnCvss', 'O CVSS vai de 0 a 10.');
+  await comBotaoCarregando(document.getElementById('btnAprovarIntel'), async () => {
+    try {
+      const r = await API.aprovarAcaoIntel(a.id, {
+        titulo: v('intelVulnNome'), descricao: v('intelVulnDescricao'), responsavel: v('intelVulnResponsavel'),
+        equipeResponsavel: v('intelVulnEquipe'), dataPrevistaCorrecao: v('intelVulnPrazo'), severidade: v('intelVulnSeveridade'),
+        cvss: cvss === '' ? null : Number(cvss),
+      });
+      Object.assign(a, { statusTriagem: 'Aprovada', vulnerabilidadeId: r.vulnerabilidadeId, vulnerabilidadeCodigo: r.codigo, triadoPor: window.USER_EMAIL || '', triadoEm: new Date().toISOString() });
+      fecharDrawerAcaoIntel();
+      renderizarThreatIntel();
+      showToast(`✅ Vulnerabilidade ${r.codigo} criada.`, '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível aprovar. Tente de novo.'), '#c62828');
+    }
+  });
+};
+
+window.abrirModalDescartarIntel = () => {
+  document.getElementById('motivoDescarteIntel').value = '';
+  document.getElementById('modalDescartarIntel').classList.add('open');
+  document.getElementById('motivoDescarteIntel').focus();
+};
+window.fecharModalDescartarIntel = () => document.getElementById('modalDescartarIntel').classList.remove('open');
+
+window.confirmarDescarteIntel = async () => {
+  const a = intelAcaoAberta;
+  const motivo = document.getElementById('motivoDescarteIntel').value.trim();
+  if (motivo.length < 5) return _avisarCampo('motivoDescarteIntel', 'Informe o motivo do descarte.');
+  await comBotaoCarregando(document.getElementById('btnConfirmarDescarteIntel'), async () => {
+    try {
+      await API.descartarAcaoIntel(a.id, motivo);
+      Object.assign(a, { statusTriagem: 'Descartada', motivoDescarte: motivo, triadoPor: window.USER_EMAIL || '', triadoEm: new Date().toISOString() });
+      fecharModalDescartarIntel();
+      fecharDrawerAcaoIntel();
+      renderizarThreatIntel();
+      showToast('Ação descartada.', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível descartar. Tente de novo.'), '#c62828');
+    }
+  });
+};
+
+window.reabrirAcaoIntelTela = async () => {
+  const a = intelAcaoAberta;
+  await comBotaoCarregando(document.getElementById('btnReabrirIntel'), async () => {
+    try {
+      await API.reabrirAcaoIntel(a.id);
+      Object.assign(a, { statusTriagem: 'Pendente', motivoDescarte: '', triadoPor: '', triadoEm: '' });
+      abrirDrawerAcaoIntel(a.id);
+      renderizarThreatIntel();
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível reabrir. Tente de novo.'), '#c62828');
+    }
+  });
+};
+
+// ---------------- Drawer da notícia ----------------
+function _htmlDrawerNoticiaIntel() {
+  return `
+    <div class="drawer-overlay" id="drawerOverlayNoticiaIntel" onclick="fecharDrawerNoticiaIntel()"></div>
+    <div class="drawer" id="drawerNoticiaIntel">
+      <div class="drawer-header">
+        <h3 id="noticiaIntelTitulo">Notícia</h3>
+        <button onclick="fecharDrawerNoticiaIntel()" aria-label="Fechar" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" id="noticiaIntelCorpo"></div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerNoticiaIntel()">Fechar</button>
+        <button class="btn btn-ghost" id="btnReanalisarIntel" onclick="reanalisarNoticiaIntelTela()">Analisar de novo</button>
+      </div>
+    </div>`;
+}
+
+window.abrirDrawerNoticiaIntel = (id) => {
+  const n = intelNoticiasData.find((x) => x.id === id);
+  if (!n) return;
+  document.getElementById('drawerNoticiaIntel').dataset.id = id;
+  document.getElementById('noticiaIntelTitulo').textContent = n.titulo || 'Notícia';
+  const acoes = intelAcoesData.filter((a) => a.noticiaId === id);
+  const analise = n.analise
+    ? `<div style="font-size:0.92em;white-space:pre-wrap;">${esc(n.analise.justificativa || (n.analise.relevante ? '—' : 'A IA concluiu que a notícia não afeta o ambiente.'))}</div>`
+      + (n.analise.softwaresAfetados.length ? `<div style="font-size:0.82em;color:#666;margin-top:6px;">Softwares: ${esc(n.analise.softwaresAfetados.map((s) => `${s.produto} ${s.versao}`.trim()).join(', '))}</div>` : '')
+    : `<span class="vazio-inline">${n.status === 'sem_correspondencia' ? 'Não cita nenhum software do inventário: não foi para a IA.' : n.status === 'erro' ? 'A análise falhou. Use "Analisar de novo".' : 'Ainda não analisada (fila da próxima coleta).'}</span>`;
+  document.getElementById('noticiaIntelCorpo').innerHTML = `
+    <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:16px;">${_pillSituacaoNoticia(n.status)}${n.origem === 'kev' ? ' ' + _htmlBadge('critical', 'Explorada ativamente (CISA KEV)') : ''}</div>
+    ${_secaoIntel('Origem', `<div style="font-size:0.92em;">${esc(n.fonte || _rotuloOrigemIntel(n.origem))}${n.url ? ` · <a href="${esc(n.url)}" target="_blank" rel="noopener noreferrer">abrir a fonte</a>` : ''}</div>
+      <div style="font-size:0.8em;color:#888;margin-top:2px;">Publicada em ${esc(n.publicadoEm ? _dataBR(n.publicadoEm) : '–')} · coletada em ${esc(_dataHoraIntel(n.coletadoEm))}${n.coletadoPor ? ' por ' + esc(n.coletadoPor) : ''}${n.cves.length ? ' · ' + esc(n.cves.join(', ')) : ''}</div>`)}
+    ${n.kev ? _secaoIntel('CISA KEV', `<div style="font-size:0.9em;">${esc([n.kev.fabricante, n.kev.produto].filter(Boolean).join(' · '))}${n.kev.prazo ? ` · prazo da CISA ${esc(_dataBR(n.kev.prazo))}` : ''}${n.kev.ransomware ? ' · usada em ransomware' : ''}</div>`) : ''}
+    ${_secaoIntel('Resumo', `<div style="font-size:0.9em;white-space:pre-wrap;max-height:260px;overflow:auto;">${esc(n.resumo || '—')}</div>`)}
+    ${_secaoIntel('Análise', analise)}
+    ${_secaoIntel(`Ações geradas (${acoes.length})`, acoes.length
+      ? `<ul style="margin:0;padding-left:18px;font-size:0.9em;">${acoes.map((a) => `<li><a href="javascript:void(0)" onclick="fecharDrawerNoticiaIntel();abrirDrawerAcaoIntel('${escJs(a.id)}')">${esc(a.titulo)}</a> ${_pillTriagemIntel(a)}</li>`).join('')}</ul>`
+      : '<span class="vazio-inline">Nenhuma.</span>')}`;
+  document.getElementById('drawerNoticiaIntel').classList.add('open');
+  document.getElementById('drawerOverlayNoticiaIntel').classList.add('open');
+};
+
+window.fecharDrawerNoticiaIntel = () => {
+  document.getElementById('drawerNoticiaIntel').classList.remove('open');
+  document.getElementById('drawerOverlayNoticiaIntel').classList.remove('open');
+};
+
+/** Depois de mudar o inventário (ou de um erro), a notícia volta para a IA. Ações já triadas ficam. */
+window.reanalisarNoticiaIntelTela = async () => {
+  const id = document.getElementById('drawerNoticiaIntel').dataset.id;
+  await comBotaoCarregando(document.getElementById('btnReanalisarIntel'), async () => {
+    try {
+      const r = await API.reanalisarNoticiaIntel(id);
+      fecharDrawerNoticiaIntel();
+      showToast(r.status === 'analisada' ? `✅ Análise refeita: ${r.acoes} ação(ões) pendente(s).` : r.status === 'sem_correspondencia' ? 'A notícia não cita nenhum software do inventário.' : '❌ ' + (r.erro || 'A análise falhou.'), r.status === 'erro' ? '#c62828' : '#2e7d32');
+      await _recarregarDadosIntel();
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível analisar. Tente de novo.'), '#c62828');
+    }
+  });
+};
+
+async function _recarregarDadosIntel() {
+  try {
+    const [acoes, noticias, config] = await Promise.all([API.getIntelAcoes(), API.getIntelNoticias(), API.getConfigThreatIntel()]);
+    intelAcoesData = acoes || [];
+    intelNoticiasData = noticias || [];
+    if (config && config.geral) intelConfig = { geral: Object.assign({}, intelConfig.geral, config.geral), inventario: config.inventario || {} };
+    _desenharAvisosIntel();
+    renderizarThreatIntel();
+  } catch (e) {
+    console.error('threatIntel: falha ao recarregar', e);
+    showToast('❌ Não foi possível atualizar a lista. Recarregue a página.', '#c62828');
+  }
+}
+
+// ---------------- Registrar notícia ----------------
+function _htmlDrawerRegistrarNoticiaIntel() {
+  return `
+    <div class="drawer-overlay" id="drawerOverlayRegistrarIntel" onclick="fecharDrawerRegistrarNoticiaIntel()"></div>
+    <div class="drawer" id="drawerRegistrarIntel">
+      <div class="drawer-header">
+        <h3>Registrar notícia</h3>
+        <button onclick="fecharDrawerRegistrarNoticiaIntel()" aria-label="Fechar" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <p style="font-size:0.85em;color:#666;margin:0 0 14px;">Para notícia que a coleta automática não pega (boletim de fabricante, grupo de WhatsApp, e-mail). Ela é cruzada com o inventário e analisada na hora.</p>
+        <div style="margin-bottom:14px;"><label style="${_lblIntel}" for="regIntelTitulo">Título <span class="req" aria-hidden="true">*</span></label>
+          <input type="text" id="regIntelTitulo" style="${_inpIntel}" maxlength="300"></div>
+        <div style="margin-bottom:14px;"><label style="${_lblIntel}" for="regIntelUrl">Link da notícia</label>
+          <input type="url" id="regIntelUrl" style="${_inpIntel}" placeholder="https://..."></div>
+        <div style="margin-bottom:14px;"><label style="${_lblIntel}" for="regIntelFonte">Fonte</label>
+          <input type="text" id="regIntelFonte" style="${_inpIntel}" placeholder="Ex.: boletim do fabricante, CTIR Gov"></div>
+        <div style="margin-bottom:14px;"><label style="${_lblIntel}" for="regIntelTexto">Texto da notícia <span class="req" aria-hidden="true">*</span></label>
+          <textarea id="regIntelTexto" rows="12" style="${_inpIntel}" placeholder="Cole aqui o texto (o sistema não abre o link)."></textarea></div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerRegistrarNoticiaIntel()">Cancelar</button>
+        <button class="btn btn-primary" id="btnRegistrarIntel" onclick="registrarNoticiaIntelTela()">Registrar e analisar</button>
+      </div>
+    </div>`;
+}
+
+window.abrirDrawerRegistrarNoticiaIntel = () => {
+  ['regIntelTitulo', 'regIntelUrl', 'regIntelFonte', 'regIntelTexto'].forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('drawerRegistrarIntel').classList.add('open');
+  document.getElementById('drawerOverlayRegistrarIntel').classList.add('open');
+  document.getElementById('regIntelTitulo').focus();
+};
+window.fecharDrawerRegistrarNoticiaIntel = () => {
+  document.getElementById('drawerRegistrarIntel').classList.remove('open');
+  document.getElementById('drawerOverlayRegistrarIntel').classList.remove('open');
+};
+
+window.registrarNoticiaIntelTela = async () => {
+  const v = (id) => document.getElementById(id).value.trim();
+  if (!v('regIntelTitulo')) return _avisarCampo('regIntelTitulo', 'Informe o título da notícia.');
+  if (v('regIntelUrl') && !/^https?:\/\//i.test(v('regIntelUrl'))) return _avisarCampo('regIntelUrl', 'O link precisa começar com http:// ou https://.');
+  if (v('regIntelTexto').length < 40) return _avisarCampo('regIntelTexto', 'Cole o texto da notícia (pelo menos algumas frases).');
+  await comBotaoCarregando(document.getElementById('btnRegistrarIntel'), async () => {
+    try {
+      const r = await API.registrarNoticiaIntel({ titulo: v('regIntelTitulo'), url: v('regIntelUrl'), fonte: v('regIntelFonte'), texto: v('regIntelTexto') });
+      fecharDrawerRegistrarNoticiaIntel();
+      if (r.status === 'analisada') showToast(r.acoes ? `✅ ${r.acoes} ação(ões) recomendada(s) para triagem.` : 'Analisada: a IA concluiu que não afeta o ambiente.', '#2e7d32');
+      else if (r.status === 'sem_correspondencia') showToast('Registrada. A notícia não cita nenhum software do inventário.', '#2e7d32');
+      else showToast('❌ Registrada, mas a análise falhou: ' + (r.erro || 'tente "Analisar de novo".'), '#c62828');
+      await _recarregarDadosIntel();
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível registrar. Tente de novo.'), '#c62828');
+    }
+  });
+};
+
+// ---------------- Coleta manual ----------------
+let _coletandoIntel = false;
+window.coletarThreatIntelAgora = async () => {
+  if (_coletandoIntel) return;
+  _coletandoIntel = true;
+  showToast('⏳ Coletando as fontes e analisando (pode levar alguns minutos)…', '#1565c0');
+  try {
+    const r = await API.coletarThreatIntel();
+    const partes = [`${r.novas} notícia(s) nova(s)`, `${r.analisadas} analisada(s) pela IA`, `${r.acoes} ação(ões)`];
+    if (r.aguardandoAnalise > 0) partes.push(`${r.aguardandoAnalise} na fila`);
+    showToast(`${r.erros && r.erros.length ? '⚠️' : '✅'} Coleta concluída: ${partes.join(', ')}.${r.erros && r.erros.length ? ` Falharam: ${r.erros.map((x) => x.feed).join(', ')}.` : ''}`, r.erros && r.erros.length ? '#e65100' : '#2e7d32');
+    await _recarregarDadosIntel();
+  } catch (e) {
+    showToast('❌ ' + _mensagemErro(e, 'A coleta falhou. Tente de novo.'), '#c62828');
+  } finally {
+    _coletandoIntel = false;
+  }
+};
+
+// ---------------- Importar inventário (CSV) ----------------
+function _htmlDrawerInventarioIntel() {
+  return `
+    <div class="drawer-overlay" id="drawerOverlayInventarioIntel" onclick="fecharDrawerInventarioIntel()"></div>
+    <div class="drawer" id="drawerInventarioIntel">
+      <div class="drawer-header">
+        <h3>Importar inventário de software</h3>
+        <button onclick="fecharDrawerInventarioIntel()" aria-label="Fechar" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <div id="inventarioIntelAtual"></div>
+        <div style="margin:16px 0;"><label style="${_lblIntel}" for="inventarioIntelArquivo">Arquivo CSV do sistema de inventário</label>
+          <input type="file" id="inventarioIntelArquivo" accept=".csv,text/csv,text/plain" onchange="lerCsvInventarioIntel(this)" style="${_inpIntel}">
+          <span style="font-size:0.72em;color:#888;display:block;margin-top:4px;">Uma linha por software instalado em cada host (hostname, software, fabricante, versão). Separador ; , ou tab. A importação substitui a anterior inteira.</span></div>
+        <div id="inventarioIntelMapa"></div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerInventarioIntel()">Fechar</button>
+        <button class="btn btn-primary" id="btnImportarInventarioIntel" onclick="importarInventarioIntelTela()" disabled>Importar</button>
+      </div>
+    </div>`;
+}
+
+function _htmlInventarioAtualIntel() {
+  const inv = intelConfig.inventario || {};
+  if (!inv.importacaoAtual) return '<div class="lista-alerta" style="margin:0;">Nenhum inventário importado ainda.</div>';
+  const sem = Array.isArray(inv.hostsSemVinculo) ? inv.hostsSemVinculo : [];
+  return `<div style="font-size:0.9em;line-height:1.6;">
+      <strong>Inventário atual:</strong> ${esc(inv.arquivo || 'CSV')}, importado em ${esc(_dataHoraIntel(inv.importadoEm))} por ${esc(inv.importadoPor || '—')}.<br>
+      ${Number(inv.softwares) || 0} softwares · ${Number(inv.hosts) || 0} hosts · ${Number(inv.hostsVinculados) || 0} com ativo no BIA${inv.linhasDescartadas ? ` · ${inv.linhasDescartadas} linha(s) descartada(s)` : ''}.
+    </div>
+    ${sem.length ? `<details class="lista-ajuda" style="margin-top:10px;"><summary>${Number(inv.qtdHostsSemVinculo) || sem.length} host(s) sem ativo no BIA</summary>
+      <p>Para ligar um host à cadeia Serviço → Processo → Tier, o nome do ativo técnico em Dependências precisa ser igual ao hostname (sem o domínio).</p>
+      <p>${esc(sem.join(', '))}${(Number(inv.qtdHostsSemVinculo) || 0) > sem.length ? '…' : ''}</p></details>` : ''}`;
+}
+
+window.abrirDrawerInventarioIntel = () => {
+  intelCsvLido = null;
+  document.getElementById('inventarioIntelAtual').innerHTML = _htmlInventarioAtualIntel();
+  document.getElementById('inventarioIntelArquivo').value = '';
+  document.getElementById('inventarioIntelMapa').innerHTML = '';
+  document.getElementById('btnImportarInventarioIntel').disabled = true;
+  document.getElementById('drawerInventarioIntel').classList.add('open');
+  document.getElementById('drawerOverlayInventarioIntel').classList.add('open');
+};
+window.fecharDrawerInventarioIntel = () => {
+  document.getElementById('drawerInventarioIntel').classList.remove('open');
+  document.getElementById('drawerOverlayInventarioIntel').classList.remove('open');
+};
+
+function _lerArquivoTexto(arquivo, codificacao) {
+  return new Promise((resolve, reject) => {
+    const leitor = new FileReader();
+    leitor.onload = () => resolve(String(leitor.result || ''));
+    leitor.onerror = () => reject(leitor.error);
+    leitor.readAsText(arquivo, codificacao);
+  });
+}
+
+window.lerCsvInventarioIntel = async (input) => {
+  const arquivo = input.files && input.files[0];
+  const alvo = document.getElementById('inventarioIntelMapa');
+  document.getElementById('btnImportarInventarioIntel').disabled = true;
+  intelCsvLido = null;
+  if (!arquivo) { alvo.innerHTML = ''; return; }
+  try {
+    let texto = await _lerArquivoTexto(arquivo, 'utf-8');
+    // Exportação do Excel em pt-BR costuma vir em Windows-1252.
+    if (InventarioCsv.pareceCodificacaoErrada(texto)) texto = await _lerArquivoTexto(arquivo, 'windows-1252');
+    const linhas = InventarioCsv.parseCsv(texto);
+    if (linhas.length < 2) { alvo.innerHTML = '<div class="lista-alerta">O arquivo não tem linhas de dados.</div>'; return; }
+    const cabecalho = linhas[0];
+    intelCsvLido = { arquivo: arquivo.name, cabecalho, dados: linhas.slice(1) };
+    const mapa = InventarioCsv.autoMapear(cabecalho, intelConfig.geral.mapeamentoCsv);
+    alvo.innerHTML = `<div style="${_lblIntel}margin-top:4px;">Colunas do arquivo</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;">
+        ${InventarioCsv.CAMPOS.map((c) => `<div><label style="font-size:0.82em;color:#555;" for="mapaIntel_${c.chave}">${esc(c.rotulo)}${c.obrigatorio ? ' <span class="req" aria-hidden="true">*</span>' : ''}</label>
+          <select id="mapaIntel_${c.chave}" style="${_inpIntel}" onchange="_previaInventarioIntel()"><option value="">${c.obrigatorio ? 'Selecione...' : '(não tem)'}</option>
+          ${cabecalho.map((h, i) => `<option value="${i}"${mapa[c.chave] === i ? ' selected' : ''}>${esc(h || `Coluna ${i + 1}`)}</option>`).join('')}</select></div>`).join('')}
+      </div>
+      <div id="inventarioIntelPrevia" style="margin-top:14px;"></div>`;
+    _previaInventarioIntel();
+  } catch (e) {
+    console.error('inventário: falha ao ler o CSV', e);
+    alvo.innerHTML = '<div class="lista-alerta">Não foi possível ler o arquivo. Confira se é um CSV.</div>';
+  }
+};
+
+function _mapaInventarioIntel() {
+  const mapa = {};
+  InventarioCsv.CAMPOS.forEach((c) => {
+    const v = (document.getElementById('mapaIntel_' + c.chave) || {}).value;
+    if (v !== '' && v !== undefined) mapa[c.chave] = Number(v);
+  });
+  return mapa;
+}
+
+window._previaInventarioIntel = () => {
+  const alvo = document.getElementById('inventarioIntelPrevia');
+  const botao = document.getElementById('btnImportarInventarioIntel');
+  if (!intelCsvLido || !alvo) return;
+  const mapa = _mapaInventarioIntel();
+  const faltam = InventarioCsv.faltando(mapa);
+  if (faltam.length) {
+    alvo.innerHTML = `<div class="lista-alerta">Escolha a coluna de: ${esc(faltam.map((c) => c.rotulo).join(', '))}.</div>`;
+    botao.disabled = true;
+    return;
+  }
+  const { itens, resumo } = InventarioCsv.consolidar(intelCsvLido.dados, mapa);
+  intelCsvLido.consolidado = { itens, resumo };
+  intelCsvLido.mapa = mapa;
+  const avisos = [];
+  if (!(mapa.fabricante >= 0)) avisos.push('Sem a coluna de fabricante, o cruzamento com as notícias fica menos preciso.');
+  if (!(mapa.versao >= 0)) avisos.push('Sem a coluna de versão, a IA não consegue dizer se a versão instalada é a vulnerável.');
+  alvo.innerHTML = `<div style="font-size:0.9em;line-height:1.6;">${resumo.linhas} linha(s) → <strong>${resumo.softwares} software(s)</strong> em <strong>${resumo.hosts} host(s)</strong>${resumo.descartadas ? `; ${resumo.descartadas} linha(s) sem host ou software serão ignoradas` : ''}.</div>
+    ${avisos.map((a) => `<div style="font-size:0.8em;color:#e65100;margin-top:4px;">${esc(a)}</div>`).join('')}`;
+  botao.disabled = !itens.length;
+};
+
+window.importarInventarioIntelTela = async () => {
+  const lido = intelCsvLido;
+  if (!lido || !lido.consolidado || !lido.consolidado.itens.length) return;
+  const botao = document.getElementById('btnImportarInventarioIntel');
+  const previa = document.getElementById('inventarioIntelPrevia');
+  await comBotaoCarregando(botao, async () => {
+    try {
+      const r = await API.importarInventarioSoftware({ arquivo: lido.arquivo, itens: lido.consolidado.itens, resumo: lido.consolidado.resumo },
+        (feitos, total) => { if (previa) previa.innerHTML = `<div style="font-size:0.9em;">Enviando… ${feitos} de ${total} softwares.</div>`; });
+      // O mapeamento fica para a próxima importação (nomes de coluna, não posição).
+      try { await API.salvarConfigThreatIntel({ mapeamentoCsv: InventarioCsv.mapaPorNome(lido.cabecalho, lido.mapa) }); } catch (e) { console.error('inventário: mapeamento não salvo', e); }
+      fecharDrawerInventarioIntel();
+      showToast(`✅ Inventário importado: ${r.softwares} software(s)${r.hostsSemVinculo ? `; ${r.hostsSemVinculo} host(s) sem ativo no BIA` : ''}.`, '#2e7d32');
+      const [config, inv] = await Promise.all([API.getConfigThreatIntel(), API.getInventarioSoftware()]);
+      intelConfig = { geral: Object.assign({}, intelConfig.geral, (config && config.geral) || {}), inventario: (config && config.inventario) || {} };
+      intelInventarioData = inv || [];
+      _desenharAvisosIntel();
+      renderizarThreatIntel();
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'A importação falhou. O inventário anterior continua valendo.'), '#c62828');
+    }
+  });
+};
+
+// ---------------- Configurar fontes ----------------
+let _feedsIntelEdicao = [];
+
+window.abrirConfigThreatIntel = () => {
+  _feedsIntelEdicao = (intelConfig.geral.feeds || []).map((f) => Object.assign({}, f));
+  _desenharConfigThreatIntel();
+  abrirConfigLista();
+};
+
+function _desenharConfigThreatIntel() {
+  const uc = intelConfig.geral.ultimaColeta;
+  document.getElementById('corpoConfigIntel').innerHTML = `
+    <div style="${_lblIntel}">Fontes</div>
+    ${_feedsIntelEdicao.map((f, i) => `<div style="border:1px solid #eee;border-radius:7px;padding:10px;margin-bottom:8px;">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+          <label style="display:flex;align-items:center;gap:6px;font-size:0.85em;cursor:pointer;"><input type="checkbox" ${f.ativo !== false ? 'checked' : ''} onchange="_feedsIntelEdicao[${i}].ativo=this.checked"> Ativa</label>
+          <select style="${_inpIntel}width:auto;padding:6px 8px;" onchange="_feedsIntelEdicao[${i}].tipo=this.value" aria-label="Tipo da fonte">
+            <option value="rss"${f.tipo !== 'kev' ? ' selected' : ''}>RSS / Atom</option><option value="kev"${f.tipo === 'kev' ? ' selected' : ''}>CISA KEV (JSON)</option></select>
+          <button type="button" class="btn-icon" style="margin-left:auto;" title="Remover fonte" aria-label="Remover fonte" onclick="_removerFeedIntel(${i})">${SVG_EXCLUIR}</button>
+        </div>
+        <input type="text" style="${_inpIntel}margin-bottom:6px;" placeholder="Nome" value="${esc(f.nome || '')}" oninput="_feedsIntelEdicao[${i}].nome=this.value" aria-label="Nome da fonte">
+        <input type="url" style="${_inpIntel}" placeholder="https://..." value="${esc(f.url || '')}" oninput="_feedsIntelEdicao[${i}].url=this.value" aria-label="Endereço da fonte">
+      </div>`).join('') || '<div class="vazio-inline">Nenhuma fonte: só a notícia registrada à mão entra.</div>'}
+    <button type="button" class="link-acao" onclick="_adicionarFeedIntel()">+ Adicionar fonte RSS</button>
+    <div style="margin-top:18px;"><label style="${_lblIntel}" for="intelLimiteIA">Limite de análises da IA por dia</label>
+      <input type="number" id="intelLimiteIA" min="0" max="200" step="1" style="${_inpIntel}max-width:140px;" value="${Number(intelConfig.geral.limiteAnalisesDia) || 0}">
+      <span style="font-size:0.72em;color:#888;display:block;margin-top:4px;">Só conta notícia que cita software do inventário. O que passar do limite fica na fila para o dia seguinte (CISA KEV primeiro).</span></div>
+    ${uc ? `<div style="font-size:0.8em;color:#888;margin-top:16px;">Última coleta: ${esc(_dataHoraIntel(uc.em))} · ${uc.novas} nova(s) · ${uc.analisadas} analisada(s) · ${uc.acoes} ação(ões)${uc.erros && uc.erros.length ? ` · falharam: ${esc(uc.erros.map((x) => `${x.feed} (${x.erro})`).join(', '))}` : ''}.</div>` : ''}
+    <div style="margin-top:16px;"><button class="btn btn-primary" id="btnSalvarConfigIntel" onclick="salvarConfigThreatIntelTela()">Salvar</button></div>`;
+}
+
+window._adicionarFeedIntel = () => { _feedsIntelEdicao.push({ nome: '', url: '', tipo: 'rss', ativo: true }); _desenharConfigThreatIntel(); };
+window._removerFeedIntel = (i) => { _feedsIntelEdicao.splice(i, 1); _desenharConfigThreatIntel(); };
+
+window.salvarConfigThreatIntelTela = async () => {
+  const feeds = _feedsIntelEdicao.filter((f) => String(f.url || '').trim() || String(f.nome || '').trim())
+    .map((f) => Object.assign({}, f, { nome: String(f.nome || '').trim() || String(f.url || '').trim() }));
+  if (feeds.some((f) => !/^https:\/\//i.test(String(f.url || '').trim()))) return showToast('Toda fonte precisa de um endereço https://.', '#e65100');
+  const limite = Number(document.getElementById('intelLimiteIA').value);
+  if (!Number.isInteger(limite) || limite < 0 || limite > 200) return _avisarCampo('intelLimiteIA', 'O limite vai de 0 a 200.');
+  await comBotaoCarregando(document.getElementById('btnSalvarConfigIntel'), async () => {
+    try {
+      await API.salvarConfigThreatIntel({ feeds, limiteAnalisesDia: limite });
+      intelConfig.geral.feeds = feeds;
+      intelConfig.geral.limiteAnalisesDia = limite;
+      fecharConfigLista();
+      showToast('✅ Fontes salvas.', '#2e7d32');
     } catch (e) {
       showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar. Tente de novo.'), '#c62828');
     }

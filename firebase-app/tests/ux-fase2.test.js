@@ -73,6 +73,8 @@ test('menu Riscos e Vulnerabilidades: subnivel Riscos primeiro, depois Vulnerabi
     ['Vulnerabilidades', 'vulnerabilidades-painel'],
     ['Vulnerabilidades', 'vulnerabilidades'],
     ['Vulnerabilidades', 'vulnerabilidades-relatorio'],
+    // Threat Intelligence (26/10/2026): a triagem desemboca em Vulnerabilidades.
+    ['Vulnerabilidades', 'threat-intel'],
   ]);
 });
 

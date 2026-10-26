@@ -103,6 +103,9 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 .drawer-overlay.open { display: block; }
 .drawer { position: fixed; top: 0; right: 0; height: 100vh; width: 70vw; min-width: 320px; max-width: 90vw; background: white; box-shadow: -4px 0 24px rgba(0,0,0,0.15); z-index: 101; display: flex; flex-direction: column; transform: translateX(100%); transition: transform 0.25s ease; }
 .drawer#drawerPessoa { width: 480px; }
+/* Threat Intelligence (26/10/2026): formulários de coluna única. */
+.drawer#drawerRegistrarIntel { width: 560px; }
+.drawer#drawerInventarioIntel { width: 640px; }
 .drawer#drawerListaContrato { width: 480px; }
 .drawer#drawerNotificacao { width: 720px; }
 .drawer#drawerProcessosLote { width: 680px; }

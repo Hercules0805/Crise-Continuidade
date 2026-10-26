@@ -71,6 +71,8 @@
   TELAS[PERFIL.ADMIN] = '*';
   TELAS[PERFIL.SEGURANCA] = [
     'processos', 'pcns', 'drp', 'riscos-dashboard', 'riscos', 'monitor', 'riscos-relatorio', 'vulnerabilidades', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
+    // Threat Intelligence (26/10/2026): triagem das acoes recomendadas e inventario de software.
+    'threat-intel',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
     'dependencias', 'areas', 'pessoas', 'relatorios', 'mapa', 'servicos', 'servicos-relatorio', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
     'terceiros-dashboard', 'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',

@@ -49,6 +49,12 @@ const COLLECTION = {
   ferramentasBackup: 'ferramentas_backup',
   vulnerabilidades: 'vulnerabilidades',
   painelVulnerabilidades: 'painel_vulnerabilidades',
+  // Threat Intelligence (26/10/2026): so leitura aqui; quem grava e o servidor
+  // (appApi + coleta agendada), menos config_threat_intel/geral.
+  intelNoticias: 'intel_noticias',
+  intelAcoes: 'intel_acoes',
+  inventarioSoftware: 'inventario_software',
+  configThreatIntel: 'config_threat_intel',
   relatoriosExecutivos: 'relatorios_executivos',
   relatoriosExecutivosConteudo: 'relatorios_executivos_conteudo',
   relatoriosCompartilhados: 'relatorios_compartilhados',
@@ -2341,6 +2347,8 @@ const _CONFIG_NOTIFICACOES_PADRAO = {
     resumoSemanal: true,
     destinatarios: { operadoresProcessos: true, gestores: false },
   },
+  // Resumo diario de Threat Intelligence (26/10/2026), para o perfil Seguranca.
+  threatIntel: { resumoDiario: true },
   // SMTP (16/10/2026: SendGrid). Usuario e senha ficam nos segredos do Firebase.
   servidor: { provedor: 'sendgrid', host: '', porta: null, remetenteEmail: '' },
 };
@@ -2381,6 +2389,7 @@ async function _lerConfigNotificacoes() {
     destinatarios: bools(d.destinatarios, p.destinatarios),
     riscos: _blocoNotificacoes('riscos', d.riscos, bools),
     continuidade: _blocoNotificacoes('continuidade', d.continuidade, bools),
+    threatIntel: bools(d.threatIntel, p.threatIntel),
     servidor: _servidorNotificacoes(d.servidor),
     atualizadoEm: d.atualizadoEm || '',
     atualizadoPor: d.atualizadoPor || '',
@@ -2405,6 +2414,7 @@ async function _salvarConfigNotificacoes(c) {
     // Sem o bloco no payload, fica o padrao (ligado) -- nao desliga por omissao.
     riscos: _blocoNotificacoes('riscos', c.riscos, boolsOuPadrao),
     continuidade: _blocoNotificacoes('continuidade', c.continuidade, boolsOuPadrao),
+    threatIntel: boolsOuPadrao(c.threatIntel, p.threatIntel),
     servidor: _servidorNotificacoes(sv),
     atualizadoEm: new Date().toISOString(),
     atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
@@ -2442,6 +2452,155 @@ async function _lerNotificacoesEmail() {
       enviadoEm: n.enviadoEm || '',
       processadoEm: n.processadoEm || '',
     };
+  });
+}
+
+// ------------------------------------------------------------
+// Threat Intelligence (26/10/2026)
+// Noticias (CISA KEV, RSS, registro manual) cruzadas com o inventario de
+// software importado por CSV; a IA sugere acoes e a Seguranca faz a triagem
+// (aprovar vira Vulnerabilidade). Leituras direto do Firestore, sem cache:
+// tudo muda pelo servidor. Escritas pelo appApi (functions/appLogic.js).
+// ------------------------------------------------------------
+const _LIMITE_NOTICIAS_TELA = 500;
+const _URL_KEV = 'https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json';
+
+async function _lerIntelAcoes() {
+  const docs = await _getAll(COLLECTION.intelAcoes);
+  return docs.map((a) => ({
+    id: a.id,
+    noticiaId: a.noticiaId || '',
+    noticiaTitulo: a.noticiaTitulo || '',
+    noticiaUrl: a.noticiaUrl || '',
+    origem: a.origem || '',
+    fonte: a.fonte || '',
+    cves: Array.isArray(a.cves) ? a.cves : [],
+    exploracaoAtiva: !!a.exploracaoAtiva,
+    ransomware: !!a.ransomware,
+    titulo: a.titulo || '',
+    descricao: a.descricao || '',
+    prioridade: a.prioridade || '',
+    prazoSugerido: a.prazoSugerido || '',
+    justificativa: a.justificativa || '',
+    softwares: Array.isArray(a.softwares) ? a.softwares : [],
+    hosts: Array.isArray(a.hosts) ? a.hosts : [],
+    qtdHosts: Number(a.qtdHosts) || 0,
+    ativosAfetados: Array.isArray(a.ativosAfetados) ? a.ativosAfetados : [],
+    processosAfetados: Array.isArray(a.processosAfetados) ? a.processosAfetados : [],
+    statusTriagem: a.statusTriagem || 'Pendente',
+    motivoDescarte: a.motivoDescarte || '',
+    vulnerabilidadeId: a.vulnerabilidadeId || '',
+    vulnerabilidadeCodigo: a.vulnerabilidadeCodigo || '',
+    triadoPor: a.triadoPor || '',
+    triadoEm: a.triadoEm || '',
+    criadoEm: a.criadoEm || '',
+  })).sort((x, y) => String(y.criadoEm).localeCompare(String(x.criadoEm)));
+}
+
+async function _lerIntelNoticias() {
+  const snap = await _db.collection(COLLECTION.intelNoticias).orderBy('coletadoEm', 'desc').limit(_LIMITE_NOTICIAS_TELA).get();
+  return snap.docs.map((d) => {
+    const n = d.data() || {};
+    const an = n.analise || null;
+    return {
+      id: d.id,
+      origem: n.origem || '',
+      fonte: n.fonte || '',
+      titulo: n.titulo || '',
+      url: n.url || '',
+      resumo: n.resumo || '',
+      publicadoEm: n.publicadoEm || '',
+      cves: Array.isArray(n.cves) ? n.cves : [],
+      kev: n.kev || null,
+      status: n.status || '',
+      erro: n.erro || '',
+      coletadoEm: n.coletadoEm || '',
+      coletadoPor: n.coletadoPor || '',
+      analisadaEm: n.analisadaEm || '',
+      analise: an ? {
+        relevante: !!an.relevante,
+        justificativa: an.justificativa || '',
+        softwaresAfetados: Array.isArray(an.softwaresAfetados) ? an.softwaresAfetados : [],
+        acoes: Number(an.acoes) || 0,
+      } : null,
+    };
+  });
+}
+
+/** { geral: {feeds, limiteAnalisesDia, mapeamentoCsv, ultimaColeta}, inventario: {...importacao atual} }. */
+async function _lerConfigThreatIntel() {
+  const [g, i] = await Promise.all([
+    _db.collection(COLLECTION.configThreatIntel).doc('geral').get(),
+    _db.collection(COLLECTION.configThreatIntel).doc('inventario').get(),
+  ]);
+  const geral = g.exists ? (g.data() || {}) : {};
+  const limite = Number(geral.limiteAnalisesDia);
+  return {
+    geral: {
+      // Sem configuracao, a coleta usa so o CISA KEV (mesmo padrao do servidor, threatIntel.js FEEDS_PADRAO).
+      feeds: Array.isArray(geral.feeds) ? geral.feeds : [{ nome: 'CISA KEV', url: _URL_KEV, tipo: 'kev', ativo: true }],
+      limiteAnalisesDia: Number.isInteger(limite) ? limite : 30,
+      mapeamentoCsv: geral.mapeamentoCsv || null,
+      ultimaColeta: geral.ultimaColeta || null,
+    },
+    inventario: i.exists ? (i.data() || {}) : {},
+  };
+}
+
+async function _salvarConfigThreatIntel(c) {
+  const dados = {
+    atualizadoEm: new Date().toISOString(),
+    atualizadoPor: (window.USER_EMAIL || '').toLowerCase(),
+  };
+  if (Array.isArray(c.feeds)) {
+    dados.feeds = c.feeds.map((f) => ({
+      nome: String(f.nome || '').trim().slice(0, 120),
+      url: String(f.url || '').trim().slice(0, 500),
+      tipo: f.tipo === 'kev' ? 'kev' : 'rss',
+      ativo: f.ativo !== false,
+    }));
+    if (dados.feeds.some((f) => !/^https:\/\//i.test(f.url))) throw new Error('Toda fonte precisa de um endereço https://.');
+  }
+  if (c.limiteAnalisesDia !== undefined) {
+    const n = Number(c.limiteAnalisesDia);
+    if (!Number.isInteger(n) || n < 0 || n > 200) throw new Error('O limite diário de análises vai de 0 a 200.');
+    dados.limiteAnalisesDia = n;
+  }
+  if (c.mapeamentoCsv !== undefined) dados.mapeamentoCsv = c.mapeamentoCsv;
+  await _db.collection(COLLECTION.configThreatIntel).doc('geral').set(dados, { merge: true });
+  return { success: true };
+}
+
+/** Softwares da importacao atual do inventario. */
+async function _lerInventarioSoftware() {
+  const meta = await _db.collection(COLLECTION.configThreatIntel).doc('inventario').get();
+  const atual = meta.exists ? (meta.data() || {}).importacaoAtual : '';
+  if (!atual) return [];
+  const docs = await _getPorCampo(COLLECTION.inventarioSoftware, 'importacaoId', atual);
+  return docs.map((x) => ({
+    id: x.id,
+    fabricante: x.fabricante || '',
+    produto: x.produto || '',
+    versao: x.versao || '',
+    qtdHosts: Number(x.qtdHosts) || 0,
+    hosts: Array.isArray(x.hosts) ? x.hosts : [],
+    dependencias: Array.isArray(x.dependencias) ? x.dependencias : [],
+  }));
+}
+
+/**
+ * Envia o inventario consolidado (InventarioCsv.consolidar) em lotes. A
+ * importacao so vale quando conclui: se cair no meio, a anterior continua.
+ */
+async function _importarInventarioSoftware({ arquivo, itens, resumo }, aoProgredir) {
+  const { importacaoId } = await _appApi('POST', 'iniciarImportacaoInventario', { arquivo });
+  const LOTE = 400;
+  for (let i = 0; i < itens.length; i += LOTE) {
+    await _appApi('POST', 'enviarLoteInventario', { importacaoId, itens: itens.slice(i, i + LOTE) });
+    if (aoProgredir) aoProgredir(Math.min(itens.length, i + LOTE), itens.length);
+  }
+  return _appApi('POST', 'concluirImportacaoInventario', {
+    importacaoId, linhas: resumo.linhas, linhasDescartadas: resumo.descartadas, hosts: resumo.hosts,
   });
 }
 
@@ -2865,6 +3024,20 @@ const API = {
     .then((r) => { API.invalidate('getIndexadoresReajuste'); return r; }),
   excluirIndexadorReajuste: (id) => API.post('excluirIndexadorReajuste', { id })
     .then((r) => { API.invalidate('getIndexadoresReajuste'); return r; }),
+  // Threat Intelligence (26/10/2026): sem cache, o servidor muda tudo.
+  getIntelAcoes: () => _lerIntelAcoes(),
+  getIntelNoticias: () => _lerIntelNoticias(),
+  getConfigThreatIntel: () => _lerConfigThreatIntel(),
+  getInventarioSoftware: () => _lerInventarioSoftware(),
+  salvarConfigThreatIntel: (c) => _salvarConfigThreatIntel(c),
+  importarInventarioSoftware: (dados, aoProgredir) => _importarInventarioSoftware(dados, aoProgredir),
+  registrarNoticiaIntel: (n) => _appApi('POST', 'registrarNoticiaIntel', { titulo: n.titulo, url: n.url, texto: n.texto, fonte: n.fonte }),
+  reanalisarNoticiaIntel: (id) => _appApi('POST', 'reanalisarNoticiaIntel', { id }),
+  coletarThreatIntel: () => _appApi('POST', 'coletarThreatIntel', {}),
+  aprovarAcaoIntel: (id, ajustes) => _appApi('POST', 'aprovarAcaoIntel', { id, ajustes })
+    .then((r) => { API.invalidate('getVulnerabilidades'); return r; }),
+  descartarAcaoIntel: (id, motivo) => _appApi('POST', 'descartarAcaoIntel', { id, motivo }),
+  reabrirAcaoIntel: (id) => _appApi('POST', 'reabrirAcaoIntel', { id }),
   getStatusContrato: () => API.get('getStatusContrato'),
   salvarStatusContrato: (t) => API.post('salvarStatusContrato', t)
     .then((r) => { API.invalidate('getStatusContrato'); return r; }),

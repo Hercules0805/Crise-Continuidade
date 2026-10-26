@@ -57,6 +57,8 @@ const CONFIG_PADRAO = {
     resumoSemanal: true,
     destinatarios: { operadoresProcessos: true, gestores: false },
   },
+  // Resumo diario de Threat Intelligence (26/10/2026) -- ver notificacoesIntel.js.
+  threatIntel: { resumoDiario: true },
   // Servidor SMTP (16/10/2026: SendGrid). Usuario/senha ficam nos segredos.
   servidor: { provedor: 'sendgrid', host: '', porta: null, remetenteEmail: '' },
 };
@@ -69,6 +71,7 @@ function normalizarConfig(c) {
   const g = x.grupos || {}, d = x.destinatarios || {};
   const rk = x.riscos || {}, rd = rk.destinatarios || {};
   const ct = x.continuidade || {}, cd = ct.destinatarios || {};
+  const ti = x.threatIntel || {};
   const resp = String(x.responderPara || '').trim().toLowerCase();
   const sv = x.servidor || {};
   const provedor = PROVEDORES_SMTP.includes(sv.provedor) ? sv.provedor : 'sendgrid';
@@ -104,6 +107,9 @@ function normalizarConfig(c) {
         operadoresProcessos: bool(cd.operadoresProcessos, true),
         gestores: bool(cd.gestores, false),
       },
+    },
+    threatIntel: {
+      resumoDiario: bool(ti.resumoDiario, true),
     },
     servidor: {
       provedor,

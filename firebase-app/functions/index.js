@@ -28,11 +28,14 @@ const contratoCiclo = require('./contratoCiclo');
 const notificacoes = require('./notificacoes');
 const notificacoesRisco = require('./notificacoesRisco');
 const notificacoesContinuidade = require('./notificacoesContinuidade');
+const notificacoesIntel = require('./notificacoesIntel');
+const threatIntelServico = require('./threatIntelServico');
 const { criarEnviador } = require('./transporteEmail');
 const {
   READ_ACTIONS: APP_READ,
   WRITE_ACTIONS: APP_WRITE,
   AppError,
+  _chamarGeminiJson,
 } = require('./appLogic');
 
 admin.initializeApp();
@@ -885,6 +888,44 @@ exports.resumoSemanalContinuidade = onSchedule(
       })) n++;
     }
     logger.info('resumoSemanalContinuidade: concluido', { pendencias: resultado.pendencias.length, destinatarios: por.size, enfileirados: n });
+  }
+);
+
+// Threat Intelligence (06:30, 26/10/2026): coleta CISA KEV + feeds RSS
+// configurados, cruza cada noticia nova com o inventario de software (pre-
+// filtro sem IA) e pede ao Gemini as acoes recomendadas, com teto diario de
+// chamadas (config_threat_intel/geral.limiteAnalisesDia). Depois, um resumo
+// por e-mail para a Seguranca com as acoes Criticas/Altas do dia. Ver
+// threatIntel.js / threatIntelServico.js / notificacoesIntel.js.
+exports.coletaThreatIntel = onSchedule(
+  { region: 'us-central1', schedule: '30 6 * * *', timeZone: 'America/Sao_Paulo', secrets: [GEMINI_API_KEY], timeoutSeconds: 540 },
+  async () => {
+    const dia = new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+    const deps = {
+      Erro: AppError,
+      hoje: dia,
+      fetch: (...args) => fetch(...args),
+      chamarIA: (prompt) => _chamarGeminiJson(GEMINI_API_KEY.value(), prompt, 'a análise da notícia'),
+    };
+    const r = await threatIntelServico.executarColeta(db, deps);
+    logger.info('coletaThreatIntel: concluida', Object.assign({}, r, { acaoIds: undefined }));
+
+    const ctxN = await _contextoNotificacao();
+    if (ctxN.config.modo === notificacoes.MODO.DESLIGADO || !ctxN.config.threatIntel.resumoDiario) return;
+    const pendentesSnap = await db.collection('intel_acoes').where('statusTriagem', '==', 'Pendente').get();
+    const pendentes = pendentesSnap.docs.map((d) => d.data());
+    const doDia = notificacoesIntel.acoesDoResumo(pendentes, dia);
+    if (!doDia.length) return;
+    const m = notificacoesIntel.montarResumoIntel(doDia, { dia, baseUrl: BASE_URL, totalPendentes: pendentes.length });
+    let n = 0;
+    for (const email of notificacoesIntel.destinatariosIntel(ctxN.perfis)) {
+      if (await _enfileirarEmail({
+        tipo: 'threatIntel', evento: 'threatIntelResumo', chave: `threatIntel:resumo:${dia}`,
+        referencia: `${doDia.length} ação(ões)`, remetenteNome: notificacoesIntel.REMETENTE,
+        para: email, motivos: ['seguranca'], assunto: m.assunto, html: m.html, texto: m.texto,
+      })) n++;
+    }
+    logger.info('coletaThreatIntel: resumo enfileirado', { acoes: doDia.length, enfileirados: n });
   }
 );
 

@@ -25,6 +25,8 @@ const transporteEmail = require('./transporteEmail');
 const historicoRisco = require('./historicoRisco');
 const retratoRisco = require('./retratoRisco');
 const cadeiaDependencias = require('./cadeiaDependencias');
+const threatIntel = require('./threatIntel');
+const threatIntelServico = require('./threatIntelServico');
 
 const COLLECTION = {
   processos: 'processos',
@@ -1798,25 +1800,22 @@ function _textosResumo(v, max) {
     .map((x) => x.slice(0, 1500));
 }
 
-async function gerarResumoExecutivo(db, data, ctx) {
-  const tipo = String(data.tipo || '');
-  const def = TIPOS_RESUMO_EXECUTIVO[tipo];
-  if (!def) throw new AppError('Tipo de relatório inválido.');
-  if (!(await def.pode(db, ctx.email))) throw new AppError('Seu perfil não pode gerar este relatório.');
-  const indicadores = data.indicadores;
-  if (!indicadores || typeof indicadores !== 'object' || Array.isArray(indicadores)) throw new AppError('Indicadores do relatório ausentes.');
-  if (JSON.stringify(indicadores).length > LIMITE_INDICADORES_IA) throw new AppError('Dados do relatório grandes demais para o resumo.');
-  if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
-
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + ctx.geminiApiKey;
+/**
+ * Chamada ao Gemini que devolve JSON (resumo executivo, analise de Threat
+ * Intelligence): temperatura baixa, sem "thinking", resposta em
+ * application/json. Lanca AppError com mensagem legivel em qualquer falha.
+ */
+async function _chamarGeminiJson(apiKey, prompt, rotulo, cfg) {
+  if (!apiKey) throw new AppError('API Key do Gemini não configurada.');
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   const payload = {
-    contents: [{ parts: [{ text: _promptResumoExecutivo(tipo, indicadores) }] }],
-    generationConfig: {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: Object.assign({
       temperature: 0.3,
       maxOutputTokens: 4096,
       responseMimeType: 'application/json',
       thinkingConfig: { thinkingBudget: 0 },
-    },
+    }, cfg || {}),
   };
 
   let body;
@@ -1832,18 +1831,30 @@ async function gerarResumoExecutivo(db, data, ctx) {
       throw new AppError('Erro na API do Gemini: ' + (body.error ? body.error.message : 'Status ' + response.status));
     }
   } catch (err) {
-    throw _erroChamadaIA(err, 'o resumo executivo');
+    throw _erroChamadaIA(err, rotulo);
   }
 
   const content = body.candidates && body.candidates[0] && body.candidates[0].content;
   const texto = content && content.parts && content.parts[0] && content.parts[0].text;
   if (!texto) throw new AppError('Resposta vazia do Gemini.');
-  let json;
   try {
-    json = JSON.parse(String(texto).replace(/^```(?:json)?\s*|\s*```$/g, ''));
+    return JSON.parse(String(texto).replace(/^```(?:json)?\s*|\s*```$/g, ''));
   } catch (e) {
     throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
   }
+}
+
+async function gerarResumoExecutivo(db, data, ctx) {
+  const tipo = String(data.tipo || '');
+  const def = TIPOS_RESUMO_EXECUTIVO[tipo];
+  if (!def) throw new AppError('Tipo de relatório inválido.');
+  if (!(await def.pode(db, ctx.email))) throw new AppError('Seu perfil não pode gerar este relatório.');
+  const indicadores = data.indicadores;
+  if (!indicadores || typeof indicadores !== 'object' || Array.isArray(indicadores)) throw new AppError('Indicadores do relatório ausentes.');
+  if (JSON.stringify(indicadores).length > LIMITE_INDICADORES_IA) throw new AppError('Dados do relatório grandes demais para o resumo.');
+  if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
+
+  const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptResumoExecutivo(tipo, indicadores), 'o resumo executivo');
   const paragrafos = _textosResumo(json && json.paragrafos, 3);
   if (!paragrafos.length) throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
   return { success: true, tipo, paragrafos, recomendacoes: _textosResumo(json.recomendacoes, 3) };
@@ -1876,6 +1887,89 @@ async function serieRiscoPorEscopo(db, data, ctx) {
   return { success: true, meses, mesAtual, empresa, escopo };
 }
 
+// ============================================================
+// Threat Intelligence (26/10/2026) -- ver threatIntel.js (regra) e
+// threatIntelServico.js (leitura/gravacao). Tudo aqui so confere o perfil e
+// liga a IA; as colecoes intel_* e inventario_software sao write:false nas
+// regras, so o servidor grava.
+// ============================================================
+const PERFIS_INTEL = ['admin', 'seguranca'];
+
+async function _exigirIntel(db, ctx) {
+  await _exigirPerfil(db, ctx.email, PERFIS_INTEL, 'Seu perfil não pode operar Threat Intelligence.');
+}
+
+/** deps do servico: IA (Gemini JSON), fetch e o erro de negocio. */
+function _depsIntel(ctx) {
+  return {
+    Erro: AppError,
+    fetch: (...args) => fetch(...args),
+    chamarIA: (prompt) => _chamarGeminiJson(ctx.geminiApiKey, prompt, 'a análise da notícia'),
+  };
+}
+
+async function registrarNoticiaIntel(db, data, ctx) {
+  await _exigirIntel(db, ctx);
+  const titulo = String(data.titulo || '').trim();
+  const texto = String(data.texto || '').trim();
+  if (!titulo) throw new AppError('Informe o título da notícia.');
+  if (texto.length < 40) throw new AppError('Cole o texto da notícia (pelo menos algumas frases).');
+  const noticia = threatIntel.noticiaManual({ titulo, texto, url: data.url, fonte: data.fonte });
+  const id = threatIntel.idNoticia(noticia);
+  const existente = await db.collection(threatIntel.COLECAO.noticias).doc(id).get();
+  if (existente.exists) throw new AppError('Esta notícia já foi registrada.');
+  const [nova] = await threatIntelServico.registrarNoticias(db, [noticia], { coletadoPor: ctx.email });
+  const r = await threatIntelServico.analisarNoticia(db, nova.id, nova.noticia, _depsIntel(ctx));
+  return { success: true, id: nova.id, status: r.status, acoes: r.acoes.length, erro: r.erro || '' };
+}
+
+async function reanalisarNoticiaIntel(db, data, ctx) {
+  await _exigirIntel(db, ctx);
+  const id = exigir(data.id, 'id');
+  const snap = await db.collection(threatIntel.COLECAO.noticias).doc(String(id)).get();
+  if (!snap.exists) throw new AppError('Notícia não encontrada.');
+  const r = await threatIntelServico.analisarNoticia(db, String(id), snap.data(), _depsIntel(ctx));
+  return { success: true, status: r.status, acoes: r.acoes.length, erro: r.erro || '' };
+}
+
+/** "Coletar agora" da tela: mesma coleta do agendamento, com teto menor de IA (a requisicao tem 5 min). */
+async function coletarThreatIntel(db, data, ctx) {
+  await _exigirIntel(db, ctx);
+  const r = await threatIntelServico.executarColeta(db, _depsIntel(ctx), { limite: 10 });
+  delete r.acaoIds;
+  return Object.assign({ success: true }, r);
+}
+
+async function aprovarAcaoIntel(db, data, ctx) {
+  await _exigirIntel(db, ctx);
+  return threatIntelServico.aprovarAcao(db, data, ctx, _depsIntel(ctx));
+}
+
+async function descartarAcaoIntel(db, data, ctx) {
+  await _exigirIntel(db, ctx);
+  return threatIntelServico.descartarAcao(db, data, ctx, _depsIntel(ctx));
+}
+
+async function reabrirAcaoIntel(db, data, ctx) {
+  await _exigirIntel(db, ctx);
+  return threatIntelServico.reabrirAcao(db, data, ctx, _depsIntel(ctx));
+}
+
+async function iniciarImportacaoInventario(db, data, ctx) {
+  await _exigirIntel(db, ctx);
+  return threatIntelServico.iniciarImportacao(db, data, ctx);
+}
+
+async function enviarLoteInventario(db, data, ctx) {
+  await _exigirIntel(db, ctx);
+  return threatIntelServico.enviarLote(db, data, ctx, _depsIntel(ctx));
+}
+
+async function concluirImportacaoInventario(db, data, ctx) {
+  await _exigirIntel(db, ctx);
+  return threatIntelServico.concluirImportacao(db, data, ctx, _depsIntel(ctx));
+}
+
 const READ_ACTIONS = {
   getLevantamentoPCN,
   dadosPCN,
@@ -1902,6 +1996,15 @@ const WRITE_ACTIONS = {
   enviarEmailTeste,
   gerarResumoExecutivo,
   serieRiscoPorEscopo,
+  registrarNoticiaIntel,
+  reanalisarNoticiaIntel,
+  coletarThreatIntel,
+  aprovarAcaoIntel,
+  descartarAcaoIntel,
+  reabrirAcaoIntel,
+  iniciarImportacaoInventario,
+  enviarLoteInventario,
+  concluirImportacaoInventario,
 };
 
 module.exports = {
@@ -1915,9 +2018,11 @@ module.exports = {
   PAGINA,
   PERFIS_PCN,
   PERFIS_DRP_LEITURA,
+  PERFIS_INTEL,
   MAX_VERSOES_PCN,
   temAlgumPerfil,
   processoKey,
   listaDeContatos,
   slug,
+  _chamarGeminiJson,
 };

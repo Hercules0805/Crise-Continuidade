@@ -798,3 +798,49 @@ describe('Security Rules — relatórios compartilhados', () => {
     await assertFails(db(SI_C).doc('relatorios_compartilhados/c2').update({ conteudo: '{}' }));
   });
 });
+
+// Threat Intelligence (26/10/2026): noticias, acoes e inventario so o servidor
+// grava; leitura so de quem faz a triagem (Admin e Seguranca).
+describe('Security Rules — Threat Intelligence', () => {
+  const SI_T = { email: 'si-intel@fortestecnologia.com.br' };
+  const TI_T = { email: 'ti-intel@fortestecnologia.com.br' };
+
+  beforeEach(async () => {
+    await seedPerfil(SI_T.email, { perfis: ['seguranca'] });
+    await seedPerfil(TI_T.email, { perfis: ['ti'] });
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const f = ctx.firestore();
+      await f.doc('intel_acoes/a1').set({ titulo: 'Atualizar', statusTriagem: 'Pendente' });
+      await f.doc('intel_noticias/n1').set({ titulo: 'Notícia' });
+      await f.doc('inventario_software/s1').set({ produto: 'Chrome' });
+      await f.doc('config_threat_intel/inventario').set({ importacaoAtual: 'x' });
+    });
+  });
+
+  test('Seguranca e Admin leem; gestor e TI nao', async () => {
+    for (const u of [SI_T, ADMIN]) {
+      await assertSucceeds(db(u).doc('intel_acoes/a1').get());
+      await assertSucceeds(db(u).doc('intel_noticias/n1').get());
+      await assertSucceeds(db(u).doc('inventario_software/s1').get());
+      await assertSucceeds(db(u).doc('config_threat_intel/inventario').get());
+    }
+    for (const u of [GESTOR, TI_T]) {
+      await assertFails(db(u).doc('intel_acoes/a1').get());
+      await assertFails(db(u).doc('inventario_software/s1').get());
+    }
+  });
+
+  test('ninguem grava acoes, noticias ou inventario pelo cliente (nem Admin)', async () => {
+    for (const u of [SI_T, ADMIN]) {
+      await assertFails(db(u).doc('intel_acoes/a1').set({ statusTriagem: 'Aprovada' }, { merge: true }));
+      await assertFails(db(u).doc('intel_noticias/n2').set({ titulo: 'x' }));
+      await assertFails(db(u).doc('inventario_software/s2').set({ produto: 'x' }));
+    }
+  });
+
+  test('config: Seguranca grava "geral"; "inventario" so o servidor', async () => {
+    await assertSucceeds(db(SI_T).doc('config_threat_intel/geral').set({ limiteAnalisesDia: 10 }));
+    await assertFails(db(SI_T).doc('config_threat_intel/inventario').set({ importacaoAtual: 'y' }));
+    await assertFails(db(GESTOR).doc('config_threat_intel/geral').set({ limiteAnalisesDia: 10 }));
+  });
+});

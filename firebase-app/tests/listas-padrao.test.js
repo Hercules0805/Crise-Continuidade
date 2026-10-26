@@ -11,7 +11,7 @@ const { JSDOM } = require('jsdom');
 const PUB = path.join(__dirname, '..', 'public');
 const SCRIPTS = ['util.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
   'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js',
-  'sanitizar-pcn.js', 'contrato-ciclo.js', 'app.js'];
+  'sanitizar-pcn.js', 'contrato-ciclo.js', 'inventario-csv.js', 'app.js'];
 
 const DADOS = {
   getAreas: [{ id: 'a1', nome: 'TI', responsavel: 'Ana Souza', email: 'ana@fortestecnologia.com.br', telefone: '(85) 99999-0000' }],
@@ -61,6 +61,7 @@ const TELAS = [
   ['perguntas', false],
   ['dependencias', true], ['servicos', true], ['catalogoBackup', true], ['processos', true], ['indicadoresCadastro', true],
   ['riscos', true], ['vulnerabilidades', true], ['contratos', true], ['fornecedores', false], ['pcns', false], ['drp', false], ['conformidade', false], ['notificacoesEmail', false],
+  ['threatIntel', false],
 ];
 
 for (const [tela, temGrade] of TELAS) {
