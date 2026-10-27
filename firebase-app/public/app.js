@@ -1689,6 +1689,10 @@ function _htmlDrawerPessoa() {
             <input type="checkbox" id="pessoaProductOwner" onchange="alternarLiderancaPessoa('productOwner')"> <strong>Product Owner</strong>
           </label>
           <div id="pessoaProductOwnerProdutos"></div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:0.9em;cursor:pointer;margin:10px 0 6px;">
+            <input type="checkbox" id="pessoaLiderSuporte" onchange="alternarLiderancaPessoa('liderSuporte')"> <strong>Liderança de Suporte</strong>
+          </label>
+          <div id="pessoaLiderSuporteProdutos"></div>
           <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Marque a função e, se quiser, os produtos dela (sem produto também é permitido). Também dá para vincular pela tela Produtos de Software.
             ${Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novoProdutoDePessoa()">+ Novo produto</button>' : ''}
             <button type="button" class="btn-icon" onclick="_recarregarProdutosPessoa()" title="Atualizar lista de produtos">🔄</button></span>
@@ -1732,7 +1736,7 @@ async function pessoas() {
       filtros: [
         { id: 'filtroPessoaArea', rotulo: 'Área', opcoes: [] },
         { id: 'filtroPessoaLider', rotulo: 'Líder', opcoes: [], todos: 'Todos' },
-        { id: 'filtroPessoaFuncao', rotulo: 'Função', opcoes: [['techLead', 'Tech Lead'], ['teamLead', 'Team Lead'], ['productOwner', 'Product Owner']] },
+        { id: 'filtroPessoaFuncao', rotulo: 'Função', opcoes: [['techLead', 'Tech Lead'], ['teamLead', 'Team Lead'], ['productOwner', 'Product Owner'], ['liderSuporte', 'Liderança de Suporte']] },
       ] })}
     <div class="loading" id="loadingPessoas">⏳ Carregando...</div>
     <div class="data-table data-table--lista" id="listaPessoas" style="display:none;">
@@ -1846,7 +1850,7 @@ function renderizarPessoas() {
   const filtroLider = (document.getElementById('filtroPessoaLider') || {}).value || '';
   if (filtroLider) data = data.filter((p) => String(p.liderImediato || '') === String(filtroLider));
 
-  // Filtro por função em produtos (Tech Lead / Team Lead / Product Owner).
+  // Filtro por função em produtos (_FUNCOES_LIDERANCA).
   const filtroFuncao = (document.getElementById('filtroPessoaFuncao') || {}).value || '';
   if (filtroFuncao) data = data.filter((p) => p[filtroFuncao] === true);
 
@@ -1882,13 +1886,13 @@ window.ordenarPessoas = (coluna) => {
 };
 
 // ------------------------------------------------------------
-// Funções em produtos (Tech Lead / Team Lead / Product Owner -- este em
-// 27/10/2026). Cada função tem os seus produtos (ids de produtos_software);
+// Funções em produtos (Tech Lead / Team Lead / Product Owner / Liderança de
+// Suporte -- as duas últimas em 27/10/2026). Cada função tem os seus produtos (ids de produtos_software);
 // marcar a função não obriga a ter produto. Estado em window._pessoaLideranca.
 // A tela Produtos de Software edita o mesmo vínculo (mora na Pessoa).
 // ------------------------------------------------------------
-window._pessoaLideranca = { techLead: false, techLeadProdutos: [], teamLead: false, teamLeadProdutos: [], productOwner: false, productOwnerProdutos: [] };
-const _FUNCOES_LIDERANCA = { techLead: 'Tech Lead', teamLead: 'Team Lead', productOwner: 'Product Owner' };
+window._pessoaLideranca = { techLead: false, techLeadProdutos: [], teamLead: false, teamLeadProdutos: [], productOwner: false, productOwnerProdutos: [], liderSuporte: false, liderSuporteProdutos: [] };
+const _FUNCOES_LIDERANCA = { techLead: 'Tech Lead', teamLead: 'Team Lead', productOwner: 'Product Owner', liderSuporte: 'Liderança de Suporte' };
 
 /** Produto (do catálogo) por id, ou null se foi removido. */
 function _produtoSoftwarePorId(id) {
@@ -2072,6 +2076,7 @@ window.abrirModalPessoa = (id) => {
     techLead: !!(p && p.techLead), techLeadProdutos: p && Array.isArray(p.techLeadProdutos) ? p.techLeadProdutos.map(String) : [],
     teamLead: !!(p && p.teamLead), teamLeadProdutos: p && Array.isArray(p.teamLeadProdutos) ? p.teamLeadProdutos.map(String) : [],
     productOwner: !!(p && p.productOwner), productOwnerProdutos: p && Array.isArray(p.productOwnerProdutos) ? p.productOwnerProdutos.map(String) : [],
+    liderSuporte: !!(p && p.liderSuporte), liderSuporteProdutos: p && Array.isArray(p.liderSuporteProdutos) ? p.liderSuporteProdutos.map(String) : [],
   };
   renderLiderancaPessoa();
   document.getElementById('pessoaTelefone').value = p ? (p.telefone || '') : '';
@@ -2158,6 +2163,8 @@ function _coletarFormularioPessoa() {
     teamLeadProdutos: window._pessoaLideranca.teamLeadProdutos || [],
     productOwner: !!window._pessoaLideranca.productOwner,
     productOwnerProdutos: window._pessoaLideranca.productOwnerProdutos || [],
+    liderSuporte: !!window._pessoaLideranca.liderSuporte,
+    liderSuporteProdutos: window._pessoaLideranca.liderSuporteProdutos || [],
     telefone: document.getElementById('pessoaTelefone').value.trim(),
     email: document.getElementById('pessoaEmail').value.trim(),
     perfis: podeGerenciar
@@ -2636,6 +2643,8 @@ window.salvarPessoaCadastro = async () => {
         teamLeadProdutos: estadoDoFormulario.teamLeadProdutos,
         productOwner: estadoDoFormulario.productOwner,
         productOwnerProdutos: estadoDoFormulario.productOwnerProdutos,
+        liderSuporte: estadoDoFormulario.liderSuporte,
+        liderSuporteProdutos: estadoDoFormulario.liderSuporteProdutos,
         telefone: document.getElementById('pessoaTelefone').value.trim(),
         email,
         perfis: perfisParaEntidade,
@@ -21461,7 +21470,7 @@ window.salvarAvaliacaoFornecedor = async () => {
 // PÁGINA: PRODUTOS DE SOFTWARE (Administração)
 //
 // Catálogo-base dos produtos da empresa (Fortes Ponto, Fortes RH...). A Pessoa
-// aponta para ele por ID nas funções Tech Lead / Team Lead / Product Owner --
+// aponta para ele por ID nas funções Tech Lead / Team Lead / Product Owner / Liderança de Suporte --
 // renomear não orfaniza ninguém. Mesmo molde de Categorias de Fornecedor:
 // desativar em vez de excluir; excluir avisa quantas pessoas apontam para ele.
 // DECISÃO 27/10/2026: o produto tem área responsável (pelo nome, como
@@ -21475,7 +21484,7 @@ let produtosSoftwareOrdenacao = criarOrdenacao('nome', 'asc');
 async function produtosSoftware() {
   const isAdmin = Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS);
   app.innerHTML = `
-    ${_htmlCabecalhoLista({ titulo: 'Produtos de Software', sub: 'Produtos da empresa, a área responsável e as pessoas de cada um (Tech Lead, Team Lead e Product Owner).',
+    ${_htmlCabecalhoLista({ titulo: 'Produtos de Software', sub: 'Produtos da empresa, a área responsável e as pessoas de cada um (Tech Lead, Team Lead, Product Owner e Liderança de Suporte).',
       primario: { rotulo: '+ Novo produto', onclick: 'abrirModalProdutoSoftware()', id: 'btnNovoProdutoSoftware' } })}
     ${_htmlBarraLista({
       busca: { id: 'buscaProdutoSoftware', placeholder: 'Buscar produto…' },
@@ -21530,7 +21539,7 @@ function renderizarProdutosSoftware() {
 
   if (!produtosSoftwareData.length) {
     _atualizarBarraLista('produtosSoftwareContador', 0, ['produto', 'produtos']);
-    lista.innerHTML = _htmlVazio('Nenhum produto cadastrado ainda.', 'Sem produtos, a Pessoa não tem o que associar como Tech Lead, Team Lead ou Product Owner.');
+    lista.innerHTML = _htmlVazio('Nenhum produto cadastrado ainda.', 'Sem produtos, a Pessoa não tem o que associar como Tech Lead, Team Lead, Product Owner ou Liderança de Suporte.');
     return;
   }
 
@@ -21548,8 +21557,8 @@ function renderizarProdutosSoftware() {
 
   lista.innerHTML = `
     <div class="data-table data-table--lista">
-      <table style="min-width:1080px;">
-        <colgroup><col style="width:200px"><col style="width:170px"><col style="width:190px"><col style="width:190px"><col style="width:190px"><col style="width:100px"><col style="width:92px"></colgroup>
+      <table style="min-width:1260px;">
+        <colgroup><col style="width:200px"><col style="width:170px"><col style="width:180px"><col style="width:180px"><col style="width:180px"><col style="width:180px"><col style="width:100px"><col style="width:92px"></colgroup>
         <thead>
           <tr>
             ${th('nome', 'Produto')}
@@ -21557,6 +21566,7 @@ function renderizarProdutosSoftware() {
             <th>Tech Lead</th>
             <th>Team Lead</th>
             <th>Product Owner</th>
+            <th>Liderança de Suporte</th>
             ${th('status', 'Status')}
             <th class="col-acoes">Ações</th>
           </tr>
@@ -21566,11 +21576,11 @@ function renderizarProdutosSoftware() {
             const l = _lideresDoProduto(p.id);
             return `
             <tr style="cursor:pointer;${p.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalProdutoSoftware('${escJs(p.id)}')">
-              ${_tdLista(p.nome, 'forte')}${_tdLista(p.area || '–')}${_tdLista(nomes(l.techLead))}${_tdLista(nomes(l.teamLead))}${_tdLista(nomes(l.productOwner))}
+              ${_tdLista(p.nome, 'forte')}${_tdLista(p.area || '–')}${_tdLista(nomes(l.techLead))}${_tdLista(nomes(l.teamLead))}${_tdLista(nomes(l.productOwner))}${_tdLista(nomes(l.liderSuporte))}
               <td>${p.ativo ? '<span class="badge badge-green">Ativo</span>' : '<span class="badge badge-gray">Inativo</span>'}</td>
               ${isAdmin ? _htmlAcoesLinha([_acaoEditar(`abrirModalProdutoSoftware('${escJs(p.id)}')`), _acaoExcluir(`excluirProdutoSoftware('${escJs(p.id)}')`)]) : '<td class="col-acoes"></td>'}
             </tr>`;
-          }).join('') : '<tr><td colspan="7" class="vazio">Nenhum produto encontrado com esses filtros.</td></tr>'}
+          }).join('') : '<tr><td colspan="8" class="vazio">Nenhum produto encontrado com esses filtros.</td></tr>'}
         </tbody>
       </table>
     </div>
@@ -21798,7 +21808,7 @@ window.excluirProdutoSoftware = async (id) => {
   const l = _lideresDoProduto(id);
   const nPessoas = new Set(Object.values(l).flat().map((x) => x.id)).size;
   const uso = nPessoas
-    ? `\n\n⚠️ ${nPessoas} pessoa${nPessoas > 1 ? 's estão associadas' : ' está associada'} a este produto (Tech Lead, Team Lead ou Product Owner); a associação continua guardada, mas aparece como "(removido)" até alguém reescolher.`
+    ? `\n\n⚠️ ${nPessoas} pessoa${nPessoas > 1 ? 's estão associadas' : ' está associada'} a este produto (Tech Lead, Team Lead, Product Owner ou Liderança de Suporte); a associação continua guardada, mas aparece como "(removido)" até alguém reescolher.`
     : '';
   if (!await confirmarAcao(`Excluir o produto "${p ? p.nome : id}"?${uso}\n\nSe a ideia é só parar de oferecê-lo em novas associações, é melhor desativar em vez de excluir.`)) return;
   try {

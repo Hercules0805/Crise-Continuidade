@@ -492,3 +492,30 @@ test('drawer: produto novo grava os vinculos com o id criado; quem so le nao ve 
   assert.strictEqual(so.doc.querySelectorAll('#prodSoftPessoas select').length, 0);
   assert.ok(so.doc.getElementById('prodSoftNome').disabled);
 });
+
+// ---------------------------------------------------------------- Liderança de Suporte (27/10/2026)
+test('pessoa: Liderança de Suporte grava e limpa como as outras funcoes', async () => {
+  const { ctx, store } = ambienteApi({ dependencias: { pe1: { nome: 'Ana', categoria: 'Pessoas' } } });
+  const base = { id: 'pe1', categoria: 'Pessoas', nome: 'Ana', techLead: false, techLeadProdutos: [], teamLead: false, teamLeadProdutos: [], productOwner: false, productOwnerProdutos: [] };
+  await ctx._salvarDependencia({ ...base, liderSuporte: true, liderSuporteProdutos: ['ps1', 'ps1'] });
+  assert.deepStrictEqual(plano([store.dependencias.pe1.liderSuporte, store.dependencias.pe1.liderSuporteProdutos]), [true, ['ps1']]);
+  await ctx._salvarDependencia({ ...base, liderSuporte: false, liderSuporteProdutos: ['ps1'] });
+  assert.deepStrictEqual(plano([store.dependencias.pe1.liderSuporte, store.dependencias.pe1.liderSuporteProdutos]), [false, []]);
+});
+
+test('produtos: coluna e bloco de Liderança de Suporte; vincular grava a funcao liderSuporte', async () => {
+  const pessoas = [
+    { id: 'pe1', categoria: 'Pessoas', nome: 'Ana', areas: ['Suporte'], liderSuporte: true, liderSuporteProdutos: ['ps1'] },
+    { id: 'pe2', categoria: 'Pessoas', nome: 'Beto', areas: ['Suporte'] },
+  ];
+  const { w, calls, doc } = await abrirPagina(['admin'], { getDependencias: pessoas, getProdutosSoftware: [{ id: 'ps1', nome: 'Fortes Ponto', ativo: true, ordem: 1 }] });
+  const cab = [...doc.querySelectorAll('#listaProdutosSoftware thead th')].map((t) => t.textContent.replace(/[▲▼]/g, '').trim());
+  assert.ok(cab.includes('Liderança de Suporte'));
+  assert.match(doc.querySelector('#listaProdutosSoftware tbody tr').textContent, /Ana/);
+  w.abrirModalProdutoSoftware('ps1');
+  const bloco = doc.querySelector('[data-funcao-produto="liderSuporte"]');
+  assert.match(bloco.textContent, /Liderança de Suporte[\s\S]*Ana/);
+  w.adicionarPessoaAoProduto('liderSuporte', 'pe2');
+  await w.salvarProdutoSoftware();
+  assert.deepStrictEqual(plano(calls.salvarVinculosProdutoPessoas[0]), ['ps1', [{ pessoaId: 'pe2', funcao: 'liderSuporte', vinculado: true }]]);
+});

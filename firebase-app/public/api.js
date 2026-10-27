@@ -354,7 +354,7 @@ async function _lerDependencias() {
     areas: Array.isArray(d.areas) ? d.areas.filter(Boolean) : [],
     // So usado por Pessoas: id da Pessoa que é o líder imediato (organograma).
     liderImediato: d.liderImediato || '',
-    // So usado por Pessoas: Tech Lead / Team Lead / Product Owner (27/10/2026),
+    // So usado por Pessoas: Tech Lead / Team Lead / Product Owner / Lideranca de Suporte (27/10/2026),
     // cada funcao com os seus produtos (ids de produtos_software). Marcar a
     // funcao nao obriga a ter produto.
     techLead: d.techLead === true,
@@ -363,6 +363,8 @@ async function _lerDependencias() {
     teamLeadProdutos: Array.isArray(d.teamLeadProdutos) ? d.teamLeadProdutos.filter(Boolean) : [],
     productOwner: d.productOwner === true,
     productOwnerProdutos: Array.isArray(d.productOwnerProdutos) ? d.productOwnerProdutos.filter(Boolean) : [],
+    liderSuporte: d.liderSuporte === true,
+    liderSuporteProdutos: Array.isArray(d.liderSuporteProdutos) ? d.liderSuporteProdutos.filter(Boolean) : [],
     empresa: d.empresa || '',
     telefone: d.telefone || '',
     email: d.email || '',
@@ -961,8 +963,9 @@ async function _salvarProdutoSoftware(p) {
 }
 
 // Funcoes da Pessoa num produto de software: cada uma e um flag e a lista de
-// ids dos produtos (<funcao>Produtos). Product Owner entrou em 27/10/2026.
-const FUNCOES_PRODUTO_PESSOA = ['techLead', 'teamLead', 'productOwner'];
+// ids dos produtos (<funcao>Produtos). Product Owner e Lideranca de Suporte
+// entraram em 27/10/2026.
+const FUNCOES_PRODUTO_PESSOA = ['techLead', 'teamLead', 'productOwner', 'liderSuporte'];
 
 /**
  * Vinculos Pessoa x Produto gravados a partir da tela de Produtos (27/10/2026).
@@ -1812,7 +1815,7 @@ async function _salvarDependencia(d) {
   // Pessoa manda estes campos; Fornecedor/Dependencia regravam o documento e
   // nao podem zerar a lideranca de ninguem.
   // Mesma lista de FUNCOES_PRODUTO_PESSOA (literal aqui: os testes extraem a funcao sozinha).
-  const funcoesProduto = ['techLead', 'teamLead', 'productOwner'];
+  const funcoesProduto = ['techLead', 'teamLead', 'productOwner', 'liderSuporte'];
   if (funcoesProduto.some((f) => typeof d[f] === 'boolean')) {
     funcoesProduto.forEach((f) => {
       data[f] = d[f] === true;
