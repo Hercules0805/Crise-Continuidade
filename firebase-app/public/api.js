@@ -388,6 +388,14 @@ async function _lerDependencias() {
     pessoasRelacionadas: Array.isArray(d.pessoasRelacionadas)
       ? d.pessoasRelacionadas.map((p) => ({ id: p.id != null ? p.id : null, nome: p.nome || '', papel: p.papel || '' }))
       : [],
+    // Fornecedor ATIVO/INATIVO (27/10/2026). Ausente = ativo: os fornecedores que
+    // ja existiam continuam ativos sem migracao. Inativo fica so na aba Inativos
+    // e some das listas de selecao e das metricas ate alguem ativa-lo.
+    ativo: d.ativo !== false,
+    situacaoAlteradaEm: d.situacaoAlteradaEm || '',
+    situacaoAlteradaPor: d.situacaoAlteradaPor || '',
+    // Linhas da planilha de origem (importacao CSV), so como referencia.
+    importacao: d.importacao && Array.isArray(d.importacao.linhas) ? d.importacao : null,
     cnpj: d.cnpj || '',
     // Quais controles do catalogo de conformidade valem para este fornecedor.
     // null = nunca customizado (ausencia, nao "nenhum") — a tela comeca sem
@@ -1772,6 +1780,11 @@ async function _salvarDependencia(d) {
       .filter((p) => p && (p.id != null || String(p.nome || '').trim()))
       .map((p) => ({ id: p.id != null ? p.id : null, nome: String(p.nome || '').trim(), papel: String(p.papel || '').trim() }));
   }
+  // Ativo/inativo e linhas importadas (27/10/2026): so se vierem no payload.
+  // Quem salva a dependencia por outra tela (Dependencia/DRP) nao manda estes
+  // campos e nao pode reativar o fornecedor nem apagar a referencia importada.
+  if (typeof d.ativo === 'boolean') data.ativo = d.ativo;
+  if (d.importacao && Array.isArray(d.importacao.linhas)) data.importacao = d.importacao;
   // Composicao de Servicos (21/10/2026): mesma regra dos canais -- so o drawer
   // de Dependencia tecnica manda estes campos; Fornecedor/Pessoa/DRP regravam
   // o documento e nao podem zerar a hierarquia nem os parametros.
@@ -1805,6 +1818,59 @@ async function _salvarDependencia(d) {
   }
   const ref = await _db.collection(COLLECTION.dependencias).add(data);
   return { success: true, id: ref.id, dado: data };
+}
+
+/**
+ * Ativa ou inativa um fornecedor (27/10/2026). Grava SO a situacao -- nao
+ * passa por _salvarDependencia, que regrava o documento inteiro a partir do
+ * payload e apagaria o que o botao da grade nao conhece.
+ */
+async function _alterarSituacaoFornecedor(b) {
+  if (!b || !b.id) throw new Error('Fornecedor não informado.');
+  const patch = {
+    ativo: b.ativo === true,
+    situacaoAlteradaEm: new Date().toISOString(),
+    situacaoAlteradaPor: (window.USER_EMAIL || '').toLowerCase(),
+  };
+  await _db.collection(COLLECTION.dependencias).doc(String(b.id)).set(patch, { merge: true });
+  return { success: true, id: b.id, dado: patch };
+}
+
+/**
+ * Importacao CSV de fornecedores (27/10/2026): cria cada um como INATIVO, com
+ * as linhas da planilha em `importacao`. Montagem e deduplicacao sao feitas
+ * antes, na tela (importacao-fornecedores.js); aqui so grava, em lotes.
+ */
+async function _importarFornecedoresInativos(b) {
+  const lista = Array.isArray(b && b.fornecedores) ? b.fornecedores : [];
+  const agora = new Date().toISOString();
+  const quem = (window.USER_EMAIL || '').toLowerCase();
+  const ids = [];
+  for (let i = 0; i < lista.length; i += 400) {
+    const lote = _db.batch();
+    lista.slice(i, i + 400).forEach((f) => {
+      const ref = _db.collection(COLLECTION.dependencias).doc();
+      ids.push(ref.id);
+      lote.set(ref, {
+        categoria: 'Fornecedores',
+        nome: String(f.nome || '').trim(),
+        nomeFantasia: '',
+        cnpj: String(f.cnpj || ''),
+        detalhes: String(f.detalhes || ''),
+        areasRelacionadas: Array.isArray(f.areasRelacionadas) ? f.areasRelacionadas : [],
+        pessoasRelacionadas: Array.isArray(f.pessoasRelacionadas) ? f.pessoasRelacionadas : [],
+        pessoas: [],
+        ativo: false,
+        situacaoAlteradaEm: agora,
+        situacaoAlteradaPor: quem,
+        importacao: Object.assign({}, f.importacao || {}, { importadoEm: agora, importadoPor: quem }),
+        criadoEm: agora,
+        criadoPor: quem,
+      });
+    });
+    await lote.commit();
+  }
+  return { success: true, total: ids.length, ids };
 }
 
 const _CAMPOS_INDICADOR = [
@@ -2669,6 +2735,8 @@ const _POST_FIRESTORE = {
   excluirConfigResposta: (b) => _db.collection(COLLECTION.configRespostas).doc(String(b.rowIndex || b.id)).delete()
     .then(() => _subirVersaoRegua()).then((versao) => ({ success: true, reguaVersao: versao })),
   salvarDependencia: (b) => _salvarDependencia(b),
+  alterarSituacaoFornecedor: (b) => _alterarSituacaoFornecedor(b),
+  importarFornecedoresInativos: (b) => _importarFornecedoresInativos(b),
   excluirDependencia: (b) => _db.collection(COLLECTION.dependencias).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarRisco: (b) => _salvarRisco(b),
   excluirRisco: (b) => _db.collection(COLLECTION.riscos).doc(String(b.id)).delete().then(() => ({ success: true })),
@@ -2910,6 +2978,10 @@ const API = {
   excluirConfigResposta: (d) => API.post('excluirConfigResposta', d),
   getDependencias: () => API.get('getDependencias'),
   salvarDependencia: (d) => API.post('salvarDependencia', d),
+  alterarSituacaoFornecedor: (id, ativo) => API.post('alterarSituacaoFornecedor', { id, ativo })
+    .then((r) => { API.invalidate('getDependencias'); return r; }),
+  importarFornecedoresInativos: (fornecedores) => API.post('importarFornecedoresInativos', { fornecedores })
+    .then((r) => { API.invalidate('getDependencias'); return r; }),
   excluirDependencia: (id) => API.post('excluirDependencia', { id }),
   getRiscos: () => API.get('getRiscos'),
   getRiscosPorProcesso: (processoId) => API.get('getRiscosPorProcesso', { processoId }),

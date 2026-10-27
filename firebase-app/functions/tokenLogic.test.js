@@ -406,3 +406,13 @@ test('validarTokenBIA: catalogo de Instalações na chave instalacoes (sem acent
   const res = await READ_ACTIONS.validarTokenBIA(db, 'b10');
   assert.deepStrictEqual(res.catalogo.instalacoes, [{ id: 'dep-sede', nome: 'Sede SP' }]);
 });
+
+test('validarTokenBIA nao envia fornecedor INATIVO ao formulario externo (27/10/2026)', async () => {
+  const seed = baseSeed();
+  seed.dependencias['dep-aws'] = { categoria: 'Fornecedores', nome: 'AWS' };
+  seed.dependencias['dep-imp'] = { categoria: 'Fornecedores', nome: 'Importado Inativo', ativo: false };
+  seed.dependencias['dep-srv'] = { categoria: 'Servidor', nome: 'SRV', ativo: false };
+  seed.tokens['b9'] = { token: 'b9', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  const res = await READ_ACTIONS.validarTokenBIA(makeDb(seed), 'b9');
+  assert.deepStrictEqual(res.catalogo.fornecedores, [{ id: 'dep-aws', nome: 'AWS' }]);
+});

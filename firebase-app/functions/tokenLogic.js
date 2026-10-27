@@ -158,6 +158,8 @@ async function validarTokenBIA(db, token) {
   const catalogoPorCategoria = {};
   depSnap.docs.forEach((d) => {
     const c = d.data();
+    // Fornecedor inativo (27/10/2026) nao vai para o formulario externo do BIA.
+    if (['Fornecedores', 'Fornecedor'].includes(c.categoria) && c.ativo === false) return;
     const cat = (c.categoria || 'Outros').toLowerCase().replace(/[^a-záéíóúãõç]/g, '');
     const key = cat === 'fornecedor' ? 'fornecedores' : cat === 'pessoa' ? 'pessoas' : cat === 'sistema' ? 'sistemas'
       : (cat === 'instalações' || cat === 'instalação') ? 'instalacoes' : cat;

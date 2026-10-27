@@ -805,6 +805,7 @@ const _acaoExcluir = (onclick) => ({ icone: SVG_EXCLUIR, titulo: 'Excluir', oncl
 const _svgAcao = (cor, corpo) => `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="${cor}" stroke-width="2" aria-hidden="true">${corpo}</svg>`;
 const SVG_VER = _svgAcao('#5c5550', '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>');
 const SVG_AVALIAR = _svgAcao('#d60014', '<path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>');
+const SVG_ATIVAR = _svgAcao('#2e7d32', '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>');
 const SVG_EMAIL = _svgAcao('#2e7d32', '<path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/>');
 const SVG_DOCUMENTO = _svgAcao('#1565c0', '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>');
 const SVG_LEVANTAMENTO = _svgAcao('#2e7d32', '<rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h6"/>');
@@ -848,6 +849,16 @@ function _renderGradeLista(o) {
   o.ordenacao.atualizarSetas(o.prefixoSeta, o.colunas.filter((c) => c.ordem).map((c) => c.ordem));
 }
 const _badgeAtivo = (ativo, fem) => ativo ? `<span class="badge badge-green">${fem ? 'Ativa' : 'Ativo'}</span>` : `<span class="badge badge-gray">${fem ? 'Inativa' : 'Inativo'}</span>`;
+
+/**
+ * Fornecedor ATIVO (27/10/2026). Fornecedor inativo (importado da planilha ou
+ * inativado) fica só na aba Inativos da tela de Fornecedores: some das listas
+ * de seleção (contrato, risco, processo, DRP) e das métricas até alguém
+ * ativá-lo. Qualquer dependência que não é fornecedor conta como ativa.
+ */
+function _fornecedorAtivo(d) {
+  return !d || !Perfis.categoriaDeFornecedor(d.categoria) || d.ativo !== false;
+}
 
 /** Drawer "Configurar" de uma tela de lista (ajuste que não é cadastro: limiar, apetite…). */
 function _htmlDrawerConfigLista(titulo, corpoId) {
@@ -3222,7 +3233,7 @@ window.abrirDrawerProcessosLote = () => {
   // na mesma leva.
   // Só os 4 Ps e os Serviços (21/10/2026): o técnico vem da composição do Serviço.
   const porCategoria = {};
-  (window.dependenciasCatalogo || []).filter((d) => CadeiaDependencias.categoriaPermitidaNoProcesso(d.categoria)).forEach((d) => {
+  (window.dependenciasCatalogo || []).filter((d) => CadeiaDependencias.categoriaPermitidaNoProcesso(d.categoria) && _fornecedorAtivo(d)).forEach((d) => {
     if (!porCategoria[d.categoria]) porCategoria[d.categoria] = [];
     porCategoria[d.categoria].push({ nome: d.nome, id: d.id || null });
   });
@@ -3709,6 +3720,7 @@ window.mostrarDropdownCategoria = (input, categoria) => {
   } else {
     disponiveis = catalogo.filter(d =>
       d.categoria === categoria &&
+      _fornecedorAtivo(d) &&
       !window._dependenciaSelecionadas.some(s => s.id && s.id === d.id) &&
       (filtro === '' || d.nome.toLowerCase().includes(filtro))
     );
@@ -3777,6 +3789,11 @@ window.selecionarDependenciaCategoria = (nome, categoria, id) => {
 window.adicionarDependenciaCategoria = (nome, categoria) => {
   if (window._dependenciaSelecionadas.some((s) => s.nome === nome && s.categoria === categoria)) return;
   if (!CadeiaDependencias.categoriaPermitidaNoProcesso(categoria) || CadeiaDependencias.ehServico({ categoria })) return;
+  const inativo = (window.dependenciasCatalogo || []).find((d) => d.categoria === categoria && (d.nome || '').toLowerCase() === String(nome || '').toLowerCase() && !_fornecedorAtivo(d));
+  if (inativo) {
+    showToast(`"${inativo.nome}" está inativo. Ative-o na tela de Fornecedores (aba Inativos) para vinculá-lo.`, '#e65100');
+    return;
+  }
   const item = { categoria, nome, id: null };
   window._dependenciaSelecionadas.push(item);
   // Verificar se existe no catálogo COM esta categoria específica
@@ -4403,7 +4420,8 @@ async function dependencias() {
     // e aqui, e nao no banco, para que o catalogo continue inteiro -- e o
     // mesmo de que os processos dependem.
     const [todas, areas] = await Promise.all([API.getDependencias(), API.getAreas()]);
-    dependenciasData = todas.filter(d => !['Pessoas', 'Pessoa'].includes(d.categoria));
+    // Fornecedor inativo fica só na aba Inativos de Fornecedores (27/10/2026).
+    dependenciasData = todas.filter(d => !['Pessoas', 'Pessoa'].includes(d.categoria) && _fornecedorAtivo(d));
     // Fonte do select "Area Responsavel" na aba DRP -- mesmo catalogo que
     // Areas/Fornecedor ja usam.
     window.areasData = areas;
@@ -4710,6 +4728,7 @@ function _drpDepCatalogoDisponivel(filtro) {
   const termo = (filtro || '').toLowerCase();
   return catalogo.filter((d) =>
     String(d.id) !== String(selfId) &&
+    _fornecedorAtivo(d) &&
     !window._depDrpDependenciasSel.some((s) => s.id && String(s.id) === String(d.id)) &&
     (termo === '' || (d.nome || '').toLowerCase().includes(termo))
   );
@@ -14689,8 +14708,10 @@ window.abrirDrawerRisco = async (r) => {
       riscosFornecedoresCache = deps.filter(d => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
     } catch (e) { riscosFornecedoresCache = []; }
   }
+  // Fornecedor inativo não é oferecido (27/10/2026); o já gravado no risco continua, marcado.
   document.getElementById('rFornecedor').innerHTML = '<option value="">-- Nenhum --</option>' +
-    riscosFornecedoresCache.map(f => `<option value="${f.id}" data-nome="${esc(f.nome)}">${esc(f.nome)}</option>`).join('');
+    riscosFornecedoresCache.filter((f) => _fornecedorAtivo(f) || (r && String(r.fornecedor || '') === String(f.id)))
+      .map(f => `<option value="${f.id}" data-nome="${esc(f.nome)}">${esc(f.nome)}${_fornecedorAtivo(f) ? '' : ' (inativo)'}</option>`).join('');
 
   // Indicadores: os KRIs da aba Monitoramento sao escolhidos deste cadastro (o
   // antigo campo "Indicador relacionado" virou o primeiro KRI; rIndicador e
@@ -19012,7 +19033,8 @@ async function drp() {
 
     // Escopo técnico (exclui Pessoas) -- mesmo recorte do Catálogo. Alimenta o
     // drawer (edição) e a lista. Fornecedores entram (têm DRP técnico também).
-    dependenciasData = deps.filter(d => !['Pessoas', 'Pessoa'].includes(d.categoria));
+    // Fornecedor inativo não tem DRP a gerar (27/10/2026).
+    dependenciasData = deps.filter(d => !['Pessoas', 'Pessoa'].includes(d.categoria) && _fornecedorAtivo(d));
     window.dependenciasCatalogo = dependenciasData;
     // Área Responsável (drawer) e picker de Dependências precisam disso.
     window.areasData = areas;
@@ -19890,6 +19912,8 @@ let fornecedoresFiltroResumo = 'todos'; // 'todos' | 'semAvaliacao' | 'vencida' 
 let fornecedoresFiltroTic = 'todos'; // 'todos' | 'tic' | 'naoTic'
 let fornecedoresOrdenacao = criarOrdenacao('nome', 'asc');
 const fornecedoresPaginacao = criarPaginacao(20);
+// Aba da tela de Fornecedores (27/10/2026): 'ativos' | 'inativos'.
+let fornecedoresAba = 'ativos';
 
 // Filtrar ou ordenar volta para a 1ª página.
 window.filtrarFornecedores = () => {
@@ -20090,23 +20114,25 @@ const FORN_SITUACOES_FILTRO = [['semAvaliacao', 'Sem avaliação'], ['vencida', 
 
 /** Números de Fornecedores (os antigos cards da lista); `filtro` = valores dos selects da lista. */
 function _metricasFornecedores() {
-  const comNota = fornecedoresData.filter((f) => { const a = _avaliacaoDoFornecedor(f.id); return a && a.nota !== null; });
+  // Só ativos (27/10/2026): fornecedor inativo não entra em métrica.
+  const lista = fornecedoresData.filter(_fornecedorAtivo);
+  const comNota = lista.filter((f) => { const a = _avaliacaoDoFornecedor(f.id); return a && a.nota !== null; });
   const vencidas = comNota.filter((f) => FornecedorScore.vencida(_avaliacaoDoFornecedor(f.id).avaliadoEm)).length;
   const abaixo = comNota.filter((f) => FornecedorScore.abreRisco(_avaliacaoDoFornecedor(f.id).nota, configFornecedor.limiarRisco)).length;
-  const semAvaliacao = fornecedoresData.length - comNota.length;
-  const qtdTic = fornecedoresData.filter((f) => f.tic !== false).length;
+  const semAvaliacao = lista.length - comNota.length;
+  const qtdTic = lista.filter((f) => f.tic !== false).length;
   const m = [
-    { n: fornecedoresData.length, t: 'Fornecedores no catálogo', c: '#d60014', filtro: {} },
+    { n: lista.length, t: 'Fornecedores no catálogo', c: '#d60014', filtro: {} },
     { n: semAvaliacao, t: 'Sem avaliação', c: semAvaliacao ? '#e65100' : '#999', filtro: { filtroFornSituacao: 'semAvaliacao' } },
     { n: vencidas, t: 'Avaliação vencida', c: vencidas ? '#e65100' : '#999', filtro: { filtroFornSituacao: 'vencida' } },
     { n: abaixo, t: `Nota abaixo de ${configFornecedor.limiarRisco}`, c: abaixo ? '#c62828' : '#2e7d32', filtro: { filtroFornSituacao: 'abaixoLimiar' } },
   ];
   if (window._fornContratosCarregados) {
-    const n = fornecedoresData.filter((f) => !_contratosVigentesDoFornecedor(f.id).length).length;
+    const n = lista.filter((f) => !_contratosVigentesDoFornecedor(f.id).length).length;
     m.push({ n, t: 'Sem contrato vigente', c: n ? '#e65100' : '#999', filtro: { filtroFornSituacao: 'semContrato' } });
   }
   m.push({ n: qtdTic, t: 'TIC', c: '#d60014', filtro: { filtroFornTic: 'tic' } });
-  m.push({ n: fornecedoresData.length - qtdTic, t: 'Não TIC', c: '#555', filtro: { filtroFornTic: 'naoTic' } });
+  m.push({ n: lista.length - qtdTic, t: 'Não TIC', c: '#555', filtro: { filtroFornTic: 'naoTic' } });
   return m;
 }
 
@@ -20193,6 +20219,10 @@ async function fornecedores() {
     ${_htmlCabecalhoLista({ titulo: 'Fornecedores', sub: 'Catálogo, avaliação e criticidade dos fornecedores da empresa.',
       primario: { rotulo: '+ Novo fornecedor', onclick: 'abrirDrawerFornecedorCadastro()', id: 'btnNovoFornecedor' },
       maisAcoes: podeMexer ? [{ rotulo: 'Critérios de Avaliação', onclick: "location.hash='#fornecedores-criterios'" }] : [] })}
+    <div role="tablist" style="display:flex;gap:4px;border-bottom:2px solid var(--brand-tint);margin-bottom:12px;">
+      ${[['ativos', 'Ativos'], ['inativos', 'Inativos']].map(([id, rot]) => `<button type="button" id="tab-forn-lista-${id}" onclick="trocarAbaFornecedores('${id}')" style="padding:10px 20px;font-size:0.88em;background:none;border:none;cursor:pointer;font-weight:700;">${rot} <span id="contFornAba-${id}"></span></button>`).join('')}
+    </div>
+    <div id="fornAbaAcoes"></div>
     ${_htmlBarraLista({ busca: { id: 'buscaFornecedor', placeholder: 'Buscar fornecedor…' }, aoMudar: 'filtrarFornecedores', contadorId: 'fornecedoresContador',
       filtros: [
         { id: 'filtroFornCadastroCategoria', rotulo: 'Categoria', opcoes: [] },
@@ -20204,9 +20234,11 @@ async function fornecedores() {
     <div id="fornResumo"></div>
     <div class="loading" id="loadingFornecedores">⏳ Carregando...</div>
     <div id="listaFornecedores"></div>
-    ${_htmlDrawerFornecedorCadastro()}`;
+    ${_htmlDrawerFornecedorCadastro()}
+    ${_htmlDrawerImportarFornecedores()}`;
 
   document.getElementById('btnNovoFornecedor').style.display = podeMexer ? 'inline-block' : 'none';
+  fornecedoresAba = 'ativos';
 
   try {
     const [deps, crits, avals, cfg, cats, subcats, critPerguntas, areasFornecedor, contratosList, statusContratoList] = await Promise.all([
@@ -20273,6 +20305,20 @@ function renderizarFornecedores() {
     resumo.innerHTML = ativos.length ? '' : `<div class="lista-alerta">Nenhum critério ativo cadastrado. Sem critério não existe nota — todo fornecedor vai aparecer como "Não avaliado".
       ${podeMexer ? ' <a href="#fornecedores-criterios">Cadastrar critérios</a>' : ''}</div>`;
   }
+  // Abas Ativos / Inativos (27/10/2026): o resto dos filtros vale dentro da aba.
+  const nAtivos = fornecedoresData.filter(_fornecedorAtivo).length;
+  const contAba = (id, n) => { const el = document.getElementById('contFornAba-' + id); if (el) el.textContent = `(${n})`; };
+  contAba('ativos', nAtivos);
+  contAba('inativos', fornecedoresData.length - nAtivos);
+  ['ativos', 'inativos'].forEach((id) => _marcarAba(document.getElementById('tab-forn-lista-' + id), id === fornecedoresAba));
+  const naAbaInativos = fornecedoresAba === 'inativos';
+  const acoesAba = document.getElementById('fornAbaAcoes');
+  if (acoesAba) {
+    acoesAba.innerHTML = naAbaInativos ? `<div class="lista-alerta" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+        <span>Fornecedores importados ou inativados ficam aqui até alguém ativá-los. Inativo não aparece nas listas de seleção (contratos, riscos, processos, DRP) nem nas métricas.</span>
+        ${podeMexer ? '<button type="button" class="btn btn-ghost" onclick="abrirImportacaoFornecedores()">📥 Importar CSV</button>' : ''}
+      </div>` : '';
+  }
   fornecedoresFiltroResumo = (document.getElementById('filtroFornSituacao') || {}).value || 'todos';
   fornecedoresFiltroTic = (document.getElementById('filtroFornTic') || {}).value || 'todos';
 
@@ -20300,7 +20346,8 @@ function renderizarFornecedores() {
     if (fornecedoresFiltroTic === 'naoTic') return f.tic === false;
     return true;
   };
-  let data = fornecedoresData.filter((f) => !busca
+  let data = fornecedoresData.filter((f) => (naAbaInativos ? !_fornecedorAtivo(f) : _fornecedorAtivo(f)))
+    .filter((f) => !busca
     || (f.nome || '').toLowerCase().includes(busca)
     || (f.nomeFantasia || '').toLowerCase().includes(busca)
     || (f.pessoas || []).some((p) => (p.nome || '').toLowerCase().includes(busca))
@@ -20362,7 +20409,7 @@ function renderizarFornecedores() {
             const contatos = (f.pessoas || []).map((p) => p.nome).join(', ');
             return `
             <tr style="cursor:pointer;" onclick="abrirDrawerFornecedorCadastro('${escJs(f.id)}')">
-              <td class="forte" title="${esc(f.nome + (contatos ? ' — contatos: ' + contatos : ''))}">${esc(f.nome)}</td>
+              <td class="forte" title="${esc(f.nome + (contatos ? ' — contatos: ' + contatos : ''))}">${esc(f.nome)}${f.importacao ? ' <span class="muted" style="font-weight:400;font-size:0.8em;" title="Veio da importação de planilha">· importado</span>' : ''}</td>
               ${_tdLista(f.categoriaFornecedor || '–')}
               <td>${_resumoAreasFornecedor(f)}</td>
               <td>${_resumoGestoresFornecedor(f)}</td>
@@ -20375,9 +20422,12 @@ function renderizarFornecedores() {
               <td class="col-c">${_badgeCriticidadeFornecedor(av)}</td>
               <td title="${esc([sit.aviso || sit.rotulo, av ? `Avaliado em ${_dataCurtaForn(av.avaliadoEm)}${av.avaliadoPor ? ' por ' + av.avaliadoPor : ''}` : ''].filter(Boolean).join(' — '))}">${_htmlBadge(_nivelSituacaoFornecedor(sit), sit.rotulo)}${sit.aviso ? ' <span style="color:#e65100;">⚠</span>' : ''}</td>
               ${_htmlAcoesLinha([{ icone: SVG_EDITAR, titulo: podeMexer ? 'Editar / avaliar fornecedor' : 'Visualizar', onclick: `abrirDrawerFornecedorCadastro('${escJs(f.id)}')` },
+                podeMexer && !_fornecedorAtivo(f) ? { icone: SVG_ATIVAR, titulo: 'Ativar fornecedor', onclick: `alternarSituacaoFornecedor('${escJs(f.id)}', true)` } : null,
                 podeMexer ? _acaoExcluir(`excluirFornecedorCadastro('${escJs(f.id)}')`) : null])}
             </tr>`;
-          }).join('') : `<tr><td colspan="9" class="vazio">${fornecedoresData.length ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor cadastrado ainda.'}</td></tr>`}
+          }).join('') : `<tr><td colspan="9" class="vazio">${naAbaInativos
+            ? (fornecedoresData.length - nAtivos ? 'Nenhum fornecedor inativo com esses filtros.' : 'Nenhum fornecedor inativo. Os importados de planilha e os inativados aparecem aqui.')
+            : (nAtivos ? 'Nenhum fornecedor encontrado com esses filtros.' : 'Nenhum fornecedor ativo cadastrado ainda.')}</td></tr>`}
         </tbody>
       </table>
     </div>
@@ -21166,6 +21216,8 @@ function _htmlDrawerFornecedorCadastro() {
         <div style="flex:1;overflow-y:auto;padding:20px 24px;">
 
       <div id="painel-forn-dados">
+      <div id="fornSituacaoBarra"></div>
+      <div id="fornDadosImportados"></div>
       <label style="${lbl}margin-bottom:10px;">Dados do fornecedor</label>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
         <div><label style="${lbl}">Razão Social <span class="req" aria-hidden="true">*</span></label><input type="text" id="fornCadNome" placeholder="Ex: Alfa Tecnologia S.A." style="${inp}"></div>
@@ -21754,11 +21806,210 @@ window.abrirDrawerFornecedorCadastro = (id, abaInicial) => {
   renderCanaisSuporteFornecedor();
   // A visibilidade dos dois botões de salvar é resolvida por trocarAbaFornecedor
   // (depende da aba e de _fornPodeMexer/_fornTemCriterios).
+  renderSituacaoFornecedor(f);
+  renderDadosImportadosFornecedor(f);
   trocarAbaFornecedor(abaInicial || 'dados');
   document.getElementById('drawerFornecedorCadastro').classList.add('open');
   document.getElementById('drawerOverlayFornecedorCadastro').classList.add('open');
   _edFornecedor.marcar();
   _edAvalFornecedor.marcar();
+};
+
+// ============================================================
+// Ativo / Inativo (27/10/2026)
+// ------------------------------------------------------------
+// A situação é gravada na hora (alterarSituacaoFornecedor), fora do Salvar do
+// cadastro: grava SÓ a situação, sem regravar o documento.
+// ============================================================
+function renderSituacaoFornecedor(f) {
+  const cont = document.getElementById('fornSituacaoBarra');
+  if (!cont) return;
+  if (!f || !f.id) { cont.innerHTML = ''; return; }
+  const ativo = _fornecedorAtivo(f);
+  const podeMexer = window._fornPodeMexer !== false;
+  const quando = f.situacaoAlteradaEm ? ` desde ${_dataCurtaForn(f.situacaoAlteradaEm)}${f.situacaoAlteradaPor ? ' (' + esc(f.situacaoAlteradaPor) + ')' : ''}` : '';
+  cont.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:10px 12px;margin-bottom:14px;border:1px solid #e0e0e0;border-left:3px solid ${ativo ? '#2e7d32' : '#999'};border-radius:8px;background:${ativo ? '#fff' : '#f5f5f5'};">
+      <span>${_badgeAtivo(ativo)} <span class="muted" style="font-size:0.85em;">${ativo ? 'Aparece nas listas de seleção e nas métricas.' : 'Fica só na aba Inativos: não aparece nas listas de seleção nem nas métricas'}${quando}.</span></span>
+      ${podeMexer ? `<button type="button" class="btn btn-ghost" onclick="alternarSituacaoFornecedor('${escJs(f.id)}', ${!ativo})" style="padding:6px 14px;${ativo ? '' : 'color:#2e7d32;border-color:#2e7d32;'}">${ativo ? 'Inativar' : 'Ativar fornecedor'}</button>` : ''}
+    </div>`;
+}
+
+/** Linhas da planilha de origem (importação CSV), só leitura. */
+function renderDadosImportadosFornecedor(f) {
+  const cont = document.getElementById('fornDadosImportados');
+  if (!cont) return;
+  const imp = f && f.importacao;
+  const linhas = imp && Array.isArray(imp.linhas) ? imp.linhas : [];
+  if (!linhas.length) { cont.innerHTML = ''; return; }
+  const v = (t) => esc(t || '–');
+  const reajuste = (l) => [l.indiceReajuste, l.mesReajuste].filter(Boolean).join(' · ') || '–';
+  const conferencia = (l) => [l.analiseJuridico ? 'Jurídico: ' + l.analiseJuridico : '', l.validacaoSI ? 'SI: ' + l.validacaoSI : ''].filter(Boolean).join(' / ') || '–';
+  cont.innerHTML = `<details style="margin-bottom:16px;border:1px solid #e0e0e0;border-radius:8px;padding:10px 12px;"${_fornecedorAtivo(f) ? '' : ' open'}>
+      <summary style="cursor:pointer;font-weight:700;font-size:0.9em;">Dados importados da planilha (${linhas.length} linha${linhas.length > 1 ? 's' : ''})</summary>
+      <div style="font-size:0.78em;color:#888;margin:6px 0 8px;">Importado de ${v(imp.origem)}${imp.importadoEm ? ' em ' + _dataCurtaForn(imp.importadoEm) : ''}${imp.importadoPor ? ' por ' + esc(imp.importadoPor) : ''}. Só referência: use para cadastrar o contrato certo ao ativar.${imp.cnpjRevisar ? ` <b style="color:#e65100;">⚠ CNPJ a revisar: ${esc(imp.cnpjRevisar)}.</b>` : ''}</div>
+      <div class="data-table" style="overflow-x:auto;"><table style="min-width:900px;">
+        <thead><tr><th>Nº</th><th>Descrição</th><th>CNPJ</th><th>Assinatura</th><th>Prazo</th><th>Setor</th><th>Gestor</th><th>Reajuste</th><th>Assinado</th><th>Conferência</th></tr></thead>
+        <tbody>${linhas.map((l) => `<tr>
+          <td class="col-nw">${v(l.numeracao)}</td><td>${v(l.descricao)}</td><td class="col-nw">${v(l.cnpj)}</td><td class="col-nw">${v(l.dataAssinatura)}</td>
+          <td>${v(l.prazo)}</td><td>${v(l.setor)}</td><td>${v(l.gestor)}</td><td>${esc(reajuste(l))}</td><td>${v(l.assinado)}</td><td>${esc(conferencia(l))}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </details>`;
+}
+
+window.alternarSituacaoFornecedor = async (id, ativar) => {
+  if (!Perfis.podeGerenciarFornecedores(window.USER_PERFIS)) return;
+  const f = fornecedoresData.find((x) => String(x.id) === String(id));
+  if (!f) return;
+  let aviso = ativar
+    ? `Ativar "${f.nome}"?\n\nEle passa para a aba Ativos e volta a aparecer nas listas de seleção (contratos, riscos, processos, DRP) e nas métricas.`
+    : `Inativar "${f.nome}"?\n\nEle vai para a aba Inativos e some das listas de seleção e das métricas. Os vínculos que já existem continuam.`;
+  const vigentes = window._fornContratosCarregados ? _contratosVigentesDoFornecedor(f.id).length : 0;
+  if (!ativar && vigentes) aviso += `\n\nAtenção: este fornecedor tem ${vigentes} contrato${vigentes > 1 ? 's' : ''} vigente${vigentes > 1 ? 's' : ''}.`;
+  if (!await confirmarAcao(aviso)) return;
+  try {
+    const r = await API.alterarSituacaoFornecedor(f.id, !!ativar);
+    Object.assign(f, (r && r.dado) || { ativo: !!ativar });
+    renderizarFornecedores();
+    const aberto = document.getElementById('drawerFornecedorCadastro');
+    if (aberto && aberto.classList.contains('open') && document.getElementById('fornCadId').value === String(f.id)) renderSituacaoFornecedor(f);
+    showToast(ativar ? `✅ "${f.nome}" ativado.` : `✅ "${f.nome}" inativado.`, '#2e7d32');
+  } catch (e) {
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível alterar a situação.'), '#c62828');
+  }
+};
+
+window.trocarAbaFornecedores = (aba) => {
+  fornecedoresAba = aba === 'inativos' ? 'inativos' : 'ativos';
+  fornecedoresPaginacao.reiniciar();
+  renderizarFornecedores();
+};
+
+// ============================================================
+// Importação de fornecedores por CSV (27/10/2026) -- aba Inativos.
+// Regras em importacao-fornecedores.js; a gravação (como INATIVOS, em lote)
+// em api.js importarFornecedoresInativos.
+// ============================================================
+function _htmlDrawerImportarFornecedores() {
+  return `
+    <div class="drawer-overlay" id="drawerOverlayImportarFornecedores" onclick="fecharImportacaoFornecedores()"></div>
+    <div class="drawer" id="drawerImportarFornecedores">
+      <div class="drawer-header">
+        <h3>Importar fornecedores (CSV)</h3>
+        <button onclick="fecharImportacaoFornecedores()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body" style="padding:20px 24px;">
+        <p style="font-size:0.9em;color:#555;margin-top:0;">Os fornecedores entram <b>inativos</b>, na aba Inativos, até alguém ativá-los. Linhas do mesmo fornecedor (aditivos) viram um fornecedor só, e quem já existe na base não é importado. Os dados de contrato da planilha ficam no fornecedor como referência — nenhum contrato é criado.</p>
+        <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Arquivo CSV</label>
+        <input type="file" id="importFornArquivo" accept=".csv,text/csv" onchange="lerArquivoImportFornecedores(this.files[0])">
+        <div style="font-size:0.74em;color:#888;margin-top:4px;">Separador vírgula, ponto e vírgula ou tab. Só a coluna do nome do fornecedor é obrigatória.</div>
+        <div id="importFornResultado" style="margin-top:18px;"></div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharImportacaoFornecedores()">Fechar</button>
+        <button class="btn btn-primary" id="btnConfirmarImportFornecedores" onclick="confirmarImportacaoFornecedores()" style="display:none;">Importar</button>
+      </div>
+    </div>`;
+}
+
+window.abrirImportacaoFornecedores = () => {
+  if (!Perfis.podeGerenciarFornecedores(window.USER_PERFIS)) return;
+  window._importFornPrevia = null;
+  document.getElementById('importFornArquivo').value = '';
+  document.getElementById('importFornResultado').innerHTML = '';
+  document.getElementById('btnConfirmarImportFornecedores').style.display = 'none';
+  document.getElementById('drawerImportarFornecedores').classList.add('open');
+  document.getElementById('drawerOverlayImportarFornecedores').classList.add('open');
+};
+
+window.fecharImportacaoFornecedores = () => {
+  document.getElementById('drawerImportarFornecedores').classList.remove('open');
+  document.getElementById('drawerOverlayImportarFornecedores').classList.remove('open');
+};
+
+/** Lê o arquivo (UTF-8; se vier em Windows-1252, relê) e monta a prévia. */
+window.lerArquivoImportFornecedores = (arquivo) => {
+  if (!arquivo) return;
+  const ler = (codificacao) => new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(String(fr.result || ''));
+    fr.onerror = () => rej(fr.error);
+    fr.readAsText(arquivo, codificacao);
+  });
+  ler('utf-8')
+    .then((t) => (InventarioCsv.pareceCodificacaoErrada(t) ? ler('windows-1252') : t))
+    .then((t) => _processarImportFornecedores(t, arquivo.name))
+    .catch((e) => showToast('❌ ' + _mensagemErro(e, 'Não foi possível ler o arquivo.'), '#c62828'));
+};
+
+function _processarImportFornecedores(texto, origem) {
+  const cont = document.getElementById('importFornResultado');
+  const btn = document.getElementById('btnConfirmarImportFornecedores');
+  const IF = ImportacaoFornecedores;
+  const { cabecalho, linhas } = IF.lerCsv(texto);
+  const mapa = IF.mapear(cabecalho);
+  const falta = IF.faltando(mapa);
+  if (!cabecalho.length || falta.length) {
+    window._importFornPrevia = null;
+    btn.style.display = 'none';
+    cont.innerHTML = `<div class="lista-alerta">Não achei a coluna ${falta.map((c) => '"' + esc(c.rotulo) + '"').join(', ') || 'de cabeçalho'} no arquivo. Confira se a primeira linha tem os nomes das colunas.</div>`;
+    return null;
+  }
+  const previa = IF.analisar(IF.registros(linhas, mapa), {
+    existentes: fornecedoresData, areas: window.areasData || [], pessoas: pessoasData || [],
+  });
+  window._importFornPrevia = { ...previa, origem: String(origem || '') };
+  const k = previa.contagem;
+  const reconhecidas = IF.CAMPOS.filter((c) => mapa[c.chave] !== undefined).map((c) => c.rotulo);
+  const ordenados = previa.itens.slice().sort((a, b) => (a.situacao === b.situacao ? 0 : (a.situacao === 'novo' ? -1 : 1))
+    || (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  const chip = (n, t, cor, fundo) => `<span style="display:inline-block;margin:0 6px 6px 0;padding:4px 10px;border-radius:12px;font-size:0.82em;font-weight:700;color:${cor};background:${fundo};">${n} ${t}</span>`;
+  cont.innerHTML = `
+    <div style="margin-bottom:8px;">
+      ${chip(k.linhas, 'linhas no arquivo', '#555', '#f5f5f5')}
+      ${chip(k.novos, k.novos === 1 ? 'fornecedor novo (entra inativo)' : 'fornecedores novos (entram inativos)', '#2e7d32', '#e8f5e9')}
+      ${chip(k.existentes, 'já existem na base (não importados)', '#757575', '#f5f5f5')}
+      ${k.cnpjRevisar ? chip(k.cnpjRevisar, 'com CNPJ a revisar', '#f57c00', '#fff3e0') : ''}
+    </div>
+    <div style="font-size:0.78em;color:#888;margin-bottom:10px;">Colunas reconhecidas: ${esc(reconhecidas.join(', '))}.</div>
+    <div class="data-table" style="max-height:52vh;overflow:auto;"><table>
+      <thead><tr><th>Fornecedor</th><th>CNPJ</th><th class="col-c">Linhas</th><th>Situação</th></tr></thead>
+      <tbody>${ordenados.map((i) => `<tr${i.situacao === 'existe' ? ' style="opacity:0.6;"' : ''}>
+        <td class="forte" title="${esc(i.detalhes)}">${esc(i.nome)}</td>
+        <td class="col-nw">${i.cnpj ? esc(i.cnpj) : '<span class="muted">—</span>'}${i.cnpjRevisar && i.situacao === 'novo' ? `<div style="font-size:0.75em;color:#e65100;">⚠ ${esc(i.motivoCnpj)}</div>` : ''}</td>
+        <td class="col-c">${i.linhas.length}</td>
+        <td>${i.situacao === 'novo'
+          ? '<span class="badge badge-green">Novo (inativo)</span>'
+          : `<span class="badge badge-gray">Já existe</span> <span class="muted" style="font-size:0.82em;">${esc(i.existente.nome)}${i.existente.ativo ? '' : ' (inativo)'}</span>`}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>`;
+  btn.textContent = `Importar ${k.novos} fornecedor${k.novos === 1 ? '' : 'es'} como inativo${k.novos === 1 ? '' : 's'}`;
+  btn.style.display = k.novos ? 'inline-block' : 'none';
+  return window._importFornPrevia;
+}
+window._processarImportFornecedores = _processarImportFornecedores;
+
+window.confirmarImportacaoFornecedores = async () => {
+  const previa = window._importFornPrevia;
+  if (!previa) return;
+  const novos = previa.itens.filter((i) => i.situacao === 'novo');
+  if (!novos.length) return;
+  if (!await confirmarAcao(`Importar ${novos.length} fornecedor${novos.length === 1 ? '' : 'es'} como INATIVO${novos.length === 1 ? '' : 'S'}?\n\nEles ficam na aba Inativos até alguém ativá-los.`)) return;
+  await comBotaoCarregando('btnConfirmarImportFornecedores', async () => {
+    try {
+      const r = await API.importarFornecedoresInativos(novos.map((i) => ImportacaoFornecedores.paraImportar(i, previa.origem)));
+      const deps = await API.getDependencias();
+      fornecedoresData = deps.filter((d) => Perfis.categoriaDeFornecedor(d.categoria));
+      window._importFornPrevia = null;
+      fecharImportacaoFornecedores();
+      fornecedoresAba = 'inativos';
+      fornecedoresPaginacao.reiniciar();
+      renderizarFornecedores();
+      showToast(`✅ ${(r && r.total) || novos.length} fornecedores importados como inativos.`, '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível importar.'), '#c62828');
+    }
+  });
 };
 
 /**
@@ -22294,7 +22545,7 @@ function _renderPainelContratos() {
   // Só quem gerencia vê o catálogo inteiro de fornecedores (o gestor só tem
   // os contratos da área -- a conta sairia errada).
   if (Perfis.podeEditarContratos(window.USER_PERFIS) && _contratoFornecedores.length) {
-    const semContrato = _contratoFornecedores.filter((f) => f.tic !== false && !_contratosVigentesDoFornecedor(f.id).length).length;
+    const semContrato = _contratoFornecedores.filter((f) => _fornecedorAtivo(f) && f.tic !== false && !_contratosVigentesDoFornecedor(f.id).length).length;
     cards.push({ n: semContrato, t: 'fornecedores TIC sem contrato vigente', c: semContrato ? '#f57c00' : '#999', titulo: 'Abrir a lista desses fornecedores', onclick: "_abrirListaFiltrada('fornecedores', { filtroFornSituacao: 'semContrato', filtroFornTic: 'tic' })" });
   }
   painel.innerHTML = `<div class="kpi-strip">${cards.map(card).join('')}</div>`;
@@ -22732,8 +22983,10 @@ window.trocarAbaContrato = (aba) => {
 function _popularSelectFornecedorContrato(atualId, atualNome) {
   const sel = document.getElementById('contratoFornecedor');
   const tem = !atualId || _contratoFornecedores.some((f) => String(f.id) === String(atualId));
+  // Fornecedor inativo não é oferecido (27/10/2026); o já gravado continua, marcado.
+  const opcoes = _contratoFornecedores.filter((f) => _fornecedorAtivo(f) || String(f.id) === String(atualId || ''));
   sel.innerHTML = '<option value="">Selecione...</option>' +
-    _contratoFornecedores.map((f) => `<option value="${esc(f.id)}">${esc(f.nome)}${f.nomeFantasia ? ' — ' + esc(f.nomeFantasia) : ''}</option>`).join('') +
+    opcoes.map((f) => `<option value="${esc(f.id)}">${esc(f.nome)}${f.nomeFantasia ? ' — ' + esc(f.nomeFantasia) : ''}${_fornecedorAtivo(f) ? '' : ' (inativo)'}</option>`).join('') +
     (!tem ? `<option value="${esc(atualId)}">${esc(atualNome || '(fornecedor removido)')}</option>` : '');
   sel.value = atualId || '';
 }

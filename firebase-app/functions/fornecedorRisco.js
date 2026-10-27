@@ -103,6 +103,9 @@ function decidir({ avaliacao, fornecedor, riscos, limiar, hoje }) {
 
   if (abaixoDoLimiar(nota, lim)) {
     if (abertos.length) return { acao: 'nada', motivo: 'já existe risco aberto para este fornecedor' };
+    // Fornecedor INATIVO (27/10/2026: importado da planilha ou inativado) nao abre
+    // risco automatico -- ele nao esta em uso. Ao ser ativado, a proxima avaliacao decide.
+    if (fornecedor && fornecedor.ativo === false) return { acao: 'nada', motivo: 'fornecedor inativo' };
     return {
       acao: 'abrir',
       risco: {

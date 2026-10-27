@@ -1438,3 +1438,33 @@ test('gerarLink: operador de processos gera para qualquer area; gestor so para a
     await assert.rejects(() => WRITE_ACTIONS.gerarLink(makeDb(comPerfil(perfis)), { tipo: 'bia', area: 'TI', processo: 'Backup' }, ctx()), AppError);
   }
 });
+
+// ============================================================
+// FORNECEDOR INATIVO (27/10/2026)
+// ============================================================
+
+test('dadosPCN nao oferece fornecedor inativo; outras categorias continuam', async () => {
+  const s = seed();
+  s.dependencias = {
+    d1: { nome: 'Ativo', categoria: 'Fornecedores' },
+    d2: { nome: 'Inativo', categoria: 'Fornecedores', ativo: false },
+    d3: { nome: 'SRV-01', categoria: 'Servidor' },
+  };
+  const db = makeDb(s);
+  db.collection = ((orig) => (col) => {
+    const api = orig(col);
+    api.get = async () => ({ docs: Object.entries(db._store[col] || {}).map(([id, data]) => ({ id, data: () => data })) });
+    return api;
+  })(db.collection);
+  const r = await READ_ACTIONS.dadosPCN(db, { area: 'TI', processo: 'Backup' });
+  assert.deepStrictEqual(r.dependencias.map((d) => d.nome).sort(), ['Ativo', 'SRV-01']);
+});
+
+test('DRP: fornecedor INATIVO ligado em drpDependencias nao entra nos contatos nem nos SLAs', async () => {
+  const s = seedContatos();
+  s.dependencias.f2.ativo = false;
+  const { promptEnviado } = await gerarDrpCapturando(s, '<h2>1. Objetivo</h2><p>x</p>');
+  assert.ok(!promptEnviado.includes('Bruno Lima'), 'pessoa relacionada do fornecedor inativo nao entra');
+  assert.ok(!promptEnviado.includes('CT-0002 — Link dedicado'), 'contrato do fornecedor inativo nao vem pelo fornecedor');
+  assert.ok(promptEnviado.includes('CT-0001 — Qualys VMDR'), 'contrato que cobre a dependencia continua');
+});

@@ -749,7 +749,8 @@ function _fornecedoresDaDependencia(depId, dep, catalogo) {
   const lista = [];
   const ja = new Set();
   const add = (d, id) => {
-    if (!d || !CATEGORIAS_FORNECEDOR_DRP.includes(d.categoria) || ja.has(String(id))) return;
+    // Fornecedor inativo (27/10/2026) nao entra nos contatos nem nos SLAs do DRP.
+    if (!d || !CATEGORIAS_FORNECEDOR_DRP.includes(d.categoria) || d.ativo === false || ja.has(String(id))) return;
     ja.add(String(id));
     lista.push({ ...d, id });
   };
@@ -1640,7 +1641,9 @@ async function dadosPCN(db, data) {
   p.bcpContatos = listaDeContatos(p.bcpContatos);
 
   const depsSnap = await db.collection('dependencias').get();
-  const dependencias = depsSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  // Fornecedor inativo (27/10/2026) nao e oferecido no levantamento do PCN.
+  const dependencias = depsSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }))
+    .filter((d) => !CATEGORIAS_FORNECEDOR_DRP.includes(d.categoria) || d.ativo !== false);
 
   return { success: true, processo: p, dependencias };
 }

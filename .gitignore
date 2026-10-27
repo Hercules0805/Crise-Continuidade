@@ -44,3 +44,6 @@ migracao/.env
 # Cloud Functions
 firebase-app/functions/node_modules/
 firebase-app/tests/node_modules/
+
+# Planilhas e relatorios de trabalho com dados reais (27/10/2026): nunca versionar.
+reports/

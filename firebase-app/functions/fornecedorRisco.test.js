@@ -161,3 +161,18 @@ test('listas nulas nao quebram', () => {
   assert.deepStrictEqual(FR.riscosAbertosDoFornecedor(null, 'f1'), []);
   assert.deepStrictEqual(FR.riscosAbertosDoFornecedor([riscoAberto()], ''), []);
 });
+
+// ============================================================
+// FORNECEDOR INATIVO (27/10/2026)
+// ============================================================
+
+test('fornecedor INATIVO nao abre risco automatico, mesmo com nota abaixo do limiar', () => {
+  const d = decidir({ avaliacao: aval({ nota: 10 }), fornecedor: { ...FORNECEDOR, ativo: false } });
+  assert.strictEqual(d.acao, 'nada');
+  assert.strictEqual(d.motivo, 'fornecedor inativo');
+});
+
+test('fornecedor sem o campo ativo (os que ja existiam) continua abrindo risco', () => {
+  assert.strictEqual(decidir({ avaliacao: aval({ nota: 10 }), fornecedor: { ...FORNECEDOR } }).acao, 'abrir');
+  assert.strictEqual(decidir({ avaliacao: aval({ nota: 10 }), fornecedor: { ...FORNECEDOR, ativo: true } }).acao, 'abrir');
+});

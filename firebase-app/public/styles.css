@@ -108,6 +108,7 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 .drawer#drawerInventarioIntel { width: 640px; }
 .drawer#drawerListaContrato { width: 480px; }
 .drawer#drawerNotificacao { width: 720px; }
+.drawer#drawerImportarFornecedores { width: 820px; }
 .drawer#drawerProcessosLote { width: 680px; }
 .drawer#drawerSelecaoDependenciasRelatorio { width: 420px; }
 .drawer#drawerOrganograma { width: 420px; }
