@@ -55,17 +55,18 @@ test('operador de processos ve indicadores e pendencias de todas as areas', asyn
   assert.match(l, /Wiki/);
   assert.match(l, /ERP/, 'dependencia critica sem DRP');
   assert.match(l, /Tier 2 sem PCN/);
-  assert.match(l, /BCP Realizado/, 'status divergente');
+  assert.match(l, /A homologar.*Faturamento.*falta homologar/, 'BIA avaliado sem homologacao');
+  assert.match(cards, /BIA a homologar/);
   assert.ok(!doc.querySelector('button[onclick="abrirDrawerCiclos()"]'), 'periodicidades sao de Admin/SI');
 });
 
 test('card filtra a lista pelo tipo e clicar de novo limpa', async () => {
   const { w, doc } = await carregar(['operador_processos']);
   const total = linhas(doc).length;
-  w.filtrarConformidadePorCard('divergencia');
+  w.filtrarConformidadePorCard('homologacao');
   assert.deepStrictEqual(linhas(doc).length, 1);
-  assert.strictEqual(doc.getElementById('confTipo').value, 'divergencia');
-  w.filtrarConformidadePorCard('divergencia');
+  assert.strictEqual(doc.getElementById('confTipo').value, 'homologacao');
+  w.filtrarConformidadePorCard('homologacao');
   assert.strictEqual(linhas(doc).length, total);
 });
 

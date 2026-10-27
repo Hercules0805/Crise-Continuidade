@@ -40,7 +40,12 @@ async function carregar(perfis, extra) {
     getProcessos: [P1, P2], getPerguntas: [], getConfigRespostas: null, getRiscosPorProcesso: [],
   }, extra || {});
   w.API = new Proxy({}, {
-    get: (_, nome) => async (arg) => {
+    get: (_, nome) => nome === 'post' ? async (acao, corpo) => {
+      // API.post(acao, corpo): salvarRespostas, sugerirImpactoProcesso... registrados como 'post:<acao>'.
+      gravacoes.push({ nome: 'post:' + acao, arg: JSON.parse(JSON.stringify(corpo === undefined ? null : corpo)) });
+      const r = dados['post:' + acao];
+      return r === undefined ? { success: true } : JSON.parse(JSON.stringify(r));
+    } : async (arg) => {
       if (/^(salvar|excluir)/.test(nome)) { gravacoes.push({ nome, arg: JSON.parse(JSON.stringify(arg === undefined ? null : arg)) }); return { success: true, id: 'novo-id' }; }
       if (nome === 'invalidate') return undefined;
       if (nome === 'get') return { versoes: [{ versao: 1, html: '<h2>1. Objetivo</h2><p>Recuperar o SRV-01</p>' }] };
@@ -210,4 +215,112 @@ test('detalhe somente leitura mostra MTD (campo do formulario), nao o antigo MTP
   assert.match(txt, /MTD/);
   assert.match(txt, /24 horas/);
   assert.doesNotMatch(txt, /MTPD/);
+});
+
+
+// ---- Status calculados, Homologar BIA, IA e UX do drawer (27/10/2026) ----
+const PERGUNTAS = [
+  { id: 'q1', pergunta: 'Afeta clientes?', categoria: 'Impacto em Clientes', ativa: true },
+  { id: 'q2', pergunta: 'Perda financeira?', categoria: 'Impacto Financeiro', ativa: true },
+];
+const AVALIADO = { id: 'p3', area: 'TI', processo: 'Cobrança', dependenciaItens: [], bcpContatos: [], avaliado: true, score: 6,
+  respostas: { 'Afeta clientes?': 4, 'Perda financeira?': 2 }, biaUltimaEm: '2026-10-20T10:00:00Z', biaRespondidas: 2, biaTotalPerguntas: 2,
+  tier: 'Tier 2 (Essencial)', nomesAnteriores: ['TI||Cobranca velha'], bcpPapeisCrise: '{"Ana":"Coordenadora"}', rto: '< 4 horas', rtoOrigem: 'sugerido' };
+const comPerguntas = (extra) => Object.assign({ getPerguntas: PERGUNTAS, getProcessos: [P1, P2, AVALIADO] }, extra || {});
+const selos = (doc) => doc.getElementById('processoSelosPlanos').textContent.replace(/\s+/g, ' ').trim();
+
+test('drawer: 4 abas (Avaliacao dentro do BIA), faixa de selos calculados e sem os selects antigos', async () => {
+  const { w, doc } = await carregar(['seguranca'], comPerguntas());
+  w.editarProcesso('p1');
+  assert.deepStrictEqual([...doc.querySelectorAll('#drawerProcesso [role="tab"]')].map((b) => b.textContent.trim()), ['Identificação', 'BIA', 'BCP', 'DRP']);
+  ['fBiaHomologada', 'fBcpStatus', 'fDrpStatus', 'painel-avaliacao', 'fBiaScoreInfo'].forEach((id) => assert.strictEqual(doc.getElementById(id), null, id));
+  assert.match(selos(doc), /BIA Não avaliado/);
+  assert.match(selos(doc), /BCP Sem PCN/);
+  assert.match(selos(doc), /DRP /);
+  assert.ok(doc.querySelector('#painel-bcp #levantamentoStatus'), 'Levantamento PCN foi para o BCP');
+  w.trocarAbaProcesso('avaliacao');
+  assert.notStrictEqual(doc.getElementById('painel-bia').style.display, 'none', 'link antigo ?aba=avaliacao cai no BIA');
+});
+
+test('BIA: progresso "x de y", selo ao vivo "Em avaliacao"; salvar grava a resposta uma vez e nao regrava sem mudanca', async () => {
+  const { w, doc, gravacoes } = await carregar(['seguranca'], comPerguntas());
+  w.editarProcesso('p2');
+  w.trocarAbaProcesso('bia');
+  assert.match(doc.getElementById('avaliacaoProgresso').textContent, /0 de 2/);
+  const radio = doc.querySelector('#avaliacaoPerguntas input[name="avalInline0"][value="4"]');
+  radio.checked = true;
+  w.calcularScoreInline();
+  assert.match(doc.getElementById('avaliacaoProgresso').textContent, /1 de 2/);
+  assert.match(selos(doc), /BIA Em avaliação/, 'ao vivo, antes de salvar');
+  await w.salvarProcesso();
+  assert.strictEqual(gravacoes.filter((g) => g.nome === 'post:salvarRespostas').length, 1);
+  await w.salvarProcesso();
+  assert.strictEqual(gravacoes.filter((g) => g.nome === 'post:salvarRespostas').length, 1, 'sem mudanca, sem resposta nova');
+});
+
+test('Homologar BIA: so com o questionario completo, por quem pode; grava quem/quando e o selo vira Homologado', async () => {
+  const { w, doc, gravacoes } = await carregar(['operador_processos'], comPerguntas());
+  w.confirmarAcao = async () => true;
+  w.editarProcesso('p3');
+  assert.match(selos(doc), /BIA Avaliado/);
+  w.trocarAbaProcesso('bia');
+  assert.ok(doc.getElementById('btnHomologarBia'), 'botao para quem homologa');
+  await w.homologarBIA();
+  const g = gravacoes.filter((x) => x.nome === 'salvarProcesso').pop().arg;
+  assert.strictEqual(g.id, 'p3');
+  assert.ok(g.biaHomologacao && g.biaHomologacao.em, 'quem/quando');
+  assert.deepStrictEqual(Object.keys(g).sort(), ['biaHomologacao', 'id'], 'so a homologacao');
+  assert.match(selos(doc), /BIA Homologado/);
+  assert.ok(!doc.getElementById('btnHomologarBia'));
+  // Gestor avalia, mas nao homologa.
+  const ge = await carregar(['gestor'], comPerguntas());
+  ge.w.editarProcesso('p3');
+  ge.w.trocarAbaProcesso('bia');
+  assert.ok(!ge.doc.getElementById('btnHomologarBia'));
+  assert.match(ge.doc.getElementById('biaHomologacaoAcao').textContent, /Admin, Segurança ou Operador de Processos/);
+});
+
+test('IA: "Sugerir com IA" mostra a sugestao para revisar; "Usar este texto" pede confirmacao quando ja ha texto', async () => {
+  const { w, doc, gravacoes } = await carregar(['seguranca'], comPerguntas({ 'post:sugerirImpactoProcesso': { texto: 'Sem este processo, clientes nao recebem boletos.' } }));
+  let perguntou = 0;
+  w.confirmarAcao = async () => { perguntou++; return true; };
+  w.editarProcesso('p3');
+  assert.notStrictEqual(doc.getElementById('btnSugerirImpacto').style.display, 'none');
+  doc.getElementById('fDescricao').value = 'Texto antigo';
+  await w.sugerirImpactoComIA();
+  assert.strictEqual(JSON.stringify(gravacoes.filter((g) => g.nome === 'post:sugerirImpactoProcesso').map((g) => g.arg)), JSON.stringify([{ id: 'p3' }]));
+  assert.match(doc.getElementById('sugestaoImpacto').textContent, /revise antes de usar[\s\S]*clientes nao recebem boletos/);
+  assert.strictEqual(doc.getElementById('fDescricao').value, 'Texto antigo', 'nada muda sozinho');
+  await w.usarSugestaoImpacto();
+  assert.strictEqual(perguntou, 1);
+  assert.strictEqual(doc.getElementById('fDescricao').value, 'Sem este processo, clientes nao recebem boletos.');
+  assert.strictEqual(doc.getElementById('sugestaoImpacto').textContent.trim(), '');
+  // Processo novo (sem id): sem o botao.
+  w.abrirModalProcesso();
+  assert.strictEqual(doc.getElementById('btnSugerirImpacto').style.display, 'none');
+});
+
+test('UX: salvar mescla sobre o registro (nao perde tier, nomes antigos, papeis); RTO "sugerido pela avaliacao" ate trocar', async () => {
+  const { w, doc, gravacoes } = await carregar(['seguranca'], comPerguntas());
+  w.editarProcesso('p3');
+  assert.match(doc.getElementById('fRTODica').textContent, /Sugerido pela avaliação do BIA/);
+  await w.salvarProcesso();
+  const reg = w.processosData.find((p) => p.id === 'p3');
+  assert.strictEqual(reg.tier, 'Tier 2 (Essencial)');
+  assert.strictEqual(JSON.stringify(reg.nomesAnteriores), JSON.stringify(['TI||Cobranca velha']));
+  assert.strictEqual(reg.bcpPapeisCrise, '{"Ana":"Coordenadora"}');
+  assert.strictEqual(gravacoes.filter((g) => g.nome === 'salvarProcesso').pop().arg.rtoOrigem, 'sugerido');
+  doc.getElementById('fRTO').value = '8h a 24h';
+  doc.getElementById('fRTO').onchange();
+  assert.doesNotMatch(doc.getElementById('fRTODica').textContent, /Sugerido/);
+  await w.salvarProcesso();
+  assert.strictEqual(gravacoes.filter((g) => g.nome === 'salvarProcesso').pop().arg.rtoOrigem, 'manual');
+});
+
+test('grade: coluna Planos pelos status calculados (title com o detalhe)', async () => {
+  const { doc } = await carregar(['seguranca'], comPerguntas());
+  const marcas = [...doc.querySelectorAll('.plano-mark')].map((m) => m.getAttribute('title'));
+  assert.ok(marcas.some((t) => /^BIA: Avaliado — Falta homologar/.test(t)), 'p3');
+  assert.ok(marcas.some((t) => /^BIA: Não avaliado/.test(t)));
+  assert.ok(doc.querySelector('.plano-mark--falta'), 'nao avaliado = vermelho');
 });

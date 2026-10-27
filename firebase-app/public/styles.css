@@ -601,3 +601,34 @@ button.mm-grupo__rotulo:hover { background: var(--brand-tint); }
 /* Grades de lista cabendo em ~960px: um pouco menos de respiro lateral e de espaçamento no título. */
 .data-table--lista th, .data-table--lista td { padding-left: 10px; padding-right: 10px; }
 .data-table--lista th { letter-spacing: .04em; }
+
+/* Processo: status calculados de BIA/BCP/DRP (27/10/2026). Faixa no topo do
+   drawer, sempre visível; cada selo leva à aba. Cor pelo nível: verde ok,
+   laranja parcial/vencendo, vermelho falta/vencido, cinza não exigido. */
+.selos-planos { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 24px; background: #fafafa; border-bottom: 1px solid #f0f0f0; flex-shrink: 0; }
+.selos-planos__vazio { font-size: 12px; color: var(--ink-muted); }
+.selo-plano { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 14px; border: 1.5px solid; font: 600 12px var(--font-sans); white-space: nowrap; background: #fff; }
+button.selo-plano { cursor: pointer; }
+button.selo-plano:hover { filter: brightness(0.96); }
+.selo-plano__sigla { font-weight: 800; letter-spacing: .3px; }
+.selo-plano__icone { font-size: 11px; }
+.selo-plano--ok { color: #2e7d32; border-color: #a5d6a7; background: #e8f5e9; }
+.selo-plano--parcial { color: #a15c00; border-color: #ffcc80; background: #fff3e0; }
+.selo-plano--falta { color: #c62828; border-color: #ef9a9a; background: #ffebee; }
+.selo-plano--neutro { color: var(--ink-muted); border-color: var(--border-strong); background: var(--surface-sunken); }
+.plano-mark--falta { background: #ffebee; color: #c62828; }
+
+/* Aba BIA: homologação e progresso do questionário. */
+.bia-homologacao { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
+.bia-homologacao__texto { font-size: 12.5px; color: #555; flex: 1; min-width: 180px; }
+.avaliacao-progresso { margin-bottom: 12px; }
+.avaliacao-progresso__texto { font-size: 12.5px; color: #555; margin-bottom: 4px; }
+.avaliacao-progresso__barra { height: 6px; border-radius: 3px; background: var(--surface-sunken); overflow: hidden; }
+.avaliacao-progresso__barra span { display: block; height: 100%; background: #2e7d32; }
+
+/* Sugestão da IA para revisar antes de usar (padrão novo, 27/10/2026). */
+.sugestao-ia { margin-top: 8px; padding: 10px 12px; border: 1.5px dashed #2e7d32; border-radius: 8px; background: #fbfdfb; }
+.sugestao-ia__titulo { font-size: 12px; font-weight: 700; color: #2e7d32; margin-bottom: 6px; }
+.sugestao-ia__texto { font-size: 13px; color: #222; line-height: 1.5; white-space: pre-wrap; }
+.sugestao-ia__acoes { display: flex; gap: 8px; margin-top: 8px; }
+.sugestao-ia__nota { font-size: 11px; color: var(--ink-muted); margin-top: 6px; }

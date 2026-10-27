@@ -243,10 +243,13 @@ async function _gravarResposta(db, { area, processo, scores, respondente, cargo 
   const perguntas = await _perguntasAtivas(db);
   const scoreMap = {};
   let score = 0;
+  let respondidas = 0;
   perguntas.forEach((perg) => {
     const v = Number(scores?.[perg.pergunta]) || 0;
     scoreMap[perg.pergunta] = v;
     score += v;
+    // Respondida = veio no envio (0 e resposta valida: "Nunca aconteceu").
+    if (scores && Object.prototype.hasOwnProperty.call(scores, perg.pergunta) && scores[perg.pergunta] !== null && scores[perg.pergunta] !== '') respondidas++;
   });
   const tier = calcularTier(score);
   const rto = calcularRTO(tier);
@@ -265,6 +268,9 @@ async function _gravarResposta(db, { area, processo, scores, respondente, cargo 
     scores: scoreMap,
     score,
     tier,
+    // Quantas perguntas tiveram resposta (BIA "em avaliacao" quando parcial).
+    respondidas,
+    totalPerguntas: perguntas.length,
     reguaVersao,
   });
   await _atualizarTierProcesso(db, area, processo, tier, rto);

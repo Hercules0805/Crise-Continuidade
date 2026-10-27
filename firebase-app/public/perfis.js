@@ -124,7 +124,7 @@
   // DECISAO 23/10/2026: Operador de Processos -- documenta e monitora os
   // processos da empresa inteira (sem recorte de area). OPERA Processos, BIA e
   // PCN; so CONSULTA DRP, Dependencias, Mapa, Areas e Pessoas. Abre no Painel
-  // de Conformidade (o que esta vencido, faltando ou divergente).
+  // de Conformidade (o que esta vencido, faltando ou a homologar).
   TELAS[PERFIL.OPERADOR_PROCESSOS] = [
     'conformidade', 'admin', 'processos', 'pcns', 'drp', 'dependencias', 'mapa', 'areas', 'pessoas', 'relatorios',
   ];
@@ -298,6 +298,14 @@
     return ehAdmin(valor) || ehSeguranca(valor) || ehOperadorProcessos(valor);
   }
 
+  /**
+   * Homologar o BIA (27/10/2026): validar a avaliacao feita (quem/quando).
+   * Mesmos perfis que geram o PCN -- o Gestor avalia, mas nao homologa.
+   */
+  function podeHomologarBIA(valor) {
+    return ehAdmin(valor) || ehSeguranca(valor) || ehOperadorProcessos(valor);
+  }
+
   /** Gerar DRP (via IA): Admin ou Seguranca (TI opera, mas nao gera). */
   function podeGerarDRP(valor) {
     return ehAdmin(valor) || ehSeguranca(valor);
@@ -459,6 +467,7 @@
     podeEditarPessoas: podeEditarPessoas,
     podeGerenciarPerfis: podeGerenciarPerfis,
     podeGerarPCN: podeGerarPCN,
+    podeHomologarBIA: podeHomologarBIA,
     podeGerarDRP: podeGerarDRP,
     podeOperarDRP: podeOperarDRP,
     podeVerConteudoDRP: podeVerConteudoDRP,

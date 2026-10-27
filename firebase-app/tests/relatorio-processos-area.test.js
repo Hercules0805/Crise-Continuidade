@@ -110,7 +110,8 @@ test('relatorio: processos do mais critico ao Pendente, depois por nome; colunas
   assert.ok(ordem.every((v) => v > 0) && ordem.slice().sort((a, b) => a - b).join() === ordem.join(), 'Tier 1, Tier 2, Tier 3, Pendente');
   assert.match(com, /<th>Processo<\/th><th>Tier<\/th><th class="c">Score<\/th><th>RTO<\/th><th>RPO<\/th><th>BIA<\/th><th>BCP<\/th><th>DRP<\/th>/);
   const negociacao = celulas(com.match(/<tr>\s*<td><strong>Negociação Vendas[\s\S]*?<\/tr>/)[0]);
-  assert.deepStrictEqual(negociacao, ['Negociação Vendas', 'Tier 1 (Crítico)', '14', '< 4 horas', '–', 'Processo Avaliado', '–', 'DRP Realizado']);
+  // BIA/BCP/DRP calculados (27/10/2026): os antigos selects ('Processo Avaliado', 'DRP Realizado') nao contam mais.
+  assert.deepStrictEqual(negociacao, ['Negociação Vendas', 'Tier 1 (Crítico)', '14', '< 4 horas', '–', 'Avaliado', 'Sem PCN', 'Sem dependências']);
 });
 
 test('relatorio: campo vazio vira "–" e processo nao avaliado fica sem score', async () => {
@@ -118,7 +119,7 @@ test('relatorio: campo vazio vira "–" e processo nao avaliado fica sem score',
   await w.abrirSelecaoAreasRelatorio();
   await w.confirmarGerarRelatorioProcessosPorArea();
   const pendente = celulas(bloco(paginas[0], 'Comercial Corporativo').match(/<tr>\s*<td><strong>Contrato Pendente[\s\S]*?<\/tr>/)[0]);
-  assert.deepStrictEqual(pendente, ['Contrato Pendente', 'Pendente', '–', '–', '–', '–', '–', '–']);
+  assert.deepStrictEqual(pendente, ['Contrato Pendente', 'Pendente', '–', '–', '–', 'Não avaliado', 'Sem PCN', 'Sem dependências']);
 });
 
 test('relatorio: area sem processo aparece com a mensagem, e sem Dono mostra traco', async () => {

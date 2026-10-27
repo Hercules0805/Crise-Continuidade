@@ -45,6 +45,7 @@ test('avaliarConformidade: mesma conta da tela, com a cadeia de dependencias do 
     'bia:faltando:ti__wiki',
     'bia:vencido:rh__folha',
     'drp:faltando:d1',
+    'homologacao:a-homologar:fin__fat',
     'pcn:faltando:fin__fat',
     'pcn:faltando:rh__folha',
   ]);
@@ -80,7 +81,8 @@ test('montarResumoContinuidade: assunto com o total, itens por tipo, link para a
   const pend = NC.avaliarConformidade(dados()).pendencias;
   pend[0].nome = '<script>x</script>';
   const m = NC.montarResumoContinuidade(pend, { dia: HOJE, motivos: ['operadorProcessos'] });
-  assert.match(m.assunto, /^\[Continuidade\] Conformidade de BIA\/PCN\/DRP — 23\/10\/2026: 5 pendência\(s\)$/);
+  assert.match(m.assunto, /^\[Continuidade\] Conformidade de BIA\/PCN\/DRP — 23\/10\/2026: 6 pendência\(s\)$/);
+  assert.match(m.texto, /1 a homologar/);
   assert.match(m.html, /#conformidade/);
   assert.ok(!m.html.includes('<script>x'), 'nome escapado');
   assert.match(m.texto, /Você recebe este resumo como Operador de Processos\./);

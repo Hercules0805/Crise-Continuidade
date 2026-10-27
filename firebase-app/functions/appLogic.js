@@ -1864,6 +1864,117 @@ async function gerarResumoExecutivo(db, data, ctx) {
 }
 
 // ============================================================
+// Sugestao da "Descricao do Impacto para Indisponibilidade" (27/10/2026): a IA
+// escreve um rascunho a partir do que o sistema ja sabe do processo; a tela
+// mostra para revisao e so grava se a pessoa usar o texto. Quem edita o
+// processo pode pedir: Admin, Seguranca, Operador de Processos e o Gestor da
+// propria area (mesmo recorte de Perfis.podeEditarProcessos).
+// ============================================================
+
+/** Ultima resposta de BIA do processo (documento inteiro), pelas mesmas chaves de _scoreDoProcesso. */
+async function _ultimaRespostaBia(db, p, id) {
+  const col = db.collection(COLLECTION.respostas);
+  const consultas = historicoRisco.chavesBiaDoProcesso(p).map((chave) => {
+    const [area, processo] = chave.split('||');
+    return col.where('area', '==', area).where('processo', '==', processo).get();
+  });
+  if (id) consultas.push(col.where('processoId', '==', String(id)).get());
+  const snaps = await Promise.all(consultas);
+  const docs = snaps.flatMap((s) => s.docs.map((d) => d.data()))
+    .sort((a, b) => new Date(b.timestamp || 0) - new Date(a.timestamp || 0));
+  return docs[0] || null;
+}
+
+/** Notas do questionario por dimensao (categoria da pergunta): { categoria: [{ pergunta, nota }] }, so as respondidas. */
+async function _impactoPorDimensao(db, resposta) {
+  if (!resposta || !resposta.scores) return {};
+  const snap = await db.collection('perguntas').get();
+  const categoriaDe = {};
+  snap.docs.forEach((d) => { const q = d.data() || {}; if (q.pergunta) categoriaDe[q.pergunta] = q.categoria || 'Geral'; });
+  const saida = {};
+  Object.keys(resposta.scores).forEach((pergunta) => {
+    const nota = Number(resposta.scores[pergunta]) || 0;
+    if (!nota) return;
+    const cat = categoriaDe[pergunta] || 'Geral';
+    (saida[cat] = saida[cat] || []).push({ pergunta, nota });
+  });
+  return saida;
+}
+
+function _promptImpactoProcesso(dados) {
+  return `Você é um analista de continuidade de negócios (ISO 22301) da Fortes Tecnologia e ajuda o dono de um processo a preencher o BIA.
+
+Escreva a "Descrição do Impacto para Indisponibilidade" do processo abaixo: o que acontece se ele parar.
+
+REGRAS:
+- Use SOMENTE os dados do JSON. Não invente clientes, valores em R$, prazos legais, sistemas ou pessoas que não estejam nele.
+- Quando faltar dado para uma dimensão, não fale dela.
+- Cubra, quando houver base nos dados: clientes, financeiro, operação (outros processos e serviços afetados), reputação e legal/regulatório. As notas do questionário (1 a 4, quanto maior pior) dizem quais dimensões pesam mais.
+- Considere o RTO/MTD: diga o que piora com o tempo parado.
+- De 3 a 6 frases, português do Brasil, direto, na voz do processo ("Sem este processo, ...").
+- Texto puro: sem markdown, sem listas, sem HTML, sem emojis.
+
+FORMATO DA RESPOSTA (JSON):
+{"texto": "a descrição"}
+
+DADOS DO PROCESSO (JSON):
+${JSON.stringify(dados)}`;
+}
+
+async function sugerirImpactoProcesso(db, data, ctx) {
+  const id = exigir(data.id, 'id');
+  const snap = await db.collection(COLLECTION.processos).doc(id).get();
+  if (!snap.exists) throw new AppError('Processo não encontrado.');
+  const p = { id: snap.id, ...(snap.data() || {}) };
+
+  const { perfis, area } = await _perfilDoUsuario(db, ctx.email);
+  const pode = perfis.some((x) => PERFIS_PCN.includes(x)) || (perfis.includes('gestor') && area && area === p.area);
+  if (!pode) throw new AppError('Seu perfil não pode editar este processo.');
+  if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
+
+  const [resposta, depsSnap, servicos, riscosSnap] = await Promise.all([
+    _ultimaRespostaBia(db, p, p.id),
+    db.collection(COLLECTION.dependencias).get(),
+    _lerServicos(db),
+    db.collection(COLLECTION.riscos).where('processoId', '==', p.id).get().catch(() => ({ docs: [] })),
+  ]);
+  const dependencias = depsSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const score = resposta ? Number(resposta.score) || 0 : 0;
+  let levantamento = {};
+  try { levantamento = typeof p.levantamentoPCN === 'string' ? JSON.parse(p.levantamentoPCN || '{}') : (p.levantamentoPCN || {}); } catch { levantamento = {}; }
+  const lev = {};
+  ['escopo', 'entrega', 'semSistema', 'contingencia', 'controlesManuais', 'funcoes', 'comunicacao'].forEach((k) => { if (levantamento[k]) lev[k] = String(levantamento[k]).slice(0, 600); });
+  const itens = Array.isArray(p.dependenciaItens) ? p.dependenciaItens : [];
+  const porCategoria = (cats) => itens.filter((it) => cats.includes(it.categoria)).map((it) => it.nome).filter(Boolean);
+
+  const dados = {
+    processo: p.processo || '',
+    area: p.area || '',
+    descricaoFuncional: String(p.descricaoFuncional || '').slice(0, 1500),
+    descricaoAtual: String(p.descricao || '').slice(0, 1500),
+    tier: _tierProcessoServidor(score, p.tierManual),
+    score,
+    rto: p.rto || '', rpo: p.rpo || '', mtd: p.mtd || '',
+    impactoPorDimensao: await _impactoPorDimensao(db, resposta),
+    servicos: cadeiaDependencias.servicosDoProcesso(p, servicos).map((s) => ({ nome: s.nome, descricao: String(s.descricao || '').slice(0, 300) })),
+    dependenciasTecnicas: cadeiaDependencias.cadeiaDoProcesso({ processo: p, servicos, dependencias })
+      .filter((it) => it.dep && !['Fornecedores', 'Fornecedor', 'Instalações', 'Instalação'].includes(it.categoria)).slice(0, 25)
+      .map((it) => `${it.categoria}: ${it.nome}`),
+    fornecedores: porCategoria(['Fornecedores', 'Fornecedor']),
+    pessoasChave: porCategoria(['Pessoas', 'Pessoa']).length,
+    instalacoes: _instalacoesDoProcessoPCN(p, dependencias).map((i) => i.nome),
+    processosInternos: porCategoria(['Processos Internos', 'Processo Interno']),
+    levantamentoPCN: lev,
+    riscos: riscosSnap.docs.map((d) => d.data() || {}).filter((r) => r.status !== 'Encerrado').slice(0, 10).map((r) => r.titulo).filter(Boolean),
+  };
+
+  const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptImpactoProcesso(dados), 'a sugestão de impacto', { maxOutputTokens: 1024 });
+  const texto = String((json && json.texto) || '').trim().slice(0, 2000);
+  if (!texto) throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
+  return { success: true, texto };
+}
+
+// ============================================================
 // Linha do tempo do Relatorio Executivo de Riscos (20/10/2026): a carga no fim
 // de cada mes, reconstruida do livro de medicoes com a mesma conta do retrato
 // diario -- para a empresa e, quando o relatorio e filtrado, so para os riscos
@@ -1982,6 +2093,7 @@ const READ_ACTIONS = {
 };
 
 const WRITE_ACTIONS = {
+  sugerirImpactoProcesso,
   gerarLink,
   salvarPCN,
   excluirPCN,

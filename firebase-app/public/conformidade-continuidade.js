@@ -8,8 +8,13 @@
  *   - DRP: toda dependencia tecnica na cadeia de um processo Tier 1/2 tem DRP,
  *     revisado dentro do ciclo (drpMeses), e testado na frequencia declarada
  *     nas estrategias de teste.
- *   - Status manual (biaHomologada/bcpStatus/drpStatus) nao diz "Realizado"
- *     quando o plano nao existe.
+ *   - BIA avaliado e homologado (27/10/2026): a homologacao (biaHomologacao)
+ *     vale para a avaliacao que existia quando foi feita; reavaliar pede
+ *     homologar de novo.
+ *
+ * Status dos planos de UM processo (statusDosPlanos, 27/10/2026): BIA, BCP e
+ * DRP calculados a partir do que existe -- substituem os antigos selects
+ * manuais (biaHomologada/bcpStatus/drpStatus), que ninguem atualizava.
  *
  * "Ultima revisao" de cada plano:
  *   - BIA: a resposta de BIA mais recente (biaUltimaEm) ou a revisao manual
@@ -40,13 +45,13 @@
   var STATUS = { VIGENTE: 'vigente', VENCENDO: 'vencendo', VENCIDO: 'vencido', SEM_REGISTRO: 'sem-registro' };
   var ROTULO_STATUS = { vigente: 'Vigente', vencendo: 'Vencendo', vencido: 'Vencido', 'sem-registro': 'Sem registro' };
 
-  var TIPO = { BIA: 'bia', PCN: 'pcn', DRP: 'drp', TESTE_DRP: 'teste-drp', DIVERGENCIA: 'divergencia' };
-  var ROTULO_TIPO = { bia: 'BIA', pcn: 'PCN', drp: 'DRP', 'teste-drp': 'Teste de DRP', divergencia: 'Status divergente' };
+  var TIPO = { BIA: 'bia', PCN: 'pcn', DRP: 'drp', TESTE_DRP: 'teste-drp', HOMOLOGACAO: 'homologacao' };
+  var ROTULO_TIPO = { bia: 'BIA', pcn: 'PCN', drp: 'DRP', 'teste-drp': 'Teste de DRP', homologacao: 'Homologação do BIA' };
 
   // Situacao da pendencia (o que a tabela filtra).
-  var SITUACAO = { FALTANDO: 'faltando', VENCIDO: 'vencido', VENCENDO: 'vencendo', ATRASADO: 'atrasado', DIVERGENTE: 'divergente' };
-  var ROTULO_SITUACAO = { faltando: 'Faltando', vencido: 'Vencido', vencendo: 'Vencendo', atrasado: 'Teste atrasado', divergente: 'Divergente' };
-  var ORDEM_SITUACAO = { vencido: 0, faltando: 1, atrasado: 2, divergente: 3, vencendo: 4 };
+  var SITUACAO = { FALTANDO: 'faltando', VENCIDO: 'vencido', VENCENDO: 'vencendo', ATRASADO: 'atrasado', A_HOMOLOGAR: 'a-homologar' };
+  var ROTULO_SITUACAO = { faltando: 'Faltando', vencido: 'Vencido', vencendo: 'Vencendo', atrasado: 'Teste atrasado', 'a-homologar': 'A homologar' };
+  var ORDEM_SITUACAO = { vencido: 0, faltando: 1, atrasado: 2, 'a-homologar': 3, vencendo: 4 };
 
   function _texto(v) {
     return v === null || v === undefined ? '' : String(v).trim();
@@ -208,23 +213,100 @@
     return /^Tier [12]\b/.test(_texto(tier));
   }
 
+  /** Questionario do BIA respondido pela metade (so respostas que guardam a contagem). */
+  function biaParcial(p) {
+    var r = Number(p && p.biaRespondidas), t = Number(p && p.biaTotalPerguntas);
+    return isFinite(r) && isFinite(t) && t > 0 && r < t;
+  }
+
   /**
-   * Status manual que diz "Realizado" sem o plano existir. depsSemDrp: as
-   * dependencias da cadeia do processo sem DRP. Devolve [{ campo, mensagem }].
+   * Homologacao do BIA valida: feita depois (ou no dia) da ultima avaliacao.
+   * Reavaliar depois de homologar pede homologar de novo.
    */
-  function divergencias(p, depsSemDrp) {
-    var out = [];
-    if (!p) return out;
-    if (p.biaHomologada === 'BIA Realizado' && !temBIA(p)) {
-      out.push({ campo: 'biaHomologada', mensagem: 'Status "BIA Realizado", mas o processo não tem resposta de BIA' });
+  function biaHomologado(p) {
+    var em = _dia(p && p.biaHomologacao && p.biaHomologacao.em);
+    if (!em || !temBIA(p)) return false;
+    var aval = _dia(p.biaUltimaEm);
+    return !aval || em >= aval;
+  }
+
+  function _dataBr(dia) {
+    return dia ? dia.split('-').reverse().join('/') : '';
+  }
+
+  /**
+   * Status calculados de BIA, BCP e DRP de um processo -- o que a faixa do
+   * drawer, a grade, o Dashboard, o relatorio e o Dossie mostram.
+   * opcoes: { tier, cadeia: [{ id, dep, ausente }], ciclos, hoje }.
+   * Cada um: { codigo, rotulo, nivel: 'ok'|'parcial'|'falta'|'neutro', detalhe }.
+   */
+  function statusDosPlanos(p, opcoes) {
+    var o = opcoes || {};
+    var hoje = _dia(o.hoje) || new Date().toISOString().slice(0, 10);
+    var ciclos = normalizarCiclos(o.ciclos);
+    var critico = ehTierCritico(o.tier);
+    var proc = p || {};
+
+    // BIA
+    var bia;
+    var cicloBia = statusCiclo(ultimaRevisaoBia(proc), ciclos.biaMeses, ciclos.avisoDias, hoje);
+    var revisado = cicloBia.ultima ? 'revisado ' + _dataBr(cicloBia.ultima) + ' · próxima ' + _dataBr(cicloBia.proxima) : '';
+    if (!temBIA(proc)) {
+      bia = { codigo: 'nao-avaliado', rotulo: 'Não avaliado', nivel: 'falta', detalhe: 'Responda o questionário do BIA' };
+    } else if (cicloBia.status === STATUS.VENCIDO) {
+      bia = { codigo: 'vencido', rotulo: 'Revisão vencida', nivel: 'falta', detalhe: revisado };
+    } else if (biaParcial(proc)) {
+      bia = { codigo: 'em-avaliacao', rotulo: 'Em avaliação', nivel: 'parcial', detalhe: proc.biaRespondidas + ' de ' + proc.biaTotalPerguntas + ' perguntas respondidas' };
+    } else if (biaHomologado(proc)) {
+      bia = { codigo: 'homologado', rotulo: 'Homologado', nivel: cicloBia.status === STATUS.VENCENDO ? 'parcial' : 'ok',
+        detalhe: 'Homologado em ' + _dataBr(_dia(proc.biaHomologacao.em)) + (proc.biaHomologacao.por ? ' por ' + _texto(proc.biaHomologacao.por) : '') + (revisado ? ' · ' + revisado : '') };
+    } else {
+      var reavaliado = !!_dia(proc.biaHomologacao && proc.biaHomologacao.em);
+      bia = { codigo: 'avaliado', rotulo: 'Avaliado', nivel: 'parcial',
+        detalhe: (reavaliado ? 'Reavaliado depois da homologação — homologar de novo' : 'Falta homologar') + (revisado ? ' · ' + revisado : '') };
     }
-    if (p.bcpStatus === 'BCP Realizado' && !temPCN(p)) {
-      out.push({ campo: 'bcpStatus', mensagem: 'Status "BCP Realizado", mas não há PCN salvo' });
+    if (bia.codigo !== 'vencido' && cicloBia.status === STATUS.VENCENDO) bia.detalhe = 'Revisão vence em ' + cicloBia.dias + ' dia(s) · ' + bia.detalhe;
+    bia.ciclo = cicloBia;
+
+    // BCP (PCN): obrigatorio no Tier 1/2.
+    var bcp;
+    var versoes = _versoes(proc.pcnSalvo);
+    var cicloPcn = statusCiclo(ultimaRevisaoPcn(proc), ciclos.pcnMeses, ciclos.avisoDias, hoje);
+    if (!versoes.length) {
+      bcp = critico
+        ? { codigo: 'sem-pcn', rotulo: 'Sem PCN', nivel: 'falta', detalhe: 'Processo ' + _texto(o.tier).replace(/ \(.*\)$/, '') + ' precisa de PCN' }
+        : { codigo: 'nao-exigido', rotulo: 'Sem PCN', nivel: 'neutro', detalhe: 'Não exigido fora do Tier 1/2' };
+    } else {
+      var ult = versoes[versoes.length - 1] || {};
+      var vrs = 'PCN v' + (ult.versao || versoes.length);
+      var quando = cicloPcn.ultima ? 'revisado ' + _dataBr(cicloPcn.ultima) + ' · próxima ' + _dataBr(cicloPcn.proxima) : '';
+      if (cicloPcn.status === STATUS.VENCIDO) bcp = { codigo: 'vencido', rotulo: 'Revisão vencida', nivel: 'falta', detalhe: vrs + (quando ? ' · ' + quando : '') };
+      else bcp = { codigo: 'pcn-gerado', rotulo: vrs, nivel: cicloPcn.status === STATUS.VENCENDO ? 'parcial' : 'ok',
+        detalhe: (cicloPcn.status === STATUS.VENCENDO ? 'Revisão vence em ' + cicloPcn.dias + ' dia(s) · ' : '') + quando };
     }
-    if (p.drpStatus === 'DRP Realizado' && depsSemDrp && depsSemDrp.length) {
-      out.push({ campo: 'drpStatus', mensagem: 'Status "DRP Realizado", mas ' + depsSemDrp.length + ' dependência(s) da cadeia sem DRP' });
+    bcp.ciclo = cicloPcn;
+
+    // DRP: cobertura da cadeia (dependencias que existem no catalogo).
+    var deps = (o.cadeia || []).filter(function (it) { return it && !it.ausente && it.dep; }).map(function (it) { return it.dep; });
+    var drp;
+    if (!deps.length) {
+      drp = { codigo: 'sem-dependencias', rotulo: 'Sem dependências', nivel: 'neutro', detalhe: 'Nenhuma dependência técnica na cadeia (aba BIA ou Serviços)' };
+    } else {
+      var com = deps.filter(temDRP);
+      var vencidos = com.filter(function (dep) { return statusCiclo(ultimaRevisaoDrp(dep), ciclos.drpMeses, ciclos.avisoDias, hoje).status === STATUS.VENCIDO; }).length;
+      var testes = com.filter(function (dep) { var t = testeDrp(dep, hoje).status; return t === 'atrasado' || t === 'nunca-testado'; }).length;
+      var partes = [com.length + ' de ' + deps.length + ' com DRP'];
+      if (vencidos) partes.push(vencidos + ' com revisão vencida');
+      if (testes) partes.push(testes + ' com teste atrasado');
+      var exigido = critico ? '' : ' (não exigido fora do Tier 1/2)';
+      if (!com.length) drp = { codigo: 'sem-drp', rotulo: 'Sem DRP', nivel: critico ? 'falta' : 'neutro', detalhe: partes[0] + exigido };
+      else if (com.length < deps.length) drp = { codigo: 'parcial', rotulo: 'Parcial ' + com.length + '/' + deps.length, nivel: critico ? 'parcial' : 'neutro', detalhe: partes.join(' · ') + exigido };
+      else if (vencidos) drp = { codigo: 'vencido', rotulo: 'Revisão vencida', nivel: 'falta', detalhe: partes.join(' · ') };
+      else drp = { codigo: 'completo', rotulo: 'Completo', nivel: testes ? 'parcial' : 'ok', detalhe: partes.join(' · ') };
+      drp.total = deps.length;
+      drp.comDrp = com.length;
     }
-    return out;
+    return { bia: bia, bcp: bcp, drp: drp };
   }
 
   function _pct(parte, total) {
@@ -259,7 +341,7 @@
       processos: processos.length, biaEmDia: 0,
       criticos: 0, pcnEmDia: 0,
       depsCriticas: 0, drpEmDia: 0,
-      testesAtrasados: 0, divergencias: 0,
+      testesAtrasados: 0, aHomologar: 0,
     };
     var criticas = {}; // depId -> { dep, processos: [nomes] }
     var naCadeia = {}; // depId -> true (cadeia de qualquer processo recebido)
@@ -278,6 +360,11 @@
       } else if (bia.status === STATUS.VENCIDO || bia.status === STATUS.VENCENDO) {
         pendencias.push(Object.assign({ tipo: TIPO.BIA, situacao: bia.status, mensagem: 'Revisão do BIA ' + (bia.status === STATUS.VENCIDO ? 'vencida' : 'vence em ' + bia.dias + ' dia(s)'), desde: bia.ultima, proxima: bia.proxima }, base));
       }
+      // Avaliado (questionario completo) e ainda nao homologado.
+      if (temBIA(p) && !biaParcial(p) && !biaHomologado(p) && bia.status !== STATUS.VENCIDO) {
+        ind.aHomologar++;
+        pendencias.push(Object.assign({ tipo: TIPO.HOMOLOGACAO, situacao: SITUACAO.A_HOMOLOGAR, mensagem: _dia(p.biaHomologacao && p.biaHomologacao.em) ? 'Reavaliado depois da homologação — homologar de novo' : 'BIA avaliado, falta homologar', desde: _dia(p.biaUltimaEm), proxima: '' }, base));
+      }
 
       // PCN: obrigatorio no Tier 1/2; o ciclo vale para qualquer PCN existente.
       var pcn = statusCiclo(ultimaRevisaoPcn(p), ciclos.pcnMeses, ciclos.avisoDias, hoje);
@@ -292,22 +379,16 @@
       }
 
       // Dependencias criticas (cadeia de processo Tier 1/2).
-      var semDrp = [];
       cadeia.forEach(function (it) {
         var dep = it.dep || depPorId[String(it.id)];
         if (!dep) return;
         naCadeia[String(dep.id)] = true;
-        if (!temDRP(dep)) semDrp.push(dep);
         if (!critico) return;
         var k = String(dep.id);
         if (!criticas[k]) criticas[k] = { dep: dep, processos: [] };
         if (criticas[k].processos.indexOf(base.nome) === -1) criticas[k].processos.push(base.nome);
       });
 
-      divergencias(p, semDrp).forEach(function (dv) {
-        ind.divergencias++;
-        pendencias.push(Object.assign({ tipo: TIPO.DIVERGENCIA, situacao: SITUACAO.DIVERGENTE, mensagem: dv.mensagem, campo: dv.campo, desde: '', proxima: '' }, base));
-      });
     });
 
     // DRP: dependencias criticas sem DRP; ciclo e teste de qualquer DRP existente.
@@ -359,7 +440,7 @@
         drpEmDia: ind.drpEmDia,
         drpPct: _pct(ind.drpEmDia, ind.depsCriticas),
         testesAtrasados: ind.testesAtrasados,
-        divergencias: ind.divergencias,
+        aHomologar: ind.aHomologar,
       },
     };
   }
@@ -394,7 +475,9 @@
     diasDaFrequencia: diasDaFrequencia,
     testeDrp: testeDrp,
     ehTierCritico: ehTierCritico,
-    divergencias: divergencias,
+    biaParcial: biaParcial,
+    biaHomologado: biaHomologado,
+    statusDosPlanos: statusDosPlanos,
     avaliar: avaliar,
     contar: contar,
   };

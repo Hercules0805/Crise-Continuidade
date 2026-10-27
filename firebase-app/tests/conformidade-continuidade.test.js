@@ -69,13 +69,56 @@ test('testeDrp: vale a menor frequencia; atrasado, em dia, nunca testado, sem fr
   assert.strictEqual(CC.testeDrp({ drpTestes: { dataUltimoTeste: '2026-10-01', frequenciaEsperada: 'Mensal' } }, HOJE).status, 'em-dia');
 });
 
-// ---- Divergencias ----
+// ---- Status dos planos de um processo (27/10/2026) ----
+const T1 = 'Tier 1 (Crítico)';
+const dep = (id, drp, extra) => Object.assign({ id, nome: id, drpSalvo: drp ? JSON.stringify([{ versao: 1, data: drp }]) : '' }, extra || {});
 
-test('divergencias: status "Realizado" sem o plano existir', () => {
-  const dv = CC.divergencias({ biaHomologada: 'BIA Realizado', bcpStatus: 'BCP Realizado', drpStatus: 'DRP Realizado' }, [{ id: 'd1' }]);
-  assert.deepStrictEqual(dv.map((x) => x.campo), ['biaHomologada', 'bcpStatus', 'drpStatus']);
-  assert.deepStrictEqual(CC.divergencias({ biaHomologada: 'BIA Realizado', avaliado: true, bcpStatus: 'BCP Realizado', pcnSalvo: pcn('2026-01-01'), drpStatus: 'DRP Realizado' }, []), []);
-  assert.deepStrictEqual(CC.divergencias({ bcpStatus: 'BCP Pendente' }, []), []);
+test('statusDosPlanos BIA: nao avaliado, em avaliacao (parcial), avaliado, homologado, reavaliado e vencido', () => {
+  const st = (p) => CC.statusDosPlanos(p, { tier: T1, hoje: HOJE }).bia;
+  assert.strictEqual(st({}).codigo, 'nao-avaliado');
+  assert.strictEqual(st({}).nivel, 'falta');
+  const parcial = st({ avaliado: true, biaUltimaEm: '2026-10-01', biaRespondidas: 7, biaTotalPerguntas: 12 });
+  assert.strictEqual(parcial.codigo, 'em-avaliacao');
+  assert.match(parcial.detalhe, /7 de 12 perguntas/);
+  const aval = st({ avaliado: true, biaUltimaEm: '2026-10-01' });
+  assert.strictEqual(aval.codigo, 'avaliado');
+  assert.strictEqual(aval.nivel, 'parcial');
+  assert.match(aval.detalhe, /Falta homologar/);
+  const homol = st({ avaliado: true, biaUltimaEm: '2026-10-01', biaHomologacao: { em: '2026-10-02T10:00:00Z', por: 'ana@x' } });
+  assert.strictEqual(homol.codigo, 'homologado');
+  assert.strictEqual(homol.nivel, 'ok');
+  assert.match(homol.detalhe, /02\/10\/2026 por ana@x/);
+  const reav = st({ avaliado: true, biaUltimaEm: '2026-10-10', biaHomologacao: { em: '2026-10-02' } });
+  assert.strictEqual(reav.codigo, 'avaliado');
+  assert.match(reav.detalhe, /homologar de novo/);
+  assert.strictEqual(st({ avaliado: true, biaUltimaEm: '2025-01-01', biaHomologacao: { em: '2025-01-02' } }).codigo, 'vencido');
+  assert.strictEqual(st({ avaliado: true, biaUltimaEm: '2025-11-10', biaHomologacao: { em: '2025-11-10' } }).nivel, 'parcial', 'vencendo');
+});
+
+test('statusDosPlanos BCP: sem PCN (falta no Tier 1/2, nao exigido no Tier 3), versao, vencido', () => {
+  assert.strictEqual(CC.statusDosPlanos({}, { tier: T1, hoje: HOJE }).bcp.codigo, 'sem-pcn');
+  const t3 = CC.statusDosPlanos({}, { tier: 'Tier 3 (Suporte)', hoje: HOJE }).bcp;
+  assert.strictEqual(t3.codigo, 'nao-exigido');
+  assert.strictEqual(t3.nivel, 'neutro');
+  const ok = CC.statusDosPlanos({ pcnSalvo: JSON.stringify([{ versao: 1, data: '2026-01-01' }, { versao: 3, data: '2026-06-01' }]) }, { tier: T1, hoje: HOJE }).bcp;
+  assert.strictEqual(ok.rotulo, 'PCN v3');
+  assert.strictEqual(ok.nivel, 'ok');
+  assert.strictEqual(CC.statusDosPlanos({ pcnSalvo: pcn('2025-01-01') }, { tier: T1, hoje: HOJE }).bcp.codigo, 'vencido');
+});
+
+test('statusDosPlanos DRP: sem dependencias, sem DRP, parcial x/y, completo, vencido, teste atrasado; removidas fora da conta', () => {
+  const drp = (cadeia, tier) => CC.statusDosPlanos({}, { tier: tier || T1, hoje: HOJE, cadeia }).drp;
+  assert.strictEqual(drp([]).codigo, 'sem-dependencias');
+  assert.strictEqual(drp([{ dep: dep('a') }]).codigo, 'sem-drp');
+  const parcial = drp([{ dep: dep('a', '2026-06-01') }, { dep: dep('b') }, { id: 'x', ausente: true }]);
+  assert.strictEqual(parcial.rotulo, 'Parcial 1/2', 'a removida nao conta');
+  assert.strictEqual(drp([{ dep: dep('a', '2026-06-01') }]).codigo, 'completo');
+  assert.strictEqual(drp([{ dep: dep('a', '2026-06-01') }]).nivel, 'ok');
+  assert.strictEqual(drp([{ dep: dep('a', '2025-01-01') }]).codigo, 'vencido');
+  const teste = drp([{ dep: dep('a', '2026-06-01', { drpEstrategiasTeste: [{ frequencia: 'Mensal' }] }) }]);
+  assert.strictEqual(teste.nivel, 'parcial');
+  assert.match(teste.detalhe, /1 com teste atrasado/);
+  assert.strictEqual(drp([{ dep: dep('a') }], 'Tier 3 (Suporte)').nivel, 'neutro', 'fora do Tier 1/2 nao e falta');
 });
 
 // ---- Avaliacao do conjunto ----
@@ -88,11 +131,12 @@ function cenario() {
   ];
   const processos = [
     // Tier 1 com PCN em dia, BIA em dia; usa d1 (DRP vencido, nunca testado) e d2 (sem DRP).
-    { id: 'p1', processo: 'Faturamento', area: 'Financeiro', tier: 'Tier 1 (Crítico)', avaliado: true, biaUltimaEm: '2026-05-01', pcnSalvo: pcn('2026-05-01'), drpStatus: 'DRP Realizado', cadeia: ['d1', 'd2'] },
+    // Avaliado e nao homologado: pendencia de homologacao.
+    { id: 'p1', processo: 'Faturamento', area: 'Financeiro', tier: 'Tier 1 (Crítico)', avaliado: true, biaUltimaEm: '2026-05-01', pcnSalvo: pcn('2026-05-01'), cadeia: ['d1', 'd2'] },
     // Tier 2 sem PCN, BIA vencido.
     { id: 'p2', processo: 'Folha', area: 'RH', tier: 'Tier 2 (Importante)', avaliado: true, biaUltimaEm: '2025-01-01', cadeia: [] },
-    // Tier 3 sem BIA, usa d3 (sem DRP mas nao critico), status BCP mentiroso.
-    { id: 'p3', processo: 'Wiki interna', area: 'TI', tier: 'Tier 3 (Suporte)', bcpStatus: 'BCP Realizado', cadeia: ['d3'] },
+    // Tier 3 sem BIA, usa d3 (sem DRP mas nao critico).
+    { id: 'p3', processo: 'Wiki interna', area: 'TI', tier: 'Tier 3 (Suporte)', cadeia: ['d3'] },
   ];
   return {
     processos,
@@ -115,7 +159,7 @@ test('avaliar: indicadores de BIA, PCN (Tier 1/2) e DRP (dependencias criticas)'
   assert.strictEqual(i.drpEmDia, 0);
   assert.strictEqual(i.drpPct, 0);
   assert.strictEqual(i.testesAtrasados, 1);
-  assert.strictEqual(i.divergencias, 2, 'drpStatus do p1 e bcpStatus do p3');
+  assert.strictEqual(i.aHomologar, 1, 'p1 avaliado sem homologacao (p2 vencido nao conta)');
 });
 
 test('avaliar: lista as pendencias certas, vencido primeiro', () => {
@@ -124,10 +168,9 @@ test('avaliar: lista as pendencias certas, vencido primeiro', () => {
   assert.deepStrictEqual(chaves.slice().sort(), [
     'bia:faltando:p3',
     'bia:vencido:p2',
-    'divergencia:divergente:p1',
-    'divergencia:divergente:p3',
     'drp:faltando:d2',
     'drp:vencido:d1',
+    'homologacao:a-homologar:p1',
     'pcn:faltando:p2',
     'teste-drp:atrasado:d1',
   ]);
@@ -147,8 +190,8 @@ test('avaliar: sem processos nao divide por zero', () => {
 
 test('contar agrupa por situacao e por tipo', () => {
   const c = CC.contar(CC.avaliar(cenario()).pendencias);
-  assert.strictEqual(c.total, 8);
-  assert.strictEqual(c.porTipo.divergencia, 2);
+  assert.strictEqual(c.total, 7);
+  assert.strictEqual(c.porTipo.homologacao, 1);
   assert.strictEqual(c.porSituacao.faltando, 3);
 });
 

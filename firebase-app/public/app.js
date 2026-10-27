@@ -1011,11 +1011,13 @@ window.filtrarPerguntas = () => {
   _atualizarBarraLista('perguntasContador', visiveis, ['pergunta', 'perguntas']);
 };
 window.trocarAbaProcesso = (aba) => {
-  // BCP e Avaliacao so sao desenhadas ao abrir a aba, e so entram no payload
-  // depois de desenhadas (com os valores ja gravados). Se o formulario estava
-  // limpo, olhar a aba nao pode torna-lo "sujo".
+  // Avaliacao virou parte do BIA (27/10/2026): links antigos (?aba=avaliacao) caem no BIA.
+  if (aba === 'avaliacao') aba = 'bia';
+  // BCP e o questionario so sao desenhados ao abrir a aba, e so entram no
+  // payload depois de desenhados (com os valores ja gravados). Se o formulario
+  // estava limpo, olhar a aba nao pode torna-lo "sujo".
   const estavaLimpo = !_edProcesso.sujo();
-  ['identificacao','avaliacao','bia','bcp','drp'].forEach(a => {
+  ['identificacao','bia','bcp','drp'].forEach(a => {
     document.getElementById('painel-' + a).style.display = a === aba ? 'block' : 'none';
     _marcarAba(document.getElementById('tab-' + a), a === aba);
   });
@@ -1024,14 +1026,16 @@ window.trocarAbaProcesso = (aba) => {
     renderPcnResumoBcp();
     renderContatosCriseBcp();
   }
-  // Selo do ciclo de revisao (23/10/2026): BIA na Avaliacao, PCN no BCP.
+  // Selo do ciclo de revisao (23/10/2026): BIA e PCN no topo da aba.
   const idProcesso = (document.getElementById('fId') || {}).value || '';
-  if (aba === 'avaliacao') renderCicloRevisao('bia', idProcesso);
+  if (aba === 'bia') renderCicloRevisao('bia', idProcesso);
   if (aba === 'bcp') renderCicloRevisao('pcn', idProcesso);
   if (aba === 'drp') renderDrpDoProcesso();
   if (aba === 'identificacao') renderVinculosProcesso();
-  // Renderizar avaliação ao abrir aba
-  if (aba === 'avaliacao') renderAvaliacaoInline();
+  if (aba === 'bia') {
+    renderAvaliacaoInline();
+    _renderAcaoHomologacaoBia();
+  }
   if (estavaLimpo) _edProcesso.marcar();
 };
 
@@ -1178,6 +1182,15 @@ window.calcularScoreInline = () => {
     if (sel) window._avaliacaoRespostas[pg.pergunta] = Number(sel.value);
   });
   window._avaliacaoScore = total;
+  // Progresso (27/10/2026): "x de y respondidas".
+  const prog = document.getElementById('avaliacaoProgresso');
+  if (prog && pergs.length && escopoAval !== document) {
+    const n = Object.keys(window._avaliacaoRespostas).length;
+    const pct = Math.round((n / pergs.length) * 100);
+    prog.innerHTML = `<div class="avaliacao-progresso__texto"><strong>${n} de ${pergs.length}</strong> perguntas respondidas${n < pergs.length ? ' — o BIA fica "Em avaliação" até completar' : ''}</div>
+      <div class="avaliacao-progresso__barra" role="progressbar" aria-valuemin="0" aria-valuemax="${pergs.length}" aria-valuenow="${n}"><span style="width:${pct}%;"></span></div>`;
+  }
+  if (typeof _renderSelosPlanos === 'function') _renderSelosPlanos();
 };
 
 // Fecha o modal de Perguntas (BIA) -- "fecharModal" por nome generico, mas o
@@ -2583,6 +2596,15 @@ window.salvarPessoaCadastro = async () => {
   // Foto do formulário no momento do clique -- é ela que vira "limpo" depois de
   // gravar (não o que for digitado enquanto a gravação está em andamento).
   const estadoDoFormulario = _coletarFormularioPessoa();
+  // Duplicidade (27/10/2026): pessoa é duplicada só se o e-mail já estiver em uso por outra.
+  {
+    const cand = { categoria: 'Pessoas', nome, email, id: id || '' };
+    const atual = id ? pessoasData.find((x) => String(x.id) === String(id)) : null;
+    const outra = DependenciaDuplicidade.acharDuplicada(pessoasData, cand);
+    if (outra && !(atual && DependenciaDuplicidade.saoDuplicadas(atual, cand))) {
+      return _avisarCampo('pessoaEmail', 'Já existe uma pessoa com este e-mail: ' + outra.nome + '.');
+    }
+  }
 
   return await comBotaoCarregando('btnSalvarPessoaCadastro', async () => {
     try {
@@ -2757,9 +2779,10 @@ async function processos() {
         <button onclick="fecharDrawerProcesso()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
+        <!-- Status calculados de BIA/BCP/DRP (27/10/2026): clicar leva a aba. -->
+        <div id="processoSelosPlanos" class="selos-planos" role="group" aria-label="Situação dos planos"></div>
         <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
           <button id="tab-identificacao" class="aba-drawer aba-drawer--ativa" role="tab" onclick="trocarAbaProcesso('identificacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;cursor:pointer;">Identificação</button>
-          <button id="tab-avaliacao" class="aba-drawer" role="tab" onclick="trocarAbaProcesso('avaliacao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;cursor:pointer;">Avaliação</button>
           <button id="tab-bia" class="aba-drawer" role="tab" onclick="trocarAbaProcesso('bia')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;cursor:pointer;">BIA</button>
           <button id="tab-bcp" class="aba-drawer" role="tab" onclick="trocarAbaProcesso('bcp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;cursor:pointer;">BCP</button>
           <button id="tab-drp" class="aba-drawer" role="tab" onclick="trocarAbaProcesso('drp')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;cursor:pointer;">DRP</button>
@@ -2801,49 +2824,33 @@ async function processos() {
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Vínculos do processo</label>
               <div id="processoVinculos"></div>
             </div>
-            <div style="margin-bottom:16px;padding-top:12px;border-top:1px solid #f0f0f0;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Levantamento PCN</label>
-              <div id="levantamentoStatus" style="font-size:0.82em;color:#999;margin-bottom:8px;"></div>
-              <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                <button class="btn btn-ghost" onclick="abrirLevantamento()" id="btnAbrirLev" style="font-size:0.82em;color:#d60014;border-color:#d60014;padding:6px 14px;display:none;">📄 Abrir Levantamento</button>
-                <button class="btn btn-ghost" onclick="copiarLinkLevantamento()" style="font-size:0.82em;color:#555;border-color:#ccc;padding:6px 14px;">🔗 Copiar link</button>
-                <button class="btn btn-ghost" onclick="enviarLinkLevantamento()" style="font-size:0.82em;color:#d60014;border-color:#d60014;padding:6px 14px;">📧 Enviar por e-mail</button>
-              </div>
-            </div>
           </div>
 
-          <!-- ABA: AVALIAÇÃO -->
-          <div id="painel-avaliacao" style="display:none;">
+          <!-- ABA: BIA (questionario + impacto + RTO/RPO/MTD + dependencias) -->
+          <div id="painel-bia" style="display:none;">
             <div data-ciclo="bia"></div>
+            <div id="biaHomologacaoAcao"></div>
             <div class="premissas-avaliacao">
               <div class="premissas-avaliacao__titulo">Premissas da avaliação</div>
               <ul>
                 <li>O impacto deve ser avaliado, considerando a indisponibilidade/falha do processo no momento em que seja necessário utilizá-lo.</li>
               </ul>
             </div>
-            <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin:0;">Questionário</label>
               <button type="button" class="btn btn-ghost" onclick="imprimirAvaliacao()">🖨️ Exportar PDF</button>
             </div>
+            <div id="avaliacaoProgresso" class="avaliacao-progresso"></div>
             <div id="avaliacaoScoreResumo" style="margin-bottom:20px;"></div>
             <div id="avaliacaoPerguntas"></div>
-          </div>
-
-          <!-- ABA: BIA -->
-          <div id="painel-bia" style="display:none;">
-            <div id="fBiaScoreInfo" style="margin-bottom:20px;"></div>
             <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Status</label>
-              <select id="fBiaHomologada" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
-                <option value="">Selecione...</option>
-                <option>Processo Não Avaliado</option>
-                <option>Processo Avaliado</option>
-                <option>BIA Realizado</option>
-              </select>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição do Impacto para Indisponibilidade</label>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
+                <label for="fDescricao" style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin:0;">Descrição do Impacto para Indisponibilidade</label>
+                <button type="button" id="btnSugerirImpacto" class="btn btn-ghost" onclick="sugerirImpactoComIA()" style="padding:4px 10px;font-size:0.8em;color:#2e7d32;border-color:#2e7d32;display:none;" title="A IA escreve um rascunho com o que o sistema sabe do processo; você revisa antes de usar">🤖 Sugerir com IA</button>
+              </div>
               <p style="font-size:0.78em;color:#888;margin-bottom:6px;">O que acontece se o processo parar? Pense nos impactos para clientes, financeiro, operação e reputação.</p>
               <textarea id="fDescricao" rows="3" placeholder="Ex: Clientes não recebem boletos, causando atraso no fluxo de caixa e reclamações..." style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
+              <div id="sugestaoImpacto"></div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
@@ -2856,7 +2863,7 @@ async function processos() {
                   <option value="8h a 24h">8 a 24 horas</option>
                   <option value="> 24 horas">Mais de 24 horas</option>
                 </select>
-                <span style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Quanto tempo pode ficar parado sem causar dano grave?</span>
+                <span id="fRTODica" style="font-size:0.72em;color:#888;margin-top:3px;display:block;">Quanto tempo pode ficar parado sem causar dano grave?</span>
               </div>
               <div>
                 <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">RPO Esperado</label>
@@ -2901,15 +2908,6 @@ async function processos() {
           <div id="painel-bcp" style="display:none;">
             <div data-ciclo="pcn"></div>
             <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BCP Status</label>
-              <select id="fBcpStatus" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
-                <option value="">Selecione...</option>
-                <option>BCP Pendente</option>
-                <option>BCP em Andamento</option>
-                <option>BCP Realizado</option>
-              </select>
-            </div>
-            <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">PCN Gerado</label>
               <div id="bcpPcnResumo"></div>
             </div>
@@ -2921,20 +2919,20 @@ async function processos() {
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Fornecedores</label>
               <div id="bcpFornecedoresTabela"></div>
             </div>
+            <div style="margin-bottom:16px;padding-top:12px;border-top:1px solid #f0f0f0;">
+              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Levantamento PCN</label>
+              <div id="levantamentoStatus" style="font-size:0.82em;color:#999;margin-bottom:8px;"></div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <button class="btn btn-ghost" onclick="abrirLevantamento()" id="btnAbrirLev" style="font-size:0.82em;color:#d60014;border-color:#d60014;padding:6px 14px;display:none;">📄 Abrir Levantamento</button>
+                <button class="btn btn-ghost" onclick="copiarLinkLevantamento()" style="font-size:0.82em;color:#555;border-color:#ccc;padding:6px 14px;">🔗 Copiar link</button>
+                <button class="btn btn-ghost" onclick="enviarLinkLevantamento()" style="font-size:0.82em;color:#d60014;border-color:#d60014;padding:6px 14px;">📧 Enviar por e-mail</button>
+              </div>
+            </div>
           </div>
 
           <!-- ABA: DRP -->
           <div id="painel-drp" style="display:none;">
-            <div style="margin-bottom:16px;">
-              <label for="fDrpStatus" style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">DRP Status</label>
-              <select id="fDrpStatus" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;">
-                <option value="">Selecione...</option>
-                <option>DRP Pendente</option>
-                <option>DRP em Andamento</option>
-                <option>DRP Realizado</option>
-              </select>
-              <div id="drpProcessoResumo" style="font-size:0.74em;color:#888;margin-top:4px;"></div>
-            </div>
+            <div id="drpProcessoResumo" style="font-size:0.82em;color:#555;margin-bottom:12px;"></div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:4px;">Planos de recuperação que sustentam o processo</label>
               <p style="font-size:0.78em;color:#888;margin-bottom:8px;">O DRP é de cada dependência. Aqui aparecem as dependências do processo (aba BIA), as dos Serviços que o suportam e os componentes abaixo delas — o mesmo caminho do Mapa de Continuidade.</p>
@@ -2968,16 +2966,6 @@ async function processos() {
             <option value="Tier 1 (Crítico)">Tier 1 (Crítico)</option>
             <option value="Tier 2 (Essencial)">Tier 2 (Essencial)</option>
             <option value="Tier 3 (Suporte)">Tier 3 (Suporte)</option>
-          </select>
-        </div>
-        <div style="margin-bottom:16px;">
-          <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">BIA Status</label>
-          <select id="loteBiaHomologada" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
-            <option value="__manter__" selected>— Não alterar —</option>
-            <option value="">Selecione...</option>
-            <option>Processo Não Avaliado</option>
-            <option>Processo Avaliado</option>
-            <option>BIA Realizado</option>
           </select>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:16px;">
@@ -3044,6 +3032,8 @@ async function processos() {
   try { window.dependenciasCatalogo = await API.getDependencias(); } catch(e) { window.dependenciasCatalogo = []; }
   // Serviços: o processo aponta o Serviço (aba BIA); o técnico vem da composição dele.
   try { window.servicosCatalogoProcesso = await API.getServicos(); } catch(e) { window.servicosCatalogoProcesso = []; }
+  // Ciclos de revisão: entram nos status calculados (coluna Planos, selos do drawer).
+  if (!_ciclosCache) { try { _ciclosCache = await API.getCiclosContinuidade(); } catch (e) { _ciclosCache = null; } }
 
   // Preencher filtro de áreas
   const filtroArea = document.getElementById('filtroArea');
@@ -3131,7 +3121,7 @@ function renderizarProcessos() {
   data = processosOrdenacao.aplicar(data, { score: comparadorPorScore, status: comparadorPorScore });
 
   // Atualizar indicadores de ordenação
-  processosOrdenacao.atualizarSetas('sort-', ['area', 'processo', 'status', 'score', 'responsavel', 'solucao', 'biaHomologada', 'bcpStatus', 'drpStatus']);
+  processosOrdenacao.atualizarSetas('sort-', ['area', 'processo', 'status', 'score', 'responsavel', 'solucao']);
 
   // Atualizar contador de processos
   _atualizarBarraLista('contadorProcessos', data.length, ['processo', 'processos']);
@@ -3221,7 +3211,7 @@ window._loteDependenciasCatalogoPorCategoria = {};
 window.abrirDrawerProcessosLote = () => {
   if (!processosSelecionados.size) return;
   document.getElementById('loteProcessosTitulo').textContent = `Editar ${processosSelecionados.size} processo(s) selecionado(s)`;
-  ['loteTierManual', 'loteBiaHomologada', 'loteRTO', 'loteRPO', 'loteMTD'].forEach((id) => {
+  ['loteTierManual', 'loteRTO', 'loteRPO', 'loteMTD'].forEach((id) => {
     document.getElementById(id).value = '__manter__';
   });
   window._loteDependencias = [];
@@ -3360,7 +3350,6 @@ window.aplicarEdicaoLoteProcessos = async () => {
 
   const camposSimples = {
     tierManual: document.getElementById('loteTierManual').value,
-    biaHomologada: document.getElementById('loteBiaHomologada').value,
     rto: document.getElementById('loteRTO').value,
     rpo: document.getElementById('loteRPO').value,
     mtd: document.getElementById('loteMTD').value,
@@ -3419,16 +3408,15 @@ window.aplicarEdicaoLoteProcessos = async () => {
 
 /**
  * Coluna "Planos" da grade de Processos: BIA, BCP e DRP como três marcadores
- * curtos (verde = Realizado, laranja = em andamento/pendente, cinza = sem
- * status). O status completo de cada um fica no title.
+ * curtos, pelos status CALCULADOS (27/10/2026, statusDosPlanos): verde ok,
+ * laranja parcial/vencendo, vermelho falta/vencido, cinza não exigido. O
+ * status completo de cada um fica no title.
  */
+const _CLASSE_PLANO_MARK = { ok: 'plano-mark--ok', parcial: 'plano-mark--andamento', falta: 'plano-mark--falta', neutro: 'plano-mark--vazio' };
 function _htmlPlanosProcesso(p) {
-  const marca = (sigla, valor) => {
-    const v = String(valor || '').trim();
-    const classe = !v ? 'plano-mark--vazio' : /realizado/i.test(v) ? 'plano-mark--ok' : 'plano-mark--andamento';
-    return `<span class="plano-mark ${classe}" title="${esc(sigla + ': ' + (v || 'sem status'))}">${sigla}</span>`;
-  };
-  return marca('BIA', p.biaHomologada) + marca('BCP', p.bcpStatus) + marca('DRP', p.drpStatus);
+  const st = _statusPlanosDoProcesso(p);
+  const marca = (sigla, x) => `<span class="plano-mark ${_CLASSE_PLANO_MARK[x.nivel] || 'plano-mark--vazio'}" title="${esc(sigla + ': ' + x.rotulo + (x.detalhe ? ' — ' + x.detalhe : ''))}">${sigla}</span>`;
+  return marca('BIA', st.bia) + marca('BCP', st.bcp) + marca('DRP', st.drp);
 }
 
 window.filtrarPorArea = (area) => {
@@ -3659,6 +3647,8 @@ function renderDependenciaTabela() {
   
   // Atualizar hidden input
   document.getElementById('fDependencia').value = selecionadas.map(s => s.nome).join(', ');
+  // Os selos (DRP) acompanham as dependencias escolhidas.
+  if (typeof _renderSelosPlanos === 'function' && document.getElementById('processoSelosPlanos')) _renderSelosPlanos();
 
   // Adicionar listeners nos inputs
   tabelaContainer.querySelectorAll('.dep-cat-input').forEach(input => {
@@ -3920,8 +3910,6 @@ window.abrirModalProcesso = (p) => {
   document.getElementById('fTierManual').value = p ? (p.tierManual || '') : '';
   // Preencher tags de dependência
   initDependenciaTags(p);
-  document.getElementById('fBiaHomologada').value = p ? p.biaHomologada : '';
-  const fBcpEl = document.getElementById('fBcpStatus'); if (fBcpEl) fBcpEl.value = p ? (p.bcpStatus || '') : '';
   // bcpContatos nao tem mais UI propria no drawer (removida -- quem edita
   // agora e o editor de Equipe de Crise dentro do proprio PCN). So hidrata
   // pra nao perder o dado no proximo salvarProcesso().
@@ -3929,10 +3917,8 @@ window.abrirModalProcesso = (p) => {
   // do PCN gravou como string JSON ate 21/10/2026.
   window._bcpContatos = p && Array.isArray(p.bcpContatos) ? p.bcpContatos.slice() : [];
 
-  // Preencher campos DRP
-  document.getElementById('fDrpStatus').value = p ? (p.drpStatus || '') : '';
-
-
+  // Registro como estava ao abrir: base da atualizacao otimista do Salvar.
+  window._processoAberto = p || null;
 
   // Preencher Dono do Processo com base na area selecionada
   const atualizarDono = () => {
@@ -3959,6 +3945,13 @@ window.abrirModalProcesso = (p) => {
   if (contAval) { contAval.innerHTML = ''; delete contAval.dataset.processoId; }
   const resumoAval = document.getElementById('avaliacaoScoreResumo');
   if (resumoAval) resumoAval.innerHTML = '';
+  const progAval = document.getElementById('avaliacaoProgresso');
+  if (progAval) progAval.innerHTML = '';
+  // Sugestao de impacto por IA (27/10/2026): so para quem edita, processo salvo.
+  const sugestao = document.getElementById('sugestaoImpacto');
+  if (sugestao) sugestao.innerHTML = '';
+  const btnIA = document.getElementById('btnSugerirImpacto');
+  if (btnIA) btnIA.style.display = p && p.id && Perfis.podeEditarProcessos(window.USER_PERFIS) ? 'inline-block' : 'none';
   // Mostrar/ocultar botão Abrir PCN
   const btnPcnSalvo = document.getElementById('btnPcnSalvo');
   if (btnPcnSalvo) btnPcnSalvo.style.display = (p && p.pcnSalvo) ? 'inline-block' : 'none';
@@ -3988,19 +3981,200 @@ window.abrirModalProcesso = (p) => {
       if (btnAbrirLev) btnAbrirLev.style.display = 'none';
     }
   }
-  // Score/Tier cards na BIA
-  const scoreInfo = document.getElementById('fBiaScoreInfo');
-  if (scoreInfo && p && p.score > 0) {
-    const tierLabel = Criticidade.tierDoProcesso(p);
-    const cor = Criticidade.corDoTier(tierLabel);
-    scoreInfo.innerHTML = `<div style="display:flex;gap:12px;margin-bottom:4px;"><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">SCORE</div><div style="font-size:1.8em;font-weight:700;color:${cor};">${p.score}</div></div><div style="flex:1;background:#f5f6fa;border-radius:8px;padding:14px;text-align:center;border-top:3px solid ${cor};"><div style="font-size:0.78em;color:#666;margin-bottom:4px;">TIER</div><div style="font-size:0.95em;font-weight:700;">${_htmlBadge(_nivelTierProcesso(tierLabel), tierLabel)}</div></div></div>`;
-  } else if (scoreInfo) { scoreInfo.innerHTML = ''; }
   // Preencher RTO/RPO/MTD
-  const fRTO = document.getElementById('fRTO'); if (fRTO) { fRTO.value = p ? (p.rto || '') : ''; fRTO.onchange = () => renderDependenciaTabela(); }
+  const fRTO = document.getElementById('fRTO'); if (fRTO) { fRTO.value = p ? (p.rto || '') : ''; fRTO.onchange = () => { renderDependenciaTabela(); _atualizarDicaRto(); }; }
+  _atualizarDicaRto();
+  _renderSelosPlanos();
   const fRPO = document.getElementById('fRPO'); if (fRPO) fRPO.value = p ? (p.rpo || '') : '';
   const fMTD = document.getElementById('fMTD'); if (fMTD) fMTD.value = p ? (p.mtd || '') : '';
   iniciarDrawerResize();
   _edProcesso.marcar();
+};
+
+// ============================================================
+// Status calculados de BIA/BCP/DRP, Homologar BIA e sugestao de impacto por
+// IA (27/10/2026). Os status vem de ConformidadeContinuidade.statusDosPlanos --
+// a mesma conta da grade, do Dashboard, do relatorio e do Dossie.
+// ============================================================
+
+/** Status dos planos de um processo com o que a tela tem carregado (catalogo, servicos, ciclos). */
+function _statusPlanosDoProcesso(p, extra) {
+  const e = extra || {};
+  const dependencias = e.dependencias || window.dependenciasCatalogo || [];
+  const servicos = e.servicos || window.servicosCatalogoProcesso || (typeof servicosData !== 'undefined' ? servicosData : []) || [];
+  const cadeia = CadeiaDependencias.cadeiaDoProcesso({ processo: p, dependencias, servicos });
+  return ConformidadeContinuidade.statusDosPlanos(p, {
+    tier: e.tier || Criticidade.tierDoProcesso(p),
+    cadeia,
+    ciclos: e.ciclos || (typeof _ciclosCache !== 'undefined' ? _ciclosCache : null),
+  });
+}
+
+const _ICONE_NIVEL_PLANO = { ok: '●', parcial: '◐', falta: '○', neutro: '–' };
+
+/** Um selo (BIA/BCP/DRP): "● BIA Homologado". `onclick` opcional. */
+function _htmlSeloPlano(sigla, st, onclick) {
+  const conteudo = `<span class="selo-plano__icone" aria-hidden="true">${_ICONE_NIVEL_PLANO[st.nivel] || '•'}</span><span class="selo-plano__sigla">${esc(sigla)}</span> <span class="selo-plano__rotulo">${esc(st.rotulo)}</span>`;
+  return onclick
+    ? `<button type="button" class="selo-plano selo-plano--${st.nivel}" onclick="${onclick}" title="${esc(st.detalhe || '')}">${conteudo}</button>`
+    : `<span class="selo-plano selo-plano--${st.nivel}" title="${esc(st.detalhe || '')}">${conteudo}</span>`;
+}
+
+/** O processo do formulario com o questionario ainda nao salvo (para os selos ao vivo). */
+function _processoComAvaliacaoAoVivo() {
+  const p = _processoDoFormulario();
+  const cont = document.getElementById('avaliacaoPerguntas');
+  const pergs = window.processosPerguntas || [];
+  if (!cont || !p.id || cont.dataset.processoId !== p.id || !pergs.length) return p;
+  const resp = window._avaliacaoRespostas || {};
+  const salvo = (window.processosData || []).find((x) => String(x.id) === String(p.id));
+  if (!Object.keys(resp).length || !_respostasBiaMudaram(resp, salvo)) return p;
+  return { ...p, avaliado: true, score: window._avaliacaoScore || 0, respostas: resp,
+    biaRespondidas: Object.keys(resp).length, biaTotalPerguntas: pergs.length, biaUltimaEm: new Date().toISOString() };
+}
+
+/** Faixa do topo do drawer: os tres selos, clicaveis (levam a aba). */
+window._renderSelosPlanos = () => {
+  const el = document.getElementById('processoSelosPlanos');
+  if (!el) return;
+  const p = _processoComAvaliacaoAoVivo();
+  if (!p.id && !(p.dependenciaItens || []).length) { el.innerHTML = '<span class="selos-planos__vazio">Salve o processo para acompanhar BIA, BCP e DRP.</span>'; return; }
+  const st = _statusPlanosDoProcesso(p);
+  el.innerHTML = _htmlSeloPlano('BIA', st.bia, "trocarAbaProcesso('bia')")
+    + _htmlSeloPlano('BCP', st.bcp, "trocarAbaProcesso('bcp')")
+    + _htmlSeloPlano('DRP', st.drp, "trocarAbaProcesso('drp')");
+  const resumoDrp = document.getElementById('drpProcessoResumo');
+  if (resumoDrp) resumoDrp.innerHTML = `${_htmlSeloPlano('DRP', st.drp)} <span style="color:#666;">${esc(st.drp.detalhe || '')}</span>`;
+};
+
+/** O questionario mudou em relacao ao gravado? (respostas antigas guardam 0 nas nao respondidas) */
+function _respostasBiaMudaram(novas, salvo) {
+  const ant = (salvo && salvo.respostas) || {};
+  const val = (v) => (v === undefined || v === null || v === '' ? undefined : Number(v));
+  return (window.processosPerguntas || []).some((q) => val(novas[q.pergunta]) !== val(ant[q.pergunta]));
+}
+
+/** Depois de salvarRespostas: reflete Tier, contagem e RTO sugerido no registro e no formulario. */
+function _aplicarResultadoRespostasBia(reg, ultima, scores, total) {
+  if (!reg) return;
+  reg.avaliado = true;
+  reg.score = total;
+  reg.respostas = scores;
+  if (ultima) {
+    reg.tier = ultima.tier || reg.tier;
+    reg.biaUltimaEm = ultima.timestamp || new Date().toISOString();
+    reg.biaRespondidas = ultima.respondidas;
+    reg.biaTotalPerguntas = ultima.totalPerguntas;
+    if (ultima.rtoSugerido) {
+      reg.rto = ultima.rtoSugerido;
+      reg.rtoOrigem = 'sugerido';
+      const fRTO = document.getElementById('fRTO');
+      if (fRTO && !fRTO.value) fRTO.value = ultima.rtoSugerido;
+    }
+  } else {
+    reg.biaUltimaEm = new Date().toISOString();
+  }
+  window._processoAberto = reg;
+  _atualizarDicaRto();
+  _atualizarTituloDrawerProcesso(reg);
+}
+
+/** Dica do RTO: "sugerido pela avaliação" enquanto ninguem confirmou outro valor. */
+window._atualizarDicaRto = () => {
+  const dica = document.getElementById('fRTODica');
+  const fRTO = document.getElementById('fRTO');
+  if (!dica || !fRTO) return;
+  const p = window._processoAberto;
+  const sugerido = p && p.rtoOrigem === 'sugerido' && p.rto && fRTO.value === p.rto;
+  dica.innerHTML = sugerido
+    ? '<span style="color:#e65100;font-weight:600;">Sugerido pela avaliação do BIA</span> — confirme ou ajuste'
+    : 'Quanto tempo pode ficar parado sem causar dano grave?';
+};
+
+/** Botao "Homologar BIA" no topo da aba BIA (so quando avaliado por completo e ainda nao homologado). */
+window._renderAcaoHomologacaoBia = () => {
+  const el = document.getElementById('biaHomologacaoAcao');
+  if (!el) return;
+  const p = _processoDoFormulario();
+  if (!p.id) { el.innerHTML = ''; return; }
+  const st = _statusPlanosDoProcesso(_processoComAvaliacaoAoVivo()).bia;
+  const pode = Perfis.podeHomologarBIA(window.USER_PERFIS);
+  const homolog = p.biaHomologacao && p.biaHomologacao.em;
+  let html = `<div class="bia-homologacao">${_htmlSeloPlano('BIA', st)} <span class="bia-homologacao__texto">${esc(st.detalhe || '')}</span>`;
+  if (pode && st.codigo === 'avaliado') html += `<button type="button" class="btn btn-ghost" id="btnHomologarBia" onclick="homologarBIA()" style="padding:4px 12px;font-size:0.82em;color:#2e7d32;border-color:#2e7d32;">✔ Homologar BIA</button>`;
+  else if (!pode && st.codigo === 'avaliado') html += '<span class="muted" style="font-size:0.78em;">A homologação é feita por Admin, Segurança ou Operador de Processos.</span>';
+  else if (homolog && st.codigo === 'homologado') html += '';
+  html += '</div>';
+  el.innerHTML = html;
+};
+
+window.homologarBIA = async () => {
+  const p = _processoDoFormulario();
+  if (!p.id || !Perfis.podeHomologarBIA(window.USER_PERFIS)) return;
+  const resp = window._avaliacaoRespostas || {};
+  const salvo = (window.processosData || []).find((x) => String(x.id) === String(p.id));
+  if (Object.keys(resp).length && _respostasBiaMudaram(resp, salvo)) {
+    return showToast('Salve as respostas do questionário antes de homologar.', '#e65100');
+  }
+  if (!await confirmarAcao(`Homologar o BIA de "${p.processo}"? A homologação registra quem validou a avaliação atual; reavaliar depois pede homologar de novo.`)) return;
+  const biaHomologacao = { em: new Date().toISOString(), por: (window.USER_EMAIL || '').toLowerCase() };
+  return comBotaoCarregando('btnHomologarBia', async () => {
+    try {
+      await API.salvarProcesso({ id: p.id, biaHomologacao });
+      if (salvo) salvo.biaHomologacao = biaHomologacao;
+      if (window._processoAberto && String(window._processoAberto.id) === String(p.id)) window._processoAberto.biaHomologacao = biaHomologacao;
+      API.invalidate('getProcessos');
+      _renderSelosPlanos();
+      _renderAcaoHomologacaoBia();
+      if (document.getElementById('lista')) renderizarProcessos();
+      showToast('✅ BIA homologado.', '#2e7d32');
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível homologar. Tente de novo.'), '#c62828');
+    }
+  });
+};
+
+/** "🤖 Sugerir com IA": a IA escreve um rascunho; aparece para revisao, nada e gravado. */
+window.sugerirImpactoComIA = async () => {
+  const id = (document.getElementById('fId') || {}).value || '';
+  const caixa = document.getElementById('sugestaoImpacto');
+  if (!id || !caixa) return showToast('Salve o processo antes de pedir a sugestão.', '#e65100');
+  return comBotaoCarregando('btnSugerirImpacto', async () => {
+    caixa.innerHTML = '<div class="sugestao-ia"><div class="sugestao-ia__titulo">⏳ A IA está escrevendo uma sugestão com o que o sistema sabe deste processo…</div></div>';
+    try {
+      const r = await API.post('sugerirImpactoProcesso', { id });
+      window._sugestaoImpacto = String((r && r.texto) || '');
+      caixa.innerHTML = `<div class="sugestao-ia" role="region" aria-label="Sugestão da IA">
+          <div class="sugestao-ia__titulo">🤖 Sugestão da IA — revise antes de usar</div>
+          <div class="sugestao-ia__texto">${esc(window._sugestaoImpacto)}</div>
+          <div class="sugestao-ia__acoes">
+            <button type="button" class="btn btn-ghost" onclick="usarSugestaoImpacto()" style="padding:4px 12px;font-size:0.82em;color:#2e7d32;border-color:#2e7d32;">Usar este texto</button>
+            <button type="button" class="btn btn-ghost" onclick="descartarSugestaoImpacto()" style="padding:4px 12px;font-size:0.82em;">Descartar</button>
+          </div>
+          <div class="sugestao-ia__nota">Escrita a partir do questionário, Serviços, dependências, levantamento do PCN e riscos ligados. Confira antes de salvar.</div>
+        </div>`;
+    } catch (e) {
+      caixa.innerHTML = '';
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível gerar a sugestão. Tente de novo.'), '#c62828');
+    }
+  });
+};
+
+window.usarSugestaoImpacto = async () => {
+  const campo = document.getElementById('fDescricao');
+  const texto = window._sugestaoImpacto || '';
+  if (!campo || !texto) return;
+  const atual = campo.value.trim();
+  if (atual && atual !== texto && !await confirmarAcao('Substituir a descrição atual pela sugestão da IA?')) return;
+  campo.value = texto;
+  descartarSugestaoImpacto();
+  campo.focus();
+};
+
+window.descartarSugestaoImpacto = () => {
+  const caixa = document.getElementById('sugestaoImpacto');
+  if (caixa) caixa.innerHTML = '';
+  window._sugestaoImpacto = '';
 };
 
 window.editarProcesso = (id) => {
@@ -4036,14 +4210,14 @@ function _coletarFormularioProcesso() {
     rto: (document.getElementById('fRTO') || {value:''}).value.trim(),
     rpo: (document.getElementById('fRPO') || {value:''}).value.trim(),
     mtd: (document.getElementById('fMTD') || {value:''}).value.trim(),
-    biaHomologada: document.getElementById('fBiaHomologada').value.trim(),
-    bcpStatus: (document.getElementById('fBcpStatus') || {value:''}).value.trim(),
     descricaoFuncional: document.getElementById('fDescricaoFuncional').value.trim(),
     tierManual: document.getElementById('fTierManual').value,
     bcpContatos: window._bcpContatos || [],
-    drpStatus: document.getElementById('fDrpStatus').value.trim(),
     ...camposFornecedoresBcp,
   };
+  // RTO preenchido pela avaliacao continua "sugerido" ate alguem escolher outro.
+  const salvoRto = window._processoAberto;
+  p.rtoOrigem = p.rto && salvoRto && salvoRto.rtoOrigem === 'sugerido' && salvoRto.rto === p.rto ? 'sugerido' : (p.rto ? 'manual' : '');
 
   // Coletar respostas da avaliação inline (se houver)
   const pergs = window.processosPerguntas || [];
@@ -4086,18 +4260,20 @@ window.salvarProcesso = async () => {
   const textoOriginal = btnSalvar ? btnSalvar.innerHTML : '';
   if (btnSalvar) { btnSalvar.disabled = true; btnSalvar.innerHTML = '⏳ Salvando...'; btnSalvar.classList.add('btn-loading'); }
 
-  // Optimistic: fechar drawer e atualizar UI imediatamente
+  // O questionario so vira uma resposta nova quando mudou (27/10/2026): antes,
+  // cada Salvar com a aba aberta criava um respostas_bia e "renovava" o ciclo.
+  const idxAnterior = p.id ? window.processosData.findIndex(x => x.id === p.id) : -1;
+  const anterior = idxAnterior !== -1 ? window.processosData[idxAnterior] : null;
+  const respostasMudaram = temResposta && _respostasBiaMudaram(avalScores, anterior);
+
+  // Optimistic: atualiza a UI na hora, por cima do registro anterior -- senao
+  // somem tier, revisoes, levantamento e papeis de crise ate recarregar.
   const area = window.areasDisponiveis ? window.areasDisponiveis.find(a => a.nome === p.area) : null;
-  const pEnriquecido = { ...p, responsavelArea: area ? area.responsavel : '', solucao: area ? area.solucao : '', score: 0, respostas: [] };
-  if (p.id) {
-    const idx = window.processosData.findIndex(x => x.id === p.id);
-    if (idx !== -1) {
-      pEnriquecido.score = temResposta ? avalTotal : window.processosData[idx].score;
-      pEnriquecido.respostas = temResposta ? avalScores : window.processosData[idx].respostas;
-      pEnriquecido.pcnSalvo = window.processosData[idx].pcnSalvo;
-      pEnriquecido.avaliado = window.processosData[idx].avaliado || temResposta;
-      window.processosData[idx] = pEnriquecido;
-    }
+  const pEnriquecido = { ...(anterior || {}), ...p, responsavelArea: area ? area.responsavel : '', solucao: area ? area.solucao : '' };
+  if (!anterior) { pEnriquecido.score = 0; pEnriquecido.respostas = {}; }
+  if (respostasMudaram) { pEnriquecido.score = avalTotal; pEnriquecido.respostas = avalScores; }
+  if (anterior) {
+    window.processosData[idxAnterior] = pEnriquecido;
   } else {
     pEnriquecido.id = '_tmp_' + Date.now(); // ID temporário (string)
     pEnriquecido.score = temResposta ? avalTotal : 0;
@@ -4113,11 +4289,18 @@ window.salvarProcesso = async () => {
   try {
     const result = await API.salvarProcesso(p);
 
-    // Salvar avaliação se respondida
-    if (temResposta) {
-      await API.post('salvarRespostas', { area: p.area, processo: p.processo, processoId: p.id || result.id, scores: avalScores });
+    // Salvar avaliação se respondida E mudou.
+    if (respostasMudaram) {
+      const r = await API.post('salvarRespostas', { area: p.area, processo: p.processo, processoId: p.id || result.id, scores: avalScores });
+      _aplicarResultadoRespostasBia(pEnriquecido, r && r.ultima, avalScores, avalTotal);
     }
-    _edProcesso.marcar({ p: { ...p, id: p.id || result.id }, aval: avalScores });
+    // Foto depois de refletir o RTO sugerido: o formulario volta a estar "limpo".
+    const depois = _coletarFormularioProcesso();
+    _edProcesso.marcar({ p: { ...depois.p, id: p.id || result.id }, aval: depois.avalScores });
+    window._processoAberto = pEnriquecido;
+    _renderSelosPlanos();
+    _renderAcaoHomologacaoBia();
+    if (respostasMudaram) renderCicloRevisao('bia', p.id || result.id);
 
     // Atualizar ID real se era novo
     if (!p.id && result.id) {
@@ -4194,7 +4377,7 @@ window.verDetalhesProcesso = (id) => {
           <div style="font-weight:600;color:#d60014;">${esc(p.mtd || '-')}</div>
         </div>
       </div>
-      <div><strong>BIA Homologada:</strong> ${p.biaHomologada || '-'}</div>
+      <div><strong>Planos:</strong> ${(() => { const st = _statusPlanosDoProcesso(p); return _htmlSeloPlano('BIA', st.bia) + ' ' + _htmlSeloPlano('BCP', st.bcp) + ' ' + _htmlSeloPlano('DRP', st.drp); })()}</div>
     </div>
   `;
   document.getElementById('modalDetalhes').classList.add('open');
@@ -4209,7 +4392,7 @@ window.fecharModalDetalhes = () => {
 window.avaliarProcesso = (id) => {
   if (!window.processosData.find((proc) => proc.id === id)) return;
   editarProcesso(id);
-  trocarAbaProcesso('avaliacao');
+  trocarAbaProcesso('bia');
 };
 
 window.imprimirAvaliacao = () => {
@@ -5995,6 +6178,15 @@ window.salvarDep = async () => {
   if (Perfis.categoriaDeFornecedor(d.categoria)) {
     return showToast('Fornecedor é cadastrado em Fornecedores → Cadastro.', '#e65100');
   }
+  // Duplicidade (27/10/2026): mesma categoria + mesmo nome no catálogo já carregado.
+  // Na edição só vale se o nome/chave mudou, para não travar duplicata antiga.
+  {
+    const outra = DependenciaDuplicidade.acharDuplicada(dependenciasData, { ...d, id: idAtual || '' });
+    if (outra && !(existente && DependenciaDuplicidade.saoDuplicadas(existente, d))) {
+      _avisarCampo('depNome', DependenciaDuplicidade.mensagem(outra));
+      return false;
+    }
+  }
 
   // Capturados ANTES de fechar o drawer: fecharDrawerDependencia() reabre o
   // drawer de origem (se for o caso) e limpa essas flags como efeito colateral.
@@ -6033,6 +6225,8 @@ window.salvarDep = async () => {
     const payload = { ...d };
     if (isNew) payload.id = null;
     const result = await API.salvarDependencia(payload);
+    // Corrida entre usuários: a API recusou por duplicidade -> cai no catch (reverte).
+    if (result && result.duplicado && result.success === false) throw new Error(result.error || 'Já existe uma dependência com esse nome.');
     _edDep.marcar({ ...estadoDoFormulario, id: isNew ? result.id : estadoDoFormulario.id });
     // Atualizar ID real se era novo
     if (isNew && result.id) {
@@ -6364,7 +6558,7 @@ function _htmlRelatorioProcessosPorArea(grupos) {
               <td><span class="tier-badge" style="background:${Criticidade.corDoTier(tier)};">${esc(tier)}</span></td>
               <td class="c">${p.avaliado || p.score > 0 ? esc(String(p.score)) : '–'}</td>
               <td>${vazio(p.rto)}</td><td>${vazio(p.rpo)}</td>
-              <td>${vazio(p.biaHomologada)}</td><td>${vazio(p.bcpStatus)}</td><td>${vazio(p.drpStatus)}</td>
+              ${(() => { const st = _statusPlanosDoProcesso(p); return `<td>${esc(st.bia.rotulo)}</td><td>${esc(st.bcp.rotulo)}</td><td>${esc(st.drp.rotulo)}</td>`; })()}
             </tr>`).join('')}
           </tbody>
         </table>` : '<p class="vazio">Nenhum processo cadastrado nesta área.</p>'}
@@ -13066,11 +13260,13 @@ async function admin() {
     <div id="painel" style="display:none;"></div>
   `;
 
-  let processos, areas, depsPlanos;
+  let processos, areas, depsPlanos, servicosPlanos, ciclosPlanos;
   try {
-    [processos, areas, depsPlanos] = await Promise.all([API.getProcessos(), API.getAreas(),
+    [processos, areas, depsPlanos, servicosPlanos, ciclosPlanos] = await Promise.all([API.getProcessos(), API.getAreas(),
       // Só para os números de DRP (seção Planos); sem eles o dashboard abre igual.
-      Perfis.podeVerTela(window.USER_PERFIS, 'drp') ? API.getDependencias().catch(() => null) : null]);
+      Perfis.podeVerTela(window.USER_PERFIS, 'drp') ? API.getDependencias().catch(() => null) : null,
+      // Cobertura Tier 1 pelos status calculados (27/10/2026).
+      API.getServicos().catch(() => []), API.getCiclosContinuidade().catch(() => null)]);
   } catch (e) {
     console.error('admin: falha ao carregar', e);
     document.getElementById('loading').outerHTML = _htmlErroCarga('Não foi possível carregar o dashboard.', 'admin');
@@ -13219,6 +13415,9 @@ async function admin() {
       // Cor por faixa de cobertura: sucesso / alerta / perigo (paleta de status do guia).
       const corCobertura = (p) => (p >= 80 ? '#2e7d32' : p >= 50 ? '#f57c00' : '#c62828');
       const kpi = (rotulo, n) => {
+        if (typeof n !== 'number') {
+          return `<div class="painel-kpi"><div class="painel-kpi__rotulo">${rotulo}</div><div class="painel-kpi__valor num">–</div><div class="painel-card__sub" style="margin:4px 0 8px;">sem acesso ao catálogo de DRP</div></div>`;
+        }
         const p = pctDe(n, tier1);
         const cor = corCobertura(p);
         return `<div class="painel-kpi">
@@ -13229,9 +13428,10 @@ async function admin() {
           </div>`;
       };
       coberturaEl.innerHTML = `<div class="painel-kpis">
-          ${kpi('BIA Realizado', t1Procs.filter(p => p.biaHomologada === 'BIA Realizado').length)}
-          ${kpi('BCP Realizado', t1Procs.filter(p => p.bcpStatus === 'BCP Realizado').length)}
-          ${kpi('DRP Realizado', t1Procs.filter(p => p.drpStatus === 'DRP Realizado').length)}
+          ${(() => { const sts = t1Procs.map((p) => _statusPlanosDoProcesso(p, { dependencias: depsPlanos || [], servicos: servicosPlanos || [], ciclos: ciclosPlanos })); return kpi('BIA homologado', sts.filter((st) => st.bia.codigo === 'homologado').length)
+            + kpi('PCN em dia', sts.filter((st) => st.bcp.codigo === 'pcn-gerado').length)
+            // Sem acesso ao catálogo (perfil sem DRP), não dá para contar: "–", nunca um zero falso.
+            + kpi('DRP completo', depsPlanos ? sts.filter((st) => st.drp.codigo === 'completo').length : '–'); })()}
         </div>`;
     } else {
       coberturaEl.innerHTML = '<p class="muted" style="font-size:14px;">Nenhum processo classificado como Tier 1 ainda.</p>';
@@ -17607,11 +17807,13 @@ window.gerarDossieProcesso = async () => {
   win.document.write('<html><head><title>Dossiê - ' + p.processo + '</title><style>:root{--risk-critical:#d60014;--risk-high:#b64a12;--risk-medium:#9a6700;--risk-low:#38bb0e}body{font-family:Arial;padding:40px;max-width:900px;margin:0 auto;font-size:11pt;line-height:1.6}h1{color:#d60014}h2{color:#d60014;border-bottom:2px solid #fce8ea;padding-bottom:6px;margin-top:24px}table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:9.5pt}th{background:#d60014;color:white;padding:8px 10px;text-align:left}td{padding:7px 10px;border:1px solid #e0e0e0}.badge{display:inline-block;padding:4px 12px;border-radius:12px;font-size:9pt;font-weight:700;color:white;background:' + Criticidade.corDoTier(tier) + '}.header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px}.header .sub{font-size:9pt;color:#888;margin-top:4px;font-weight:400}.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}.btn-print:hover{opacity:.9}@media print{.btn-print{display:none!important}}</style></head><body>');
   win.document.write('<div class="header"><div><img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display=\'none\'"><div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">BIA · Governança, Riscos e Conformidade</div><h1>' + p.processo + '</h1><div class="sub">' + p.area + ' — ' + responsavel + ' • ' + new Date().toLocaleDateString('pt-BR') + ' • Fortes Tecnologia</div></div><button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button></div><span class="badge">' + tier + ' • Score ' + score + '</span>');
   win.document.write('<h2>Identificação</h2><p><b>Descrição:</b> ' + (p.descricaoFuncional || '-') + '</p>');
-  win.document.write('<h2>BIA</h2><p><b>Status:</b> ' + (p.biaHomologada || '-') + '</p><p><b>Impacto:</b> ' + (p.descricao || '-') + '</p><p><b>RTO:</b> ' + (p.rto || '-') + ' | <b>RPO:</b> ' + (p.rpo || '-') + ' | <b>MTD:</b> ' + (p.mtd || '-') + '</p>');
+  const stDossie = _statusPlanosDoProcesso(p);
+  const linhaStatus = (x) => '<p><b>Status:</b> ' + esc(x.rotulo) + (x.detalhe ? ' <span style="color:#888;">— ' + esc(x.detalhe) + '</span>' : '') + '</p>';
+  win.document.write('<h2>BIA</h2>' + linhaStatus(stDossie.bia) + '<p><b>Impacto:</b> ' + (p.descricao || '-') + '</p><p><b>RTO:</b> ' + (p.rto || '-') + ' | <b>RPO:</b> ' + (p.rpo || '-') + ' | <b>MTD:</b> ' + (p.mtd || '-') + '</p>');
   if (depItens.length) { win.document.write('<h3>Dependências</h3><table><tr><th>Categoria</th><th>Recurso</th><th>Detalhe</th></tr>'); depItens.forEach(function(d) { win.document.write('<tr><td><b>' + d.categoria + '</b></td><td>' + d.nome + '</td><td>' + (d.detalhe || '-') + '</td></tr>'); }); win.document.write('</table>'); }
-  win.document.write('<h2>BCP</h2><p><b>Status:</b> ' + (p.bcpStatus || '-') + '</p>');
+  win.document.write('<h2>BCP</h2>' + linhaStatus(stDossie.bcp));
   if (contatos.length) { win.document.write('<table><tr><th>Nome</th><th>Empresa</th><th>Setor</th><th>Telefone</th><th>Email</th></tr>'); contatos.forEach(function(d) { win.document.write('<tr><td><b>' + d.nome + '</b></td><td>' + (d.empresa||'-') + '</td><td>' + (d.setor||'-') + '</td><td>' + (d.telefone||'-') + '</td><td>' + (d.email||'-') + '</td></tr>'); }); win.document.write('</table>'); }
-  win.document.write('<h2>DRP</h2><p><b>Status:</b> ' + esc(p.drpStatus || '-') + '</p>');
+  win.document.write('<h2>DRP</h2>' + linhaStatus(stDossie.drp));
   if (drpItens.length) {
     win.document.write('<table><tr><th>Dependência</th><th>Origem</th><th>RTO</th><th>DRP</th></tr>');
     drpItens.forEach(function (it) {
@@ -17899,7 +18101,9 @@ function renderPcnResumoBcp() {
     container.innerHTML = `
       <div style="border:1px dashed #ddd;border-radius:8px;padding:20px;text-align:center;color:#888;background:#fafafa;">
         <div style="margin-bottom:10px;">Nenhum PCN gerado ainda para este processo.</div>
-        <button class="btn btn-ghost" onclick="gerarPCNProcesso()" style="color:#2e7d32;border-color:#2e7d32;">🤖 Gerar PCN</button>
+        ${Perfis.podeGerarPCN(window.USER_PERFIS)
+          ? '<button class="btn btn-ghost" onclick="gerarPCNProcesso()" style="color:#2e7d32;border-color:#2e7d32;">🤖 Gerar PCN</button>'
+          : '<div style="font-size:0.85em;">O PCN é gerado por Admin, Segurança ou Operador de Processos.</div>'}
       </div>`;
     return;
   }
@@ -22159,6 +22363,15 @@ window.salvarFornecedorCadastro = async () => {
   const dados = _coletarFormularioFornecedor();
   const { id, nome } = dados;
   if (!nome) return _avisarCampo('fornCadNome', 'Informe a razão social do fornecedor.');
+  // Duplicidade (27/10/2026): mesma razão social ou mesmo CNPJ. Na edição só vale se mudou.
+  {
+    const atual = id ? fornecedoresData.find((x) => String(x.id) === String(id)) : null;
+    const cand = { categoria: CATEGORIA_FORNECEDOR_PADRAO, nome, cnpj: dados.cnpj, id: id || '' };
+    const outra = DependenciaDuplicidade.acharDuplicada(fornecedoresData.map((f) => ({ ...f, categoria: CATEGORIA_FORNECEDOR_PADRAO })), cand);
+    if (outra && !(atual && DependenciaDuplicidade.saoDuplicadas({ ...atual, categoria: CATEGORIA_FORNECEDOR_PADRAO }, cand))) {
+      return _avisarCampo('fornCadNome', DependenciaDuplicidade.mensagem({ ...outra, categoria: 'Fornecedores' }));
+    }
+  }
 
   return await comBotaoCarregando('btnSalvarFornecedorCadastro', async () => {
   try {
@@ -24164,7 +24377,7 @@ async function notificacoesEmail() {
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;">
           <div>
             <div style="${lbl}">O que envia</div>
-            ${chk('notifContResumo', 'Resumo semanal de conformidade (segunda, 07:30)', 'BIA, PCN e DRP faltando, vencidos, com teste atrasado ou status divergente — o mesmo da tela Conformidade de Continuidade. Quem não tem pendência não recebe.')}
+            ${chk('notifContResumo', 'Resumo semanal de conformidade (segunda, 07:30)', 'BIA, PCN e DRP faltando, vencidos, com teste atrasado ou BIA a homologar — o mesmo da tela Conformidade de Continuidade. Quem não tem pendência não recebe.')}
           </div>
           <div>
             <div style="${lbl}">Para quem</div>
@@ -24477,7 +24690,7 @@ window.fecharDrawerNotificacao = () => {
 // ============================================================
 // PÁGINA: CONFORMIDADE DE CONTINUIDADE (23/10/2026)
 //
-// Painel do Operador de Processos: o que está faltando, vencido ou divergente
+// Painel do Operador de Processos: o que está faltando, vencido ou a homologar
 // em BIA, PCN e DRP. A conta fica em conformidade-continuidade.js (a mesma do
 // resumo por e-mail, no servidor); aqui só desenha. Admin, SI e Operador de
 // Processos veem todas as áreas; o Gestor, só a dele (_recorteAreaGestor).
@@ -24489,7 +24702,7 @@ const conformidadePaginacao = criarPaginacao(20);
 async function conformidade() {
   const podeCiclos = Perfis.podeEditarCiclos(window.USER_PERFIS);
   app.innerHTML = `
-    ${_htmlCabecalhoLista({ titulo: 'Conformidade de Continuidade', sub: 'BIA, PCN e DRP faltando, vencidos, com teste atrasado ou com status divergente do plano real.',
+    ${_htmlCabecalhoLista({ titulo: 'Conformidade de Continuidade', sub: 'BIA, PCN e DRP faltando, vencidos, com teste atrasado ou BIA a homologar.',
       maisAcoes: podeCiclos ? [{ rotulo: 'Periodicidades de revisão', onclick: 'abrirDrawerCiclos()' }] : [] })}
     <div class="loading">⏳ Carregando...</div>
     <div id="conformidadeConteudo" style="display:none;">
@@ -24568,7 +24781,7 @@ function _pctTexto(pct) {
   return pct === null ? '—' : pct + '%';
 }
 
-const _NIVEL_SITUACAO_CONFORMIDADE = { vencido: 'critical', faltando: 'high', atrasado: 'high', divergente: 'medium', vencendo: 'low' };
+const _NIVEL_SITUACAO_CONFORMIDADE = { vencido: 'critical', faltando: 'high', atrasado: 'high', 'a-homologar': 'medium', vencendo: 'low' };
 
 function renderizarConformidade() {
   const { resultado, ciclos } = conformidadeDados;
@@ -24584,7 +24797,7 @@ function renderizarConformidade() {
     card('PCN em dia (Tier 1/2)', _pctTexto(i.pcnPct), 'pcn', `${i.pcnEmDia} de ${i.criticos} processo(s) Tier 1/2 com PCN dentro do ciclo`),
     card('DRP em dia (dep. críticas)', _pctTexto(i.drpPct), 'drp', `${i.drpEmDia} de ${i.depsCriticas} dependência(s) da cadeia de processos Tier 1/2 com DRP dentro do ciclo`),
     card('Testes de DRP atrasados', i.testesAtrasados, 'teste-drp', 'DRP nunca testado ou com o último teste fora da frequência declarada', i.testesAtrasados ? 'var(--risk-high)' : ''),
-    card('Status divergente', i.divergencias, 'divergencia', 'Status "Realizado" informado à mão sem o plano existir', i.divergencias ? 'var(--risk-high)' : ''),
+    card('BIA a homologar', i.aHomologar, 'homologacao', 'BIA avaliado (questionário completo) e ainda não homologado — ou reavaliado depois da homologação', i.aHomologar ? 'var(--risk-medium)' : ''),
   ].join('');
   document.getElementById('conformidadeCiclos').textContent =
     `Ciclo de revisão: BIA a cada ${ciclos.biaMeses} meses · PCN a cada ${ciclos.pcnMeses} · DRP a cada ${ciclos.drpMeses}. "Vencendo" = faltam ${ciclos.avisoDias} dias ou menos.`;

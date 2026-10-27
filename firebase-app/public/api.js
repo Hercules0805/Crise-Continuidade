@@ -1446,6 +1446,9 @@ async function _lerRespostasIndexadas() {
       respostas: r.scores || {},
       timestamp: r.timestamp,
       respondente: r.respondente,
+      // Questionario pela metade (27/10/2026): so as respostas novas guardam.
+      respondidas: typeof r.respondidas === 'number' ? r.respondidas : null,
+      totalPerguntas: typeof r.totalPerguntas === 'number' ? r.totalPerguntas : null,
     };
     const key = `${r.area}||${r.processo}`;
     if (!porChave[key]) porChave[key] = resumo;
@@ -1503,12 +1506,16 @@ async function _lerProcessos() {
       // MTD e o campo do formulario; mtpd e o nome antigo (Apps Script), so
       // lido como reserva para processo que nunca foi salvo pelo drawer.
       mtd: d.mtd || d.mtpd || '',
-      biaHomologada: d.biaHomologada || '',
+      // RTO preenchido pela avaliacao do BIA ('sugerido') ate alguem confirmar.
+      rtoOrigem: d.rtoOrigem || '',
       tier: d.tier || '',
-      bcpStatus: d.bcpStatus || '',
       descricaoFuncional: d.descricaoFuncional || '',
       bcpContatos: _listaContatos(d.bcpContatos),
-      drpStatus: d.drpStatus || '',
+      // Status BIA/BCP/DRP (27/10/2026) sao calculados na leitura
+      // (ConformidadeContinuidade.statusDosPlanos); os antigos biaHomologada/
+      // bcpStatus/drpStatus deixaram de ser lidos e gravados. So a homologacao
+      // do BIA e registrada: { em, por }.
+      biaHomologacao: d.biaHomologacao && d.biaHomologacao.em ? d.biaHomologacao : null,
       // Campos do Apps Script sem tela desde a migracao (bcpObjetivo,
       // bcpRiscos, drpProcedimentos, workaround...) sairam da leitura e da
       // gravacao em 21/10/2026. O que ja esta no Firestore fica intocado.
@@ -1525,6 +1532,8 @@ async function _lerProcessos() {
       // Ciclo de revisao (23/10/2026, ver conformidade-continuidade.js): a
       // resposta de BIA mais recente e as revisoes registradas de BIA/PCN.
       biaUltimaEm: resp && resp.timestamp ? resp.timestamp : '',
+      biaRespondidas: resp ? resp.respondidas : null,
+      biaTotalPerguntas: resp ? resp.totalPerguntas : null,
       // Revisao vigente: {ultimaEm, revisadoPor, aprovadoPor, aprovadoEm, observacao} ou null.
       biaRevisao: d.biaRevisao && d.biaRevisao.ultimaEm ? d.biaRevisao : null,
       biaHistoricoRevisao: Array.isArray(d.biaHistoricoRevisao) ? d.biaHistoricoRevisao : [],
@@ -1812,6 +1821,24 @@ async function _salvarDependencia(d) {
       observacao: String(c.observacao || ''),
     }));
   }
+  // Duplicidade (27/10/2026): mesma categoria + mesmo nome. Criar um igual nao
+  // grava e devolve o que ja existe; renomear para um nome em uso e recusado.
+  // So confere se a chave mudou, para nao travar quem ja tem duplicata antiga.
+  const DD = typeof DependenciaDuplicidade !== 'undefined' ? DependenciaDuplicidade : null;
+  if (DD && data.categoria && data.nome) {
+    const mesmaCategoria = (await _db.collection(COLLECTION.dependencias).where('categoria', '==', data.categoria).get())
+      .docs.map((x) => ({ id: x.id, ...x.data() }));
+    const candidato = { ...data, id: d.id ? String(d.id) : '' };
+    if (d.id) {
+      const atual = mesmaCategoria.find((x) => x.id === String(d.id));
+      const mudouChave = !atual || !DD.saoDuplicadas(atual, candidato);
+      const outra = mudouChave ? DD.acharDuplicada(mesmaCategoria, candidato) : null;
+      if (outra) return { success: false, duplicado: true, existente: { id: outra.id, nome: outra.nome, categoria: outra.categoria }, error: DD.mensagem(outra) };
+    } else {
+      const outra = DD.acharDuplicada(mesmaCategoria, candidato);
+      if (outra) return { success: true, id: outra.id, duplicado: true, dado: outra };
+    }
+  }
   if (d.id) {
     await _db.collection(COLLECTION.dependencias).doc(String(d.id)).set(data, { merge: true });
     return { success: true, id: d.id, dado: data };
@@ -2004,8 +2031,8 @@ function _marcarTierManual(dados, anterior) {
 }
 
 const _CAMPOS_PROCESSO = [
-  'area', 'processo', 'descricao', 'dependencia', 'dependenciaItens', 'rto', 'rpo', 'mtd', 'biaHomologada', 'tier',
-  'bcpStatus', 'descricaoFuncional', 'bcpContatos', 'drpStatus',
+  'area', 'processo', 'descricao', 'dependencia', 'dependenciaItens', 'rto', 'rtoOrigem', 'rpo', 'mtd', 'tier',
+  'descricaoFuncional', 'bcpContatos', 'biaHomologacao',
   'bcpPlanoBProvedores', 'bcpSlas', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual', 'tierManualPor', 'tierManualEm',
 ];
 
@@ -2089,13 +2116,17 @@ async function _salvarRespostas(payload) {
   const timestampIso = new Date().toISOString();
   const reguaVersao = await _versaoReguaAtual();
 
+  let ultima = null;
   for (const resp of respostas) {
     const scores = {};
     let score = 0;
+    let respondidas = 0;
     perguntas.forEach((perg) => {
       const v = Number(resp.scores?.[perg.pergunta]) || 0;
       scores[perg.pergunta] = v;
       score += v;
+      // Respondida = veio no envio (0 e resposta valida: "Nunca aconteceu").
+      if (resp.scores && Object.prototype.hasOwnProperty.call(resp.scores, perg.pergunta) && resp.scores[perg.pergunta] !== null && resp.scores[perg.pergunta] !== '') respondidas++;
     });
     const tier = _calcularTier(score);
     const rto = _calcularRTO(tier);
@@ -2112,6 +2143,9 @@ async function _salvarRespostas(payload) {
       scores,
       score,
       tier,
+      // Quantas perguntas tiveram resposta: o BIA "em avaliacao" (parcial).
+      respondidas,
+      totalPerguntas: perguntas.length,
       // Qual regua pontuou esta resposta. Sem isso, mudar os pesos reescreve o
       // significado de todo o historico em silencio.
       reguaVersao,
@@ -2127,10 +2161,12 @@ async function _salvarRespostas(payload) {
       const patch = { tier };
       if (!rtoAtual) { patch.rto = rto; patch.rtoOrigem = 'sugerido'; }
       await ref.set(patch, { merge: true });
+      ultima = { tier, rtoSugerido: patch.rto || null, respondidas, totalPerguntas: perguntas.length, timestamp: timestampIso };
     }
   }
 
-  return { success: true, total: respostas.length };
+  // `ultima`: o drawer reflete na hora o Tier, o RTO sugerido e a contagem.
+  return { success: true, total: respostas.length, ultima };
 }
 
 // ------------------------------------------------------------
@@ -2933,6 +2969,10 @@ const API = {
     }
     // Resumo executivo por IA dos relatorios de Vulnerabilidades/Riscos (so
     // agregados; perfil Admin/Seguranca conferido no servidor).
+    // Sugestao da "Descricao do Impacto" por IA (27/10/2026): so devolve o texto.
+    if (action === 'sugerirImpactoProcesso') {
+      return _appApi('POST', 'sugerirImpactoProcesso', { id: body.id });
+    }
     if (action === 'gerarResumoExecutivo') {
       return _appApi('POST', 'gerarResumoExecutivo', { tipo: body.tipo, indicadores: body.indicadores });
     }

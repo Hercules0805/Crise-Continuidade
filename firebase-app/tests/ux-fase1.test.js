@@ -93,7 +93,7 @@ test('atalho para tela que o perfil nao ve nao aparece', () => {
   g.close();
 });
 
-test('questionario BIA: uma interface so -- o check da lista abre o Processo na aba Avaliacao', async () => {
+test('questionario BIA: uma interface so -- o check da lista abre o Processo na aba BIA (questionario dentro dela)', async () => {
   const w = carregar(['admin'], {}, `
     window.__abas = [];
     editarProcesso = (id) => { window.__editado = id; };
@@ -101,10 +101,10 @@ test('questionario BIA: uma interface so -- o check da lista abre o Processo na 
   w.processosData = [{ id: 'p1', processo: 'Folha', area: 'RH' }];
   w.avaliarProcesso('p1');
   assert.strictEqual(w.__editado, 'p1');
-  assert.strictEqual(w.__abas.join(), 'avaliacao');
+  assert.strictEqual(w.__abas.join(), 'bia');
   const app = fs.readFileSync(path.join(PUB, 'app.js'), 'utf8');
   assert.doesNotMatch(app, /drawerAvaliar|salvarAvaliacaoProcesso|_edAvaliar/, 'drawer "Avaliar Processo" removido');
-  const aba = app.slice(app.indexOf('<div id="painel-avaliacao"'), app.indexOf('<!-- ABA: BIA -->'));
+  const aba = app.slice(app.indexOf('<div id="painel-bia"'), app.indexOf('<!-- ABA: BCP -->'));
   assert.match(aba, /premissas-avaliacao/);
   assert.match(aba, /imprimirAvaliacao\(\)/);
   w.close();

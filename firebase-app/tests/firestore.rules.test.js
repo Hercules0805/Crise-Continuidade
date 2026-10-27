@@ -157,6 +157,19 @@ describe('Security Rules — processos e respostas', () => {
   test('gestor NÃO cria resposta de outra área', async () => {
     await assertFails(db(GESTOR).collection('respostas_bia').add({ area: 'RH', processo: 'Proc', score: 8 }));
   });
+
+  // Homologar o BIA (27/10/2026): o gestor avalia, mas nao homologa.
+  test('gestor NÃO homologa o BIA da própria área (nem ao criar); edita o resto normalmente', async () => {
+    const h = { em: '2026-10-27T10:00:00Z', por: 'gestor@x' };
+    await assertFails(db(GESTOR).doc('processos/ti__proc').set({ biaHomologacao: h }, { merge: true }));
+    await assertFails(db(GESTOR).doc('processos/ti__novo').set({ area: 'TI', processo: 'Novo', biaHomologacao: h }));
+    await assertSucceeds(db(GESTOR).doc('processos/ti__proc').set({ area: 'TI', processo: 'Proc', descricao: 'x' }, { merge: true }));
+    await assertSucceeds(db(GESTOR).doc('processos/ti__proc').delete());
+  });
+
+  test('admin homologa o BIA', async () => {
+    await assertSucceeds(db(ADMIN).doc('processos/ti__proc').set({ biaHomologacao: { em: '2026-10-27T10:00:00Z', por: 'admin@x' } }, { merge: true }));
+  });
 });
 
 // --- Regressao: a colecao de tokens ficava legivel para todo o dominio ---
@@ -607,6 +620,7 @@ describe('Security Rules — Operador de Processos', () => {
     await assertSucceeds(db(OPP).doc('processos/ti__proc').set({ area: 'TI', processo: 'Proc' }, { merge: true }));
     await assertSucceeds(db(OPP).doc('processos/novo').set({ area: 'Financeiro', processo: 'Novo' }));
     await assertSucceeds(db(OPP).collection('respostas_bia').add({ area: 'RH', processo: 'Proc', score: 8 }));
+    await assertSucceeds(db(OPP).doc('processos/rh__proc').set({ biaHomologacao: { em: '2026-10-27T10:00:00Z', por: 'op@x' } }, { merge: true }), 'homologa o BIA');
   });
 
   test('não altera nem apaga respostas de BIA (histórico)', async () => {

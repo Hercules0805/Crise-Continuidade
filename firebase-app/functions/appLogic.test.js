@@ -1468,3 +1468,73 @@ test('DRP: fornecedor INATIVO ligado em drpDependencias nao entra nos contatos n
   assert.ok(!promptEnviado.includes('CT-0002 — Link dedicado'), 'contrato do fornecedor inativo nao vem pelo fornecedor');
   assert.ok(promptEnviado.includes('CT-0001 — Qualys VMDR'), 'contrato que cobre a dependencia continua');
 });
+
+// ---- Sugestao da Descricao do Impacto por IA (27/10/2026) ----
+function seedImpacto(perfil) {
+  const s = seed();
+  s.config_perfis['analista@fortestecnologia.com.br'] = perfil;
+  s.processos.ti__backup = {
+    area: 'TI', processo: 'Backup', descricaoFuncional: 'Copia diária dos dados de clientes', rto: '< 4 horas', mtd: '24 horas',
+    dependenciaItens: [{ categoria: 'Serviços', id: 's1', nome: 'Portal' }, { categoria: 'Fornecedores', id: 'f1', nome: 'Nuvem SA' }],
+    levantamentoPCN: JSON.stringify({ semSistema: 'Clientes ficam sem restaurar arquivos', outro: 'x' }),
+  };
+  s.servicos = { s1: { nome: 'Portal', descricao: 'Portal do cliente', dependenciaItens: [{ id: 'srv', nome: 'SRV-01', categoria: 'Servidor' }] } };
+  s.dependencias = { srv: { nome: 'SRV-01', categoria: 'Servidor' }, f1: { nome: 'Nuvem SA', categoria: 'Fornecedores' } };
+  s.perguntas = { q1: { pergunta: 'Afeta clientes?', categoria: 'Impacto em Clientes' }, q2: { pergunta: 'Perda financeira?', categoria: 'Impacto Financeiro' } };
+  s.respostas_bia = { r1: { area: 'TI', processo: 'Backup', score: 7, timestamp: '2026-10-01T00:00:00Z', scores: { 'Afeta clientes?': 4, 'Perda financeira?': 0 } } };
+  s.riscos = { k1: { processoId: 'ti__backup', titulo: 'Ransomware no SRV-01', status: 'Identificado' }, k2: { processoId: 'ti__backup', titulo: 'Antigo', status: 'Encerrado' } };
+  return s;
+}
+
+test('sugerirImpactoProcesso: quem edita o processo pede; gestor so da propria area; demais recusados', async () => {
+  const resp = JSON.stringify({ texto: 'Sem este processo, os clientes ficam sem restaurar arquivos.' });
+  for (const [perfil, ok] of [
+    [{ perfis: ['admin'] }, true], [{ perfis: ['operador_processos'] }, true], [{ perfis: ['seguranca'] }, true],
+    [{ perfis: ['gestor'], area: 'TI' }, true], [{ perfis: ['gestor'], area: 'RH' }, false], [{ perfis: ['ti'] }, false], [{ perfis: ['operador'] }, false],
+  ]) {
+    const db = makeDb(seedImpacto(perfil));
+    const g = capturarGemini(resp);
+    try {
+      if (ok) {
+        const r = await WRITE_ACTIONS.sugerirImpactoProcesso(db, { id: 'ti__backup' }, ctx({ geminiApiKey: 'k' }));
+        assert.match(r.texto, /restaurar arquivos/, JSON.stringify(perfil));
+      } else {
+        await assert.rejects(() => WRITE_ACTIONS.sugerirImpactoProcesso(db, { id: 'ti__backup' }, ctx({ geminiApiKey: 'k' })), /não pode editar este processo/, JSON.stringify(perfil));
+      }
+    } finally { g.restaurar(); }
+  }
+});
+
+test('sugerirImpactoProcesso: o prompt leva questionario por dimensao, servicos, cadeia, levantamento e riscos abertos; nada grava', async () => {
+  const db = makeDb(seedImpacto({ perfis: ['admin'] }));
+  const g = capturarGemini(JSON.stringify({ texto: 'ok' }));
+  try {
+    await WRITE_ACTIONS.sugerirImpactoProcesso(db, { id: 'ti__backup' }, ctx({ geminiApiKey: 'k' }));
+  } finally { g.restaurar(); }
+  const corpo = g.chamadas[0].corpo;
+  const prompt = corpo.contents[0].parts[0].text;
+  assert.strictEqual(corpo.generationConfig.responseMimeType, 'application/json');
+  const dados = JSON.parse(prompt.slice(prompt.indexOf('DADOS DO PROCESSO (JSON):') + 'DADOS DO PROCESSO (JSON):'.length));
+  assert.deepStrictEqual(dados.impactoPorDimensao, { 'Impacto em Clientes': [{ pergunta: 'Afeta clientes?', nota: 4 }] }, 'so as respondidas, pela categoria');
+  assert.deepStrictEqual(dados.servicos.map((s) => s.nome), ['Portal']);
+  assert.ok(dados.dependenciasTecnicas.includes('Servidor: SRV-01'), 'cadeia pelo Servico');
+  assert.deepStrictEqual(dados.fornecedores, ['Nuvem SA']);
+  assert.deepStrictEqual(dados.levantamentoPCN, { semSistema: 'Clientes ficam sem restaurar arquivos' });
+  assert.deepStrictEqual(dados.riscos, ['Ransomware no SRV-01'], 'encerrado fica fora');
+  assert.strictEqual(dados.rto, '< 4 horas');
+  assert.match(prompt, /Não invente/);
+  assert.strictEqual(db._store.processos.ti__backup.descricao, undefined, 'so sugere; quem grava e a tela');
+});
+
+test('sugerirImpactoProcesso: sem chave, processo inexistente, formato invalido e erro da API viram AppError', async () => {
+  await assert.rejects(() => WRITE_ACTIONS.sugerirImpactoProcesso(makeDb(seedImpacto({ perfis: ['admin'] })), { id: 'ti__backup' }, ctx({ geminiApiKey: '' })), /API Key do Gemini/);
+  await assert.rejects(() => WRITE_ACTIONS.sugerirImpactoProcesso(makeDb(seedImpacto({ perfis: ['admin'] })), { id: 'nao' }, ctx({ geminiApiKey: 'k' })), /não encontrado/);
+  let g = capturarGemini('{"outra":1}');
+  try {
+    await assert.rejects(() => WRITE_ACTIONS.sugerirImpactoProcesso(makeDb(seedImpacto({ perfis: ['admin'] })), { id: 'ti__backup' }, ctx({ geminiApiKey: 'k' })), /fora do formato/);
+  } finally { g.restaurar(); }
+  g = capturarGemini('', false);
+  try {
+    await assert.rejects(() => WRITE_ACTIONS.sugerirImpactoProcesso(makeDb(seedImpacto({ perfis: ['admin'] })), { id: 'ti__backup' }, ctx({ geminiApiKey: 'k' })), /Erro na API do Gemini: quota/);
+  } finally { g.restaurar(); }
+});

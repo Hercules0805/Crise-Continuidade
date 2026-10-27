@@ -135,7 +135,7 @@ function montarResumoContinuidade(pendencias, opts) {
   const lista = pendencias || [];
   const contagem = CC.contar(lista);
   const dia = _dataBR(o.dia);
-  const partes = ['vencido', 'faltando', 'atrasado', 'divergente', 'vencendo']
+  const partes = ['vencido', 'faltando', 'atrasado', 'a-homologar', 'vencendo']
     .filter((s) => contagem.porSituacao[s])
     .map((s) => `${contagem.porSituacao[s]} ${CC.ROTULO_SITUACAO[s].toLowerCase()}`);
   const assunto = `[Continuidade] Conformidade de BIA/PCN/DRP${dia ? ` — ${dia}` : ''}: ${contagem.total} pendência(s)`;
