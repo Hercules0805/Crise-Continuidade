@@ -1238,7 +1238,13 @@ async function _salvarRelatorioExecutivo(r) {
 }
 
 async function _lerRelatoriosExecutivos() {
-  const docs = await _getAll(COLLECTION.relatoriosExecutivos);
+  // Operador de Processos (27/10/2026) só lê as edições do Relatório de
+  // Continuidade: as regras recusam a lista inteira, então a consulta filtra.
+  const perfis = window.USER_PERFIS;
+  const leTudo = Perfis.ehAdmin(perfis) || Perfis.ehSeguranca(perfis);
+  const docs = leTudo
+    ? await _getAll(COLLECTION.relatoriosExecutivos)
+    : await _getPorCampo(COLLECTION.relatoriosExecutivos, 'tipo', 'continuidade');
   return docs.sort((a, b) => String(b.geradoEm || '').localeCompare(String(a.geradoEm || '')));
 }
 

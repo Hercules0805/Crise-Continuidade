@@ -1770,11 +1770,18 @@ const TIPOS_RESUMO_EXECUTIVO = {
     titulo: 'Relatório Executivo de Riscos',
     referencia: 'NIST SP 800-30 (matriz 5x5), SP 800-39 (enquadrar, avaliar, responder, monitorar) e CSF 2.0 GV.RM (apetite de risco)',
   },
+  // Relatorio de Status de Continuidade (27/10/2026): quem governa BIA/PCN/DRP.
+  continuidade: {
+    pode: (db, email) => temAlgumPerfil(db, email, PERFIS_PCN),
+    titulo: 'Relatório de Status de Continuidade',
+    referencia: 'ISO 22301 (BIA, estratégias e planos de continuidade, exercícios e testes) e NIST SP 800-34 (planos de contingência e recuperação)',
+    papel: 'um analista sênior de continuidade de negócios',
+  },
 };
 
 function _promptResumoExecutivo(tipo, indicadores) {
   const t = TIPOS_RESUMO_EXECUTIVO[tipo];
-  return `Você é um analista sênior de riscos de segurança da informação e escreve para a diretoria da Fortes Tecnologia.
+  return `Você é ${t.papel || 'um analista sênior de riscos de segurança da informação'} e escreve para a diretoria da Fortes Tecnologia.
 
 Escreva o RESUMO EXECUTIVO do "${t.titulo}", seguindo ${t.referencia}.
 

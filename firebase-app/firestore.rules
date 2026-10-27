@@ -513,19 +513,25 @@ service cloud.firestore {
     // rodaria script na sessao de quem abrisse.
     // Imutavel (sem update); quem gerou e quem grava; so o Admin exclui.
     // 'servicos' e 'servicos-mapa' (21/10/2026): Relatorios de Servicos.
+    // 'continuidade' (27/10/2026): Relatorio de Status de Continuidade -- o
+    // Operador de Processos tambem gera e le, mas SO este tipo (a consulta
+    // dele filtra tipo == 'continuidade').
     function relatorioExecutivoValido(d) {
-      return d.tipo in ['vulnerabilidades', 'riscos', 'servicos', 'servicos-mapa']
+      return d.tipo in ['vulnerabilidades', 'riscos', 'servicos', 'servicos-mapa', 'continuidade']
         && d.geradoPor == request.auth.token.email.lower();
     }
+    function relatorioDeContinuidade(d) {
+      return isOperadorProcessos() && d.tipo == 'continuidade';
+    }
     match /relatorios_executivos/{id} {
-      allow read: if isAdmin() || isSeguranca();
-      allow create: if (isAdmin() || isSeguranca()) && relatorioExecutivoValido(request.resource.data);
+      allow read: if isAdmin() || isSeguranca() || relatorioDeContinuidade(resource.data);
+      allow create: if (isAdmin() || isSeguranca() || relatorioDeContinuidade(request.resource.data)) && relatorioExecutivoValido(request.resource.data);
       allow update: if false;
       allow delete: if isAdmin();
     }
     match /relatorios_executivos_conteudo/{id} {
-      allow read: if isAdmin() || isSeguranca();
-      allow create: if (isAdmin() || isSeguranca()) && relatorioExecutivoValido(request.resource.data)
+      allow read: if isAdmin() || isSeguranca() || relatorioDeContinuidade(resource.data);
+      allow create: if (isAdmin() || isSeguranca() || relatorioDeContinuidade(request.resource.data)) && relatorioExecutivoValido(request.resource.data)
         && request.resource.data.conteudo is string && request.resource.data.conteudo.size() < 900000;
       allow update: if false;
       allow delete: if isAdmin();

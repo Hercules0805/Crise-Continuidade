@@ -767,13 +767,44 @@ describe('Security Rules — relatórios executivos salvos', () => {
 
   test('gestor não lê; ninguém altera; só o admin exclui', async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      await ctx.firestore().doc('relatorios_executivos/e9').set(meta(ADMIN.email));
-      await ctx.firestore().doc('config_perfis/si-rel@fortestecnologia.com.br').set({ perfis: ['seguranca'] });
+      const f = ctx.firestore();
+      await f.doc('relatorios_executivos/e9').set(meta(ADMIN.email));
+      await f.doc('config_perfis/si-rel@fortestecnologia.com.br').set({ perfis: ['seguranca'] });
     });
     await assertFails(db(GESTOR).doc('relatorios_executivos/e9').get());
     await assertFails(db(ADMIN).doc('relatorios_executivos/e9').update({ titulo: 'x' }));
     await assertFails(db(SI_REL).doc('relatorios_executivos/e9').delete());
     await assertSucceeds(db(ADMIN).doc('relatorios_executivos/e9').delete());
+  });
+
+  // Relatorio de Status de Continuidade (27/10/2026): o Operador de Processos
+  // gera e le SO este tipo; TI nao; so o Admin exclui.
+  test('operador de processos: cria e lê só o Relatório de Continuidade', async () => {
+    const OPP_REL = { email: 'opp-rel@fortestecnologia.com.br' };
+    const TI_REL = { email: 'ti-rel@fortestecnologia.com.br' };
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const f = ctx.firestore();
+      await f.doc('config_perfis/opp-rel@fortestecnologia.com.br').set({ perfis: ['operador_processos'] });
+      await f.doc('config_perfis/ti-rel@fortestecnologia.com.br').set({ perfis: ['ti'] });
+      await f.doc('config_perfis/si-rel@fortestecnologia.com.br').set({ perfis: ['seguranca'] });
+      await f.doc('relatorios_executivos/r1').set(meta(ADMIN.email));
+      await f.doc('relatorios_executivos_conteudo/r1').set(cont(ADMIN.email));
+      await f.doc('relatorios_executivos/c0').set(Object.assign(meta(ADMIN.email), { tipo: 'continuidade' }));
+    });
+    const deCont = (por) => Object.assign(meta(por), { tipo: 'continuidade' });
+    await assertSucceeds(db(OPP_REL).doc('relatorios_executivos/c1').set(deCont(OPP_REL.email)));
+    await assertSucceeds(db(OPP_REL).doc('relatorios_executivos_conteudo/c1').set(cont(OPP_REL.email, { tipo: 'continuidade' })));
+    await assertSucceeds(db(OPP_REL).doc('relatorios_executivos_conteudo/c1').get());
+    await assertSucceeds(db(OPP_REL).collection('relatorios_executivos').where('tipo', '==', 'continuidade').get());
+    await assertSucceeds(db(OPP_REL).doc('relatorios_executivos/c0').get());
+    await assertFails(db(OPP_REL).collection('relatorios_executivos').get(), 'a lista inteira tem riscos/vulnerabilidades');
+    await assertFails(db(OPP_REL).doc('relatorios_executivos/r1').get());
+    await assertFails(db(OPP_REL).doc('relatorios_executivos_conteudo/r1').get());
+    await assertFails(db(OPP_REL).doc('relatorios_executivos/c2').set(meta(OPP_REL.email)), 'outro tipo');
+    await assertFails(db(OPP_REL).doc('relatorios_executivos/c1').delete());
+    await assertFails(db(TI_REL).doc('relatorios_executivos/c3').set(deCont(TI_REL.email)));
+    await assertFails(db(TI_REL).doc('relatorios_executivos/c0').get());
+    await assertSucceeds(db(SI_REL).doc('relatorios_executivos/c4').set(deCont(SI_REL.email)));
   });
 });
 

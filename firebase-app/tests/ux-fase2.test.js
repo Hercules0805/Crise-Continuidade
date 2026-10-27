@@ -60,7 +60,7 @@ test('menu lateral: operacao primeiro (continuidade no topo), configuracao e adm
   const principal = { continuidade: 'admin', terceiros: 'terceiros-dashboard', servicos: 'servicos', indicadores: 'indicadores-dashboard' };
   for (const g of m) if (principal[g.grupo]) assert.strictEqual(g.itens[0].page, principal[g.grupo], g.grupo + ': principal primeiro');
   assert.deepStrictEqual(m.find((g) => g.grupo === 'continuidade').itens.map((i) => i.page),
-    ['admin', 'conformidade', 'processos', 'pcns', 'drp', 'dependencias', 'mapa', 'relatorios']);
+    ['admin', 'conformidade', 'processos', 'pcns', 'drp', 'dependencias', 'mapa', 'relatorios', 'continuidade-relatorio']);
 });
 
 test('menu Riscos e Vulnerabilidades: subnivel Riscos primeiro, depois Vulnerabilidades', () => {

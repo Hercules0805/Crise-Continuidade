@@ -23,6 +23,7 @@ const pages = {
   'fornecedores-criticidade': fornecedoresCriticidadePerguntas,
   'catalogo-backup': catalogoBackup,
   'servicos-relatorio': servicosRelatorio,
+  'continuidade-relatorio': continuidadeRelatorio,
   mapa: mapaContinuidade,
   'catalogo-backup-ferramentas': catalogoBackupFerramentas,
   'produtos-software': produtosSoftware,
@@ -6465,6 +6466,11 @@ async function relatorios() {
       <div><h2>Relatórios</h2><p class="page-sub">Relatórios de apoio à Continuidade de Negócio</p></div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fill, minmax(280px, 1fr));gap:16px;">
+      ${_seVeTela('continuidade-relatorio', `<div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
+        <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Status de Continuidade</h3>
+        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Quantos processos têm BIA e PCN, quantas dependências têm DRP, por área e por categoria, revisões, testes e pendências — com resumo por IA e edições salvas.</p>
+        <button class="btn btn-primary" onclick="location.hash='#continuidade-relatorio'">📄 Abrir</button>
+      </div>`)}
       <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
         <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Processos por Dependência</h3>
         <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para cada dependência do catálogo técnico e cada instalação, quais Processos de Negócio dependem dela.</p>
@@ -6892,6 +6898,7 @@ const _TITULO_RELATORIO_EXECUTIVO = {
   riscos: 'Relatório Executivo de Riscos',
   servicos: 'Relatório de Composição de Serviços',
   'servicos-mapa': 'Mapa de Conexões de Serviços',
+  continuidade: 'Relatório de Status de Continuidade',
 };
 
 // Tipos de edição que cada tela de relatório lista em "Edições salvas" (a tela
@@ -7329,6 +7336,7 @@ window._relatoriosGerados = window._relatoriosGerados || {};
 
 function _htmlRelatorioExecutivoPorTipo(tipo, dados, opcoes, resumoIA, edicao) {
   if (_tiposDaTelaRelatorio('servicos').includes(tipo)) return _htmlRelatorioServicosPorTipo(tipo, dados, opcoes, edicao);
+  if (tipo === 'continuidade') return _htmlRelatorioContinuidade(dados, opcoes, resumoIA, edicao);
   return tipo === 'riscos'
     ? _htmlRelatorioExecutivoRiscos(dados, opcoes, resumoIA, edicao)
     : _htmlRelatorioExecutivoVulnerabilidades(dados, opcoes, resumoIA, edicao);
@@ -7934,6 +7942,299 @@ function _htmlRelatorioComposicaoServicos(dados, opcoes, edicao) {
       'Alerta: a soma do caminho crítico passa do valor definido no serviço. Uma soma que já passa do limite é alerta mesmo com dependências sem valor, porque a soma real só pode ser maior.',
       '"(mín.)": alguma dependência do serviço não tem o valor informado; a soma mostrada é um mínimo.',
       'Valores lidos em minutos; RTO/RPO antigos em texto foram convertidos quando possível.',
+    ],
+  });
+}
+
+// ============================================================
+// RELATÓRIO DE STATUS DE CONTINUIDADE (27/10/2026)
+// Mesmo padrão dos executivos (opções e escopo na tela, documento em aba nova,
+// Imprimir/PDF, edições salvas como retrato dos dados, resumo por IA opcional).
+// A conta fica em ContinuidadeRelatorio (continuidade-relatorio.js), sobre as
+// mesmas regras da Conformidade. Admin, Segurança e Operador de Processos.
+// ============================================================
+window._relContBase = null;
+
+async function continuidadeRelatorio() {
+  window._relExecTipo = 'continuidade';
+  relatoriosSalvosPaginacao.reiniciar();
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Relatório de Continuidade</h2><p class="page-sub">Status de BIA, PCN e DRP: cobertura, áreas, dependências, revisões, testes e pendências — para imprimir, salvar em PDF ou guardar no sistema</p></div>
+    </div>
+    <div class="painel-card">
+      <div class="painel-card__titulo">Gerar relatório</div>
+      <div class="painel-card__sub">O relatório abre numa aba nova. Lá você revisa, imprime ou salva em PDF, e pode guardar a edição no sistema</div>
+      <label style="display:flex;gap:8px;align-items:flex-start;font-size:0.9em;cursor:pointer;margin:10px 0 4px;">
+        <input type="checkbox" id="relContIA" checked style="margin-top:3px;">
+        <span>Incluir resumo executivo por IA (Gemini)
+          <span style="display:block;font-size:0.85em;color:var(--ink-muted);margin-top:2px;">A IA recebe só os números agregados e as pendências de topo. Leva alguns segundos; revise o texto antes de distribuir.</span>
+        </span>
+      </label>
+      <div style="margin-top:18px;padding-top:14px;border-top:1px solid var(--border);">
+        <div class="painel-card__titulo" style="font-size:14px;">Escopo do relatório</div>
+        <div class="painel-card__sub" style="margin-bottom:10px;">Deixe em "Todas" para a empresa inteira, ou escolha uma área. A evolução compara com a última edição salva do mesmo escopo</div>
+        <div id="relContEscopo"><div class="vazio-inline">Carregando os filtros…</div></div>
+        <div id="relContContagem" style="font-size:13px;color:var(--ink-muted);margin-top:8px;"></div>
+      </div>
+      <button class="btn btn-primary" id="btnGerarRelCont" style="margin-top:14px;" onclick="gerarRelatorioContinuidade()">📄 Gerar relatório</button>
+    </div>
+    <div id="relatoriosSalvos"></div>`;
+  await Promise.all([_carregarEscopoRelatorioContinuidade(), _carregarRelatoriosSalvos()]);
+}
+
+async function _carregarEscopoRelatorioContinuidade() {
+  const cont = document.getElementById('relContEscopo');
+  if (!cont) return;
+  try {
+    const [processos, areas] = await Promise.all([API.getProcessos(), API.getAreas().catch(() => [])]);
+    window._relContBase = { processos: processos || [], areas: areas || [] };
+  } catch (e) {
+    console.error('Relatório de Continuidade: dados não carregaram', e);
+    window._relContBase = null;
+    cont.innerHTML = _htmlErroCarga('Não foi possível carregar os processos.', 'continuidadeRelatorio');
+    const btn = document.getElementById('btnGerarRelCont');
+    if (btn) btn.disabled = true;
+    return;
+  }
+  const b = window._relContBase;
+  const nomes = [...new Set(b.areas.map((a) => a.nome).concat(b.processos.map((p) => p.area)).map((n) => String(n || '').trim()).filter(Boolean))]
+    .sort((x, y) => x.localeCompare(y, 'pt-BR'));
+  cont.innerHTML = `<div class="filters" style="margin-bottom:0;">
+    <div class="field"><label class="field-label" for="relContArea">Área</label>
+      <select id="relContArea" class="field-control" onchange="atualizarEscopoRelatorioContinuidade()">
+        <option value="">Todas</option>${nomes.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}
+      </select></div>
+  </div>`;
+  atualizarEscopoRelatorioContinuidade();
+}
+
+const _escopoRelatorioContinuidade = (area) => (area ? `Área ${area}` : 'Empresa inteira');
+
+window.atualizarEscopoRelatorioContinuidade = () => {
+  const b = window._relContBase;
+  const cont = document.getElementById('relContContagem');
+  const btn = document.getElementById('btnGerarRelCont');
+  if (!cont || !b) return;
+  const area = (document.getElementById('relContArea') || {}).value || '';
+  const n = b.processos.filter((p) => !area || String(p.area || '').trim() === area).length;
+  cont.innerHTML = `${n} processo${n === 1 ? '' : 's'} no escopo · <strong>${esc(_escopoRelatorioContinuidade(area))}</strong>${n ? '' : ' — <span style="color:#e65100;">nada a relatar neste escopo</span>'}`;
+  if (btn) {
+    btn.disabled = !n;
+    btn.title = n ? '' : 'Nenhum processo no escopo escolhido.';
+  }
+};
+
+/** Indicadores da última edição salva do mesmo escopo (para a evolução); null quando não há ou não abre. */
+async function _edicaoAnteriorContinuidade(escopo) {
+  try {
+    const lista = await API.getRelatoriosExecutivos();
+    const ultima = (lista || []).filter((r) => r.tipo === 'continuidade' && (r.escopo || 'Empresa inteira') === escopo)
+      .sort((a, b) => String(b.geradoEm || '').localeCompare(String(a.geradoEm || '')))[0];
+    if (!ultima) return null;
+    const c = await API.getConteudoRelatorioExecutivo(ultima.id);
+    const retrato = JSON.parse(c.conteudo);
+    const ind = retrato && retrato.dados && retrato.dados.d && retrato.dados.d.indicadores;
+    return ind ? { indicadores: ind, geradoEm: retrato.geradoEm || ultima.geradoEm } : null;
+  } catch (e) {
+    console.error('Relatório de Continuidade: edição anterior não abriu; segue sem evolução', e);
+    return null;
+  }
+}
+
+/** Dados do documento, sempre lidos de novo (o cadastro pode ter mudado desde que a tela abriu). */
+async function _dadosRelatorioContinuidade(opcoes) {
+  const [processos, dependencias, servicos, ciclos, anterior] = await Promise.all([
+    API.getProcessos(), API.getDependencias(),
+    API.getServicos().catch(() => []), API.getCiclosContinuidade().catch(() => null),
+    _edicaoAnteriorContinuidade(opcoes.escopo),
+  ]);
+  const CRel = ContinuidadeRelatorio;
+  const d = CRel.dadosRelatorio({ processos, dependencias, servicos, ciclos, hoje: new Date().toISOString().slice(0, 10), area: opcoes.area });
+  const evolucao = CRel.variacao(d.indicadores, anterior);
+  return { d, evolucao, destaques: CRel.destaques(d, evolucao), indicadoresIA: CRel.indicadoresParaIA(d, evolucao, opcoes.escopo) };
+}
+
+window.gerarRelatorioContinuidade = async () => {
+  const tipo = 'continuidade';
+  const area = (document.getElementById('relContArea') || {}).value || '';
+  const opcoes = { area, escopo: _escopoRelatorioContinuidade(area), ia: !!(document.getElementById('relContIA') || {}).checked };
+  // Aba aberta NO CLIQUE (antes de qualquer await), senão o navegador bloqueia.
+  const win = window.open('', '_blank');
+  if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
+  const escrever = (html) => { win.document.open(); win.document.write(html); win.document.close(); };
+  const titulo = _TITULO_RELATORIO_EXECUTIVO[tipo];
+  escrever(_htmlAvisoDocumentoExecutivo(titulo, opcoes.ia ? 'Gerando o relatório e o resumo por IA… pode levar alguns segundos.' : 'Gerando o relatório…'));
+  let dados;
+  try {
+    dados = await _dadosRelatorioContinuidade(opcoes);
+  } catch (e) {
+    console.error('Relatório de Continuidade: falha ao carregar', e);
+    escrever(_htmlAvisoDocumentoExecutivo(titulo, 'Não foi possível carregar os dados: ' + _mensagemErro(e, 'erro desconhecido') + '. Feche esta aba e tente de novo.', true));
+    return;
+  }
+  let resumoIA = null;
+  if (opcoes.ia) {
+    try {
+      const r = await API.post('gerarResumoExecutivo', { tipo, indicadores: dados.indicadoresIA });
+      if (!r || r.error) throw new Error((r && r.error) || 'resposta vazia');
+      resumoIA = { paragrafos: r.paragrafos || [], recomendacoes: r.recomendacoes || [] };
+    } catch (e) {
+      console.error('Relatório de Continuidade: resumo por IA falhou', e);
+      resumoIA = { erro: _mensagemErro(e, 'erro desconhecido') };
+    }
+  }
+  const idTemp = 'rel' + Date.now() + Math.random().toString(36).slice(2, 7);
+  const edicao = { modo: 'gerado', idTemp, geradoEm: new Date().toISOString(), geradoPor: (window.USER_EMAIL || '').toLowerCase() };
+  window._relatoriosGerados[idTemp] = { tipo, dados, opcoes, resumoIA, edicao, win, salvo: null };
+  escrever(_htmlRelatorioExecutivoPorTipo(tipo, dados, opcoes, resumoIA, edicao));
+};
+
+const _NIVEL_DOC_SITUACAO_CONT = { vencido: 'critical', faltando: 'high', atrasado: 'high', 'a-homologar': 'medium', vencendo: 'medium' };
+const _corCoberturaDoc = (p) => (p === null || p === undefined ? '#bbb' : p >= 80 ? '#2e7d32' : p >= 50 ? '#f57c00' : '#c62828');
+const _pctDoc = (p) => (p === null || p === undefined ? '–' : p + '%');
+
+function _htmlRelatorioContinuidade(dados, opcoes, resumoIA, edicao) {
+  const CC = ConformidadeContinuidade;
+  const d = dados.d;
+  const c = d.cobertura;
+  const dataBr = (dia) => (dia ? String(dia).slice(0, 10).split('-').reverse().join('/') : '–');
+  const fracao = (n, total) => `${n} de ${total}`;
+  const tierCurto = (t) => (t === Criticidade.TIER.PENDENTE ? 'Pendente' : Criticidade.tierCurto(t));
+  const linhaPct = (rotulo, n, total) => _linhaBarraDoc(rotulo, total ? `${n}/${total}` : '0', total ? (n / total) * 100 : 0, _corCoberturaDoc(total ? Math.round((n / total) * 100) : null));
+  const linhaN = (rotulo, n, total, cor) => _linhaBarraDoc(rotulo, n, total ? (n / total) * 100 : 0, cor);
+
+  // 1. Cobertura
+  const s1 = `<div class="bloco">
+      <div class="kpis">
+        ${_kpiDoc('Processos', c.processos.total, [Criticidade.TIER.T1, Criticidade.TIER.T2, Criticidade.TIER.T3, Criticidade.TIER.PENDENTE].map((t) => `${tierCurto(t)} ${c.processos.porTier[t] || 0}`).join(' · '))}
+        ${_kpiDoc('BIA realizado', _pctDoc(c.bia.pctRealizados), `${fracao(c.bia.realizados, c.bia.total)} · ${c.bia.homologados} homologado(s)`)}
+        ${_kpiDoc('PCN nos Tier 1/2', _pctDoc(c.bcp.pctCriticos), c.bcp.criticos ? fracao(c.bcp.criticosComPcn, c.bcp.criticos) : 'Nenhum Tier 1/2')}
+        ${_kpiDoc('DRP nas dependências críticas', _pctDoc(c.drp.dependencias.pctCriticas), c.drp.dependencias.criticas ? `${fracao(c.drp.dependencias.criticasComDrp, c.drp.dependencias.criticas)} · ${c.drp.dependencias.criticasEmDia} em dia` : 'Nenhuma na cadeia de Tier 1/2')}
+      </div>
+      <div class="colunas">
+        <div><h3>BIA (${c.bia.total} processos)</h3>
+          ${linhaN('Homologados', c.bia.homologados, c.bia.total, '#2e7d32')}
+          ${linhaN('Avaliados a homologar', c.bia.aHomologar, c.bia.total, '#f57c00')}
+          ${linhaN('Revisão vencida', c.bia.vencidos, c.bia.total, '#c62828')}
+          ${linhaN('Em avaliação', c.bia.emAvaliacao, c.bia.total, '#9a6700')}
+          ${linhaN('Não avaliados', c.bia.naoAvaliados, c.bia.total, '#c62828')}
+        </div>
+        <div><h3>BCP / PCN</h3>
+          ${linhaPct('Tier 1/2 com PCN', c.bcp.criticosComPcn, c.bcp.criticos)}
+          ${linhaN('Tier 1/2 sem PCN', c.bcp.criticosSemPcn, c.bcp.criticos, '#c62828')}
+          ${linhaN('PCN com revisão vencida', c.bcp.vencidos, c.bcp.comPcn, '#c62828')}
+          <div class="muted" style="font-size:8.5pt;">${c.bcp.comPcn} processo(s) com PCN no total (o PCN só é exigido no Tier 1/2).</div>
+        </div>
+      </div>
+      <div class="colunas" style="margin-top:12px;">
+        <div><h3>DRP — dependências</h3>
+          ${linhaPct('Do catálogo com DRP', c.drp.dependencias.comDrp, c.drp.dependencias.total)}
+          ${linhaPct('Críticas com DRP', c.drp.dependencias.criticasComDrp, c.drp.dependencias.criticas)}
+          ${linhaPct('Críticas com DRP em dia', c.drp.dependencias.criticasEmDia, c.drp.dependencias.criticas)}
+          ${linhaN('DRP com teste atrasado', c.drp.dependencias.testesAtrasados, c.drp.dependencias.comDrp, '#c62828')}
+          ${linhaN('DRP nunca testado', c.drp.dependencias.nuncaTestados, c.drp.dependencias.comDrp, '#c62828')}
+        </div>
+        <div><h3>DRP — processos Tier 1/2 (${c.drp.processos.criticos})</h3>
+          ${linhaN('DRP completo', c.drp.processos.completo, c.drp.processos.criticos, '#2e7d32')}
+          ${linhaN('DRP parcial', c.drp.processos.parcial, c.drp.processos.criticos, '#f57c00')}
+          ${linhaN('Sem DRP', c.drp.processos.semDrp, c.drp.processos.criticos, '#c62828')}
+          ${linhaN('DRP com revisão vencida', c.drp.processos.vencido, c.drp.processos.criticos, '#c62828')}
+          ${linhaN('Sem dependências mapeadas', c.drp.processos.semDependencias, c.drp.processos.criticos, '#9a6700')}
+        </div>
+      </div>
+    </div>`;
+
+  // 2. Evolução
+  const ev = dados.evolucao;
+  const fmtValor = (x, v) => (v === null || v === undefined ? '–' : x.unidade === 'pp' ? v + '%' : String(v));
+  const fmtDelta = (x) => {
+    if (x.delta === null) return '<span class="muted">–</span>';
+    if (!x.delta) return '<span class="delta">igual</span>';
+    const cls = x.tendencia === 'melhora' ? 'desce' : x.tendencia === 'piora' ? 'sobe' : '';
+    return `<span class="delta ${cls}">${x.delta > 0 ? '▲ +' : '▼ '}${x.delta}${x.unidade === 'pp' ? ' p.p.' : ''}</span>`;
+  };
+  const s2 = ev
+    ? `<div class="bloco">${_tabelaDoc([{ t: 'Indicador' }, { t: `Em ${dataBr(ev.desde)}`, cls: 'c' }, { t: 'Agora', cls: 'c' }, { t: 'Variação', cls: 'c' }],
+      ev.itens.map((x) => [esc(x.rotulo), esc(fmtValor(x, x.anterior)), `<strong>${esc(fmtValor(x, x.atual))}</strong>`, fmtDelta(x)]))}</div>`
+    : '<div class="bloco"><p class="vazio">Primeira edição deste escopo: salve-a no sistema para que a próxima mostre a evolução.</p></div>';
+
+  // 3. Por área
+  const s3 = `<div class="bloco">${_tabelaDoc([{ t: 'Área' }, { t: 'Processos', cls: 'c' }, { t: 'BIA realizado', cls: 'c' }, { t: 'Tier 1/2', cls: 'c' }, { t: 'PCN (Tier 1/2)', cls: 'c' }, { t: 'DRP completo (Tier 1/2)', cls: 'c' }, { t: 'Pendências', cls: 'c' }],
+    d.porArea.map((a) => [
+      `<strong>${esc(a.area)}</strong>`, esc(String(a.processos)),
+      `${esc(_pctDoc(a.pctBia))} <span class="muted">(${a.biaRealizados})</span>`,
+      esc(String(a.criticos)),
+      a.criticos ? `${esc(_pctDoc(a.pctPcn))} <span class="muted">(${a.criticosComPcn})</span>` : '<span class="muted">–</span>',
+      a.criticos ? `${esc(_pctDoc(a.pctDrp))} <span class="muted">(${a.criticosDrpCompleto})</span>` : '<span class="muted">–</span>',
+      a.pendencias ? _chipDoc(String(a.pendencias), 'high') : '0',
+    ]), 'Nenhum processo no escopo.')}</div>`;
+
+  // 4. Por categoria de dependência
+  const s4 = `<div class="bloco">${_tabelaDoc([{ t: 'Categoria' }, { t: 'Total', cls: 'c' }, { t: 'Com DRP', cls: 'c' }, { t: 'Críticas', cls: 'c' }, { t: 'Críticas sem DRP', cls: 'c' }, { t: 'Teste em dia', cls: 'c' }, { t: 'Teste atrasado', cls: 'c' }, { t: 'Nunca testado', cls: 'c' }],
+    d.porCategoria.map((x) => [
+      `${_iconeCategoriaDep(x.categoria)} <strong>${esc(x.categoria)}</strong>`, esc(String(x.total)),
+      `${x.comDrp} <span class="muted">(${esc(_pctDoc(x.pctDrp))})</span>`, esc(String(x.criticas)),
+      x.criticasSemDrp ? _chipDoc(String(x.criticasSemDrp), 'critical') : '0',
+      esc(String(x.testeEmDia)),
+      x.testeAtrasado ? _chipDoc(String(x.testeAtrasado), 'high') : '0',
+      x.nuncaTestado ? _chipDoc(String(x.nuncaTestado), 'high') : '0',
+    ]), 'Nenhuma dependência que possa ter DRP no escopo.')}
+    <div class="muted" style="font-size:8.5pt;margin-top:6px;">Crítica = está na cadeia (direta, por Serviço ou por componentes) de algum processo Tier 1/2. "Sem frequência" de teste não entra nas colunas de teste.</div></div>`;
+
+  // 5. Revisões e testes
+  const r = d.revisoes;
+  const tabelaRev = (itens, vazio, colData) => _tabelaDoc([{ t: 'Plano' }, { t: 'Processo / dependência' }, { t: 'Área' }, { t: 'Situação' }, { t: colData }],
+    itens.map((x) => [
+      esc(CC.ROTULO_TIPO[x.tipo] || x.tipo),
+      `<strong>${esc(x.nome)}</strong>${x.alvo === 'dependencia' && x.processos.length ? `<div class="muted">${esc(x.processos.join(', '))}</div>` : ''}`,
+      esc(x.area || '–'),
+      esc(x.mensagem),
+      esc(x.proxima ? dataBr(x.proxima) : x.desde ? dataBr(x.desde) : '–'),
+    ]), vazio);
+  const s5 = `<div class="bloco"><h3>Revisões vencidas (${r.vencidas.length})</h3>${tabelaRev(r.vencidas, 'Nenhuma revisão vencida.', 'Venceu em')}</div>
+    <div class="bloco"><h3>Revisões vencendo (${r.vencendo.length})</h3>${tabelaRev(r.vencendo, 'Nenhuma revisão vencendo no período de aviso.', 'Vence em')}</div>
+    <div class="bloco"><h3>Testes de DRP atrasados ou nunca feitos (${r.testes.length})</h3>${tabelaRev(r.testes, 'Todos os DRPs com frequência declarada estão com o teste em dia.', 'Previsto / último')}</div>
+    <div class="bloco"><h3>BIA a homologar (${r.aHomologar.length})</h3>${tabelaRev(r.aHomologar, 'Nenhum BIA esperando homologação.', 'Avaliado em')}</div>`;
+
+  // 6. Pendências
+  const p = d.pendencias;
+  const contagem = (mapa, rotulos) => Object.keys(mapa).map((k) => `${esc(rotulos[k] || k)}: <strong>${mapa[k]}</strong>`).join(' · ');
+  const s6 = `<div class="bloco">
+      <div style="font-size:9pt;margin-bottom:8px;"><strong>${p.total}</strong> pendência(s)${p.total ? ` — ${contagem(p.porSituacao, CC.ROTULO_SITUACAO)}<br>Por plano: ${contagem(p.porTipo, CC.ROTULO_TIPO)}` : ''}</div>
+      ${_tabelaDoc([{ t: 'Situação' }, { t: 'Plano' }, { t: 'Processo / dependência' }, { t: 'Área' }, { t: 'Tier' }, { t: 'O que falta' }],
+        p.itens.map((x) => [
+          _chipDoc(CC.ROTULO_SITUACAO[x.situacao] || x.situacao, _NIVEL_DOC_SITUACAO_CONT[x.situacao]),
+          esc(CC.ROTULO_TIPO[x.tipo] || x.tipo),
+          `<strong>${esc(x.nome)}</strong>${x.alvo === 'dependencia' && x.processos.length ? `<div class="muted">${esc(x.processos.join(', '))}</div>` : ''}`,
+          esc(x.area || '–'), esc(x.tier ? tierCurto(x.tier) : '–'), esc(x.mensagem),
+        ]), 'Nenhuma pendência de BIA, PCN ou DRP no escopo.')}
+      ${p.total > p.itens.length ? `<div class="muted" style="font-size:8.5pt;margin-top:6px;">Mostrando as ${p.itens.length} mais graves de ${p.total}. A lista completa fica na tela Conformidade de Continuidade.</div>` : ''}
+    </div>`;
+
+  const ciclos = d.ciclos;
+  return _htmlDocumentoExecutivo({
+    titulo: _TITULO_RELATORIO_EXECUTIVO.continuidade,
+    subtitulo: `${c.processos.total} processo(s) • BIA ${_pctDoc(c.bia.pctRealizados)} • PCN Tier 1/2 ${_pctDoc(c.bcp.pctCriticos)} • DRP críticas ${_pctDoc(c.drp.dependencias.pctCriticas)}`,
+    escopo: opcoes.escopo,
+    resumoIA,
+    edicao,
+    destaques: dados.destaques,
+    secoes: [
+      { titulo: 'Cobertura de BIA, PCN e DRP', ref: 'ISO 22301 8.2 · 8.4 · NIST SP 800-34', html: s1 },
+      { titulo: 'Evolução desde a última edição', ref: '', html: s2 },
+      { titulo: 'Por área', ref: '', html: s3 },
+      { titulo: 'Por categoria de dependência', ref: '', html: s4 },
+      { titulo: 'Revisões e testes', ref: 'ISO 22301 8.5 · 9.1', html: s5 },
+      { titulo: 'Pendências', ref: '', html: s6 },
+    ],
+    notas: [
+      'Mesmas regras da tela Conformidade de Continuidade e dos status do Processo: os números deste relatório batem com elas na data da geração.',
+      'BIA realizado: questionário completo (avaliado ou homologado), incluindo os com revisão vencida. Homologado: confirmado por Admin, Segurança ou Operador de Processos depois da última avaliação.',
+      'PCN é exigido nos processos Tier 1/2; nos demais, aparece só no total de processos com PCN.',
+      'Dependências que podem ter DRP: o catálogo sem Pessoas, Processos Internos e fornecedores inativos. No recorte por área, só as que estão na cadeia dos processos da área.',
+      `Ciclos de revisão vigentes: BIA ${ciclos.biaMeses} meses, PCN ${ciclos.pcnMeses} meses, DRP ${ciclos.drpMeses} meses; "vencendo" = faltam ${ciclos.avisoDias} dias ou menos.`,
+      'Teste de DRP: vale a menor frequência declarada nas estratégias de teste, contada desde o último registro de teste.',
     ],
   });
 }

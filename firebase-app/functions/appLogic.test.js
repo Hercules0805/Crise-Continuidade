@@ -1706,3 +1706,32 @@ test('sugerirTextoIA revisao-observacao: so o que veio depois da ultima revisao 
   assert.deepStrictEqual(dados.versoesDesdeAUltimaRevisao.map((v) => v.versao), [3]);
   assert.deepStrictEqual(dados.testesDesdeAUltimaRevisao, [{ data: '2026-09-20', resultado: 'Parcial', pendencias: 'Ajustar DNS' }]);
 });
+
+// ---- Relatorio de Status de Continuidade: resumo por IA (27/10/2026) ----
+test('gerarResumoExecutivo continuidade: Admin, SI e Operador de Processos; TI e Gestor recusados; prompt de continuidade', async () => {
+  for (const perfil of ['ti', 'gestor', 'operador']) {
+    await assert.rejects(
+      () => WRITE_ACTIONS.gerarResumoExecutivo(makeDb(seedPerfil([perfil])), { tipo: 'continuidade', indicadores: { a: 1 } }, ctx({ geminiApiKey: 'k' })),
+      /Seu perfil não pode/, perfil);
+  }
+  for (const perfil of ['admin', 'seguranca', 'operador_processos']) {
+    const g = capturarGemini(JSON.stringify({ paragrafos: ['P1'], recomendacoes: ['R1'] }));
+    try {
+      const r = await WRITE_ACTIONS.gerarResumoExecutivo(makeDb(seedPerfil([perfil])), { tipo: 'continuidade', indicadores: { escopo: 'Empresa inteira', bia: { pctRealizados: 50 } } }, ctx({ geminiApiKey: 'k' }));
+      assert.deepStrictEqual(r.paragrafos, ['P1'], perfil);
+      const prompt = g.chamadas[0].corpo.contents[0].parts[0].text;
+      assert.match(prompt, /analista sênior de continuidade de negócios/);
+      assert.match(prompt, /Relatório de Status de Continuidade/);
+      assert.match(prompt, /ISO 22301/);
+      assert.match(prompt, /"pctRealizados":50/);
+    } finally { g.restaurar(); }
+  }
+});
+
+test('gerarResumoExecutivo riscos: o papel do prompt continua o de riscos', async () => {
+  const g = capturarGemini(JSON.stringify({ paragrafos: ['P1'], recomendacoes: [] }));
+  try {
+    await WRITE_ACTIONS.gerarResumoExecutivo(makeDb(seedPerfil(['seguranca'])), { tipo: 'riscos', indicadores: { a: 1 } }, ctx({ geminiApiKey: 'k' }));
+  } finally { g.restaurar(); }
+  assert.match(g.chamadas[0].corpo.contents[0].parts[0].text, /analista sênior de riscos de segurança da informação/);
+});

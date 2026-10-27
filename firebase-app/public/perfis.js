@@ -74,7 +74,7 @@
     // Threat Intelligence (26/10/2026): triagem das acoes recomendadas e inventario de software.
     'threat-intel',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
-    'dependencias', 'areas', 'pessoas', 'relatorios', 'mapa', 'servicos', 'servicos-relatorio', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
+    'dependencias', 'areas', 'pessoas', 'relatorios', 'continuidade-relatorio', 'mapa', 'servicos', 'servicos-relatorio', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
     'terceiros-dashboard', 'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
     'admin', 'conformidade',
@@ -127,6 +127,8 @@
   // de Conformidade (o que esta vencido, faltando ou a homologar).
   TELAS[PERFIL.OPERADOR_PROCESSOS] = [
     'conformidade', 'admin', 'processos', 'pcns', 'drp', 'dependencias', 'mapa', 'areas', 'pessoas', 'relatorios',
+    // DECISAO 27/10/2026: Relatorio de Status de Continuidade (edicoes salvas + IA) para Admin, SI e Operador de Processos.
+    'continuidade-relatorio',
   ];
 
   // Tela inicial de cada perfil (DECISAO 16/10/2026): escolha explicita, nao
