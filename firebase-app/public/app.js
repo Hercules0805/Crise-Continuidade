@@ -1676,7 +1676,7 @@ function _htmlDrawerPessoa() {
           <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Onde a pessoa trabalha. Entra no Mapa de Continuidade e no PCN (quantas pessoas uma instalação fora do ar afeta).</span>
         </div>
         <div style="margin-bottom:16px;">
-          <label style="${lbl}">Liderança em produtos</label>
+          <label style="${lbl}">Funções em produtos</label>
           <label style="display:flex;align-items:center;gap:8px;font-size:0.9em;cursor:pointer;margin-bottom:6px;">
             <input type="checkbox" id="pessoaTechLead" onchange="alternarLiderancaPessoa('techLead')"> <strong>Tech Lead</strong>
           </label>
@@ -1685,7 +1685,11 @@ function _htmlDrawerPessoa() {
             <input type="checkbox" id="pessoaTeamLead" onchange="alternarLiderancaPessoa('teamLead')"> <strong>Team Lead</strong>
           </label>
           <div id="pessoaTeamLeadProdutos"></div>
-          <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Marque a função e, se quiser, os produtos que a pessoa lidera (sem produto também é permitido).
+          <label style="display:flex;align-items:center;gap:8px;font-size:0.9em;cursor:pointer;margin:10px 0 6px;">
+            <input type="checkbox" id="pessoaProductOwner" onchange="alternarLiderancaPessoa('productOwner')"> <strong>Product Owner</strong>
+          </label>
+          <div id="pessoaProductOwnerProdutos"></div>
+          <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Marque a função e, se quiser, os produtos dela (sem produto também é permitido). Também dá para vincular pela tela Produtos de Software.
             ${Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novoProdutoDePessoa()">+ Novo produto</button>' : ''}
             <button type="button" class="btn-icon" onclick="_recarregarProdutosPessoa()" title="Atualizar lista de produtos">🔄</button></span>
         </div>
@@ -1728,7 +1732,7 @@ async function pessoas() {
       filtros: [
         { id: 'filtroPessoaArea', rotulo: 'Área', opcoes: [] },
         { id: 'filtroPessoaLider', rotulo: 'Líder', opcoes: [], todos: 'Todos' },
-        { id: 'filtroPessoaFuncao', rotulo: 'Função', opcoes: [['techLead', 'Tech Lead'], ['teamLead', 'Team Lead']] },
+        { id: 'filtroPessoaFuncao', rotulo: 'Função', opcoes: [['techLead', 'Tech Lead'], ['teamLead', 'Team Lead'], ['productOwner', 'Product Owner']] },
       ] })}
     <div class="loading" id="loadingPessoas">⏳ Carregando...</div>
     <div class="data-table data-table--lista" id="listaPessoas" style="display:none;">
@@ -1739,7 +1743,7 @@ async function pessoas() {
             <th onclick="ordenarPessoas('nome')" style="cursor:pointer;">Nome <span id="sort-pessoa-nome"></span></th>
             <th onclick="ordenarPessoas('detalhes')" style="cursor:pointer;">Cargo <span id="sort-pessoa-detalhes"></span></th>
             <th onclick="ordenarPessoas('setor')" style="cursor:pointer;">Área <span id="sort-pessoa-setor"></span></th>
-            <th>Liderança</th>
+            <th>Funções em produtos</th>
             <th onclick="ordenarPessoas('telefone')" style="cursor:pointer;">Telefone <span id="sort-pessoa-telefone"></span></th>
             <th onclick="ordenarPessoas('email')" style="cursor:pointer;">E-mail <span id="sort-pessoa-email"></span></th>
             <th class="col-acoes">Ações</th>
@@ -1842,7 +1846,7 @@ function renderizarPessoas() {
   const filtroLider = (document.getElementById('filtroPessoaLider') || {}).value || '';
   if (filtroLider) data = data.filter((p) => String(p.liderImediato || '') === String(filtroLider));
 
-  // Filtro por função de liderança em produtos (Tech Lead / Team Lead).
+  // Filtro por função em produtos (Tech Lead / Team Lead / Product Owner).
   const filtroFuncao = (document.getElementById('filtroPessoaFuncao') || {}).value || '';
   if (filtroFuncao) data = data.filter((p) => p[filtroFuncao] === true);
 
@@ -1878,12 +1882,13 @@ window.ordenarPessoas = (coluna) => {
 };
 
 // ------------------------------------------------------------
-// Liderança em produtos (Tech Lead / Team Lead). Cada função tem os seus
-// produtos (ids de produtos_software); marcar a função não obriga a ter
-// produto. Estado em window._pessoaLideranca.
+// Funções em produtos (Tech Lead / Team Lead / Product Owner -- este em
+// 27/10/2026). Cada função tem os seus produtos (ids de produtos_software);
+// marcar a função não obriga a ter produto. Estado em window._pessoaLideranca.
+// A tela Produtos de Software edita o mesmo vínculo (mora na Pessoa).
 // ------------------------------------------------------------
-window._pessoaLideranca = { techLead: false, techLeadProdutos: [], teamLead: false, teamLeadProdutos: [] };
-const _FUNCOES_LIDERANCA = { techLead: 'Tech Lead', teamLead: 'Team Lead' };
+window._pessoaLideranca = { techLead: false, techLeadProdutos: [], teamLead: false, teamLeadProdutos: [], productOwner: false, productOwnerProdutos: [] };
+const _FUNCOES_LIDERANCA = { techLead: 'Tech Lead', teamLead: 'Team Lead', productOwner: 'Product Owner' };
 
 /** Produto (do catálogo) por id, ou null se foi removido. */
 function _produtoSoftwarePorId(id) {
@@ -2066,6 +2071,7 @@ window.abrirModalPessoa = (id) => {
   window._pessoaLideranca = {
     techLead: !!(p && p.techLead), techLeadProdutos: p && Array.isArray(p.techLeadProdutos) ? p.techLeadProdutos.map(String) : [],
     teamLead: !!(p && p.teamLead), teamLeadProdutos: p && Array.isArray(p.teamLeadProdutos) ? p.teamLeadProdutos.map(String) : [],
+    productOwner: !!(p && p.productOwner), productOwnerProdutos: p && Array.isArray(p.productOwnerProdutos) ? p.productOwnerProdutos.map(String) : [],
   };
   renderLiderancaPessoa();
   document.getElementById('pessoaTelefone').value = p ? (p.telefone || '') : '';
@@ -2150,6 +2156,8 @@ function _coletarFormularioPessoa() {
     techLeadProdutos: window._pessoaLideranca.techLeadProdutos || [],
     teamLead: !!window._pessoaLideranca.teamLead,
     teamLeadProdutos: window._pessoaLideranca.teamLeadProdutos || [],
+    productOwner: !!window._pessoaLideranca.productOwner,
+    productOwnerProdutos: window._pessoaLideranca.productOwnerProdutos || [],
     telefone: document.getElementById('pessoaTelefone').value.trim(),
     email: document.getElementById('pessoaEmail').value.trim(),
     perfis: podeGerenciar
@@ -2298,7 +2306,7 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
   const servicosDaPessoa = (dados.servicos || []).filter((s) =>
     _stakeholdersDoServico(s, backups || []).lista.some((p) => String(p.id) === String(pessoa.id)));
 
-  // Produtos de Software onde é Tech Lead / Team Lead (vínculo por id). Uma
+  // Produtos de Software onde é Tech Lead / Team Lead / Product Owner (vínculo por id). Uma
   // linha por produto, com as funções juntas; função marcada sem produto
   // também é vínculo (linha própria, "sem produto associado").
   const produtosDaPessoa = [];
@@ -2404,7 +2412,7 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
         + '</table>';
     }
     if (produtosDaPessoa.length) {
-      html += '<h2>Produtos de Software (Tech Lead / Team Lead)</h2><table><tr><th>Produto</th><th>Função</th></tr>'
+      html += '<h2>Produtos de Software (funções)</h2><table><tr><th>Produto</th><th>Função</th></tr>'
         + linhaOuVazio(produtosDaPessoa, (p) => '<tr><td><b>' + esc(p.nome) + '</b></td><td>' + esc(p.funcoes) + '</td></tr>')
         + '</table>';
     }
@@ -2626,6 +2634,8 @@ window.salvarPessoaCadastro = async () => {
         techLeadProdutos: estadoDoFormulario.techLeadProdutos,
         teamLead: estadoDoFormulario.teamLead,
         teamLeadProdutos: estadoDoFormulario.teamLeadProdutos,
+        productOwner: estadoDoFormulario.productOwner,
+        productOwnerProdutos: estadoDoFormulario.productOwnerProdutos,
         telefone: document.getElementById('pessoaTelefone').value.trim(),
         email,
         perfis: perfisParaEntidade,
@@ -11162,15 +11172,20 @@ window.novoItemListaDeContrato = (chave) => {
 };
 
 // ---- Produto de Software ----
+// Desde 27/10/2026 o cadastro do produto é um drawer (com a área responsável).
+async function _prepararCadastroProdutoSoftware() {
+  _garantirHtmlCadastro('drawerProdutoSoftware', _htmlModalProdutoSoftware);
+  if (!window.areasData) window.areasData = await API.getAreas();
+}
 window.novoProdutoDePessoa = () => _abrirCadastroRapido({
   pai: 'drawerPessoa', overlay: 'drawerOverlayPessoa',
-  preparar: async () => { _garantirHtmlCadastro('modalProdutoSoftware', _htmlModalProdutoSoftware); },
+  preparar: _prepararCadastroProdutoSoftware,
   abrir: () => abrirModalProdutoSoftware(),
   aoSalvar: () => renderLiderancaPessoa(),
 });
 window.novoProdutoDeVulnerabilidade = () => _abrirCadastroRapido({
   pai: 'drawerVulnerabilidade', overlay: 'drawerOverlayVulnerabilidade',
-  preparar: async () => { _garantirHtmlCadastro('modalProdutoSoftware', _htmlModalProdutoSoftware); },
+  preparar: _prepararCadastroProdutoSoftware,
   abrir: () => abrirModalProdutoSoftware(),
   aoSalvar: (p) => { _popularSelectProdutoSoftwareVuln(p.id); _sugerirResponsavelPeloProdutoVuln(); },
 });
@@ -21446,9 +21461,13 @@ window.salvarAvaliacaoFornecedor = async () => {
 // PÁGINA: PRODUTOS DE SOFTWARE (Administração)
 //
 // Catálogo-base dos produtos da empresa (Fortes Ponto, Fortes RH...). A Pessoa
-// aponta para ele por ID (Tech Lead / Team Lead) -- renomear não orfaniza
-// ninguém. Mesmo molde de Categorias de Fornecedor: desativar em vez de
-// excluir; excluir avisa quantas pessoas apontam para o produto.
+// aponta para ele por ID nas funções Tech Lead / Team Lead / Product Owner --
+// renomear não orfaniza ninguém. Mesmo molde de Categorias de Fornecedor:
+// desativar em vez de excluir; excluir avisa quantas pessoas apontam para ele.
+// DECISÃO 27/10/2026: o produto tem área responsável (pelo nome, como
+// processo.area) e o drawer do produto edita as pessoas de cada função. O
+// vínculo continua morando na Pessoa (<funcao>Produtos): as duas telas editam
+// o mesmo dado (API.salvarVinculosProdutoPessoas grava só o que mudou).
 // ============================================================
 let produtosSoftwareData = [];
 let produtosSoftwareOrdenacao = criarOrdenacao('nome', 'asc');
@@ -21456,9 +21475,13 @@ let produtosSoftwareOrdenacao = criarOrdenacao('nome', 'asc');
 async function produtosSoftware() {
   const isAdmin = Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS);
   app.innerHTML = `
-    ${_htmlCabecalhoLista({ titulo: 'Produtos de Software', sub: 'Produtos da empresa, para indicar o Tech Lead e o Team Lead de cada um.',
+    ${_htmlCabecalhoLista({ titulo: 'Produtos de Software', sub: 'Produtos da empresa, a área responsável e as pessoas de cada um (Tech Lead, Team Lead e Product Owner).',
       primario: { rotulo: '+ Novo produto', onclick: 'abrirModalProdutoSoftware()', id: 'btnNovoProdutoSoftware' } })}
-    ${_htmlBarraLista({ busca: { id: 'buscaProdutoSoftware', placeholder: 'Buscar produto…' }, aoMudar: 'filtrarProdutosSoftware', contadorId: 'produtosSoftwareContador' })}
+    ${_htmlBarraLista({
+      busca: { id: 'buscaProdutoSoftware', placeholder: 'Buscar produto…' },
+      filtros: [{ id: 'filtroProdutoArea', rotulo: 'Área responsável', todos: 'Todas', opcoes: [] }],
+      aoMudar: 'filtrarProdutosSoftware', contadorId: 'produtosSoftwareContador',
+    })}
     <div class="loading" id="loadingProdutosSoftware">⏳ Carregando...</div>
     <div id="listaProdutosSoftware"></div>
     ${_htmlModalProdutoSoftware()}`;
@@ -21466,13 +21489,15 @@ async function produtosSoftware() {
   document.getElementById('btnNovoProdutoSoftware').style.display = isAdmin ? 'inline-block' : 'none';
 
   try {
-    const [produtos, deps] = await Promise.all([
+    const [produtos, deps, areas] = await Promise.all([
       API.getProdutosSoftware(),
-      // Só para contar quantas pessoas usam cada produto; sem isso a tela abre igual.
+      // Pessoas de cada função e áreas; sem elas a tela abre igual (sem os nomes).
       API.getDependencias().catch(() => null),
+      API.getAreas().catch(() => null),
     ]);
     produtosSoftwareData = produtos;
     if (deps) pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+    if (areas) window.areasData = areas;
   } catch (e) {
     console.error('Produtos de software: falha ao carregar', e);
     document.getElementById('loadingProdutosSoftware').style.display = 'none';
@@ -21480,19 +21505,22 @@ async function produtosSoftware() {
     return;
   }
   document.getElementById('loadingProdutosSoftware').style.display = 'none';
+  const areasUsadas = [...new Set(produtosSoftwareData.map((p) => p.area).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  _preencherFiltroLista('filtroProdutoArea', 'Área responsável', [...areasUsadas.map((a) => [a, a]), ['__sem__', 'Sem área']], 'Todas');
   renderizarProdutosSoftware();
 }
 
 window.ordenarProdutosSoftware = (coluna) => { produtosSoftwareOrdenacao.ordenar(coluna); renderizarProdutosSoftware(); };
 
-/** Pessoas que lideram o produto, por função: { techLead: [Pessoa], teamLead: [Pessoa] }. */
+/** Pessoas de cada função no produto: { techLead: [Pessoa], teamLead: [Pessoa], productOwner: [Pessoa] }. */
 function _lideresDoProduto(produtoId) {
   const id = String(produtoId);
   const tem = (lista) => Array.isArray(lista) && lista.map(String).includes(id);
-  return {
-    techLead: (pessoasData || []).filter((p) => p.techLead && tem(p.techLeadProdutos)),
-    teamLead: (pessoasData || []).filter((p) => p.teamLead && tem(p.teamLeadProdutos)),
-  };
+  const saida = {};
+  Object.keys(_FUNCOES_LIDERANCA).forEach((f) => {
+    saida[f] = (pessoasData || []).filter((p) => p[f] && tem(p[f + 'Produtos']));
+  });
+  return saida;
 }
 
 function renderizarProdutosSoftware() {
@@ -21502,12 +21530,14 @@ function renderizarProdutosSoftware() {
 
   if (!produtosSoftwareData.length) {
     _atualizarBarraLista('produtosSoftwareContador', 0, ['produto', 'produtos']);
-    lista.innerHTML = _htmlVazio('Nenhum produto cadastrado ainda.', 'Sem produtos, a Pessoa não tem o que associar como Tech Lead ou Team Lead.');
+    lista.innerHTML = _htmlVazio('Nenhum produto cadastrado ainda.', 'Sem produtos, a Pessoa não tem o que associar como Tech Lead, Team Lead ou Product Owner.');
     return;
   }
 
   const busca = ((document.getElementById('buscaProdutoSoftware') || {}).value || '').trim().toLowerCase();
+  const filtroArea = (document.getElementById('filtroProdutoArea') || {}).value || '';
   let data = produtosSoftwareData.filter((p) => !busca || (p.nome || '').toLowerCase().includes(busca));
+  if (filtroArea) data = data.filter((p) => (filtroArea === '__sem__' ? !p.area : p.area === filtroArea));
   data = produtosSoftwareOrdenacao.aplicar(data, {
     status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
   });
@@ -21518,13 +21548,15 @@ function renderizarProdutosSoftware() {
 
   lista.innerHTML = `
     <div class="data-table data-table--lista">
-      <table style="min-width:820px;">
-        <colgroup><col style="width:240px"><col style="width:220px"><col style="width:220px"><col style="width:110px"><col style="width:92px"></colgroup>
+      <table style="min-width:1080px;">
+        <colgroup><col style="width:200px"><col style="width:170px"><col style="width:190px"><col style="width:190px"><col style="width:190px"><col style="width:100px"><col style="width:92px"></colgroup>
         <thead>
           <tr>
             ${th('nome', 'Produto')}
+            ${th('area', 'Área responsável')}
             <th>Tech Lead</th>
             <th>Team Lead</th>
+            <th>Product Owner</th>
             ${th('status', 'Status')}
             <th class="col-acoes">Ações</th>
           </tr>
@@ -21534,86 +21566,239 @@ function renderizarProdutosSoftware() {
             const l = _lideresDoProduto(p.id);
             return `
             <tr style="cursor:pointer;${p.ativo ? '' : 'opacity:0.5;'}" onclick="abrirModalProdutoSoftware('${escJs(p.id)}')">
-              ${_tdLista(p.nome, 'forte')}${_tdLista(nomes(l.techLead))}${_tdLista(nomes(l.teamLead))}
+              ${_tdLista(p.nome, 'forte')}${_tdLista(p.area || '–')}${_tdLista(nomes(l.techLead))}${_tdLista(nomes(l.teamLead))}${_tdLista(nomes(l.productOwner))}
               <td>${p.ativo ? '<span class="badge badge-green">Ativo</span>' : '<span class="badge badge-gray">Inativo</span>'}</td>
               ${isAdmin ? _htmlAcoesLinha([_acaoEditar(`abrirModalProdutoSoftware('${escJs(p.id)}')`), _acaoExcluir(`excluirProdutoSoftware('${escJs(p.id)}')`)]) : '<td class="col-acoes"></td>'}
             </tr>`;
-          }).join('') : '<tr><td colspan="5" class="vazio">Nenhum produto encontrado com essa busca.</td></tr>'}
+          }).join('') : '<tr><td colspan="7" class="vazio">Nenhum produto encontrado com esses filtros.</td></tr>'}
         </tbody>
       </table>
     </div>
     ${_htmlPaginacao(pag, 'irParaPaginaProdutosSoftware')}`;
 
-  produtosSoftwareOrdenacao.atualizarSetas('sort-prodsoft-', ['nome', 'status']);
+  produtosSoftwareOrdenacao.atualizarSetas('sort-prodsoft-', ['nome', 'area', 'status']);
 }
 
 const produtosSoftwarePaginacao = criarPaginacao(20);
 window.irParaPaginaProdutosSoftware = (d) => { produtosSoftwarePaginacao.mover(d); renderizarProdutosSoftware(); };
 window.filtrarProdutosSoftware = () => { produtosSoftwarePaginacao.reiniciar(); renderizarProdutosSoftware(); };
 
+// O nome `_htmlModalProdutoSoftware` ficou por compatibilidade com quem injeta o
+// cadastro (cadastro rápido); desde 27/10/2026 é um drawer.
 function _htmlModalProdutoSoftware() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
   return `
-    <div class="modal-overlay" id="modalProdutoSoftware"><div class="modal" onclick="event.stopPropagation()">
-      <h3 id="modalProdutoSoftwareTitulo">Novo Produto</h3>
-      <input type="hidden" id="prodSoftId">
-      <label>Produto</label>
-      <input type="text" id="prodSoftNome" placeholder="Ex: Fortes Ponto">
-      <label class="check-label"><input type="checkbox" id="prodSoftAtivo" checked> Produto ativo</label>
-      <span style="font-size:0.75em;color:#888;display:block;">Desativar tira o produto das listas para novas associações. Quem já está associado continua vendo o produto marcado como inativo.</span>
-      <div class="modal-footer">
-        <button class="btn btn-ghost" onclick="fecharModalProdutoSoftware()">Cancelar</button>
+    <div class="drawer-overlay" id="drawerOverlayProdutoSoftware" onclick="fecharModalProdutoSoftware()"></div>
+    <div class="drawer" id="drawerProdutoSoftware">
+      <div class="drawer-header">
+        <h3 id="modalProdutoSoftwareTitulo">Novo Produto</h3>
+        <button onclick="fecharModalProdutoSoftware()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <input type="hidden" id="prodSoftId">
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}" for="prodSoftNome">Produto <span class="req" aria-hidden="true">*</span></label>
+          <input type="text" id="prodSoftNome" placeholder="Ex: Fortes Ponto" style="${inp}">
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}" for="prodSoftArea">Área responsável</label>
+          <select id="prodSoftArea" onchange="_renderPessoasDoProduto()" style="${inp}"><option value="">Nenhuma</option></select>
+        </div>
+        <label class="check-label" style="margin-bottom:4px;"><input type="checkbox" id="prodSoftAtivo" checked> Produto ativo</label>
+        <span style="font-size:0.75em;color:#888;display:block;margin-bottom:18px;">Desativar tira o produto das listas para novas associações. Quem já está associado continua vendo o produto marcado como inativo.</span>
+        <div id="prodSoftPessoasBloco" style="border-top:1px solid #f0f0f0;padding-top:14px;">
+          <label style="${lbl}">Pessoas do produto</label>
+          <p style="font-size:0.78em;color:#888;margin:0 0 10px;">O vínculo é o mesmo do cadastro da Pessoa ("Funções em produtos"): mudar aqui muda lá.</p>
+          <div id="prodSoftPessoas"></div>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharModalProdutoSoftware()">Fechar</button>
         <button class="btn btn-primary" id="btnSalvarProdutoSoftware" onclick="salvarProdutoSoftware()">Salvar</button>
       </div>
-    </div></div>`;
+    </div>`;
 }
+
+// Pessoas de cada função no drawer: { techLead: [ids], ... }; `antes` = o gravado.
+window._produtoPessoas = {};
+window._produtoPessoasAntes = {};
+
+const _areaPrincipalPessoa = (p) => ((Array.isArray(p.areas) && p.areas[0]) || p.setor || '');
+
+function _popularSelectAreaProduto(valor) {
+  const sel = document.getElementById('prodSoftArea');
+  if (!sel) return;
+  const nomes = (window.areasData || []).map((a) => a.nome).filter(Boolean).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const fora = valor && !nomes.includes(valor) ? `<option value="${esc(valor)}">${esc(valor)} (fora do cadastro)</option>` : '';
+  sel.innerHTML = `<option value="">Nenhuma</option>${nomes.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}${fora}`;
+  sel.value = valor || '';
+}
+
+/** Blocos por função: chips das pessoas e o select para adicionar (as da área responsável primeiro). */
+window._renderPessoasDoProduto = () => {
+  const cont = document.getElementById('prodSoftPessoas');
+  if (!cont) return;
+  const pode = Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS);
+  const area = (document.getElementById('prodSoftArea') || {}).value || '';
+  const pessoas = (pessoasData || []).slice().sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  const porId = (id) => pessoas.find((p) => String(p.id) === String(id));
+  cont.innerHTML = Object.entries(_FUNCOES_LIDERANCA).map(([funcao, rotulo]) => {
+    const ids = window._produtoPessoas[funcao] || [];
+    const chips = ids.length ? ids.map((id) => {
+      const p = porId(id);
+      return `<span style="display:inline-flex;align-items:center;gap:6px;background:${p ? '#d60014' : '#999'};color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(p ? p.nome : '(pessoa removida)')}${pode ? `<button type="button" onclick="removerPessoaDoProduto('${funcao}','${escJs(id)}')" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button>` : ''}</span>`;
+    }).join('') : '<span class="vazio-inline">Ninguém.</span>';
+    const livres = pessoas.filter((p) => !ids.map(String).includes(String(p.id)));
+    const opt = (p) => `<option value="${esc(p.id)}">${esc(p.nome)}${_areaPrincipalPessoa(p) ? ` — ${esc(_areaPrincipalPessoa(p))}` : ''}</option>`;
+    const daArea = area ? livres.filter((p) => (p.areas || [p.setor]).includes(area)) : [];
+    const outras = livres.filter((p) => !daArea.includes(p));
+    const select = pode ? `<select class="prod-soft-add" data-funcao="${funcao}" onchange="adicionarPessoaAoProduto('${funcao}', this.value)" style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.88em;margin-top:6px;">
+        <option value="">Adicionar pessoa…</option>
+        ${daArea.length ? `<optgroup label="Da área ${esc(area)}">${daArea.map(opt).join('')}</optgroup><optgroup label="Outras pessoas">${outras.map(opt).join('')}</optgroup>` : outras.map(opt).join('')}
+      </select>` : '';
+    return `<div style="margin-bottom:14px;" data-funcao-produto="${funcao}">
+        <div style="font-size:0.85em;font-weight:700;color:#333;margin-bottom:6px;">${esc(rotulo)}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">${chips}</div>
+        ${select}
+      </div>`;
+  }).join('');
+};
+
+window.adicionarPessoaAoProduto = (funcao, pessoaId) => {
+  if (!pessoaId) return;
+  const lista = window._produtoPessoas[funcao] || [];
+  if (!lista.map(String).includes(String(pessoaId))) window._produtoPessoas[funcao] = [...lista, String(pessoaId)];
+  _renderPessoasDoProduto();
+};
+
+window.removerPessoaDoProduto = (funcao, pessoaId) => {
+  window._produtoPessoas[funcao] = (window._produtoPessoas[funcao] || []).filter((id) => String(id) !== String(pessoaId));
+  _renderPessoasDoProduto();
+};
+
+/** O que mudou nas pessoas do produto: [{ pessoaId, funcao, vinculado }]. */
+function _mudancasPessoasDoProduto() {
+  const mudancas = [];
+  Object.keys(_FUNCOES_LIDERANCA).forEach((funcao) => {
+    const antes = new Set((window._produtoPessoasAntes[funcao] || []).map(String));
+    const depois = new Set((window._produtoPessoas[funcao] || []).map(String));
+    depois.forEach((id) => { if (!antes.has(id)) mudancas.push({ pessoaId: id, funcao, vinculado: true }); });
+    antes.forEach((id) => { if (!depois.has(id)) mudancas.push({ pessoaId: id, funcao, vinculado: false }); });
+  });
+  return mudancas;
+}
+
+function _coletarFormularioProdutoSoftware() {
+  return {
+    id: document.getElementById('prodSoftId').value || null,
+    nome: document.getElementById('prodSoftNome').value.trim(),
+    area: document.getElementById('prodSoftArea').value,
+    ativo: document.getElementById('prodSoftAtivo').checked,
+    pessoas: Object.keys(_FUNCOES_LIDERANCA).map((f) => (window._produtoPessoas[f] || []).map(String).sort()),
+  };
+}
+const _edProdutoSoftware = criarRastreadorEdicao(() => _coletarFormularioProdutoSoftware());
 
 window.abrirModalProdutoSoftware = (id) => {
   const p = id ? produtosSoftwareData.find((x) => String(x.id) === String(id)) : null;
+  const pode = Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS);
   document.getElementById('modalProdutoSoftwareTitulo').textContent = p ? 'Editar Produto' : 'Novo Produto';
   document.getElementById('prodSoftId').value = p ? p.id : '';
   document.getElementById('prodSoftNome').value = p ? p.nome : '';
   document.getElementById('prodSoftAtivo').checked = p ? p.ativo : true;
-  document.getElementById('modalProdutoSoftware').classList.add('open');
+  _popularSelectAreaProduto(p ? (p.area || '') : '');
+  const l = p ? _lideresDoProduto(p.id) : {};
+  window._produtoPessoas = {};
+  Object.keys(_FUNCOES_LIDERANCA).forEach((f) => { window._produtoPessoas[f] = (l[f] || []).map((x) => String(x.id)); });
+  window._produtoPessoasAntes = JSON.parse(JSON.stringify(window._produtoPessoas));
+  // Cadastro rápido (por cima da Pessoa ou da Vulnerabilidade): quem chamou ainda
+  // não salvou, então as pessoas do produto ficam para depois.
+  document.getElementById('prodSoftPessoasBloco').style.display = _temDrawerPaiEmpilhado() ? 'none' : 'block';
+  _renderPessoasDoProduto();
+  ['prodSoftNome', 'prodSoftArea', 'prodSoftAtivo'].forEach((c) => { document.getElementById(c).disabled = !pode; });
+  document.getElementById('btnSalvarProdutoSoftware').style.display = pode ? '' : 'none';
+  document.getElementById('drawerProdutoSoftware').classList.add('open');
+  document.getElementById('drawerOverlayProdutoSoftware').classList.add('open');
+  _edProdutoSoftware.marcar();
 };
 
-window.fecharModalProdutoSoftware = () => {
-  document.getElementById('modalProdutoSoftware').classList.remove('open');
+function _fecharProdutoSoftwareSemSalvar() {
+  document.getElementById('drawerProdutoSoftware').classList.remove('open');
+  document.getElementById('drawerOverlayProdutoSoftware').classList.remove('open');
   _reabrirDrawerPaiSeEscondido();
-};
+}
+
+window.fecharModalProdutoSoftware = () => _fecharComRastreador({
+  idDrawer: 'drawerProdutoSoftware',
+  sujo: () => Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS) && _edProdutoSoftware.sujo(),
+  salvar: () => salvarProdutoSoftware(),
+  fecharSemSalvar: _fecharProdutoSoftwareSemSalvar,
+});
 
 window.salvarProdutoSoftware = async () => {
   const nome = document.getElementById('prodSoftNome').value.trim();
-  if (!nome) return showToast('Informe o nome do produto.', '#e65100');
-
+  if (!nome) { _avisarCampo('prodSoftNome', 'Informe o nome do produto.'); return false; }
+  let ok = false;
   await comBotaoCarregando('btnSalvarProdutoSoftware', async () => {
+    let r;
     try {
-      const r = await API.salvarProdutoSoftware({
+      r = await API.salvarProdutoSoftware({
         id: document.getElementById('prodSoftId').value || null,
         nome,
+        area: document.getElementById('prodSoftArea').value,
         ativo: document.getElementById('prodSoftAtivo').checked,
       });
       produtosSoftwareData = await API.getProdutosSoftware();
-      // Aberto por cima de outro formulário (cadastro rápido): devolve o produto criado.
-      if (_temDrawerPaiEmpilhado()) {
-        const novo = produtosSoftwareData.find((x) => String(x.id) === String(r && r.id)) || { id: r && r.id, nome, ativo: true };
-        _entregarCadastroRapido(novo, fecharModalProdutoSoftware);
-      } else {
-        fecharModalProdutoSoftware();
-      }
-      renderizarProdutosSoftware();
-      showToast('✅ Salvo!', '#2e7d32');
     } catch (e) {
       showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
+      return;
     }
+    // Edição mantém o id aberto; produto novo pega o criado.
+    const id = String(document.getElementById('prodSoftId').value || (r && r.id) || '');
+    document.getElementById('prodSoftId').value = id;
+    // Aberto por cima de outro formulário (cadastro rápido): devolve o produto criado.
+    if (_temDrawerPaiEmpilhado()) {
+      ok = true;
+      const novo = produtosSoftwareData.find((x) => String(x.id) === id) || { id, nome, ativo: true };
+      _entregarCadastroRapido(novo, _fecharProdutoSoftwareSemSalvar);
+      showToast('✅ Salvo!', '#2e7d32');
+      return;
+    }
+    const mudancas = _mudancasPessoasDoProduto();
+    if (mudancas.length) {
+      try {
+        await API.salvarVinculosProdutoPessoas(id, mudancas);
+        // Mesmo efeito na memória da tela (o banco já gravou).
+        mudancas.forEach((m) => {
+          const p = (pessoasData || []).find((x) => String(x.id) === String(m.pessoaId));
+          if (!p) return;
+          const lista = (p[m.funcao + 'Produtos'] || []).map(String).filter((x) => x !== id);
+          if (m.vinculado) { p[m.funcao] = true; lista.push(id); }
+          p[m.funcao + 'Produtos'] = lista;
+        });
+      } catch (e) {
+        renderizarProdutosSoftware();
+        showToast('⚠️ Produto salvo, mas as pessoas não foram gravadas: ' + _mensagemErro(e, 'tente de novo.'), '#e65100');
+        return;
+      }
+    }
+    ok = true;
+    window._produtoPessoasAntes = JSON.parse(JSON.stringify(window._produtoPessoas));
+    document.getElementById('modalProdutoSoftwareTitulo').textContent = 'Editar Produto';
+    _edProdutoSoftware.marcar();
+    renderizarProdutosSoftware();
+    showToast('✅ Salvo!', '#2e7d32');
   });
+  return ok;
 };
 
 window.excluirProdutoSoftware = async (id) => {
   const p = produtosSoftwareData.find((x) => String(x.id) === String(id));
   const l = _lideresDoProduto(id);
-  const nPessoas = new Set([...l.techLead, ...l.teamLead].map((x) => x.id)).size;
+  const nPessoas = new Set(Object.values(l).flat().map((x) => x.id)).size;
   const uso = nPessoas
-    ? `\n\n⚠️ ${nPessoas} pessoa${nPessoas > 1 ? 's estão associadas' : ' está associada'} a este produto como Tech Lead/Team Lead; a associação continua guardada, mas aparece como "(removido)" até alguém reescolher.`
+    ? `\n\n⚠️ ${nPessoas} pessoa${nPessoas > 1 ? 's estão associadas' : ' está associada'} a este produto (Tech Lead, Team Lead ou Product Owner); a associação continua guardada, mas aparece como "(removido)" até alguém reescolher.`
     : '';
   if (!await confirmarAcao(`Excluir o produto "${p ? p.nome : id}"?${uso}\n\nSe a ideia é só parar de oferecê-lo em novas associações, é melhor desativar em vez de excluir.`)) return;
   try {

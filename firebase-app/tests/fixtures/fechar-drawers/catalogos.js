@@ -341,6 +341,15 @@ window.__rodar = async () => {
   await fecharModalPessoa();
   ok(pessoaPayload().techLeadProdutos.join() === 'ps1,ps2' && pessoaPayload().teamLeadProdutos.join() === 'ps2', 'lideranca: cada funcao grava os SEUS produtos');
   zera(); abrirModalPessoa('pe1');
+  document.getElementById('pessoaProductOwner').checked = true; alternarLiderancaPessoa('productOwner'); alternarProdutoLiderancaPessoa('productOwner', 'ps1');
+  ok(chips('ProductOwner').some((t) => /Fortes Ponto ✓/.test(t)), 'funcoes: Product Owner tem os proprios chips de produto');
+  await fecharModalPessoa();
+  ok(pessoaPayload().productOwner === true && pessoaPayload().productOwnerProdutos.join() === 'ps1', 'funcoes: Product Owner grava a funcao e os produtos dela');
+  zera(); abrirModalPessoa('pe1');
+  document.getElementById('pessoaProductOwner').checked = false; alternarLiderancaPessoa('productOwner');
+  ok(window._pessoaLideranca.productOwnerProdutos.length === 0, 'funcoes: desmarcar Product Owner limpa os produtos dele');
+  _fecharModalPessoaSemSalvar();
+  zera(); abrirModalPessoa('pe1');
   alternarProdutoLiderancaPessoa('techLead', 'ps2');
   await fecharModalPessoa();
   ok(n('salvarDependencia') === 1, 'lideranca: so marcar/desmarcar um produto ja conta como mudanca');
@@ -355,6 +364,17 @@ window.__rodar = async () => {
   ok(n('salvarDependencia') === 0, 'lideranca: abrir e fechar com produto inativo/removido nao reescreve nada');
   ok(_resumoLiderancaPessoa(pessoasData[0])[0].nomes.join() === 'Antigo', 'lideranca: resumo da grade mostra o inativo pelo nome e esconde o removido');
   pessoasData[0].techLead = false; pessoasData[0].techLeadProdutos = [];
+
+  // ---- Produto de Software (drawer desde 27/10/2026)
+  html(_htmlModalProdutoSoftware);
+  window.areasData = [{ nome: 'Produto' }];
+  zera(); abrirModalProdutoSoftware('ps1');
+  await fecharModalProdutoSoftware();
+  ok(n('salvarProdutoSoftware') === 0 && !aberto('drawerProdutoSoftware'), 'produto: abrir e fechar sem mexer nao grava');
+  zera(); abrirModalProdutoSoftware('ps1');
+  set('prodSoftArea', 'Produto');
+  await fecharModalProdutoSoftware();
+  ok(n('salvarProdutoSoftware') === 1, 'produto: trocar a area conta como mudanca (Fechar pergunta e salva)');
 
   // ------------------------------------------------------------ Fornecedor (aba Dados)
   html(_htmlDrawerFornecedorCadastro);

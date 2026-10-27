@@ -1,4 +1,4 @@
-// Catalogo de Produtos de Software + lideranca da Pessoa (Tech Lead / Team Lead).
+// Catalogo de Produtos de Software + funcoes da Pessoa (Tech Lead / Team Lead / Product Owner).
 // Camada de dados (api.js, com Firestore falso) e a pagina do catalogo (app.js real no jsdom).
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -42,7 +42,7 @@ function ambienteApi(docsIniciais) {
   ['_lerProdutosSoftware', '_nomeComparavel', '_salvarProdutoSoftware', '_minutosOuNull', '_refsDependencia', '_lerDependencias', '_salvarDependencia'].forEach((f) => {
     vm.runInContext(extrair(f) + `\nthis.${f} = ${f};`, ctx);
   });
-  vm.runInContext('const _CAMPOS_PRODUTO_SOFTWARE = ["nome", "ativo", "ordem"]; this._CAMPOS_PRODUTO_SOFTWARE = _CAMPOS_PRODUTO_SOFTWARE;', ctx);
+  vm.runInContext('const _CAMPOS_PRODUTO_SOFTWARE = ["nome", "area", "ativo", "ordem"]; this._CAMPOS_PRODUTO_SOFTWARE = _CAMPOS_PRODUTO_SOFTWARE;', ctx);
   return { ctx, store };
 }
 
@@ -176,20 +176,21 @@ test('pagina: Admin e Segurança veem os botoes de gerenciar; quem so le, nao', 
   assert.strictEqual(doc.querySelector('#listaProdutosSoftware button[title="Excluir"]'), null);
 });
 
-test('pagina: novo produto grava nome e ativo; erro (duplicado) aparece e o modal continua aberto', async () => {
+test('pagina: novo produto grava nome, area e ativo; erro (duplicado) aparece e o drawer continua aberto', async () => {
   const { w, calls, toasts, doc } = await abrirPagina(['admin']);
   w.abrirModalProdutoSoftware();
   doc.getElementById('prodSoftNome').value = 'Fortes Doc';
   await w.salvarProdutoSoftware();
-  assert.deepStrictEqual(plano(calls.salvarProdutoSoftware[0][0]), { id: null, nome: 'Fortes Doc', ativo: true });
-  assert.ok(!doc.getElementById('modalProdutoSoftware').classList.contains('open'));
+  assert.deepStrictEqual(plano(calls.salvarProdutoSoftware[0][0]), { id: null, nome: 'Fortes Doc', area: '', ativo: true });
+  assert.ok(doc.getElementById('drawerProdutoSoftware').classList.contains('open'), 'Salvar mantem o drawer (padrao Fechar + Salvar)');
+  assert.strictEqual(doc.getElementById('modalProdutoSoftwareTitulo').textContent, 'Editar Produto');
 
   w.__falhaSalvar = 'Já existe um produto chamado "Fortes Doc".';
   w.abrirModalProdutoSoftware();
   doc.getElementById('prodSoftNome').value = 'fortes doc';
   await w.salvarProdutoSoftware();
   assert.ok(toasts.some((t) => /Já existe um produto/.test(t)));
-  assert.ok(doc.getElementById('modalProdutoSoftware').classList.contains('open'), 'o modal nao pode fechar com erro');
+  assert.ok(doc.getElementById('drawerProdutoSoftware').classList.contains('open'), 'o drawer nao pode fechar com erro');
 });
 
 test('pagina: excluir avisa quantas pessoas estao associadas', async () => {
@@ -233,7 +234,7 @@ const secao = (html) => (html.match(/<h2>Produtos de Software[\s\S]*?<\/table>/)
 test('relatorio: Tech Lead de 2 produtos e Team Lead de 1 deles = 2 linhas, funcoes juntas, ordem por nome', async () => {
   const html = await montarRelatorio({ ...pessoaBase, techLead: true, techLeadProdutos: ['ps1', 'ps2'], teamLead: true, teamLeadProdutos: ['ps1'] }, CATALOGO);
   const s = secao(html);
-  assert.match(s, /Produtos de Software \(Tech Lead \/ Team Lead\)/);
+  assert.match(s, /Produtos de Software \(funções\)/);
   assert.strictEqual((s.match(/<tr><td>/g) || []).length, 2);
   assert.ok(s.indexOf('Fortes AC Pessoal') < s.indexOf('Fortes Ponto'), 'ordenado por nome');
   assert.match(s, /<b>Fortes AC Pessoal<\/b><\/td><td>Tech Lead<\/td>/);
@@ -379,4 +380,115 @@ test('relatorio/dono: nome de processo com HTML sai escapado', async () => {
   const html = await montarRelatorio(allan, [], { processos, areas: AREAS });
   assert.ok(!html.includes('<img src=x'));
   assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);
+});
+
+// ---------------------------------------------------------------- Product Owner e area responsavel (27/10/2026)
+test('pessoa: Product Owner grava como as outras funcoes (sem repetido; desmarcar limpa)', async () => {
+  const { ctx, store } = ambienteApi({ dependencias: { pe1: { nome: 'Ana', categoria: 'Pessoas' } } });
+  const base = { id: 'pe1', categoria: 'Pessoas', nome: 'Ana', techLead: false, techLeadProdutos: [], teamLead: false, teamLeadProdutos: [] };
+  await ctx._salvarDependencia({ ...base, productOwner: true, productOwnerProdutos: ['ps1', 'ps1', ''] });
+  assert.deepStrictEqual(plano([store.dependencias.pe1.productOwner, store.dependencias.pe1.productOwnerProdutos]), [true, ['ps1']]);
+  await ctx._salvarDependencia({ ...base, productOwner: false, productOwnerProdutos: ['ps1'] });
+  assert.deepStrictEqual(plano([store.dependencias.pe1.productOwner, store.dependencias.pe1.productOwnerProdutos]), [false, []]);
+});
+
+test('produto: area responsavel grava e le; produto antigo vem sem area', async () => {
+  const { ctx, store } = ambienteApi({ produtos_software: { velho: { nome: 'Antigo', ativo: true } } });
+  const r = await ctx._salvarProdutoSoftware({ nome: 'Fortes Ponto', area: 'Produto', ativo: true });
+  assert.strictEqual(store.produtos_software[r.id].area, 'Produto');
+  const lidos = await ctx._lerProdutosSoftware();
+  assert.strictEqual(lidos.find((p) => p.id === 'velho').area, '');
+  assert.strictEqual(lidos.find((p) => p.id === r.id).area, 'Produto');
+});
+
+test('vinculos pela tela de Produtos: um lote; vincular liga a funcao, desvincular so tira o produto; funcao fora da lista recusa', async () => {
+  const sets = [];
+  const ctx = {
+    COLLECTION: { dependencias: 'dependencias' },
+    window: { USER_EMAIL: 'Adm@X' },
+    firebase: { firestore: { FieldValue: { arrayUnion: (v) => ({ union: v }), arrayRemove: (v) => ({ remove: v }) } } },
+    _db: {
+      collection: () => ({ doc: (id) => ({ id }) }),
+      batch: () => ({ set: (ref, data, opts) => sets.push({ id: ref.id, data, opts }), commit: async () => sets.push('commit') }),
+    },
+  };
+  vm.createContext(ctx);
+  vm.runInContext("const FUNCOES_PRODUTO_PESSOA = ['techLead', 'teamLead', 'productOwner'];\n" + extrair('_salvarVinculosProdutoPessoas') + '\nthis.f = _salvarVinculosProdutoPessoas;', ctx);
+  const r = await ctx.f('ps1', [{ pessoaId: 'pe1', funcao: 'productOwner', vinculado: true }, { pessoaId: 'pe2', funcao: 'techLead', vinculado: false }]);
+  assert.strictEqual(r.gravadas, 2);
+  assert.strictEqual(sets[0].id, 'pe1');
+  assert.strictEqual(sets[0].data.productOwner, true);
+  assert.deepStrictEqual(plano(sets[0].data.productOwnerProdutos), { union: 'ps1' });
+  assert.strictEqual(sets[0].data.atualizadoPor, 'adm@x');
+  assert.deepStrictEqual(plano(sets[0].opts), { merge: true });
+  assert.deepStrictEqual(plano(sets[1].data.techLeadProdutos), { remove: 'ps1' });
+  assert.strictEqual(sets[1].data.techLead, undefined, 'desvincular mantem a funcao');
+  assert.strictEqual(sets[2], 'commit');
+  await assert.rejects(() => ctx.f('ps1', [{ pessoaId: 'pe1', funcao: 'admin', vinculado: true }]), /Função inválida/);
+  assert.deepStrictEqual(plano(await ctx.f('ps1', [])), { success: true, gravadas: 0 });
+});
+
+const PESSOAS_PO = [
+  { id: 'pe1', categoria: 'Pessoas', nome: 'Ana', areas: ['TI'], techLead: true, techLeadProdutos: ['ps1'], teamLead: false, teamLeadProdutos: [] },
+  { id: 'pe2', categoria: 'Pessoas', nome: 'Bia', areas: ['Produto'], productOwner: true, productOwnerProdutos: ['ps1'] },
+  { id: 'pe3', categoria: 'Pessoas', nome: 'Caio', areas: ['Produto'] },
+  { id: 'pe4', categoria: 'Pessoas', nome: 'Duda', areas: ['RH'] },
+];
+const PRODUTOS_AREA = [
+  { id: 'ps1', nome: 'Fortes Ponto', area: 'Produto', ativo: true, ordem: 1 },
+  { id: 'ps2', nome: 'Fortes RH', area: 'Área Antiga', ativo: true, ordem: 2 },
+];
+const comAreas = { getDependencias: PESSOAS_PO, getProdutosSoftware: PRODUTOS_AREA, getAreas: [{ nome: 'Produto' }, { nome: 'TI' }] };
+
+test('pagina: colunas Area responsavel e Product Owner; filtro por area', async () => {
+  const { w, doc } = await abrirPagina(['admin'], comAreas);
+  const cab = [...doc.querySelectorAll('#listaProdutosSoftware thead th')].map((t) => t.textContent.replace(/[▲▼]/g, '').trim());
+  assert.deepStrictEqual(cab.slice(0, 5), ['Produto', 'Área responsável', 'Tech Lead', 'Team Lead', 'Product Owner']);
+  const ponto = [...doc.querySelectorAll('#listaProdutosSoftware tbody tr')].find((l) => /Fortes Ponto/.test(l.textContent));
+  assert.match(ponto.textContent, /Produto[\s\S]*Ana[\s\S]*Bia/);
+  const filtro = doc.getElementById('filtroProdutoArea');
+  assert.deepStrictEqual([...filtro.options].map((o) => o.value), ['', 'Área Antiga', 'Produto', '__sem__']);
+  filtro.value = 'Produto';
+  w.filtrarProdutosSoftware();
+  assert.strictEqual(doc.querySelectorAll('#listaProdutosSoftware tbody tr').length, 1);
+});
+
+test('drawer: area gravada (e fora do cadastro marcada); pessoas por funcao, as da area primeiro; salva so o que mudou', async () => {
+  const { w, calls, doc } = await abrirPagina(['seguranca'], comAreas);
+  w.abrirModalProdutoSoftware('ps2');
+  assert.match(doc.getElementById('prodSoftArea').selectedOptions[0].textContent, /Área Antiga \(fora do cadastro\)/);
+  w.abrirModalProdutoSoftware('ps1');
+  assert.strictEqual(doc.getElementById('prodSoftArea').value, 'Produto');
+  const bloco = (f) => doc.querySelector(`[data-funcao-produto="${f}"]`);
+  assert.match(bloco('techLead').textContent, /Ana/);
+  assert.match(bloco('productOwner').textContent, /Bia/);
+  const primeiro = bloco('productOwner').querySelector('optgroup');
+  assert.strictEqual(primeiro.label, 'Da área Produto');
+  assert.deepStrictEqual([...primeiro.querySelectorAll('option')].map((o) => o.textContent), ['Caio — Produto'], 'a da area primeiro; quem ja e PO nao aparece');
+  w.adicionarPessoaAoProduto('productOwner', 'pe3');
+  w.removerPessoaDoProduto('techLead', 'pe1');
+  await w.salvarProdutoSoftware();
+  assert.deepStrictEqual(plano(calls.salvarVinculosProdutoPessoas[0]), ['ps1', [
+    { pessoaId: 'pe1', funcao: 'techLead', vinculado: false },
+    { pessoaId: 'pe3', funcao: 'productOwner', vinculado: true },
+  ]]);
+  const ponto = [...doc.querySelectorAll('#listaProdutosSoftware tbody tr')].find((l) => /Fortes Ponto/.test(l.textContent));
+  assert.match(ponto.textContent, /Bia, Caio/, 'a lista ja reflete');
+  assert.doesNotMatch(ponto.textContent, /Ana/);
+  await w.salvarProdutoSoftware();
+  assert.strictEqual(calls.salvarVinculosProdutoPessoas.length, 1, 'salvar de novo sem mudar nao grava vinculos');
+});
+
+test('drawer: produto novo grava os vinculos com o id criado; quem so le nao ve os selects', async () => {
+  const { w, calls, doc } = await abrirPagina(['admin'], comAreas);
+  w.abrirModalProdutoSoftware();
+  doc.getElementById('prodSoftNome').value = 'Fortes Doc';
+  w.adicionarPessoaAoProduto('teamLead', 'pe4');
+  await w.salvarProdutoSoftware();
+  assert.deepStrictEqual(plano(calls.salvarVinculosProdutoPessoas[0]), ['novo', [{ pessoaId: 'pe4', funcao: 'teamLead', vinculado: true }]]);
+
+  const so = await abrirPagina(['gestor'], comAreas);
+  so.w.abrirModalProdutoSoftware('ps1');
+  assert.strictEqual(so.doc.querySelectorAll('#prodSoftPessoas select').length, 0);
+  assert.ok(so.doc.getElementById('prodSoftNome').disabled);
 });

@@ -117,12 +117,12 @@ test('Pessoa -> + Novo produto: produto criado aparece na liderança da pessoa',
   await espera();
   w.abrirModalPessoa();
   await w.novoProdutoDePessoa();
-  assert.ok(aberto(w, 'modalProdutoSoftware'));
+  assert.ok(aberto(w, 'drawerProdutoSoftware'));
   w.document.getElementById('prodSoftNome').value = 'Fortes Ponto';
   await w.salvarProdutoSoftware();
   await espera();
   assert.ok(aberto(w, 'drawerPessoa'), 'voltou para a pessoa');
-  assert.ok(!aberto(w, 'modalProdutoSoftware'));
+  assert.ok(!aberto(w, 'drawerProdutoSoftware'));
   w.close();
 });
 

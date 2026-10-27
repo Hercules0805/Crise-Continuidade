@@ -354,12 +354,15 @@ async function _lerDependencias() {
     areas: Array.isArray(d.areas) ? d.areas.filter(Boolean) : [],
     // So usado por Pessoas: id da Pessoa que é o líder imediato (organograma).
     liderImediato: d.liderImediato || '',
-    // So usado por Pessoas: Tech Lead / Team Lead, cada funcao com os seus
-    // produtos (ids de produtos_software). Marcar a funcao nao obriga a ter produto.
+    // So usado por Pessoas: Tech Lead / Team Lead / Product Owner (27/10/2026),
+    // cada funcao com os seus produtos (ids de produtos_software). Marcar a
+    // funcao nao obriga a ter produto.
     techLead: d.techLead === true,
     techLeadProdutos: Array.isArray(d.techLeadProdutos) ? d.techLeadProdutos.filter(Boolean) : [],
     teamLead: d.teamLead === true,
     teamLeadProdutos: Array.isArray(d.teamLeadProdutos) ? d.teamLeadProdutos.filter(Boolean) : [],
+    productOwner: d.productOwner === true,
+    productOwnerProdutos: Array.isArray(d.productOwnerProdutos) ? d.productOwnerProdutos.filter(Boolean) : [],
     empresa: d.empresa || '',
     telefone: d.telefone || '',
     email: d.email || '',
@@ -906,7 +909,7 @@ async function _salvarCategoriaFornecedor(c) {
 
 /**
  * Produtos de Software da empresa (Fortes Ponto, Fortes RH...). Catalogo-base:
- * a Pessoa aponta para ele, por ID (Tech Lead / Team Lead de um produto) --
+ * a Pessoa aponta para ele, por ID (Tech Lead / Team Lead / Product Owner) --
  * renomear um produto nao orfaniza ninguem. Mesmo molde de Categorias de
  * Fornecedor: desativar em vez de excluir, sem versao.
  */
@@ -915,6 +918,8 @@ async function _lerProdutosSoftware() {
   return docs.map((d) => ({
     id: d.id,
     nome: d.nome || '',
+    // Area responsavel pelo produto (27/10/2026), pelo NOME (como processo.area).
+    area: d.area || '',
     ativo: d.ativo !== false,
     ordem: Number(d.ordem) || 0,
     criadoEm: d.criadoEm || '',
@@ -922,7 +927,7 @@ async function _lerProdutosSoftware() {
   })).sort((a, b) => (a.ordem - b.ordem) || a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
-const _CAMPOS_PRODUTO_SOFTWARE = ['nome', 'ativo', 'ordem'];
+const _CAMPOS_PRODUTO_SOFTWARE = ['nome', 'area', 'ativo', 'ordem'];
 
 /** Nome comparavel: sem acento, sem maiuscula, sem espaco sobrando. */
 function _nomeComparavel(nome) {
@@ -953,6 +958,42 @@ async function _salvarProdutoSoftware(p) {
   if (data.ordem === undefined) data.ordem = Date.now();
   const ref = await _db.collection(COLLECTION.produtosSoftware).add(data);
   return { success: true, id: ref.id };
+}
+
+// Funcoes da Pessoa num produto de software: cada uma e um flag e a lista de
+// ids dos produtos (<funcao>Produtos). Product Owner entrou em 27/10/2026.
+const FUNCOES_PRODUTO_PESSOA = ['techLead', 'teamLead', 'productOwner'];
+
+/**
+ * Vinculos Pessoa x Produto gravados a partir da tela de Produtos (27/10/2026).
+ * O vinculo mora na Pessoa (<funcao>Produtos), o mesmo que o drawer da Pessoa
+ * edita. mudancas = [{ pessoaId, funcao, vinculado }]. Vincular liga a funcao;
+ * desvincular so tira o produto (a pessoa continua com a funcao). Um lote so.
+ */
+async function _salvarVinculosProdutoPessoas(produtoId, mudancas) {
+  const id = String(produtoId || '').trim();
+  if (!id) throw new Error('Produto sem id.');
+  const lista = Array.isArray(mudancas) ? mudancas : [];
+  if (!lista.length) return { success: true, gravadas: 0 };
+  const FV = firebase.firestore.FieldValue;
+  const agora = new Date().toISOString();
+  const por = (window.USER_EMAIL || '').toLowerCase();
+  const lote = _db.batch();
+  lista.forEach((m) => {
+    if (!FUNCOES_PRODUTO_PESSOA.includes(m && m.funcao)) throw new Error('Função inválida: ' + (m && m.funcao));
+    const pessoaId = String(m.pessoaId || '').trim();
+    if (!pessoaId) throw new Error('Pessoa sem id.');
+    const patch = { atualizadoEm: agora, atualizadoPor: por };
+    if (m.vinculado) {
+      patch[m.funcao] = true;
+      patch[m.funcao + 'Produtos'] = FV.arrayUnion(id);
+    } else {
+      patch[m.funcao + 'Produtos'] = FV.arrayRemove(id);
+    }
+    lote.set(_db.collection(COLLECTION.dependencias).doc(pessoaId), patch, { merge: true });
+  });
+  await lote.commit();
+  return { success: true, gravadas: lista.length };
 }
 
 /**
@@ -1770,11 +1811,13 @@ async function _salvarDependencia(d) {
   // Lideranca da Pessoa (Tech Lead/Team Lead): mesma regra -- so o drawer de
   // Pessoa manda estes campos; Fornecedor/Dependencia regravam o documento e
   // nao podem zerar a lideranca de ninguem.
-  if (typeof d.techLead === 'boolean' || typeof d.teamLead === 'boolean') {
-    data.techLead = d.techLead === true;
-    data.techLeadProdutos = data.techLead && Array.isArray(d.techLeadProdutos) ? [...new Set(d.techLeadProdutos.map(String).filter(Boolean))] : [];
-    data.teamLead = d.teamLead === true;
-    data.teamLeadProdutos = data.teamLead && Array.isArray(d.teamLeadProdutos) ? [...new Set(d.teamLeadProdutos.map(String).filter(Boolean))] : [];
+  // Mesma lista de FUNCOES_PRODUTO_PESSOA (literal aqui: os testes extraem a funcao sozinha).
+  const funcoesProduto = ['techLead', 'teamLead', 'productOwner'];
+  if (funcoesProduto.some((f) => typeof d[f] === 'boolean')) {
+    funcoesProduto.forEach((f) => {
+      data[f] = d[f] === true;
+      data[f + 'Produtos'] = data[f] && Array.isArray(d[f + 'Produtos']) ? [...new Set(d[f + 'Produtos'].map(String).filter(Boolean))] : [];
+    });
   }
   // Gestor e setor do FORNECEDOR vem dos contratos (19/10/2026): a tela de
   // fornecedor nao envia mais esses campos, e o que nao vem no payload nao pode
@@ -2787,6 +2830,7 @@ const _POST_FIRESTORE = {
   excluirCriterioFornecedor: (b) => _db.collection(COLLECTION.criteriosFornecedor).doc(String(b.id)).delete()
     .then(() => _subirVersaoCriterios()).then((versao) => ({ success: true, criteriosVersao: versao })),
   salvarProdutoSoftware: (b) => _salvarProdutoSoftware(b),
+  salvarVinculosProdutoPessoas: (b) => _salvarVinculosProdutoPessoas(b.produtoId, b.mudancas),
   excluirProdutoSoftware: (b) => _db.collection(COLLECTION.produtosSoftware).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarCategoriaFornecedor: (b) => _salvarCategoriaFornecedor(b),
   excluirCategoriaFornecedor: (b) => _db.collection(COLLECTION.categoriasFornecedor).doc(String(b.id)).delete().then(() => ({ success: true })),
@@ -3047,6 +3091,9 @@ const API = {
     .then((r) => { API.invalidate('getProdutosSoftware'); return r; }),
   excluirProdutoSoftware: (id) => API.post('excluirProdutoSoftware', { id })
     .then((r) => { API.invalidate('getProdutosSoftware'); return r; }),
+  // Vinculos Pessoa x Produto gravados pela tela de Produtos: mexem nas Pessoas.
+  salvarVinculosProdutoPessoas: (produtoId, mudancas) => API.post('salvarVinculosProdutoPessoas', { produtoId, mudancas })
+    .then((r) => { API.invalidate('getDependencias'); return r; }),
   getSubcategoriasFornecedor: () => API.get('getSubcategoriasFornecedor'),
   getCriticidadeFornecedorPerguntas: () => API.get('getCriticidadeFornecedorPerguntas'),
   getAvaliacoesFornecedor: () => API.get('getAvaliacoesFornecedor'),
