@@ -6472,7 +6472,7 @@ async function relatorios() {
       </div>
       <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
         <h3 style="font-size:1em;color:#d60014;margin-bottom:8px;">Processos por Área</h3>
-        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Para cada área, os Processos de Negócio dela, com Tier, score, RTO/RPO, status de BIA/BCP/DRP e quem é o dono (responsável da área).</p>
+        <p style="font-size:0.85em;color:#666;margin-bottom:16px;">Resumo dos indicadores e, para cada área, os Processos de Negócio dela, com Tier, score, RTO/RPO, status de BIA/BCP/DRP e o dono (responsável da área). Descrição Funcional e do Impacto opcionais.</p>
         <button class="btn btn-primary" onclick="abrirSelecaoAreasRelatorio()">📄 Gerar relatório</button>
       </div>
       <div style="background:white;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,0.08);padding:20px;">
@@ -6517,6 +6517,9 @@ async function relatorios() {
         <button onclick="fecharSelecaoAreasRelatorio()" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
       </div>
       <div class="drawer-body">
+        <div style="font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px;">Incluir no relatório</div>
+        <label class="check-label" style="font-size:0.88em;margin-bottom:4px;"><input type="checkbox" id="relAreasDescFuncional"> Descrição Funcional</label>
+        <label class="check-label" style="font-size:0.88em;margin-bottom:14px;"><input type="checkbox" id="relAreasDescImpacto"> Descrição do Impacto para Indisponibilidade</label>
         <p style="font-size:0.82em;color:#888;margin-bottom:12px;">Selecione quais áreas entram no relatório "Processos por Área". O número ao lado é a quantidade de processos de cada uma.</p>
         <div style="display:flex;gap:8px;margin-bottom:10px;">
           <button type="button" class="btn btn-ghost" onclick="selecionarTodasAreasRelatorio(true)" style="font-size:0.82em;padding:6px 12px;">Selecionar todas</button>
@@ -6615,6 +6618,9 @@ window.selecionarTodasDependenciasRelatorio = (checked) => {
 // ============================================================
 window._relatorioAreasGrupos = [];
 window._relatorioAreasSelecionadas = new Set();
+// Catálogo, serviços e ciclos carregados com a seleção: o status de DRP vem da
+// cadeia de dependências, que a tela Relatórios não tem carregada sozinha.
+window._relatorioAreasContexto = null;
 
 /**
  * Um grupo por área: as do catálogo mais qualquer área que só apareça nos
@@ -6635,13 +6641,17 @@ function _gruposRelatorioAreas(areas, processos) {
 }
 
 window.abrirSelecaoAreasRelatorio = async () => {
-  let areas, processos;
+  let areas, processos, dependencias, servicos, ciclos;
   try {
-    [areas, processos] = await Promise.all([API.getAreas(), API.getProcessos()]);
+    [areas, processos, dependencias, servicos, ciclos] = await Promise.all([
+      API.getAreas(), API.getProcessos(), API.getDependencias(),
+      API.getServicos().catch(() => []), API.getCiclosContinuidade().catch(() => null),
+    ]);
   } catch (e) {
     showToast('❌ ' + _mensagemErro(e, 'Não foi possível carregar áreas e processos. Tente de novo.'), '#c62828');
     return;
   }
+  window._relatorioAreasContexto = { dependencias: dependencias || [], servicos: servicos || [], ciclos };
   window._relatorioAreasGrupos = _gruposRelatorioAreas(areas, processos);
   window._relatorioAreasSelecionadas = new Set(window._relatorioAreasGrupos.map((g) => g.nome));
   _renderRelatorioAreasChecklist();
@@ -6686,7 +6696,11 @@ window.confirmarGerarRelatorioProcessosPorArea = async () => {
   const selecionadas = window._relatorioAreasSelecionadas || new Set();
   if (!selecionadas.size) return showToast('Selecione ao menos uma área.', '#e65100');
   const grupos = (window._relatorioAreasGrupos || []).filter((g) => selecionadas.has(g.nome));
-  const html = _htmlRelatorioProcessosPorArea(grupos);
+  const html = _htmlRelatorioProcessosPorArea(grupos, {
+    descricaoFuncional: !!(document.getElementById('relAreasDescFuncional') || {}).checked,
+    descricaoImpacto: !!(document.getElementById('relAreasDescImpacto') || {}).checked,
+    contexto: window._relatorioAreasContexto,
+  });
   const win = window.open('', '_blank');
   if (!win) return showToast('Popup bloqueado. Permita popups para este site.', '#e65100');
   fecharSelecaoAreasRelatorio();
@@ -6695,12 +6709,77 @@ window.confirmarGerarRelatorioProcessosPorArea = async () => {
   win.document.close();
 };
 
-/** HTML do relatório para os grupos (áreas) já filtrados -- pura, para teste. */
-function _htmlRelatorioProcessosPorArea(grupos) {
-  const ORDEM_TIER = [Criticidade.TIER.T1, Criticidade.TIER.T2, Criticidade.TIER.T3, Criticidade.TIER.PENDENTE];
+const _ORDEM_TIER_RELATORIO = () => [Criticidade.TIER.T1, Criticidade.TIER.T2, Criticidade.TIER.T3, Criticidade.TIER.PENDENTE];
+
+/**
+ * Indicadores do resumo do "Processos por Área" (27/10/2026) -- pura, para
+ * teste. Mesma conta das linhas (tierDoProcesso + _statusPlanosDoProcesso),
+ * para o resumo nunca contradizer a tabela. DRP só conta Tier 1/2, onde é exigido.
+ */
+function _indicadoresRelatorioAreas(grupos, contexto) {
+  const ind = {
+    areas: (grupos || []).length, total: 0, tiers: {}, semRto: 0,
+    bia: { 'nao-avaliado': 0, 'em-avaliacao': 0, avaliado: 0, homologado: 0, vencido: 0 },
+    bcp: { semPcn: 0, semPcnCriticos: 0, comPcn: 0, vencido: 0 },
+    drp: { criticos: 0, 'sem-drp': 0, parcial: 0, completo: 0, vencido: 0, 'sem-dependencias': 0 },
+  };
+  _ORDEM_TIER_RELATORIO().forEach((t) => { ind.tiers[t] = 0; });
+  (grupos || []).forEach((g) => g.processos.forEach((p) => {
+    const tier = Criticidade.tierDoProcesso(p);
+    const st = _statusPlanosDoProcesso(p, Object.assign({ tier }, contexto || {}));
+    const critico = ConformidadeContinuidade.ehTierCritico(tier);
+    ind.total++;
+    ind.tiers[tier] = (ind.tiers[tier] || 0) + 1;
+    if (!String(p.rto || '').trim()) ind.semRto++;
+    if (ind.bia[st.bia.codigo] !== undefined) ind.bia[st.bia.codigo]++;
+    if (st.bcp.codigo === 'sem-pcn' || st.bcp.codigo === 'nao-exigido') {
+      ind.bcp.semPcn++;
+      if (critico) ind.bcp.semPcnCriticos++;
+    } else {
+      ind.bcp.comPcn++;
+      if (st.bcp.codigo === 'vencido') ind.bcp.vencido++;
+    }
+    if (critico) {
+      ind.drp.criticos++;
+      if (ind.drp[st.drp.codigo] !== undefined) ind.drp[st.drp.codigo]++;
+    }
+  }));
+  return ind;
+}
+
+/**
+ * HTML do relatório para os grupos (áreas) já filtrados -- pura, para teste.
+ * opcoes: { descricaoFuncional, descricaoImpacto, contexto: {dependencias, servicos, ciclos} }.
+ */
+function _htmlRelatorioProcessosPorArea(grupos, opcoes) {
+  const o = opcoes || {};
+  const ORDEM_TIER = _ORDEM_TIER_RELATORIO();
   const rotuloTier = (t) => (t === Criticidade.TIER.PENDENTE ? 'Pendente' : Criticidade.tierCurto(t));
   const vazio = (v) => (v === undefined || v === null || String(v).trim() === '' ? '–' : esc(String(v)));
   const totalProcessos = (grupos || []).reduce((t, g) => t + g.processos.length, 0);
+  const comDescricoes = !!(o.descricaoFuncional || o.descricaoImpacto);
+  const linhaDescricoes = (p) => {
+    const campo = (rotulo, v) => `<div class="desc"><strong>${rotulo}:</strong> ${String(v || '').trim() ? `<span class="desc-texto">${esc(String(v).trim())}</span>` : '<span class="desc-vazia">Não informada</span>'}</div>`;
+    return `<tr class="descricoes"><td colspan="8">${o.descricaoFuncional ? campo('Descrição funcional', p.descricaoFuncional) : ''}${o.descricaoImpacto ? campo('Impacto da indisponibilidade', p.descricao) : ''}</td></tr>`;
+  };
+
+  const ind = _indicadoresRelatorioAreas(grupos, o.contexto);
+  const num = (n, alerta) => `<strong class="${alerta && n > 0 ? 'alerta' : ''}">${n}</strong>`;
+  const item = (rotulo, n, alerta) => `<li><span>${rotulo}</span>${num(n, alerta)}</li>`;
+  const resumoGeral = totalProcessos ? `
+<section class="resumo-geral">
+  <h2>Resumo</h2>
+  <div class="resumo-cards">
+    <div class="resumo-card"><div class="resumo-titulo">Processos</div><div class="resumo-num">${ind.total}</div>
+      <ul>${item('Áreas', ind.areas)}${ORDEM_TIER.map((t) => `<li><span><span class="tier-badge" style="background:${Criticidade.corDoTier(t)};">${esc(rotuloTier(t))}</span></span>${num(ind.tiers[t] || 0)}</li>`).join('')}</ul></div>
+    <div class="resumo-card"><div class="resumo-titulo">BIA</div><div class="resumo-num">${ind.bia.homologado}<span class="resumo-de"> homologado(s)</span></div>
+      <ul>${item('Não avaliados', ind.bia['nao-avaliado'], true)}${item('Em avaliação', ind.bia['em-avaliacao'])}${item('Avaliados a homologar', ind.bia.avaliado)}${item('Revisão vencida', ind.bia.vencido, true)}</ul></div>
+    <div class="resumo-card"><div class="resumo-titulo">BCP (PCN)</div><div class="resumo-num">${ind.bcp.semPcn}<span class="resumo-de"> sem PCN</span></div>
+      <ul>${item('Dos quais Tier 1/2 (obrigatório)', ind.bcp.semPcnCriticos, true)}${item('Com PCN', ind.bcp.comPcn)}${item('PCN com revisão vencida', ind.bcp.vencido, true)}</ul></div>
+    <div class="resumo-card"><div class="resumo-titulo">DRP e RTO</div><div class="resumo-num">${ind.drp['sem-drp']}<span class="resumo-de"> Tier 1/2 sem DRP</span></div>
+      <ul>${item('DRP parcial (Tier 1/2)', ind.drp.parcial)}${item('DRP completo (Tier 1/2)', ind.drp.completo)}${item('DRP com revisão vencida (Tier 1/2)', ind.drp.vencido, true)}${item('Tier 1/2 sem dependências mapeadas', ind.drp['sem-dependencias'], true)}${item('Processos sem RTO definido', ind.semRto, true)}</ul></div>
+  </div>
+</section>` : '';
 
   const corpo = (grupos || []).map((g) => {
     const linhas = g.processos
@@ -6720,13 +6799,13 @@ function _htmlRelatorioProcessosPorArea(grupos) {
         <table>
           <thead><tr><th>Processo</th><th>Tier</th><th class="c">Score</th><th>RTO</th><th>RPO</th><th>BIA</th><th>BCP</th><th>DRP</th></tr></thead>
           <tbody>
-            ${linhas.map(({ p, tier }) => `<tr>
+            ${linhas.map(({ p, tier }) => `<tr${comDescricoes ? ' class="com-descricoes"' : ''}>
               <td><strong>${esc(p.processo)}</strong></td>
               <td><span class="tier-badge" style="background:${Criticidade.corDoTier(tier)};">${esc(tier)}</span></td>
               <td class="c">${p.avaliado || p.score > 0 ? esc(String(p.score)) : '–'}</td>
               <td>${vazio(p.rto)}</td><td>${vazio(p.rpo)}</td>
-              ${(() => { const st = _statusPlanosDoProcesso(p); return `<td>${esc(st.bia.rotulo)}</td><td>${esc(st.bcp.rotulo)}</td><td>${esc(st.drp.rotulo)}</td>`; })()}
-            </tr>`).join('')}
+              ${(() => { const st = _statusPlanosDoProcesso(p, Object.assign({ tier }, o.contexto || {})); return `<td>${esc(st.bia.rotulo)}</td><td>${esc(st.bcp.rotulo)}</td><td>${esc(st.drp.rotulo)}</td>`; })()}
+            </tr>${comDescricoes ? linhaDescricoes(p) : ''}`).join('')}
           </tbody>
         </table>` : '<p class="vazio">Nenhum processo cadastrado nesta área.</p>'}
     </div>`;
@@ -6758,8 +6837,25 @@ td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
 .c{text-align:center}
 .tier-badge{display:inline-block;padding:3px 10px;border-radius:12px;font-size:8.5pt;font-weight:600;color:#fff}
 .vazio{font-size:9.5pt;color:#999;font-style:italic;padding:4px 0}
+tr.com-descricoes td{border-bottom:none}
+tr.descricoes td{background:#fafafa;font-size:9pt;color:#444;padding:6px 10px 10px 22px;border-bottom:1px solid #e8e8e8}
+tr.com-descricoes,tr.descricoes{page-break-inside:avoid;break-inside:avoid}
+.desc{margin-top:3px}
+.desc-texto{white-space:pre-line}
+.desc-vazia{color:#999;font-style:italic}
+.resumo-geral{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:20px;margin-bottom:20px;page-break-inside:avoid}
+.resumo-geral h2{font-size:13pt;color:#d60014;margin-bottom:12px}
+.resumo-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.resumo-card{border:1px solid #eee;border-top:3px solid #d60014;border-radius:8px;padding:12px 14px}
+.resumo-titulo{font-size:8.5pt;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.3px}
+.resumo-num{font-size:20pt;font-weight:700;color:#222;margin:4px 0 8px}
+.resumo-de{font-size:9pt;font-weight:400;color:#777}
+.resumo-card ul{list-style:none;font-size:9pt}
+.resumo-card li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dashed #f0f0f0}
+.resumo-card li strong{color:#333}
+.resumo-card li strong.alerta{color:#d60014}
 .footer{margin-top:30px;text-align:center;font-size:8pt;color:#aaa}
-@media print{body{background:#fff}.btn-print{display:none!important}.area-bloco,.tier-badge{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+@media print{body{background:#fff}.btn-print{display:none!important}.area-bloco,.resumo-geral,.resumo-card,.tier-badge,tr.descricoes td{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
 </style>
 </head>
 <body>
@@ -6772,6 +6868,7 @@ td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
   </div>
   <button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button>
 </div>
+${resumoGeral}
 ${corpo || '<p class="vazio">Nenhuma área selecionada.</p>'}
 <div class="footer">Relatório gerado a partir do cadastro de Áreas e de Processos. Dono = responsável da área.</div>
 </body>

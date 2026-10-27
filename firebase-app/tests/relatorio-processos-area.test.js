@@ -40,12 +40,14 @@ async function carregar(opcoes) {
     if (o.falhaCarga) throw new Error('sem rede');
     if (nome === 'getAreas') return JSON.parse(JSON.stringify(o.areas || AREAS));
     if (nome === 'getProcessos') return JSON.parse(JSON.stringify(o.processos || PROCESSOS));
+    if (nome === 'getDependencias') return JSON.parse(JSON.stringify(o.dependencias || []));
+    if (nome === 'getCiclosContinuidade') return null;
     return [];
   } });
   ['util.js', 'dependencia-duplicidade.js', 'perfis.js', 'criticidade.js', 'cadeia-dependencias.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8')
-    + '\n;showToast = (m) => { window.__toasts.push(m); };window.__t = { grupos: _gruposRelatorioAreas, html: _htmlRelatorioProcessosPorArea };');
+    + '\n;showToast = (m) => { window.__toasts.push(m); };window.__t = { grupos: _gruposRelatorioAreas, html: _htmlRelatorioProcessosPorArea, indicadores: _indicadoresRelatorioAreas };');
   w.__toasts = toasts;
   await w.relatorios();
   return { w, toasts, paginas, estado, doc: w.document };
@@ -202,4 +204,104 @@ test('_gruposRelatorioAreas: catalogo + areas so dos processos, ordenado, com os
     { nome: 'Comercial Corporativo', n: 4, fora: false, dono: 'Allan Rodrigues Lima' },
     { nome: 'TI', n: 1, fora: false, dono: 'Kaique Branco' },
   ]);
+});
+
+// ---- Melhorias de 27/10/2026: descricoes opcionais e resumo de indicadores ----
+
+const hoje = new Date().toISOString().slice(0, 10);
+const pcnHoje = JSON.stringify([{ versao: 1, data: hoje, autor: 'x' }]);
+const DEPS = [
+  { id: 'srv', nome: 'SRV-01', categoria: 'Servidor', drpSalvo: JSON.stringify([{ versao: 1, data: hoje }]) },
+  { id: 'bd', nome: 'Oracle', categoria: 'Banco de Dados', drpSalvo: '' },
+];
+const PROC_DRP = [
+  { id: 'c1', area: 'TI', processo: 'Crítico completo', score: 14, avaliado: true, rto: '< 1 hora', pcnSalvo: pcnHoje,
+    descricaoFuncional: 'Emite as notas', descricao: 'Para o faturamento', dependenciaItens: [{ id: 'srv', nome: 'SRV-01', categoria: 'Servidor' }] },
+  { id: 'c2', area: 'TI', processo: 'Crítico sem DRP', score: 13, avaliado: true, rto: '',
+    descricaoFuncional: '', descricao: '<b>forte</b>', dependenciaItens: [{ id: 'bd', nome: 'Oracle', categoria: 'Banco de Dados' }] },
+  { id: 'c3', area: 'RH', processo: 'Suporte', score: 3, avaliado: true, rto: '24 horas' },
+];
+const AREAS_DRP = [{ id: 'a', nome: 'TI', responsavel: 'K' }, { id: 'b', nome: 'RH', responsavel: 'R' }];
+
+async function gerar(marcar) {
+  const r = await carregar({ processos: PROC_DRP, areas: AREAS_DRP, dependencias: DEPS });
+  await r.w.abrirSelecaoAreasRelatorio();
+  (marcar || []).forEach((id) => { r.doc.getElementById(id).checked = true; });
+  await r.w.confirmarGerarRelatorioProcessosPorArea();
+  return r;
+}
+
+const linhaDoProcesso = (html, nome) => html.match(new RegExp(`<tr[^>]*>\\s*<td><strong>${nome}[\\s\\S]*?</tr>`))[0];
+const descricoesDoProcesso = (html, nome) => {
+  const m = html.match(new RegExp(`<td><strong>${nome}[\\s\\S]*?</tr>\\s*<tr class="descricoes">([\\s\\S]*?)</tr>`));
+  return m ? m[1] : null;
+};
+// Espaco entre tags vizinhas, para o texto do cartao ler "Tier 1 2" e nao "Tier 12".
+const resumoGeral = (html) => html.match(/<section class="resumo-geral">([\s\S]*?)<\/section>/)[1].replace(/></g, '> <');
+
+test('drawer: as duas descricoes sao opcionais e vem desmarcadas', async () => {
+  const { w, doc } = await carregar();
+  await w.abrirSelecaoAreasRelatorio();
+  assert.strictEqual(doc.getElementById('relAreasDescFuncional').checked, false);
+  assert.strictEqual(doc.getElementById('relAreasDescImpacto').checked, false);
+});
+
+test('descricoes: sem opcao nao ha linha; com as duas, linha embaixo do processo, vazia vira "Nao informada", HTML escapado', async () => {
+  const sem = await gerar();
+  assert.ok(!sem.paginas[0].includes('class="descricoes"'));
+  const html = (await gerar(['relAreasDescFuncional', 'relAreasDescImpacto'])).paginas[0];
+  const completo = texto(descricoesDoProcesso(html, 'Crítico completo'));
+  assert.match(completo, /Descrição funcional: Emite as notas/);
+  assert.match(completo, /Impacto da indisponibilidade: Para o faturamento/);
+  const vazia = descricoesDoProcesso(html, 'Crítico sem DRP');
+  assert.match(texto(vazia), /Descrição funcional: Não informada/);
+  assert.ok(vazia.includes('&lt;b&gt;forte&lt;/b&gt;') && !vazia.includes('<b>forte'));
+});
+
+test('descricoes: so a opcao marcada entra', async () => {
+  const html = (await gerar(['relAreasDescImpacto'])).paginas[0];
+  assert.match(html, /Impacto da indisponibilidade/);
+  assert.ok(!/Descrição funcional:/.test(html));
+});
+
+test('DRP: o relatorio carrega o catalogo sozinho (antes saia "Sem dependências")', async () => {
+  const ti = bloco((await gerar()).paginas[0], 'TI');
+  assert.deepStrictEqual(celulas(linhaDoProcesso(ti, 'Crítico completo')).slice(5), ['Avaliado', 'PCN v1', 'Completo']);
+  assert.deepStrictEqual(celulas(linhaDoProcesso(ti, 'Crítico sem DRP')).slice(5), ['Avaliado', 'Sem PCN', 'Sem DRP']);
+});
+
+test('resumo: totais, Tier, BIA, BCP e DRP/RTO das areas selecionadas', async () => {
+  const resumo = texto(resumoGeral((await gerar()).paginas[0]));
+  assert.match(resumo, /Processos 3 Áreas 2 Tier 1 2 Tier 2 0 Tier 3 1 Pendente 0/);
+  assert.match(resumo, /BIA 0 homologado\(s\) Não avaliados 0 Em avaliação 0 Avaliados a homologar 3/);
+  assert.match(resumo, /BCP \(PCN\) 2 sem PCN Dos quais Tier 1\/2 \(obrigatório\) 1 Com PCN 1/);
+  assert.match(resumo, /DRP e RTO 1 Tier 1\/2 sem DRP DRP parcial \(Tier 1\/2\) 0 DRP completo \(Tier 1\/2\) 1/);
+  assert.match(resumo, /Processos sem RTO definido 1/);
+});
+
+test('resumo: selecao parcial muda os numeros; alerta em destaque so quando ha', async () => {
+  const r = await carregar({ processos: PROC_DRP, areas: AREAS_DRP, dependencias: DEPS });
+  await r.w.abrirSelecaoAreasRelatorio();
+  r.w.selecionarTodasAreasRelatorio(false);
+  r.w.toggleAreaRelatorioSelecionada(r.w._relatorioAreasGrupos.findIndex((g) => g.nome === 'RH'), true);
+  await r.w.confirmarGerarRelatorioProcessosPorArea();
+  const sec = resumoGeral(r.paginas[0]);
+  assert.match(texto(sec), /Processos 1 Áreas 1/);
+  assert.ok(!sec.includes('class="alerta"'), 'Tier 3 com RTO: nada em vermelho');
+  const todas = resumoGeral((await gerar()).paginas[0]);
+  assert.ok(todas.includes('class="alerta"'), 'Tier 1 sem PCN fica em vermelho');
+});
+
+test('_indicadoresRelatorioAreas conta direto dos grupos', async () => {
+  const { w } = await carregar();
+  const grupos = w.__t.grupos([], PROC_DRP);
+  const ind = JSON.parse(JSON.stringify(w.__t.indicadores(grupos, { dependencias: DEPS, servicos: [] })));
+  assert.strictEqual(ind.total, 3);
+  assert.strictEqual(ind.areas, 2);
+  assert.strictEqual(ind.bcp.semPcn, 2);
+  assert.strictEqual(ind.bcp.semPcnCriticos, 1);
+  assert.strictEqual(ind.drp.criticos, 2);
+  assert.strictEqual(ind.drp['sem-drp'], 1);
+  assert.strictEqual(ind.drp.completo, 1);
+  assert.strictEqual(ind.semRto, 1);
 });
