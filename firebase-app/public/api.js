@@ -2973,6 +2973,11 @@ const API = {
     if (action === 'sugerirImpactoProcesso') {
       return _appApi('POST', 'sugerirImpactoProcesso', { id: body.id });
     }
+    // Demais sugestoes por IA da Continuidade (alvo: processo-funcional,
+    // dependencia-drp, servico-descricao, revisao-observacao). Nada grava.
+    if (action === 'sugerirTextoIA') {
+      return _appApi('POST', 'sugerirTextoIA', { alvo: body.alvo, id: body.id, tipo: body.tipo || '' });
+    }
     if (action === 'gerarResumoExecutivo') {
       return _appApi('POST', 'gerarResumoExecutivo', { tipo: body.tipo, indicadores: body.indicadores });
     }

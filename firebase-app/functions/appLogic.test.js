@@ -1538,3 +1538,171 @@ test('sugerirImpactoProcesso: sem chave, processo inexistente, formato invalido 
     await assert.rejects(() => WRITE_ACTIONS.sugerirImpactoProcesso(makeDb(seedImpacto({ perfis: ['admin'] })), { id: 'ti__backup' }, ctx({ geminiApiKey: 'k' })), /Erro na API do Gemini: quota/);
   } finally { g.restaurar(); }
 });
+
+// ---- Mais sugestoes por IA (sugerirTextoIA, 27/10/2026) ----
+const dadosDoPrompt = (g, marcador) => {
+  const prompt = g.chamadas[0].corpo.contents[0].parts[0].text;
+  return { prompt, dados: JSON.parse(prompt.slice(prompt.indexOf(marcador) + marcador.length)) };
+};
+
+async function pedirIA(seedObj, data, resposta) {
+  const db = makeDb(seedObj);
+  const g = capturarGemini(resposta === undefined ? JSON.stringify({ texto: 'Sugestão.' }) : resposta);
+  try {
+    const r = await WRITE_ACTIONS.sugerirTextoIA(db, data, ctx({ geminiApiKey: 'k' }));
+    return { r, g, db };
+  } finally { g.restaurar(); }
+}
+
+test('sugerirTextoIA: alvo desconhecido e recusado', async () => {
+  await assert.rejects(() => WRITE_ACTIONS.sugerirTextoIA(makeDb(seed()), { alvo: 'x', id: 'a' }, ctx({ geminiApiKey: 'k' })), /Sugestão inválida/);
+});
+
+test('sugerirTextoIA processo-funcional: mesmo recorte de quem edita; prompt sem notas/riscos; nada grava', async () => {
+  for (const [perfil, ok] of [[{ perfis: ['operador_processos'] }, true], [{ perfis: ['gestor'], area: 'TI' }, true], [{ perfis: ['gestor'], area: 'RH' }, false], [{ perfis: ['ti'] }, false]]) {
+    const p = pedirIA(seedImpacto(perfil), { alvo: 'processo-funcional', id: 'ti__backup' });
+    if (ok) assert.strictEqual((await p).r.texto, 'Sugestão.');
+    else await assert.rejects(() => p, /não pode editar este processo/, JSON.stringify(perfil));
+  }
+  const { g, db } = await pedirIA(seedImpacto({ perfis: ['admin'] }), { alvo: 'processo-funcional', id: 'ti__backup' });
+  const { prompt, dados } = dadosDoPrompt(g, 'DADOS DO PROCESSO (JSON):');
+  assert.match(prompt, /Descrição Funcional/);
+  assert.match(prompt, /NÃO fale de impacto/);
+  assert.strictEqual(dados.descricaoFuncional, 'Copia diária dos dados de clientes', 'texto atual vai no prompt');
+  assert.deepStrictEqual(dados.servicos.map((s) => s.nome), ['Portal']);
+  assert.deepStrictEqual(dados.fornecedores, ['Nuvem SA']);
+  assert.strictEqual(dados.impactoPorDimensao, undefined);
+  assert.strictEqual(dados.riscos, undefined);
+  assert.strictEqual(db._store.processos.ti__backup.descricaoFuncional, 'Copia diária dos dados de clientes', 'nada grava');
+});
+
+test('sugerirTextoIA processo-impacto: atalho para sugerirImpactoProcesso', async () => {
+  const { g } = await pedirIA(seedImpacto({ perfis: ['admin'] }), { alvo: 'processo-impacto', id: 'ti__backup' });
+  assert.match(g.chamadas[0].corpo.contents[0].parts[0].text, /Descrição do Impacto para Indisponibilidade/);
+});
+
+function seedDrp(perfis) {
+  const s = seed();
+  s.config_perfis['analista@fortestecnologia.com.br'] = { perfis };
+  s.dependencias = {
+    db1: {
+      nome: 'Banco ERP', categoria: 'Banco de Dados', detalhes: 'Base do ERP', estrategia: 'Backup em nuvem', rtoMin: 240, rpoMin: 60, responsavel: 'TI',
+      componentes: [{ id: 'srv', nome: 'SRV-01', categoria: 'Servidor' }],
+      drpDependencias: [{ id: 'f1', nome: 'Nuvem SA', categoria: 'Fornecedores' }],
+      drpRunbook: ['Restaurar o último backup'],
+      drpEstrategiasTeste: [{ cenario: 'Tabletop (Exercício de Mesa)', frequencia: 'Semestral' }],
+    },
+    srv: { nome: 'SRV-01', categoria: 'Servidor' },
+    app: { nome: 'ERP Web', categoria: 'Sistemas', componentes: [{ id: 'db1', nome: 'Banco ERP', categoria: 'Banco de Dados' }] },
+    f1: { nome: 'Nuvem SA', categoria: 'Fornecedores' },
+  };
+  s.servicos = { s1: { nome: 'Faturamento', dependenciaItens: [{ id: 'db1', nome: 'Banco ERP', categoria: 'Banco de Dados' }] } };
+  s.processos = { p1: { area: 'Financeiro', processo: 'Faturar', tierManual: 'Tier 1 (Crítico)', dependenciaItens: [{ categoria: 'Serviços', id: 's1', nome: 'Faturamento' }] } };
+  return s;
+}
+
+test('sugerirTextoIA dependencia-drp: Admin/SI/TI pedem; Operador de Processos e Gestor recusados', async () => {
+  const resp = JSON.stringify({ runbook: ['Subir o SRV-01'] });
+  for (const perfis of [['admin'], ['seguranca'], ['ti']]) {
+    const { r } = await pedirIA(seedDrp(perfis), { alvo: 'dependencia-drp', id: 'db1' }, resp);
+    assert.deepStrictEqual(r.listas.drpRunbook, ['Subir o SRV-01'], perfis[0]);
+  }
+  for (const perfis of [['operador_processos'], ['gestor']]) {
+    await assert.rejects(() => pedirIA(seedDrp(perfis), { alvo: 'dependencia-drp', id: 'db1' }, resp), /não pode operar o DRP/, perfis[0]);
+  }
+});
+
+test('sugerirTextoIA dependencia-drp: prompt com cadeia, processos e Tier; so itens novos; cenario fora da lista descartado', async () => {
+  const resp = JSON.stringify({
+    criteriosAcionamento: ['Banco fora do ar por mais de 1 hora', ' banco fora do ar  por mais de 1 hora ', ''],
+    runbook: ['restaurar o último backup', 'Validar integridade da base'],
+    limitacoes: 'nao e lista',
+    estrategiasTeste: [
+      { cenario: 'Tabletop (Exercício de Mesa)', frequencia: 'Semestral' },
+      { cenario: 'Full Failover Test (Teste Completo)', frequencia: 'Anual' },
+      { cenario: 'Teste inventado', frequencia: 'Mensal' },
+    ],
+  });
+  const { r, g, db } = await pedirIA(seedDrp(['ti']), { alvo: 'dependencia-drp', id: 'db1' }, resp);
+  const { prompt, dados } = dadosDoPrompt(g, 'DADOS DA DEPENDÊNCIA (JSON):');
+  assert.match(prompt, /NÃO repita o que já está em "jaCadastrado"/);
+  assert.deepStrictEqual(dados.processosQueDependem, [{ processo: 'Faturar', area: 'Financeiro', tier: 'Tier 1 (Crítico)', rto: '' }], 'pela cadeia (Servico)');
+  assert.deepStrictEqual(dados.servicosQueAUsam, ['Faturamento']);
+  assert.deepStrictEqual(dados.componentesDeQueDepende, ['Servidor: SRV-01']);
+  assert.deepStrictEqual(dados.itensQueDependemDela, ['Sistemas: ERP Web']);
+  assert.deepStrictEqual(dados.precisaParaRecuperar, ['Fornecedores: Nuvem SA']);
+  assert.strictEqual(dados.rtoMinutos, 240);
+  assert.deepStrictEqual(dados.jaCadastrado.runbook, ['Restaurar o último backup']);
+
+  assert.deepStrictEqual(r.listas.drpCriteriosAcionamento, ['Banco fora do ar por mais de 1 hora'], 'repetido e vazio saem');
+  assert.deepStrictEqual(r.listas.drpRunbook, ['Validar integridade da base'], 'o que ja esta cadastrado sai');
+  assert.deepStrictEqual(r.listas.drpLimitacoes, []);
+  assert.deepStrictEqual(r.estrategiasTeste, [{ cenario: 'Full Failover Test (Teste Completo)', frequencia: 'Anual' }]);
+  assert.deepStrictEqual(db._store.dependencias.db1.drpRunbook, ['Restaurar o último backup'], 'nada grava');
+});
+
+test('sugerirTextoIA dependencia-drp: resposta que nao e objeto vira erro de formato', async () => {
+  await assert.rejects(() => pedirIA(seedDrp(['admin']), { alvo: 'dependencia-drp', id: 'db1' }, '["x"]'), /fora do formato/);
+  await assert.rejects(() => pedirIA(seedDrp(['admin']), { alvo: 'dependencia-drp', id: 'nao' }, '{}'), /Dependência não encontrada/);
+});
+
+test('sugerirTextoIA servico-descricao: Admin/SI; prompt com composicao, processos suportados e stakeholders', async () => {
+  const s = seedDrp(['seguranca']);
+  s.servicos.s1.stakeholders = [{ id: 'pe1', nome: 'Ana' }];
+  s.servicos.s1.descricao = 'Emite notas';
+  const { r, g } = await pedirIA(s, { alvo: 'servico-descricao', id: 's1' });
+  assert.strictEqual(r.texto, 'Sugestão.');
+  const { dados } = dadosDoPrompt(g, 'DADOS DO SERVIÇO (JSON):');
+  assert.strictEqual(dados.descricaoAtual, 'Emite notas');
+  assert.deepStrictEqual(dados.composicao, [{ item: 'Banco de Dados: Banco ERP', papel: 'Base do ERP', componentes: ['Servidor: SRV-01'] }]);
+  assert.deepStrictEqual(dados.processosSuportados, [{ processo: 'Faturar', area: 'Financeiro', tier: 'Tier 1 (Crítico)' }]);
+  assert.deepStrictEqual(dados.stakeholders, ['Ana']);
+  for (const perfis of [['ti'], ['operador_processos']]) {
+    await assert.rejects(() => pedirIA(seedDrp(perfis), { alvo: 'servico-descricao', id: 's1' }), /não pode editar Serviços/, perfis[0]);
+  }
+});
+
+test('sugerirTextoIA revisao-observacao: perfil por tipo de plano', async () => {
+  for (const [perfis, tipo, ok] of [
+    [['operador_processos'], 'bia', true], [['operador_processos'], 'pcn', true], [['operador_processos'], 'drp', false],
+    [['ti'], 'drp', true], [['ti'], 'bia', false], [['gestor'], 'pcn', false],
+  ]) {
+    const p = pedirIA(seedDrp(perfis), { alvo: 'revisao-observacao', tipo, id: tipo === 'drp' ? 'db1' : 'p1' });
+    if (ok) assert.strictEqual((await p).r.texto, 'Sugestão.');
+    else await assert.rejects(() => p, /não registra revisão/, perfis[0] + ' ' + tipo);
+  }
+  await assert.rejects(() => pedirIA(seedDrp(['admin']), { alvo: 'revisao-observacao', tipo: 'x', id: 'p1' }), /Tipo de revisão inválido/);
+});
+
+test('sugerirTextoIA revisao-observacao: so o que veio depois da ultima revisao registrada', async () => {
+  const s = seedDrp(['admin']);
+  Object.assign(s.processos.p1, {
+    biaHistoricoRevisao: [{ ultimaEm: '2026-03-01', observacao: 'Conferido com o dono' }, { ultimaEm: '2026-06-10', aprovadoPor: 'Carla' }],
+    pcnHistoricoRevisao: [{ ultimaEm: '2026-06-10' }],
+    pcnSalvo: JSON.stringify([{ versao: 1, data: '2026-05-01T10:00:00Z', autor: 'a', html: '<p>x</p>' }, { versao: 2, data: '2026-08-01T10:00:00Z', autor: 'b', html: '<p>y</p>' }]),
+  });
+  s.respostas_bia = {
+    r1: { area: 'Financeiro', processo: 'Faturar', score: 5, timestamp: '2026-05-01T00:00:00Z' },
+    r2: { processoId: 'p1', area: 'Financeiro', processo: 'Faturar', score: 9, timestamp: '2026-09-01T00:00:00Z' },
+  };
+  s.dependencias.db1.drpHistoricoRevisao = [{ ultimaEm: '2026-07-01' }];
+  s.dependencias.db1.drpSalvo = JSON.stringify([{ versao: 3, data: '2026-08-15T00:00:00Z', autor: 'ti@x' }]);
+  s.dependencias.db1.drpRegistrosTeste = [{ data: '2026-06-01', resultado: 'Sucesso' }, { data: '2026-09-20', resultado: 'Parcial', pendencias: 'Ajustar DNS' }];
+
+  let { g } = await pedirIA(s, { alvo: 'revisao-observacao', tipo: 'bia', id: 'p1' });
+  let { prompt, dados } = dadosDoPrompt(g, 'DADOS (JSON):');
+  assert.match(prompt, /BIA \(Análise de Impacto\)/);
+  assert.deepStrictEqual(dados.ultimaRevisaoRegistrada, { data: '2026-06-10', aprovadoPor: 'Carla', observacao: '' }, 'a mais recente');
+  assert.deepStrictEqual(dados.respostasDesdeAUltimaRevisao.map((r) => r.data), ['2026-09-01'], 'a mesma resposta achada por duas chaves conta uma vez');
+  assert.strictEqual(dados.respostaAnteriorAUltimaRevisao.score, 5);
+
+  ({ g } = await pedirIA(s, { alvo: 'revisao-observacao', tipo: 'pcn', id: 'p1' }));
+  ({ dados } = dadosDoPrompt(g, 'DADOS (JSON):'));
+  assert.deepStrictEqual(dados.versoesDesdeAUltimaRevisao, [{ versao: 2, data: '2026-08-01', autor: 'b' }]);
+  assert.ok(!JSON.stringify(dados).includes('<p>'), 'o HTML do plano nao vai');
+
+  ({ g } = await pedirIA(s, { alvo: 'revisao-observacao', tipo: 'drp', id: 'db1' }));
+  ({ dados } = dadosDoPrompt(g, 'DADOS (JSON):'));
+  assert.deepStrictEqual(dados.versoesDesdeAUltimaRevisao.map((v) => v.versao), [3]);
+  assert.deepStrictEqual(dados.testesDesdeAUltimaRevisao, [{ data: '2026-09-20', resultado: 'Parcial', pendencias: 'Ajustar DNS' }]);
+});

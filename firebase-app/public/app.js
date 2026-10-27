@@ -2807,8 +2807,12 @@ async function processos() {
               </div>
             </div>
             <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição Funcional</label>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
+                <label for="fDescricaoFuncional" style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin:0;">Descrição Funcional</label>
+                ${_htmlBotaoSugerirIA('btnSugerirFuncional', 'sugerirFuncionalComIA()', { titulo: 'A IA escreve um rascunho com o que o sistema sabe do processo; você revisa antes de usar' })}
+              </div>
               <textarea id="fDescricaoFuncional" rows="4" placeholder="Descreva a função deste processo" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
+              <div id="sugestaoFuncional"></div>
             </div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Criticidade (Pré-Avaliação)</label>
@@ -2846,7 +2850,7 @@ async function processos() {
             <div style="margin-bottom:16px;">
               <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
                 <label for="fDescricao" style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin:0;">Descrição do Impacto para Indisponibilidade</label>
-                <button type="button" id="btnSugerirImpacto" class="btn btn-ghost" onclick="sugerirImpactoComIA()" style="padding:4px 10px;font-size:0.8em;color:#2e7d32;border-color:#2e7d32;display:none;" title="A IA escreve um rascunho com o que o sistema sabe do processo; você revisa antes de usar">🤖 Sugerir com IA</button>
+                ${_htmlBotaoSugerirIA('btnSugerirImpacto', 'sugerirImpactoComIA()', { titulo: 'A IA escreve um rascunho com o que o sistema sabe do processo; você revisa antes de usar' })}
               </div>
               <p style="font-size:0.78em;color:#888;margin-bottom:6px;">O que acontece se o processo parar? Pense nos impactos para clientes, financeiro, operação e reputação.</p>
               <textarea id="fDescricao" rows="3" placeholder="Ex: Clientes não recebem boletos, causando atraso no fluxo de caixa e reclamações..." style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
@@ -3947,11 +3951,13 @@ window.abrirModalProcesso = (p) => {
   if (resumoAval) resumoAval.innerHTML = '';
   const progAval = document.getElementById('avaliacaoProgresso');
   if (progAval) progAval.innerHTML = '';
-  // Sugestao de impacto por IA (27/10/2026): so para quem edita, processo salvo.
-  const sugestao = document.getElementById('sugestaoImpacto');
-  if (sugestao) sugestao.innerHTML = '';
-  const btnIA = document.getElementById('btnSugerirImpacto');
-  if (btnIA) btnIA.style.display = p && p.id && Perfis.podeEditarProcessos(window.USER_PERFIS) ? 'inline-block' : 'none';
+  // Sugestoes por IA (impacto e descricao funcional): so para quem edita, processo salvo.
+  const podeIA = !!(p && p.id && Perfis.podeEditarProcessos(window.USER_PERFIS));
+  [['sugestaoImpacto', 'btnSugerirImpacto'], ['sugestaoFuncional', 'btnSugerirFuncional']].forEach(([caixa, botao]) => {
+    descartarSugestaoIA(caixa);
+    const btn = document.getElementById(botao);
+    if (btn) btn.style.display = podeIA ? 'inline-block' : 'none';
+  });
   // Mostrar/ocultar botão Abrir PCN
   const btnPcnSalvo = document.getElementById('btnPcnSalvo');
   if (btnPcnSalvo) btnPcnSalvo.style.display = (p && p.pcnSalvo) ? 'inline-block' : 'none';
@@ -4134,47 +4140,103 @@ window.homologarBIA = async () => {
   });
 };
 
-/** "🤖 Sugerir com IA": a IA escreve um rascunho; aparece para revisao, nada e gravado. */
-window.sugerirImpactoComIA = async () => {
-  const id = (document.getElementById('fId') || {}).value || '';
-  const caixa = document.getElementById('sugestaoImpacto');
-  if (!id || !caixa) return showToast('Salve o processo antes de pedir a sugestão.', '#e65100');
-  return comBotaoCarregando('btnSugerirImpacto', async () => {
-    caixa.innerHTML = '<div class="sugestao-ia"><div class="sugestao-ia__titulo">⏳ A IA está escrevendo uma sugestão com o que o sistema sabe deste processo…</div></div>';
+// ============================================================
+// Sugestao por IA (27/10/2026): botao "🤖 Sugerir com IA" + caixa
+// .sugestao-ia para revisar. A IA so devolve o texto -- nada e gravado ate a
+// pessoa usar e salvar o formulario. Usado na Descricao do Impacto e na
+// Descricao Funcional do Processo, na Descricao do Servico e na Observacao de
+// "Registrar revisao". A variante com checkboxes (Parametros DRP) esta junto
+// das listas do DRP (sugerirParametrosDrpComIA).
+// ============================================================
+const _ESTILO_BOTAO_IA = 'padding:4px 10px;font-size:0.8em;color:#2e7d32;border-color:#2e7d32;';
+const _ESTILO_ACAO_IA = 'padding:4px 12px;font-size:0.82em;';
+
+function _htmlBotaoSugerirIA(idBotao, onclick, opts) {
+  const o = opts || {};
+  return `<button type="button" id="${idBotao}" class="btn btn-ghost" onclick="${onclick}" style="${_ESTILO_BOTAO_IA}${o.visivel ? '' : 'display:none;'}" title="${o.titulo || 'A IA escreve um rascunho com o que o sistema sabe; você revisa antes de usar'}">${o.rotulo || '🤖 Sugerir com IA'}</button>`;
+}
+
+/** Caixa "pensando..." enquanto a IA responde. */
+const _htmlSugestaoIACarregando = (msg) => `<div class="sugestao-ia"><div class="sugestao-ia__titulo">⏳ ${esc(msg)}</div></div>`;
+
+// Sugestao em exibicao por caixa: { idCaixa: { texto, idCampo } }.
+window._sugestoesIA = {};
+
+/**
+ * Pede o texto a IA e mostra na caixa `idCaixa` com "Usar este texto" (que
+ * preenche `idCampo`) e "Descartar". `acao`/`corpo` vao para API.post.
+ */
+function _sugerirTextoComIA({ acao, corpo, idBotao, idCaixa, idCampo, carregando, nota }) {
+  const caixa = document.getElementById(idCaixa);
+  if (!caixa) return Promise.resolve();
+  return comBotaoCarregando(idBotao, async () => {
+    caixa.innerHTML = _htmlSugestaoIACarregando(carregando || 'A IA está escrevendo uma sugestão…');
     try {
-      const r = await API.post('sugerirImpactoProcesso', { id });
-      window._sugestaoImpacto = String((r && r.texto) || '');
+      const r = await API.post(acao, corpo);
+      const texto = String((r && r.texto) || '');
+      window._sugestoesIA[idCaixa] = { texto, idCampo };
       caixa.innerHTML = `<div class="sugestao-ia" role="region" aria-label="Sugestão da IA">
           <div class="sugestao-ia__titulo">🤖 Sugestão da IA — revise antes de usar</div>
-          <div class="sugestao-ia__texto">${esc(window._sugestaoImpacto)}</div>
+          <div class="sugestao-ia__texto">${esc(texto)}</div>
           <div class="sugestao-ia__acoes">
-            <button type="button" class="btn btn-ghost" onclick="usarSugestaoImpacto()" style="padding:4px 12px;font-size:0.82em;color:#2e7d32;border-color:#2e7d32;">Usar este texto</button>
-            <button type="button" class="btn btn-ghost" onclick="descartarSugestaoImpacto()" style="padding:4px 12px;font-size:0.82em;">Descartar</button>
+            <button type="button" class="btn btn-ghost" onclick="usarSugestaoIA('${idCaixa}')" style="${_ESTILO_ACAO_IA}color:#2e7d32;border-color:#2e7d32;">Usar este texto</button>
+            <button type="button" class="btn btn-ghost" onclick="descartarSugestaoIA('${idCaixa}')" style="${_ESTILO_ACAO_IA}">Descartar</button>
           </div>
-          <div class="sugestao-ia__nota">Escrita a partir do questionário, Serviços, dependências, levantamento do PCN e riscos ligados. Confira antes de salvar.</div>
+          ${nota ? `<div class="sugestao-ia__nota">${esc(nota)}</div>` : ''}
         </div>`;
     } catch (e) {
       caixa.innerHTML = '';
       showToast('❌ ' + _mensagemErro(e, 'Não foi possível gerar a sugestão. Tente de novo.'), '#c62828');
     }
   });
-};
+}
 
-window.usarSugestaoImpacto = async () => {
-  const campo = document.getElementById('fDescricao');
-  const texto = window._sugestaoImpacto || '';
-  if (!campo || !texto) return;
+window.usarSugestaoIA = async (idCaixa) => {
+  const s = window._sugestoesIA[idCaixa];
+  const campo = s && document.getElementById(s.idCampo);
+  if (!campo || !s.texto) return;
   const atual = campo.value.trim();
-  if (atual && atual !== texto && !await confirmarAcao('Substituir a descrição atual pela sugestão da IA?')) return;
-  campo.value = texto;
-  descartarSugestaoImpacto();
+  if (atual && atual !== s.texto && !await confirmarAcao('Substituir o texto atual pela sugestão da IA?')) return;
+  campo.value = s.texto;
+  descartarSugestaoIA(idCaixa);
   campo.focus();
 };
 
-window.descartarSugestaoImpacto = () => {
-  const caixa = document.getElementById('sugestaoImpacto');
+window.descartarSugestaoIA = (idCaixa) => {
+  const caixa = document.getElementById(idCaixa);
   if (caixa) caixa.innerHTML = '';
-  window._sugestaoImpacto = '';
+  delete window._sugestoesIA[idCaixa];
+};
+
+/** Id do processo aberto no drawer; sem id (novo) avisa e devolve ''. */
+function _idProcessoParaIA() {
+  const id = (document.getElementById('fId') || {}).value || '';
+  if (!id) showToast('Salve o processo antes de pedir a sugestão.', '#e65100');
+  return id;
+}
+
+window.sugerirImpactoComIA = () => {
+  const id = _idProcessoParaIA();
+  if (!id) return;
+  return _sugerirTextoComIA({
+    acao: 'sugerirImpactoProcesso', corpo: { id },
+    idBotao: 'btnSugerirImpacto', idCaixa: 'sugestaoImpacto', idCampo: 'fDescricao',
+    carregando: 'A IA está escrevendo uma sugestão com o que o sistema sabe deste processo…',
+    nota: 'Escrita a partir do questionário, Serviços, dependências, levantamento do PCN e riscos ligados. Confira antes de salvar.',
+  });
+};
+window.usarSugestaoImpacto = () => usarSugestaoIA('sugestaoImpacto');
+window.descartarSugestaoImpacto = () => descartarSugestaoIA('sugestaoImpacto');
+
+window.sugerirFuncionalComIA = () => {
+  const id = _idProcessoParaIA();
+  if (!id) return;
+  return _sugerirTextoComIA({
+    acao: 'sugerirTextoIA', corpo: { alvo: 'processo-funcional', id },
+    idBotao: 'btnSugerirFuncional', idCaixa: 'sugestaoFuncional', idCampo: 'fDescricaoFuncional',
+    carregando: 'A IA está escrevendo a descrição com o que o sistema sabe deste processo…',
+    nota: 'Escrita a partir da área, Serviços, dependências e levantamento do PCN. Confira antes de salvar.',
+  });
 };
 
 window.editarProcesso = (id) => {
@@ -5077,6 +5139,104 @@ window.removerDrpEstrategiaTeste = (idx) => {
   renderDrpEstrategiasTeste();
 };
 
+// ---- "🤖 Sugerir parâmetros com IA" (27/10/2026) ----
+// Variante com checkboxes da sugestao por IA: a IA devolve itens por lista
+// (sugerirTextoIA alvo 'dependencia-drp'), a caixa mostra marcados e
+// "Adicionar selecionados" so acrescenta nas listas da tela -- grava no
+// Salvar da dependencia, como um item digitado.
+const _TITULOS_LISTAS_DRP_IA = {
+  drpCriteriosAcionamento: 'Critérios de acionamento',
+  drpPreRequisitos: 'Pré-requisitos',
+  drpHealthCheck: 'Health Check',
+  drpRunbook: 'Runbook de restore',
+  drpCriteriosRetorno: 'Critérios de retorno',
+  drpLimitacoes: 'Limitações conhecidas',
+};
+window._sugestaoDrp = null;
+
+const _chaveItemDrp = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+const _chaveEstrategiaDrp = (e) => _chaveItemDrp(e && e.cenario) + '|' + _chaveItemDrp(e && e.frequencia);
+
+function _htmlSugestaoDrp(s) {
+  const item = (tipo, campo, i, texto) => `<label class="sugestao-ia__item"><input type="checkbox" checked data-sugestao-drp="${tipo}" data-campo="${campo}" data-idx="${i}"><span>${esc(texto)}</span></label>`;
+  const secoes = Object.keys(_TITULOS_LISTAS_DRP_IA).filter((c) => s.listas[c].length).map((c) => `
+    <div class="sugestao-ia__secao"><div class="sugestao-ia__secao-titulo">${esc(_TITULOS_LISTAS_DRP_IA[c])}</div>
+      ${s.listas[c].map((t, i) => item('lista', c, i, t)).join('')}</div>`);
+  if (s.estrategiasTeste.length) {
+    secoes.push(`<div class="sugestao-ia__secao"><div class="sugestao-ia__secao-titulo">Estratégias de teste</div>
+      ${s.estrategiasTeste.map((e, i) => item('estrategia', '', i, `${e.cenario}${e.frequencia ? ' — ' + e.frequencia : ''}`)).join('')}</div>`);
+  }
+  if (!secoes.length) {
+    return `<div class="sugestao-ia" role="region" aria-label="Sugestão da IA">
+      <div class="sugestao-ia__titulo">🤖 A IA não encontrou nada novo a sugerir com os dados cadastrados</div>
+      <div class="sugestao-ia__acoes"><button type="button" class="btn btn-ghost" onclick="descartarSugestaoDrp()" style="${_ESTILO_ACAO_IA}">Fechar</button></div>
+    </div>`;
+  }
+  return `<div class="sugestao-ia" role="region" aria-label="Sugestão da IA">
+      <div class="sugestao-ia__titulo">🤖 Sugestões da IA — marque o que entra nas listas</div>
+      ${secoes.join('')}
+      <div class="sugestao-ia__acoes">
+        <button type="button" class="btn btn-ghost" onclick="adicionarSugestoesDrp()" style="${_ESTILO_ACAO_IA}color:#2e7d32;border-color:#2e7d32;">Adicionar selecionados</button>
+        <button type="button" class="btn btn-ghost" onclick="descartarSugestaoDrp()" style="${_ESTILO_ACAO_IA}">Descartar</button>
+      </div>
+      <div class="sugestao-ia__nota">Escritas a partir da categoria, componentes, estratégia, RTO/RPO e dos processos que dependem desta dependência. Os itens entram nas listas abaixo; nada é gravado até Salvar.</div>
+    </div>`;
+}
+
+window.sugerirParametrosDrpComIA = () => {
+  const id = document.getElementById('depId').value;
+  const caixa = document.getElementById('sugestaoDrp');
+  if (!caixa) return;
+  if (!id) return showToast('Salve a dependência antes de pedir a sugestão.', '#e65100');
+  return comBotaoCarregando('btnSugerirDrp', async () => {
+    caixa.innerHTML = _htmlSugestaoIACarregando('A IA está sugerindo os parâmetros com o que o sistema sabe desta dependência…');
+    try {
+      const r = await API.post('sugerirTextoIA', { alvo: 'dependencia-drp', id });
+      // O servidor tira o que ja esta gravado; aqui sai tambem o que foi
+      // digitado na tela e ainda nao salvo.
+      const listas = {};
+      Object.keys(_TITULOS_LISTAS_DRP_IA).forEach((c) => {
+        const ja = new Set((window._depDrpListas[c] || []).map(_chaveItemDrp));
+        listas[c] = (((r && r.listas) || {})[c] || []).map(String).filter((t) => t.trim() && !ja.has(_chaveItemDrp(t)));
+      });
+      const jaEstr = new Set((window._depDrpEstrategias || []).map(_chaveEstrategiaDrp));
+      const estrategiasTeste = ((r && r.estrategiasTeste) || []).filter((e) => e && e.cenario && !jaEstr.has(_chaveEstrategiaDrp(e)));
+      window._sugestaoDrp = { listas, estrategiasTeste };
+      caixa.innerHTML = _htmlSugestaoDrp(window._sugestaoDrp);
+    } catch (e) {
+      caixa.innerHTML = '';
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível gerar a sugestão. Tente de novo.'), '#c62828');
+    }
+  });
+};
+
+window.adicionarSugestoesDrp = () => {
+  const s = window._sugestaoDrp;
+  if (!s) return;
+  const marcados = [...document.querySelectorAll('#sugestaoDrp input[data-sugestao-drp]:checked')];
+  if (!marcados.length) return showToast('Marque ao menos um item.', '#e65100');
+  const mexidas = new Set();
+  marcados.forEach((cb) => {
+    const i = Number(cb.dataset.idx);
+    if (cb.dataset.sugestaoDrp === 'estrategia') {
+      const e = s.estrategiasTeste[i];
+      if (e) { window._depDrpEstrategias.push({ cenario: e.cenario, frequencia: e.frequencia || '' }); mexidas.add('estrategias'); }
+    } else {
+      const t = (s.listas[cb.dataset.campo] || [])[i];
+      if (t) { window._depDrpListas[cb.dataset.campo].push(t); mexidas.add(cb.dataset.campo); }
+    }
+  });
+  mexidas.forEach((c) => (c === 'estrategias' ? renderDrpEstrategiasTeste() : renderDrpLista(c)));
+  descartarSugestaoDrp();
+  showToast(`✅ ${marcados.length} ${marcados.length === 1 ? 'item adicionado' : 'itens adicionados'} — salve a dependência para gravar.`, '#2e7d32');
+};
+
+window.descartarSugestaoDrp = () => {
+  const caixa = document.getElementById('sugestaoDrp');
+  if (caixa) caixa.innerHTML = '';
+  window._sugestaoDrp = null;
+};
+
 // ============================================================
 // Aba "Gestão de Testes" -- seção "Roteiros de Teste": documento gerado via
 // IA (Gemini) a partir do DRP já gerado da dependência, um por tipo de teste
@@ -5835,6 +5995,10 @@ function _htmlDrawerDependencia() {
           </div>
 
           <div id="painel-dep-drp" style="display:none;">
+            <div style="display:flex;justify-content:flex-end;">
+              ${_htmlBotaoSugerirIA('btnSugerirDrp', 'sugerirParametrosDrpComIA()', { rotulo: '🤖 Sugerir parâmetros com IA', titulo: 'A IA sugere itens para as listas abaixo com o que o sistema sabe desta dependência; você escolhe o que entra' })}
+            </div>
+            <div id="sugestaoDrp" style="margin-bottom:12px;"></div>
             <div id="depSlasContratados"></div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-bottom:6px;">
               ${_htmlCampoDuracao('depRto', 'RTO', 'Tempo para voltar a funcionar')}
@@ -5963,6 +6127,9 @@ window.abrirDrawerDependencia = (d) => {
   renderDrpEstrategiasTeste();
   renderDrpRoteirosTeste();
   renderDrpRegistrosTeste();
+  // Sugestao dos parametros por IA: quem opera o DRP, dependencia salva.
+  descartarSugestaoDrp();
+  document.getElementById('btnSugerirDrp').style.display = d && d.id && Perfis.podeOperarDRP(window.USER_PERFIS) ? 'inline-block' : 'none';
   // Aba "Plano de Recuperação": template importado + preview do DRP salvo.
   window._depDrpTemplate = d && d.drpTemplate ? String(d.drpTemplate) : '';
   window._depDrpTemplateNome = d && d.drpTemplateNome ? String(d.drpTemplateNome) : '';
@@ -8596,8 +8763,12 @@ function _htmlDrawerServico() {
               <input type="text" id="servicoNome" placeholder="Ex: Serviço de E-mail Corporativo" style="${inp}">
             </div>
             <div style="margin-bottom:16px;">
-              <label style="${lbl}">Descrição</label>
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
+                <label for="servicoDescricao" style="${lbl}margin:0;">Descrição</label>
+                ${_htmlBotaoSugerirIA('btnSugerirServico', 'sugerirDescricaoServicoComIA()', { titulo: 'A IA escreve um rascunho com a composição, os processos suportados e os stakeholders; você revisa antes de usar' })}
+              </div>
               <textarea id="servicoDescricao" rows="3" placeholder="O que esse serviço entrega, para quem" style="${inp}resize:vertical;font-family:inherit;"></textarea>
+              <div id="sugestaoServico"></div>
             </div>
             <div style="margin-bottom:6px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
               ${_htmlCampoDuracao('servicoRto', 'RTO', 'Tempo para voltar a funcionar', '_renderComposicaoServico()')}
@@ -8684,6 +8855,9 @@ window.abrirDrawerServico = (id) => {
   document.getElementById('servicoNome').value = s ? (s.nome || '') : '';
   document.getElementById('servicoDescricao').value = s ? (s.descricao || '') : '';
   document.getElementById('servicoDrawerTitulo').textContent = s ? 'Editar Serviço' : 'Novo Serviço';
+  // Sugestao da descricao por IA: quem edita Servicos (Admin/SI), servico salvo.
+  descartarSugestaoIA('sugestaoServico');
+  document.getElementById('btnSugerirServico').style.display = s && (Perfis.ehAdmin(window.USER_PERFIS) || Perfis.ehSeguranca(window.USER_PERFIS)) ? 'inline-block' : 'none';
 
   window._servicoDependencias = s && Array.isArray(s.dependenciaItens) ? [...s.dependenciaItens] : [];
   _preencherCampoDuracao('servicoRto', s ? s.rtoMin : null, '');
@@ -8784,6 +8958,17 @@ window.fecharDrawerServico = () => _fecharComRastreador({
 });
 
 const _edServico = criarRastreadorEdicao(() => _coletarFormularioServico());
+
+window.sugerirDescricaoServicoComIA = () => {
+  const id = document.getElementById('servicoId').value;
+  if (!id) return showToast('Salve o serviço antes de pedir a sugestão.', '#e65100');
+  return _sugerirTextoComIA({
+    acao: 'sugerirTextoIA', corpo: { alvo: 'servico-descricao', id },
+    idBotao: 'btnSugerirServico', idCaixa: 'sugestaoServico', idCampo: 'servicoDescricao',
+    carregando: 'A IA está escrevendo a descrição com o que o sistema sabe deste serviço…',
+    nota: 'Escrita a partir da composição salva, dos processos suportados e dos stakeholders. Confira antes de salvar.',
+  });
+};
 
 function _coletarFormularioServico() {
   return {
@@ -24912,14 +25097,30 @@ window.abrirDrawerRevisao = (tipo, id) => {
     <input type="date" id="revData" style="${inp}" max="${hoje}" value="${hoje}">
     <label style="${lbl}margin-top:14px;" for="revAprovador">Aprovado por</label>
     <input type="text" id="revAprovador" style="${inp}" placeholder="Ex.: dono do processo" value="${esc((rev && rev.aprovadoPor) || '')}">
-    <label style="${lbl}margin-top:14px;" for="revObs">Observação</label>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-top:14px;margin-bottom:5px;">
+      <label style="${lbl}margin:0;" for="revObs">Observação</label>
+      ${_htmlBotaoSugerirIA('btnSugerirRevisao', 'sugerirObservacaoRevisaoComIA()', { visivel: true, titulo: 'A IA resume o que mudou desde a última revisão registrada; você revisa antes de usar' })}
+    </div>
     <textarea id="revObs" rows="3" style="${inp}resize:vertical;" placeholder="O que foi conferido"></textarea>
+    <div id="sugestaoRevisao"></div>
     <div style="${lbl}margin-top:22px;">Histórico</div>
     ${hist.length
       ? `<ul style="margin:0 0 0 18px;padding:0;font-size:0.84em;line-height:1.7;">${hist.slice(0, 10).map((h) => `<li>${esc(dataBR(h.ultimaEm))} · ${esc(h.revisadoPor || '')}${h.aprovadoPor ? ` · aprovado por ${esc(h.aprovadoPor)}` : ''}${h.observacao ? `<div style="color:#888;">${esc(h.observacao)}</div>` : ''}</li>`).join('')}</ul>`
       : '<p class="vazio-inline">Nenhuma revisão registrada.</p>'}`;
   document.getElementById('drawerRevisao').classList.add('open');
   document.getElementById('drawerOverlayRevisao').classList.add('open');
+};
+
+window.sugerirObservacaoRevisaoComIA = () => {
+  const tipo = document.getElementById('revTipo').value;
+  return _sugerirTextoComIA({
+    acao: 'sugerirTextoIA', corpo: { alvo: 'revisao-observacao', tipo, id: document.getElementById('revId').value },
+    idBotao: 'btnSugerirRevisao', idCaixa: 'sugestaoRevisao', idCampo: 'revObs',
+    carregando: 'A IA está resumindo o que mudou desde a última revisão…',
+    nota: tipo === 'bia'
+      ? 'Escrita a partir das respostas do questionário e da homologação desde a última revisão registrada.'
+      : `Escrita a partir das versões ${tipo === 'drp' ? 'do DRP e dos testes registrados' : 'do PCN'} desde a última revisão registrada.`,
+  });
 };
 
 window.fecharDrawerRevisao = () => {

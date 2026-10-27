@@ -632,3 +632,8 @@ button.selo-plano:hover { filter: brightness(0.96); }
 .sugestao-ia__texto { font-size: 13px; color: #222; line-height: 1.5; white-space: pre-wrap; }
 .sugestao-ia__acoes { display: flex; gap: 8px; margin-top: 8px; }
 .sugestao-ia__nota { font-size: 11px; color: var(--ink-muted); margin-top: 6px; }
+/* Variante com checkboxes (Parametros DRP): itens agrupados por lista, a pessoa marca o que entra. */
+.sugestao-ia__secao { margin-top: 8px; }
+.sugestao-ia__secao-titulo { font-size: 11px; font-weight: 700; color: #444; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; }
+.sugestao-ia__item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #222; line-height: 1.45; padding: 2px 0; cursor: pointer; }
+.sugestao-ia__item input { margin-top: 3px; flex-shrink: 0; }

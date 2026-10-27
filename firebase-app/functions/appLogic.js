@@ -1921,9 +1921,10 @@ DADOS DO PROCESSO (JSON):
 ${JSON.stringify(dados)}`;
 }
 
-async function sugerirImpactoProcesso(db, data, ctx) {
+/** Processo que quem pede pode editar (PERFIS_PCN ou gestor da area), com a chave da IA configurada. */
+async function _processoEditavelParaIA(db, data, ctx) {
   const id = exigir(data.id, 'id');
-  const snap = await db.collection(COLLECTION.processos).doc(id).get();
+  const snap = await db.collection(COLLECTION.processos).doc(String(id)).get();
   if (!snap.exists) throw new AppError('Processo não encontrado.');
   const p = { id: snap.id, ...(snap.data() || {}) };
 
@@ -1931,7 +1932,11 @@ async function sugerirImpactoProcesso(db, data, ctx) {
   const pode = perfis.some((x) => PERFIS_PCN.includes(x)) || (perfis.includes('gestor') && area && area === p.area);
   if (!pode) throw new AppError('Seu perfil não pode editar este processo.');
   if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
+  return p;
+}
 
+/** O que o sistema sabe do processo, para os prompts de sugestao (impacto e descricao funcional). */
+async function _dadosProcessoIA(db, p) {
   const [resposta, depsSnap, servicos, riscosSnap] = await Promise.all([
     _ultimaRespostaBia(db, p, p.id),
     db.collection(COLLECTION.dependencias).get(),
@@ -1967,11 +1972,372 @@ async function sugerirImpactoProcesso(db, data, ctx) {
     levantamentoPCN: lev,
     riscos: riscosSnap.docs.map((d) => d.data() || {}).filter((r) => r.status !== 'Encerrado').slice(0, 10).map((r) => r.titulo).filter(Boolean),
   };
+  return dados;
+}
 
-  const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptImpactoProcesso(dados), 'a sugestão de impacto', { maxOutputTokens: 1024 });
-  const texto = String((json && json.texto) || '').trim().slice(0, 2000);
+/** Texto unico da resposta da IA ({"texto": ...}); vazio vira erro de formato. */
+function _textoDaRespostaIA(json, max) {
+  const texto = String((json && json.texto) || '').trim().slice(0, max || 2000);
   if (!texto) throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
-  return { success: true, texto };
+  return texto;
+}
+
+async function sugerirImpactoProcesso(db, data, ctx) {
+  const p = await _processoEditavelParaIA(db, data, ctx);
+  const dados = await _dadosProcessoIA(db, p);
+  const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptImpactoProcesso(dados), 'a sugestão de impacto', { maxOutputTokens: 1024 });
+  return { success: true, texto: _textoDaRespostaIA(json) };
+}
+
+// ============================================================
+// Mais sugestoes por IA na Continuidade (27/10/2026), mesmo molde da do
+// impacto: a IA escreve um rascunho com o que o sistema sabe, a tela mostra
+// para revisao e so grava quando a pessoa usa (e salva). Uma acao so,
+// sugerirTextoIA({ alvo, id, tipo }), com um registro por alvo -- cada um
+// confere o proprio perfil, igual a quem pode editar aquele campo:
+//   processo-funcional  Descricao Funcional do Processo (quem edita o processo)
+//   processo-impacto    Descricao do Impacto (= sugerirImpactoProcesso)
+//   dependencia-drp     itens das listas dos Parametros DRP (Admin, SI, TI)
+//   servico-descricao   Descricao do Servico (Admin, SI -- regra de /servicos)
+//   revisao-observacao  Observacao de "Registrar revisao" (bia/pcn/drp)
+// ============================================================
+
+const _REGRAS_SUGESTAO_IA = `REGRAS:
+- Use SOMENTE os dados do JSON. Não invente clientes, valores em R$, prazos legais, sistemas, fornecedores ou pessoas que não estejam nele.
+- Quando faltar dado para um ponto, não fale dele.
+- Português do Brasil, direto, sem rodeios.
+- Texto puro: sem markdown, sem HTML, sem emojis.`;
+
+function _promptFuncionalProcesso(dados) {
+  return `Você é um analista de continuidade de negócios (ISO 22301) da Fortes Tecnologia e ajuda o dono de um processo a preencher o cadastro.
+
+Escreva a "Descrição Funcional" do processo abaixo: o que ele faz, para quem (cliente interno ou externo), o que recebe e o que entrega, e com o que trabalha (Serviços, sistemas, fornecedores, outros processos). NÃO fale de impacto de parada — isso é outro campo.
+
+${_REGRAS_SUGESTAO_IA}
+- De 2 a 5 frases, sem listas, começando pelo propósito do processo.
+- "descricaoFuncional" é o texto atual (pode estar vazio): se houver, aproveite o que ele diz e complete com os dados.
+- Os textos do levantamento PCN foram escritos pelo dono do processo: são a melhor fonte para entradas, entregas e funções.
+
+FORMATO DA RESPOSTA (JSON):
+{"texto": "a descrição funcional"}
+
+DADOS DO PROCESSO (JSON):
+${JSON.stringify(dados)}`;
+}
+
+async function _sugerirFuncionalProcesso(db, data, ctx) {
+  const p = await _processoEditavelParaIA(db, data, ctx);
+  const dados = await _dadosProcessoIA(db, p);
+  delete dados.impactoPorDimensao;
+  delete dados.riscos;
+  const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptFuncionalProcesso(dados), 'a sugestão de descrição', { maxOutputTokens: 1024 });
+  return { success: true, texto: _textoDaRespostaIA(json) };
+}
+
+// ---- Parametros DRP da dependencia ----
+
+/** Mesmo vocabulario de DRP_CENARIOS_TESTE (public/app.js): cenario fora dele e descartado. */
+const DRP_CENARIOS_TESTE = [
+  'Tabletop (Exercício de Mesa)',
+  'Teste Funcional (testa partes específicas do sistema)',
+  'Teste Paralelo (ambiente de recuperação ativado em paralelo)',
+  'Full Failover Test (Teste Completo)',
+];
+
+/** Chave da resposta da IA -> campo da dependencia (as listas da aba Parametros DRP). */
+const LISTAS_DRP_IA = {
+  criteriosAcionamento: 'drpCriteriosAcionamento',
+  preRequisitos: 'drpPreRequisitos',
+  healthCheck: 'drpHealthCheck',
+  runbook: 'drpRunbook',
+  criteriosRetorno: 'drpCriteriosRetorno',
+  limitacoes: 'drpLimitacoes',
+};
+const MAX_ITENS_LISTA_DRP_IA = 6;
+
+const _chaveItemIA = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+function _promptParametrosDrp(dados) {
+  return `Você é um especialista em recuperação de desastres (ISO 22301, NIST SP 800-34) da Fortes Tecnologia e ajuda a equipe de TI a preencher os parâmetros do DRP de um componente.
+
+Sugira itens para cada lista dos parâmetros do DRP da dependência abaixo:
+- criteriosAcionamento: quando acionar o DRP (sintoma + tempo, coerente com o RTO).
+- preRequisitos: o que precisa estar pronto antes de recuperar (backups, acessos, credenciais, ambiente).
+- healthCheck: perguntas/verificações de diagnóstico antes e durante a recuperação.
+- runbook: passos de recuperação, na ordem de execução, coerentes com a estratégia de contingência e com os componentes de que ela depende.
+- criteriosRetorno: como confirmar que voltou ao normal (testes, conciliação, validação com os processos que dependem dela).
+- limitacoes: limitações conhecidas da estratégia (só as que os dados sustentam).
+- estrategiasTeste: cenários de teste com frequência. "cenario" tem que ser EXATAMENTE um destes: ${JSON.stringify(dados.cenariosPermitidos)}. A frequência segue o Tier mais crítico dos processos que dependem dela (Tier 1: trimestral ou semestral; Tier 2: semestral; Tier 3: anual) e o tipo de teste (Full Failover é menos frequente que Tabletop).
+
+${_REGRAS_SUGESTAO_IA}
+- Cada item é uma frase curta e acionável (até 200 caracteres), sem numeração.
+- No máximo ${MAX_ITENS_LISTA_DRP_IA} itens por lista; lista sem base nos dados fica vazia.
+- NÃO repita o que já está em "jaCadastrado" — sugira só o que falta.
+- Seja genérico quando não souber o produto exato (ex.: "Restaurar o banco a partir do último backup íntegro"), nunca invente nomes de ferramentas.
+
+FORMATO DA RESPOSTA (JSON):
+{"criteriosAcionamento": ["..."], "preRequisitos": ["..."], "healthCheck": ["..."], "runbook": ["..."], "criteriosRetorno": ["..."], "limitacoes": ["..."], "estrategiasTeste": [{"cenario": "...", "frequencia": "..."}]}
+
+DADOS DA DEPENDÊNCIA (JSON):
+${JSON.stringify(dados)}`;
+}
+
+async function _dadosDependenciaDrpIA(db, id) {
+  const snap = await db.collection(COLLECTION.dependencias).doc(String(id)).get();
+  if (!snap.exists) throw new AppError('Dependência não encontrada.');
+  const dep = snap.data() || {};
+  const [catSnap, procSnap, servicos] = await Promise.all([
+    db.collection(COLLECTION.dependencias).get(),
+    db.collection(COLLECTION.processos).get(),
+    _lerServicos(db),
+  ]);
+  const catalogo = catSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const processos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const ligados = _processosLigadosADependencia(String(id), dep.nome, dep.categoria, processos, { servicos, dependencias: catalogo });
+  const processosComTier = await Promise.all(ligados.slice(0, 20).map(async (p) => ({
+    processo: p.processo || '', area: p.area || '',
+    tier: _tierProcessoServidor(await _scoreDoProcesso(db, p, p.id), p.tierManual),
+    rto: p.rto || '',
+  })));
+  const nomeItem = (x) => [x && x.categoria, x && x.nome].filter(Boolean).join(': ');
+  const acimaDela = catalogo.filter((d) => Array.isArray(d.componentes) && d.componentes.some((c) => c && String(c.id) === String(id))).map(nomeItem);
+  const minutos = (campo) => { const v = dep[campo + 'Min']; return typeof v === 'number' && Number.isFinite(v) ? v : null; };
+
+  const jaCadastrado = {};
+  Object.entries(LISTAS_DRP_IA).forEach(([chave, campo]) => { jaCadastrado[chave] = Array.isArray(dep[campo]) ? dep[campo].slice(0, 30) : []; });
+  jaCadastrado.estrategiasTeste = Array.isArray(dep.drpEstrategiasTeste) ? dep.drpEstrategiasTeste.map((e) => ({ cenario: e.cenario || '', frequencia: e.frequencia || '' })) : [];
+
+  return {
+    dep,
+    dados: {
+      nome: dep.nome || '',
+      categoria: dep.categoria || '',
+      papel: String(dep.detalhes || '').slice(0, 800),
+      estrategiaContingencia: dep.estrategia || '',
+      rto: dep.rto || '', rpo: dep.rpo || '',
+      rtoMinutos: minutos('rto'), rpoMinutos: minutos('rpo'), mttrMinutos: minutos('mttr'),
+      areaResponsavel: dep.responsavel || '',
+      componentesDeQueDepende: (Array.isArray(dep.componentes) ? dep.componentes : []).map(nomeItem).filter(Boolean),
+      precisaParaRecuperar: (Array.isArray(dep.drpDependencias) ? dep.drpDependencias : []).map(nomeItem).filter(Boolean),
+      itensQueDependemDela: acimaDela,
+      servicosQueAUsam: servicos.filter((s) => Array.isArray(s.dependenciaItens) && s.dependenciaItens.some((it) => it && String(it.id) === String(id))).map((s) => s.nome).filter(Boolean),
+      processosQueDependem: processosComTier,
+      cenariosPermitidos: DRP_CENARIOS_TESTE,
+      jaCadastrado,
+    },
+  };
+}
+
+async function _sugerirParametrosDrp(db, data, ctx) {
+  if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não pode operar o DRP.');
+  const id = exigir(data.id, 'id');
+  if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
+  const { dep, dados } = await _dadosDependenciaDrpIA(db, id);
+
+  const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptParametrosDrp(dados), 'a sugestão dos parâmetros do DRP');
+  if (!json || typeof json !== 'object' || Array.isArray(json)) throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
+
+  // So o que e novo: item repetido (na resposta ou ja cadastrado) fica de fora.
+  const listas = {};
+  Object.entries(LISTAS_DRP_IA).forEach(([chave, campo]) => {
+    const vistos = new Set((Array.isArray(dep[campo]) ? dep[campo] : []).map(_chaveItemIA));
+    listas[campo] = (Array.isArray(json[chave]) ? json[chave] : [])
+      .map((x) => String(x == null ? '' : x).trim().slice(0, 300))
+      .filter((x) => x && !vistos.has(_chaveItemIA(x)) && vistos.add(_chaveItemIA(x)))
+      .slice(0, MAX_ITENS_LISTA_DRP_IA);
+  });
+  const vistasEstr = new Set((Array.isArray(dep.drpEstrategiasTeste) ? dep.drpEstrategiasTeste : []).map((e) => _chaveItemIA(e && e.cenario) + '|' + _chaveItemIA(e && e.frequencia)));
+  const estrategiasTeste = (Array.isArray(json.estrategiasTeste) ? json.estrategiasTeste : [])
+    .filter((e) => e && DRP_CENARIOS_TESTE.includes(String(e.cenario || '').trim()))
+    .map((e) => ({ cenario: String(e.cenario).trim(), frequencia: String(e.frequencia || '').trim().slice(0, 60) }))
+    .filter((e) => { const k = _chaveItemIA(e.cenario) + '|' + _chaveItemIA(e.frequencia); return !vistasEstr.has(k) && vistasEstr.add(k); })
+    .slice(0, DRP_CENARIOS_TESTE.length);
+
+  return { success: true, listas, estrategiasTeste };
+}
+
+// ---- Descricao do Servico ----
+
+function _promptDescricaoServico(dados) {
+  return `Você é um analista de continuidade de negócios (ISO 22301) da Fortes Tecnologia e ajuda a manter o catálogo de Serviços de TI.
+
+Escreva a "Descrição" do Serviço abaixo: o que ele entrega, para quem (processos e áreas que o usam) e, em linhas gerais, do que é composto.
+
+${_REGRAS_SUGESTAO_IA}
+- De 2 a 4 frases, sem listas, começando pelo que o serviço entrega.
+- "descricaoAtual" é o texto atual (pode estar vazio): se houver, aproveite o que ele diz.
+- Não cite RTO/RPO/MTTR em números; no máximo diga se o serviço suporta processos críticos (Tier 1).
+
+FORMATO DA RESPOSTA (JSON):
+{"texto": "a descrição"}
+
+DADOS DO SERVIÇO (JSON):
+${JSON.stringify(dados)}`;
+}
+
+async function _sugerirDescricaoServico(db, data, ctx) {
+  await _exigirPerfil(db, ctx.email, ['admin', 'seguranca'], 'Seu perfil não pode editar Serviços.');
+  const id = exigir(data.id, 'id');
+  if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
+  const snap = await db.collection(COLLECTION.servicos).doc(String(id)).get();
+  if (!snap.exists) throw new AppError('Serviço não encontrado.');
+  const s = { id: snap.id, ...(snap.data() || {}) };
+
+  const [catSnap, procSnap] = await Promise.all([db.collection(COLLECTION.dependencias).get(), db.collection(COLLECTION.processos).get()]);
+  const catalogo = catSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const processos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const doCatalogo = (it) => (it && it.id != null ? catalogo.find((d) => String(d.id) === String(it.id)) : null);
+  const itens = Array.isArray(s.dependenciaItens) ? s.dependenciaItens : [];
+  // Processos suportados: o vinculo mora no processo (item 'Servicos'); processoIds antigo ainda conta.
+  const idsAntigos = (Array.isArray(s.processoIds) ? s.processoIds : []).map((x) => String(x && x.id != null ? x.id : x));
+  const suportados = processos.filter((p) => idsAntigos.includes(String(p.id)) || (Array.isArray(p.dependenciaItens) && p.dependenciaItens.some((it) => it && it.categoria === 'Serviços' && String(it.id) === String(s.id))));
+  const processosSuportados = await Promise.all(suportados.slice(0, 20).map(async (p) => ({
+    processo: p.processo || '', area: p.area || '',
+    tier: _tierProcessoServidor(await _scoreDoProcesso(db, p, p.id), p.tierManual),
+  })));
+
+  const dados = {
+    nome: s.nome || '',
+    descricaoAtual: String(s.descricao || '').slice(0, 1500),
+    composicao: itens.map((it) => {
+      const d = doCatalogo(it) || {};
+      return {
+        item: [it.categoria || d.categoria, it.nome || d.nome].filter(Boolean).join(': '),
+        papel: String(d.detalhes || '').slice(0, 300),
+        componentes: (Array.isArray(d.componentes) ? d.componentes : []).map((c) => [c && c.categoria, c && c.nome].filter(Boolean).join(': ')).filter(Boolean),
+      };
+    }).slice(0, 30),
+    processosSuportados,
+    stakeholders: (Array.isArray(s.stakeholders) ? s.stakeholders : []).map((x) => (x && typeof x === 'object' ? (x.nome || x.area || '') : String(x || ''))).filter(Boolean).slice(0, 20),
+  };
+  const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptDescricaoServico(dados), 'a sugestão de descrição', { maxOutputTokens: 1024 });
+  return { success: true, texto: _textoDaRespostaIA(json) };
+}
+
+// ---- Observacao da revisao do plano ----
+
+const _ROTULO_PLANO_IA = { bia: 'BIA (Análise de Impacto)', pcn: 'PCN (Plano de Continuidade)', drp: 'DRP (Plano de Recuperação)' };
+
+function _promptObservacaoRevisao(dados) {
+  return `Você é um analista de continuidade de negócios (ISO 22301) da Fortes Tecnologia e ajuda a registrar a revisão periódica de um plano.
+
+Escreva a "Observação" da revisão do ${_ROTULO_PLANO_IA[dados.plano]} abaixo: o que mudou desde a última revisão registrada (respostas novas do questionário, versões novas do plano, testes executados) e o que segue igual. Quem registra vai conferir e completar.
+
+${_REGRAS_SUGESTAO_IA}
+- De 1 a 3 frases, sem listas. Cite datas no formato dd/mm/aaaa.
+- Se nada mudou desde a última revisão, diga que o plano foi conferido e segue sem alterações desde a data dela.
+- Não diga que algo foi aprovado ou validado se os dados não mostram isso.
+
+FORMATO DA RESPOSTA (JSON):
+{"texto": "a observação"}
+
+DADOS (JSON):
+${JSON.stringify(dados)}`;
+}
+
+/** Ultima revisao REGISTRADA (a vigente pode ser so uma versao salva) e o corte "desde". */
+function _revisoesDoPlano(doc, tipo) {
+  const hist = (Array.isArray(doc[tipo + 'HistoricoRevisao']) ? doc[tipo + 'HistoricoRevisao'] : [])
+    .filter((h) => h && h.ultimaEm).slice().sort((a, b) => String(b.ultimaEm).localeCompare(String(a.ultimaEm)));
+  const ultima = hist[0] || null;
+  return {
+    desde: ultima ? String(ultima.ultimaEm).slice(0, 10) : '',
+    ultimaRevisaoRegistrada: ultima ? { data: String(ultima.ultimaEm).slice(0, 10), aprovadoPor: ultima.aprovadoPor || '', observacao: String(ultima.observacao || '').slice(0, 500) } : null,
+  };
+}
+
+const _depoisDe = (data, desde) => !desde || String(data || '').slice(0, 10) > desde;
+
+function _metadadosVersoes(json) {
+  let v = [];
+  try { v = json ? JSON.parse(json) : []; } catch { v = []; }
+  return (Array.isArray(v) ? v : []).map((x) => ({ versao: x.versao, data: String(x.data || '').slice(0, 10), autor: x.autor || '' }));
+}
+
+async function _sugerirObservacaoRevisao(db, data, ctx) {
+  const tipo = String(data.tipo || '');
+  if (!['bia', 'pcn', 'drp'].includes(tipo)) throw new AppError('Tipo de revisão inválido.');
+  if (tipo === 'drp') {
+    if (!(await podeOperarDRP(db, ctx.email))) throw new AppError('Seu perfil não registra revisão deste plano.');
+  } else {
+    await _exigirPerfil(db, ctx.email, PERFIS_PCN, 'Seu perfil não registra revisão deste plano.');
+  }
+  const id = exigir(data.id, 'id');
+  if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
+
+  const col = tipo === 'drp' ? COLLECTION.dependencias : COLLECTION.processos;
+  const snap = await db.collection(col).doc(String(id)).get();
+  if (!snap.exists) throw new AppError(tipo === 'drp' ? 'Dependência não encontrada.' : 'Processo não encontrado.');
+  const doc = { id: snap.id, ...(snap.data() || {}) };
+  const { desde, ultimaRevisaoRegistrada } = _revisoesDoPlano(doc, tipo);
+  const dados = { plano: tipo, hoje: new Date().toISOString().slice(0, 10), ultimaRevisaoRegistrada };
+
+  if (tipo === 'drp') {
+    const versoes = _metadadosVersoes(doc.drpSalvo);
+    const testes = (Array.isArray(doc.drpRegistrosTeste) ? doc.drpRegistrosTeste : []).filter((r) => r && r.data);
+    Object.assign(dados, {
+      dependencia: doc.nome || '', categoria: doc.categoria || '',
+      totalVersoesDoDrp: versoes.length,
+      versaoMaisRecente: versoes[versoes.length - 1] || null,
+      versoesDesdeAUltimaRevisao: versoes.filter((v) => _depoisDe(v.data, desde)),
+      testesDesdeAUltimaRevisao: testes.filter((r) => _depoisDe(r.data, desde)).slice(-10)
+        .map((r) => ({ data: r.data, resultado: r.resultado || '', pendencias: String(r.pendencias || '').slice(0, 300) })),
+      ultimoTeste: testes.slice().sort((a, b) => String(b.data).localeCompare(String(a.data)))[0] || null,
+      estrategiasDeTesteCadastradas: (Array.isArray(doc.drpEstrategiasTeste) ? doc.drpEstrategiasTeste : []).length,
+      cadastroAtualizadoEm: String(doc.atualizadoEm || '').slice(0, 10),
+    });
+  } else {
+    Object.assign(dados, { processo: doc.processo || '', area: doc.area || '', cadastroAtualizadoEm: String(doc.atualizadoEm || '').slice(0, 10) });
+    if (tipo === 'bia') {
+      const col2 = db.collection(COLLECTION.respostas);
+      const consultas = historicoRisco.chavesBiaDoProcesso(doc).map((chave) => {
+        const [area, processo] = chave.split('||');
+        return col2.where('area', '==', area).where('processo', '==', processo).get();
+      });
+      consultas.push(col2.where('processoId', '==', String(doc.id)).get());
+      const snaps = await Promise.all(consultas);
+      // A mesma resposta pode vir por duas chaves (nome e processoId): conta uma vez.
+      const porId = new Map();
+      snaps.forEach((s) => s.docs.forEach((d) => porId.set(d.id, d.data() || {})));
+      const respostas = [...porId.values()]
+        .filter((r) => r.timestamp)
+        .sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)))
+        .map((r) => ({ data: String(r.timestamp).slice(0, 10), score: Number(r.score) || 0, tier: _tierProcessoServidor(r.score, ''), rto: r.rtoSugerido || '' }));
+      const anteriores = respostas.filter((r) => !_depoisDe(r.data, desde));
+      Object.assign(dados, {
+        respostaAnteriorAUltimaRevisao: desde ? (anteriores[anteriores.length - 1] || null) : null,
+        respostasDesdeAUltimaRevisao: respostas.filter((r) => _depoisDe(r.data, desde)).slice(-5),
+        homologacao: doc.biaHomologacao && doc.biaHomologacao.em ? { data: String(doc.biaHomologacao.em).slice(0, 10), por: doc.biaHomologacao.por || '' } : null,
+        rto: doc.rto || '', rpo: doc.rpo || '', mtd: doc.mtd || '',
+      });
+    } else {
+      const versoes = _metadadosVersoes(doc.pcnSalvo);
+      Object.assign(dados, {
+        totalVersoesDoPcn: versoes.length,
+        versaoMaisRecente: versoes[versoes.length - 1] || null,
+        versoesDesdeAUltimaRevisao: versoes.filter((v) => _depoisDe(v.data, desde)),
+        levantamentoPreenchido: !!doc.levantamentoPCN,
+      });
+    }
+  }
+
+  const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptObservacaoRevisao(dados), 'a sugestão da observação', { maxOutputTokens: 512 });
+  return { success: true, texto: _textoDaRespostaIA(json, 1000) };
+}
+
+const ALVOS_SUGESTAO_IA = {
+  'processo-funcional': _sugerirFuncionalProcesso,
+  'processo-impacto': sugerirImpactoProcesso,
+  'dependencia-drp': _sugerirParametrosDrp,
+  'servico-descricao': _sugerirDescricaoServico,
+  'revisao-observacao': _sugerirObservacaoRevisao,
+};
+
+/** Sugestao por IA para revisao na tela; nada e gravado aqui. */
+async function sugerirTextoIA(db, data, ctx) {
+  const fn = ALVOS_SUGESTAO_IA[String(data.alvo || '')];
+  if (!fn) throw new AppError('Sugestão inválida.');
+  return fn(db, data, ctx);
 }
 
 // ============================================================
@@ -2094,6 +2460,7 @@ const READ_ACTIONS = {
 
 const WRITE_ACTIONS = {
   sugerirImpactoProcesso,
+  sugerirTextoIA,
   gerarLink,
   salvarPCN,
   excluirPCN,
