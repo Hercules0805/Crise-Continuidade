@@ -194,6 +194,18 @@ test('quem so consulta nao ve Importar nem Ativar', async () => {
   assert.doesNotMatch(doc.getElementById('listaFornecedores').innerHTML, /alternarSituacaoFornecedor/);
 });
 
+test('"Importar CSV" abre o drawer de importacao fora do drawer do fornecedor (nenhum drawer aninhado em outro)', async () => {
+  // Regressao: um </div> faltando no drawer do fornecedor deixava o drawer de importacao
+  // dentro dele (fechado e fora da tela) -- o clique abria um drawer invisivel.
+  const { w, doc, $ } = await carregar(['operador']);
+  w.trocarAbaFornecedores('inativos');
+  doc.querySelectorAll('.drawer').forEach((d) => assert.equal(d.parentElement.closest('.drawer'), null, `${d.id} esta dentro de outro drawer`));
+  assert.ok($('fornAbaAcoes').querySelector('button[onclick*="abrirImportacaoFornecedores"]'));
+  w.abrirImportacaoFornecedores();
+  assert.ok($('drawerImportarFornecedores').classList.contains('open'));
+  assert.equal($('drawerFornecedorCadastro').contains($('drawerImportarFornecedores')), false);
+});
+
 test('drawer: barra de situacao com Ativar/Inativar e "Dados importados" so quando ha linhas', async () => {
   const { w, $ } = await carregar(['admin']);
   w.abrirDrawerFornecedorCadastro('fm');

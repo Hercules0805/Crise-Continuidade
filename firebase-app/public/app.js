@@ -21353,6 +21353,7 @@ function _htmlDrawerFornecedorCadastro() {
         <div id="fornContratosLista"></div>
       </div>
 
+        </div>
       </div>
       <div class="drawer-footer">
         <button class="btn btn-ghost" onclick="fecharDrawerFornecedorCadastro()">Fechar</button>
