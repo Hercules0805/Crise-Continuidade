@@ -392,6 +392,23 @@ async function salvarDependenciasBIA(db, data) {
       dependenciaItens.push({ categoria, nome, id });
     }
   }
+  // Pessoas herdadas de Produto/Servico (28/10/2026): o formulario so manda
+  // {nome, id}; a origem (herdadoDe) e a escolha manual vem do que ja estava
+  // gravado. Quem o dono tirar e herdado volta na proxima sincronizacao (tela).
+  const procIdAntes = await _acharProcessoId(db, area, processo);
+  const pessoasAntes = new Map();
+  if (procIdAntes) {
+    const antesSnap = await db.collection(COLLECTION.processos).doc(procIdAntes).get();
+    ((antesSnap.exists && (antesSnap.data() || {}).dependenciaItens) || [])
+      .filter((it) => it && (it.categoria === 'Pessoas' || it.categoria === 'Pessoa') && it.id)
+      .forEach((it) => pessoasAntes.set(String(it.id), it));
+  }
+  dependenciaItens.forEach((it) => {
+    if (it.categoria !== 'Pessoas' || !it.id || !pessoasAntes.has(String(it.id))) return;
+    const antes = pessoasAntes.get(String(it.id));
+    if (Array.isArray(antes.herdadoDe) && antes.herdadoDe.length) it.herdadoDe = antes.herdadoDe;
+    if (antes.manual === true) it.manual = true;
+  });
   // Servicos: so por id de servico que existe (nunca cria).
   if (Array.isArray(servicosEnviados) && servicosEnviados.length) {
     const srvSnap = await db.collection(COLLECTION.servicos).get();
@@ -406,7 +423,7 @@ async function salvarDependenciasBIA(db, data) {
   }
 
   // Atualizar o processo (só campos presentes).
-  const procId = await _acharProcessoId(db, area, processo);
+  const procId = procIdAntes;
   if (procId) {
     const atualSnap = await db.collection(COLLECTION.processos).doc(procId).get();
     const atual = atualSnap.exists ? (atualSnap.data() || {}) : {};

@@ -172,7 +172,7 @@ test('Dependencias: cartoes so dos Servicos e dos 4 Ps; Servico achado pela busc
   w.trocarAbaProcesso('dependencias');
   const tabela = doc.getElementById('fDependenciaTabela');
   const cartoes = [...tabela.querySelectorAll('.deps-cartao')].map((c) => c.dataset.categoria);
-  assert.deepStrictEqual(cartoes, ['Serviços', 'Pessoas', 'Instalações', 'Fornecedores', 'Processos Internos']);
+  assert.strictEqual(JSON.stringify(cartoes), JSON.stringify(['Serviços', 'Produtos de Software', 'Pessoas', 'Instalações', 'Fornecedores', 'Processos Internos']));
   // Portal RH suporta o processo pelo processoIds legado, mas ainda nao esta no processo: aparece na busca.
   doc.getElementById('depsBusca').value = 'portal';
   w.buscarDependenciaProcesso();
@@ -417,4 +417,71 @@ test('Dependencias: item com cadastro removido continua visivel, "(removida)"', 
   assert.ok(chip, 'removida aparece no cartao');
   assert.match(chip.textContent, /\(removida\)/);
   assert.ok(chip.classList.contains('dep-tag-item--removida'));
+});
+
+// ---- Produtos de Software Fortes e pessoas herdadas (28/10/2026) ----
+const PRODUTOS = [{ id: 'ps1', nome: 'Fortes Ponto', area: 'Produto', ativo: true }, { id: 'ps9', nome: 'Antigo', ativo: false }];
+const PESSOAS_PROD = [
+  { id: 'tl', categoria: 'Pessoas', nome: 'Tadeu Lead', areas: ['Produto'], techLead: true, techLeadProdutos: ['ps1'] },
+  { id: 'po', categoria: 'Pessoas', nome: 'Paula Owner', areas: ['Produto'], productOwner: true, productOwnerProdutos: ['ps1'], liderSuporte: true, liderSuporteProdutos: ['ps1'] },
+  { id: 'stk', categoria: 'Pessoas', nome: 'Sergio Stake', areas: ['RH'] },
+];
+const SERVICO_STK = { id: 's5', nome: 'Folha Online', dependenciaItens: [], stakeholders: [{ id: 'stk', nome: 'Sergio Stake' }] };
+const comProdutos = (extra) => Object.assign({
+  getDependencias: DEPS.concat(PESSOAS_PROD),
+  getProdutosSoftware: PRODUTOS,
+  getServicos: SERVICOS.concat([SERVICO_STK]),
+}, extra || {});
+
+test('Produtos: cartao "Produtos de Software Fortes"; busca acha so os ativos; adicionar herda as pessoas (sem ×, com a origem)', async () => {
+  const { w, doc } = await carregar(['seguranca'], comProdutos());
+  w.editarProcesso('p2');
+  w.trocarAbaProcesso('dependencias');
+  assert.match(doc.getElementById('depsCartao-produtos-de-software').textContent, /Produtos de Software Fortes/);
+  const res = buscar(w, doc, 'fortes');
+  assert.match(res.textContent, /Produtos[\s\S]*Fortes Ponto/);
+  assert.doesNotMatch(buscar(w, doc, 'antigo').textContent, /Antigo/, 'produto inativo fora');
+  w.selecionarDependenciaCategoria('Fortes Ponto', 'Produtos de Software', 'ps1');
+  assert.match(doc.getElementById('depsCartao-produtos-de-software').textContent, /Tech Lead: Tadeu Lead · Product Owner: Paula Owner · Liderança de Suporte: Paula Owner/);
+  const chips = [...doc.querySelectorAll('#depsCartao-pessoas .dep-tag-item')];
+  assert.deepStrictEqual(chips.map((c) => c.textContent.replace(/×/g, '').trim()), ['🔗 Tadeu Lead', '🔗 Paula Owner']);
+  assert.ok(chips.every((c) => c.classList.contains('dep-tag-item--herdada') && !c.querySelector('button')), 'herdada sem ×');
+  assert.match(doc.getElementById('depsCartao-pessoas').textContent, /via Fortes Ponto \(Product Owner, Liderança de Suporte\)/);
+  assert.match((w.__toasts || []).join(' '), /2 pessoa\(s\) herdada\(s\): Tadeu Lead, Paula Owner/);
+});
+
+test('Produtos: tirar o produto tira as herdadas; a escolhida a mao tambem fica; Servico herda os stakeholders', async () => {
+  const { w, doc } = await carregar(['seguranca'], comProdutos());
+  w.editarProcesso('p2');
+  w.trocarAbaProcesso('dependencias');
+  w.selecionarDependenciaCategoria('Fortes Ponto', 'Produtos de Software', 'ps1');
+  w.selecionarDependenciaCategoria('Paula Owner', 'Pessoas', 'po'); // ja herdada -> passa a ser manual tambem
+  const po = w._dependenciaSelecionadas.find((s) => s.id === 'po');
+  assert.strictEqual(po.manual, true);
+  assert.ok([...doc.querySelectorAll('#depsCartao-pessoas .dep-tag-item')].find((c) => /Paula/.test(c.textContent)).querySelector('button'), 'herdada + manual tem ×');
+  const idxProduto = w._dependenciaSelecionadas.findIndex((s) => s.categoria === 'Produtos de Software');
+  w.removerDependenciaTag(idxProduto);
+  assert.strictEqual(JSON.stringify(w._dependenciaSelecionadas.map((s) => s.id)), JSON.stringify(['po']), 'Tadeu saiu; Paula ficou (manual)');
+  assert.strictEqual(w._dependenciaSelecionadas[0].herdadoDe, undefined);
+  w.selecionarDependenciaCategoria('Folha Online', 'Serviços', 's5');
+  const stk = w._dependenciaSelecionadas.find((s) => s.id === 'stk');
+  assert.ok(stk && stk.herdadoDe[0].tipo === 'servico' && stk.herdadoDe[0].funcoes[0] === 'Stakeholder');
+  assert.match(doc.getElementById('depsCartao-servicos').textContent, /1 stakeholder herdado/);
+});
+
+test('Produtos: abrir processo cujo produto ganhou pessoa mostra o aviso; salvar grava herdadoDe', async () => {
+  // Gravado so com o produto e o Tadeu herdado; a Paula entrou no produto depois.
+  const P2X = { ...P2, dependenciaItens: [
+    { categoria: 'Produtos de Software', id: 'ps1', nome: 'Fortes Ponto' },
+    { categoria: 'Pessoas', id: 'tl', nome: 'Tadeu Lead', herdadoDe: [{ tipo: 'produto', id: 'ps1', nome: 'Fortes Ponto', funcoes: ['Tech Lead'] }] },
+  ] };
+  const { w, doc, gravacoes } = await carregar(['seguranca'], comProdutos({ getProcessos: [P1, P2X] }));
+  w.editarProcesso('p2');
+  w.trocarAbaProcesso('dependencias');
+  assert.match(doc.querySelector('#fDependenciaTabela .deps-aviso-sync').textContent, /Atualizado pelos produtos e serviços: \+1 \(Paula Owner\)[\s\S]*salve para gravar/);
+  await w.salvarProcesso();
+  const itens = gravacoes.find((x) => x.nome === 'salvarProcesso').arg.dependenciaItens;
+  const paula = itens.find((it) => it.id === 'po');
+  assert.ok(paula && paula.herdadoDe[0].funcoes.includes('Product Owner'), 'herdadoDe vai no payload');
+  assert.ok(itens.some((it) => it.categoria === 'Produtos de Software' && it.id === 'ps1'));
 });

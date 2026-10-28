@@ -3074,6 +3074,8 @@ async function processos() {
   try { window.dependenciasCatalogo = await API.getDependencias(); } catch(e) { window.dependenciasCatalogo = []; }
   // Serviços: o processo aponta o Serviço (aba BIA); o técnico vem da composição dele.
   try { window.servicosCatalogoProcesso = await API.getServicos(); } catch(e) { window.servicosCatalogoProcesso = []; }
+  // Produtos de Software Fortes (28/10/2026): o processo aponta produtos e herda as pessoas deles.
+  try { produtosSoftwareData = await API.getProdutosSoftware(); } catch(e) { produtosSoftwareData = []; }
   // Ciclos de revisão: entram nos status calculados (coluna Planos, selos do drawer).
   if (!_ciclosCache) { try { _ciclosCache = await API.getCiclosContinuidade(); } catch (e) { _ciclosCache = null; } }
 
@@ -3538,7 +3540,8 @@ function _adivinharDependenciaLegada(nome) {
 function initDependenciaTags(p) {
   const itensNovos = p && Array.isArray(p.dependenciaItens) ? p.dependenciaItens : null;
   if (itensNovos && itensNovos.length) {
-    window._dependenciaSelecionadas = itensNovos.map((it) => ({ categoria: it.categoria, nome: it.nome, id: it.id === undefined ? null : it.id }));
+    // Item inteiro (herdadoDe/manual das Pessoas herdadas, 28/10/2026), com id normalizado.
+    window._dependenciaSelecionadas = itensNovos.map((it) => ({ ...it, id: it.id === undefined ? null : it.id }));
   } else {
     // Processo legado: so tem a string plana (dependencia). Adivinha categoria
     // e tenta religar por nome -- sem vinculo nenhum so quando nao acha nada.
@@ -3560,8 +3563,12 @@ function initDependenciaTags(p) {
 // processo aponta Serviços e os 4 Ps; o técnico vem pela composição do
 // Serviço; item técnico direto antigo vai para o bloco de legado.
 // ============================================================
-const _CATEGORIAS_DEP_PROCESSO = ['Serviços', 'Pessoas', 'Instalações', 'Fornecedores', 'Processos Internos'];
-const _ROTULO_CAT_DEP_PROCESSO = { 'Serviços': 'Serviços', 'Pessoas': 'Pessoas', 'Instalações': 'Instalações', 'Fornecedores': 'Fornecedores', 'Processos Internos': 'Processos' };
+const _CATEGORIAS_DEP_PROCESSO = ['Serviços', 'Produtos de Software', 'Pessoas', 'Instalações', 'Fornecedores', 'Processos Internos'];
+const _ROTULO_CAT_DEP_PROCESSO = { 'Serviços': 'Serviços', 'Produtos de Software': 'Produtos', 'Pessoas': 'Pessoas', 'Instalações': 'Instalações', 'Fornecedores': 'Fornecedores', 'Processos Internos': 'Processos' };
+// Título do cartão quando difere da pílula/grupo da busca.
+const _TITULO_CARTAO_DEP_PROCESSO = { 'Produtos de Software': 'Produtos de Software Fortes' };
+// Não obrigatórios no Tier 1/2 (sem ⚠ na cobertura).
+const _CATEGORIAS_DEP_OPCIONAIS = ['Processos Internos', 'Produtos de Software'];
 const _MAX_POR_GRUPO_BUSCA_DEP = 6;
 const _MAX_SUGESTOES_DEP = 6;
 // Categorias em que a busca oferece "+ Criar" (Serviço e Processo só existem pelo cadastro próprio).
@@ -3595,6 +3602,7 @@ function _candidatosDependenciaProcesso() {
     saida.push({ categoria, id, nome, info: info || '', chave: _normBuscaDep([nome, info, extra].filter(Boolean).join(' ')) });
   };
   (window.servicosCatalogoProcesso || []).forEach((s) => push('Serviços', s.id, s.nome, s.descricao));
+  (produtosSoftwareData || []).filter((p) => p.ativo !== false).forEach((p) => push('Produtos de Software', p.id, p.nome, p.area));
   catalogo.forEach((d) => {
     if (d.categoria === 'Pessoas') push('Pessoas', d.id, d.nome, [d.detalhes, (d.areas || [])[0] || d.setor].filter(Boolean).join(' · '), (d.areas || []).join(' '));
     else if (_ehInstalacao(d.categoria)) push('Instalações', d.id, d.nome, [d.tipoInstalacao, d.endereco].filter(Boolean).join(' · '));
@@ -3754,8 +3762,15 @@ function _sugestoesDependenciaProcesso(cat, atual) {
 function _htmlTagDependencia(item, globalIdx, ctx) {
   const ehProcesso = _ehProcessoInterno(item.categoria);
   const ehServico = CadeiaDependencias.ehServico(item);
+  const ehProduto = CadeiaDependencias.ehProduto(item);
+  const produtos = produtosSoftwareData || [];
+  const produto = ehProduto && item.id ? produtos.find((x) => String(x.id) === String(item.id)) : null;
   const servico = ehServico && item.id ? ctx.servicosCat.find((s) => String(s.id) === String(item.id)) : null;
-  const dep = item.id && !ehProcesso && !ehServico ? ctx.catalogo.find((d) => d.id === item.id) : null;
+  const dep = item.id && !ehProcesso && !ehServico && !ehProduto ? ctx.catalogo.find((d) => d.id === item.id) : null;
+  // Pessoa herdada de Produto/Serviço (28/10/2026): só sai tirando a origem.
+  const herdada = CadeiaDependencias.ehPessoa(item) && Array.isArray(item.herdadoDe) && item.herdadoDe.length > 0;
+  const soHerdada = CadeiaDependencias.soHerdada(item);
+  const origens = herdada ? item.herdadoDe.map((o) => o.nome).join(', ') : '';
   const semVinculo = item.id === null || item.id === undefined;
   // Vinculo cujo cadastro sumiu: o Mapa de Continuidade descarta esse item
   // em silencio; aqui ele aparece cinza, "(removida)", para ser tirado.
@@ -3763,15 +3778,18 @@ function _htmlTagDependencia(item, globalIdx, ctx) {
   const removida = !semVinculo && (ehProcesso
     ? (window.processosData || []).length > 0 && !(window.processosData || []).some((p) => String(p.id) === String(item.id))
     : ehServico ? ctx.servicosCat.length > 0 && !servico
-      : ctx.catalogo.length > 0 && !dep);
+      : ehProduto ? produtos.length > 0 && !produto
+        : ctx.catalogo.length > 0 && !dep);
   const isProcessoLink = ehProcesso && item.id && !removida;
   const tooltipBase = (dep ? [dep.empresa, dep.detalhes, dep.telefone].filter(Boolean).join(' • ') : servico ? (servico.descricao || '') : '') || item.nome;
-  const tooltip = tooltipBase + (semVinculo ? ' (sem vínculo com o cadastro -- remova e adicione de novo pra linkar)' : removida ? ' (o cadastro foi removido -- não aparece no Mapa de Continuidade)' : isProcessoLink ? ' (clique para abrir o processo)' : '');
+  const tooltip = tooltipBase + (semVinculo ? ' (sem vínculo com o cadastro -- remova e adicione de novo pra linkar)' : removida ? ' (o cadastro foi removido -- não aparece no Mapa de Continuidade)' : isProcessoLink ? ' (clique para abrir o processo)' : '')
+    + (soHerdada ? ` — vem de ${origens}; para tirar, remova a origem` : herdada ? ` — também vem de ${origens}; o × tira só a escolha manual` : '');
   const apagada = semVinculo || removida;
-  const classes = 'dep-tag-item' + (removida ? ' dep-tag-item--removida' : semVinculo ? ' dep-tag-item--sem-vinculo' : '');
+  const classes = 'dep-tag-item' + (removida ? ' dep-tag-item--removida' : semVinculo ? ' dep-tag-item--sem-vinculo' : herdada ? ' dep-tag-item--herdada' : '');
   const onclickTag = isProcessoLink ? ` onclick="editarProcesso('${escJs(item.id)}')"` : '';
   const sufixo = removida ? ' <span style="opacity:0.8;">(removida)</span>' : semVinculo ? ' <span style="opacity:0.7;">⚠</span>' : '';
-  return `<span class="${classes}"${onclickTag} style="${isProcessoLink ? 'cursor:pointer;' : ''}" title="${esc(tooltip)}">${esc(item.nome)}${sufixo}<button type="button" onclick="event.stopPropagation();removerDependenciaTag(${globalIdx})" class="dep-tag-item__x${apagada ? ' dep-tag-item__x--escuro' : ''}" title="Remover" aria-label="Remover ${esc(item.nome)}">&times;</button></span>`;
+  const x = soHerdada ? '' : `<button type="button" onclick="event.stopPropagation();removerDependenciaTag(${globalIdx})" class="dep-tag-item__x${apagada || herdada ? ' dep-tag-item__x--escuro' : ''}" title="${herdada ? 'Tirar a escolha manual (continua herdada)' : 'Remover'}" aria-label="Remover ${esc(item.nome)}">&times;</button>`;
+  return `<span class="${classes}"${onclickTag} style="${isProcessoLink ? 'cursor:pointer;' : ''}" title="${esc(tooltip)}">${herdada ? '🔗 ' : ''}${esc(item.nome)}${sufixo}${x}</span>`;
 }
 
 /** Linha de detalhe de um item escolhido, por categoria. */
@@ -3784,7 +3802,16 @@ function _htmlDetalheDependencia(item, ctx, atual) {
     const av = ServicoComposicao.avaliarServico(s, ctx.catalogo);
     const rtoProc = ServicoComposicao.valorMin({ rto: (document.getElementById('fRTO') || {}).value || '' }, 'rto');
     const excede = rtoProc !== null && Number.isFinite(s.rtoMin) && s.rtoMin > rtoProc;
-    return `<div class="servico-resumo-bia">${esc(s.nome)} · ${nomes.length ? esc(nomes.slice(0, 3).join(', ')) + (nomes.length > 3 ? ' +' + (nomes.length - 3) : '') : 'sem dependências na composição'} · <span class="chip-status" style="height:18px;font-size:10px;">${esc(av.rotuloStatus)}</span>${excede ? ` <span class="deps-alerta">⚠ RTO do serviço (${esc(ServicoComposicao.formatarDuracao(s.rtoMin))}) acima do RTO do processo</span>` : ''}</div>`;
+    const stk = Array.isArray(s.stakeholders) ? s.stakeholders.length : 0;
+    return `<div class="servico-resumo-bia">${esc(s.nome)} · ${nomes.length ? esc(nomes.slice(0, 3).join(', ')) + (nomes.length > 3 ? ' +' + (nomes.length - 3) : '') : 'sem dependências na composição'} · <span class="chip-status" style="height:18px;font-size:10px;">${esc(av.rotuloStatus)}</span>${excede ? ` <span class="deps-alerta">⚠ RTO do serviço (${esc(ServicoComposicao.formatarDuracao(s.rtoMin))}) acima do RTO do processo</span>` : ''}${stk ? ` · ${stk} stakeholder${stk === 1 ? '' : 's'} herdado${stk === 1 ? '' : 's'}` : ''}</div>`;
+  }
+  if (CadeiaDependencias.ehProduto(item)) {
+    const pessoas = CadeiaDependencias.pessoasDoProduto(item.id, ctx.catalogo);
+    if (!pessoas.length) return 'nenhuma pessoa vinculada — vincule em Produtos de Software';
+    return CadeiaDependencias.FUNCOES_PRODUTO
+      .map(([, rotulo]) => [rotulo, pessoas.filter((x) => x.funcoes.includes(rotulo)).map((x) => x.pessoa.nome)])
+      .filter(([, nomes]) => nomes.length)
+      .map(([rotulo, nomes]) => `${esc(rotulo)}: ${esc(nomes.join(', '))}`).join(' · ');
   }
   if (_ehProcessoInterno(item.categoria)) {
     const p = (window.processosData || []).find((x) => String(x.id) === String(item.id));
@@ -3792,7 +3819,12 @@ function _htmlDetalheDependencia(item, ctx, atual) {
   }
   const d = item.id ? ctx.catalogo.find((x) => String(x.id) === String(item.id)) : null;
   if (!d) return '';
-  if (item.categoria === 'Pessoas') return [d.detalhes, (d.areas || [])[0] || d.setor].filter(Boolean).map(esc).join(' · ');
+  if (item.categoria === 'Pessoas') {
+    const base = [d.detalhes, (d.areas || [])[0] || d.setor].filter(Boolean).map(esc).join(' · ');
+    const via = Array.isArray(item.herdadoDe) && item.herdadoDe.length
+      ? `<span class="deps-item__via">${item.herdadoDe.map((o) => `via ${esc(o.nome)} (${esc((o.funcoes || []).join(', '))})`).join(' · ')}</span>` : '';
+    return [base, via].filter(Boolean).join(' · ');
+  }
   if (_ehInstalacao(item.categoria)) {
     if (d.instalacaoAlternativa && d.instalacaoAlternativa.nome) return `alternativa: ${esc(d.instalacaoAlternativa.nome)}`;
     return atual.critico ? '<span class="deps-alerta">⚠ sem instalação alternativa</span>' : 'sem instalação alternativa';
@@ -3821,6 +3853,7 @@ function renderDependenciaTabela() {
   // Categoria antiga no singular (Fornecedor, Pessoa...) entra no cartão da plural.
   const cartaoDe = (item) => {
     if (CadeiaDependencias.ehServico(item)) return 'Serviços';
+    if (CadeiaDependencias.ehProduto(item)) return 'Produtos de Software';
     if (_ehProcessoInterno(item.categoria)) return 'Processos Internos';
     if (_ehInstalacao(item.categoria)) return 'Instalações';
     if (Perfis.categoriaDeFornecedor(item.categoria)) return 'Fornecedores';
@@ -3839,7 +3872,7 @@ function renderDependenciaTabela() {
   if (cobertura) {
     cobertura.innerHTML = _CATEGORIAS_DEP_PROCESSO.map((cat) => {
       const n = porCartao[cat].length;
-      const falta = !n && atual.critico && cat !== 'Processos Internos';
+      const falta = !n && atual.critico && !_CATEGORIAS_DEP_OPCIONAIS.includes(cat);
       return `<button type="button" class="deps-cobertura__pilula${falta ? ' deps-cobertura__pilula--falta' : n ? ' deps-cobertura__pilula--ok' : ''}" onclick="irParaCartaoDependencia('${escJs(cat)}')" title="${falta ? 'Processo Tier 1/2 sem ' + esc(_ROTULO_CAT_DEP_PROCESSO[cat].toLowerCase()) + ' mapeados' : 'Ir para ' + esc(_ROTULO_CAT_DEP_PROCESSO[cat])}">${falta ? '⚠ ' : ''}${esc(_ROTULO_CAT_DEP_PROCESSO[cat])} <strong>${n}</strong></button>`;
     }).join('');
   }
@@ -3858,7 +3891,7 @@ function renderDependenciaTabela() {
       : '';
     return `<section class="deps-cartao" id="depsCartao-${_slugCatDep(cat)}" data-categoria="${esc(cat)}">
         <header class="deps-cartao__cab">
-          <span class="deps-cartao__titulo">${DEPENDENCIA_CAT_ICONES[cat] || '📦'} ${esc(_ROTULO_CAT_DEP_PROCESSO[cat])} <span class="deps-cartao__n">${itens.length}</span></span>
+          <span class="deps-cartao__titulo">${DEPENDENCIA_CAT_ICONES[cat] || '📦'} ${esc(_TITULO_CARTAO_DEP_PROCESSO[cat] || _ROTULO_CAT_DEP_PROCESSO[cat])} <span class="deps-cartao__n">${itens.length}</span></span>
           ${cat === 'Serviços' && podeNovoServico ? '<button type="button" class="link-acao" onclick="novoServicoDoProcesso()">+ Novo serviço</button>' : ''}
         </header>
         <div class="deps-cartao__exemplo">${esc(DEPENDENCIA_CAT_EXEMPLOS[cat] || '')}</div>
@@ -3867,7 +3900,15 @@ function renderDependenciaTabela() {
       </section>`;
   }).join('');
 
-  tabelaContainer.innerHTML = cartoes + _htmlCadeiaDependencias(ctx) + _htmlLegadoTecnicoProcesso(legados, selecionadas, ctx.servicosCat, ctx.catalogo);
+  const aviso = window._depsAvisoSync;
+  const partesAviso = aviso ? [
+    aviso.adicionadas.length ? `+${aviso.adicionadas.length} (${esc(aviso.adicionadas.join(', '))})` : '',
+    aviso.removidas.length ? `−${aviso.removidas.length} (${esc(aviso.removidas.join(', '))})` : '',
+  ].filter(Boolean) : [];
+  const htmlAviso = aviso
+    ? `<div class="deps-aviso-sync" role="status">🔗 Atualizado pelos produtos e serviços: ${partesAviso.length ? partesAviso.join(', ') + ' pessoa(s)' : 'origem das pessoas atualizada'} — salve para gravar.</div>`
+    : '';
+  tabelaContainer.innerHTML = htmlAviso + cartoes + _htmlCadeiaDependencias(ctx) + _htmlLegadoTecnicoProcesso(legados, selecionadas, ctx.servicosCat, ctx.catalogo);
 
   // Atualizar hidden input
   document.getElementById('fDependencia').value = selecionadas.map(s => s.nome).join(', ');
@@ -3881,14 +3922,37 @@ window.selecionarDependenciaCategoria = (nome, categoria, id) => {
   if (!CadeiaDependencias.categoriaPermitidaNoProcesso(cat)) {
     return showToast('Banco, Servidor, API e outros itens técnicos entram pelo Serviço que os contém.', '#e65100');
   }
-  const jaSelecionado = idReal
-    ? window._dependenciaSelecionadas.some((s) => s.id === idReal)
-    : window._dependenciaSelecionadas.some((s) => s.nome === nome && s.categoria === cat);
-  if (!jaSelecionado) {
-    window._dependenciaSelecionadas.push({ categoria: cat, nome, id: idReal });
-    renderDependenciaTabela();
+  const existente = idReal
+    ? window._dependenciaSelecionadas.find((s) => s.id === idReal)
+    : window._dependenciaSelecionadas.find((s) => s.nome === nome && s.categoria === cat);
+  if (existente) {
+    // Escolher à mão quem já veio herdado: passa a ser também manual (fica se a origem sair).
+    if (CadeiaDependencias.soHerdada(existente)) { existente.manual = true; renderDependenciaTabela(); }
+    return;
   }
+  window._dependenciaSelecionadas.push({ categoria: cat, nome, id: idReal });
+  _sincronizarHerdadasProcesso(true);
+  renderDependenciaTabela();
 };
+
+/**
+ * Pessoas herdadas dos Produtos e Serviços do processo (28/10/2026):
+ * recalcula com o cadastro atual (CadeiaDependencias.sincronizarPessoasHerdadas).
+ * `avisar`: toast com quem entrou/saiu.
+ */
+function _sincronizarHerdadasProcesso(avisar) {
+  const r = CadeiaDependencias.sincronizarPessoasHerdadas(window._dependenciaSelecionadas || [], {
+    pessoas: window.dependenciasCatalogo || [], servicos: window.servicosCatalogoProcesso || [],
+  });
+  window._dependenciaSelecionadas = r.itens;
+  if (avisar && (r.adicionadas.length || r.removidas.length)) {
+    const partes = [];
+    if (r.adicionadas.length) partes.push(`${r.adicionadas.length} pessoa(s) herdada(s): ${r.adicionadas.join(', ')}`);
+    if (r.removidas.length) partes.push(`saiu/saíram: ${r.removidas.join(', ')}`);
+    showToast('🔗 ' + partes.join('; ') + '.', '#2e7d32');
+  }
+  return r;
+}
 
 // So chamada agora pra Fornecedores/Infraestrutura/Pessoas/Sistemas -- o "+
 // Criar" de Processos Internos nao existe (a busca unica so oferece criar Pessoas/Instalacoes/Fornecedores), pra
@@ -3939,7 +4003,15 @@ window.adicionarDependenciaCategoria = (nome, categoria) => {
 };
 
 window.removerDependenciaTag = (idx) => {
-  window._dependenciaSelecionadas.splice(idx, 1);
+  const item = window._dependenciaSelecionadas[idx];
+  if (!item) return;
+  // Herdada e manual: o × tira só a escolha manual (continua pela origem).
+  if (CadeiaDependencias.ehPessoa(item) && Array.isArray(item.herdadoDe) && item.herdadoDe.length) {
+    delete item.manual;
+  } else {
+    window._dependenciaSelecionadas.splice(idx, 1);
+    _sincronizarHerdadasProcesso(true);
+  }
   renderDependenciaTabela();
 };
 
@@ -3980,6 +4052,7 @@ window.trocarLegadoPorServico = (idx, servicoId) => {
   if (!lista.some((x) => CadeiaDependencias.ehServico(x) && String(x.id) === String(s.id))) {
     lista.push({ categoria: CadeiaDependencias.CATEGORIA_SERVICO, nome: s.nome, id: String(s.id) });
   }
+  _sincronizarHerdadasProcesso(true);
   renderDependenciaTabela();
 };
 
@@ -4109,6 +4182,16 @@ window.abrirModalProcesso = (p) => {
   const fMTD = document.getElementById('fMTD'); if (fMTD) fMTD.value = p ? (p.mtd || '') : '';
   iniciarDrawerResize();
   _edProcesso.marcar();
+  // Pessoas herdadas (28/10/2026): o que mudou nos Produtos/Serviços desde que o
+  // processo foi salvo entra agora -- depois do marcar(), para "Fechar" perguntar.
+  window._depsAvisoSync = null;
+  if (p && p.id) {
+    const sync = _sincronizarHerdadasProcesso(false);
+    if (sync.adicionadas.length || sync.removidas.length || sync.alteradas) {
+      window._depsAvisoSync = sync;
+      renderDependenciaTabela();
+    }
+  }
 };
 
 // ============================================================
@@ -4708,6 +4791,7 @@ const DEPENDENCIA_CAT_ICONES = {
   'Pessoas': '👤', 'Pessoa': '👤',
   'Processos Internos': '🔄', 'Processo Interno': '🔄',
   'Instalações': '📍', 'Instalação': '📍',
+  'Produtos de Software': '💿', 'Produto de Software': '💿',
   'API': '🔌',
   'Banco de Dados': '🗄️',
   'Infraestrutura': '⚡',
@@ -4727,6 +4811,7 @@ const DEPENDENCIA_CAT_EXEMPLOS = {
   'Processo Interno': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
   'Instalações': 'Ex: Sede São Paulo, Filial Recife, Data center Tamboré, escritório de atendimento',
   'Instalação': 'Ex: Sede São Paulo, Filial Recife, Data center Tamboré, escritório de atendimento',
+  'Produtos de Software': 'Ex: Fortes Ponto, Fortes RH, Fortes AC Pessoal — as pessoas do produto (Tech Lead, Team Lead, PO, Suporte) entram no processo sozinhas',
   'API': 'Ex: API de pagamento (PIX/cartão), API de CEP, integração com Receita Federal, webhook de terceiros',
   'Banco de Dados': 'Ex: PostgreSQL de produção, banco Oracle financeiro, réplica de leitura, data warehouse',
   'Infraestrutura': 'Ex: Internet, energia elétrica, climatização, switches/roteadores, telefonia',

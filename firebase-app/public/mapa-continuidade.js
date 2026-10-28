@@ -238,6 +238,9 @@
       var tecnicasDiretas = 0;
       _lista(p.dependenciaItens).forEach(function (it) {
         if (!it) return;
+        // Produto de Software (28/10/2026): sem no proprio no mapa nesta fase;
+        // as pessoas dele ja entram como Pessoas herdadas do processo.
+        if (it.categoria === 'Produtos de Software' || it.categoria === 'Produto de Software') return;
         if (CATEGORIAS_PROCESSO.indexOf(it.categoria) >= 0) {
           ligar(id, procPorId[String(it.id)], 'depende do processo', 'processo dependente');
           return;

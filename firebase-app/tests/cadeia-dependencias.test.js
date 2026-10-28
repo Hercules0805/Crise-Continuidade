@@ -80,3 +80,57 @@ test('componentes em ciclo nao travam nem a cadeia nem o inverso', () => {
   assert.deepStrictEqual(CD.cadeiaDoProcesso({ processo: p, servicos: [s], dependencias: deps }).map((x) => x.nome), ['A', 'B']);
   assert.strictEqual(CD.processosQueDependemDe('b', { processos: [p], servicos: [s], dependencias: deps }).length, 1);
 });
+
+// ---- Produtos de Software e pessoas herdadas (28/10/2026) ----
+const PESSOAS_HER = [
+  { id: 'ana', categoria: 'Pessoas', nome: 'Ana', techLead: true, techLeadProdutos: ['ps1'], productOwner: true, productOwnerProdutos: ['ps1'] },
+  { id: 'bia', categoria: 'Pessoas', nome: 'Bia', liderSuporte: true, liderSuporteProdutos: ['ps1'] },
+  { id: 'caio', categoria: 'Pessoas', nome: 'Caio', teamLead: true, teamLeadProdutos: ['ps2'] },
+  { id: 'davi', categoria: 'Pessoas', nome: 'Davi' },
+];
+const SERVICOS_HER = [{ id: 's1', nome: 'Portal', stakeholders: [{ id: 'davi', nome: 'Davi' }, { id: 'ana', nome: 'Ana' }] }];
+const prod = (id, nome) => ({ categoria: 'Produtos de Software', id, nome });
+const plano = (x) => JSON.parse(JSON.stringify(x));
+
+test('produto: categoria permitida no processo e fora da cadeia (sem DRP)', () => {
+  assert.ok(CD.categoriaPermitidaNoProcesso('Produtos de Software'));
+  assert.ok(!CD.ehTecnicoDireto(prod('ps1', 'Fortes Ponto')));
+  const cadeia = CD.cadeiaDoProcesso({ processo: { id: 'p', dependenciaItens: [prod('ps1', 'Fortes Ponto')] }, dependencias: [], servicos: [] });
+  assert.strictEqual(cadeia.length, 0);
+});
+
+test('sincronizar: produto herda as 4 funcoes; servico herda stakeholders; pessoa em duas origens tem as duas', () => {
+  const r = CD.sincronizarPessoasHerdadas([prod('ps1', 'Fortes Ponto'), { categoria: 'Serviços', id: 's1', nome: 'Portal' }], { pessoas: PESSOAS_HER, servicos: SERVICOS_HER });
+  const pessoas = r.itens.filter((it) => it.categoria === 'Pessoas');
+  assert.deepStrictEqual(pessoas.map((p) => p.id), ['ana', 'bia', 'davi']);
+  assert.deepStrictEqual(plano(pessoas[0].herdadoDe), [
+    { tipo: 'produto', id: 'ps1', nome: 'Fortes Ponto', funcoes: ['Tech Lead', 'Product Owner'] },
+    { tipo: 'servico', id: 's1', nome: 'Portal', funcoes: ['Stakeholder'] },
+  ]);
+  assert.deepStrictEqual(plano(pessoas[1].herdadoDe[0].funcoes), ['Liderança de Suporte']);
+  assert.strictEqual(pessoas[0].manual, undefined, 'so herdada');
+  assert.deepStrictEqual(r.adicionadas, ['Ana', 'Bia', 'Davi']);
+});
+
+test('sincronizar: tirar a origem tira a herdada e mantem a manual e a antiga; manual que tambem e herdada fica marcada', () => {
+  const antiga = { categoria: 'Pessoas', id: 'caio', nome: 'Caio' };
+  const primeira = CD.sincronizarPessoasHerdadas([prod('ps1', 'Fortes Ponto'), { categoria: 'Pessoas', id: 'bia', nome: 'Bia' }, antiga], { pessoas: PESSOAS_HER, servicos: [] });
+  const bia = primeira.itens.find((it) => it.id === 'bia');
+  assert.strictEqual(bia.manual, true, 'ja estava escolhida a mao');
+  assert.ok(bia.herdadoDe.length);
+  const semProduto = primeira.itens.filter((it) => it.categoria !== 'Produtos de Software');
+  const r = CD.sincronizarPessoasHerdadas(semProduto, { pessoas: PESSOAS_HER, servicos: [] });
+  assert.deepStrictEqual(r.itens.map((it) => it.id), ['bia', 'caio'], 'Ana (so herdada) saiu');
+  assert.deepStrictEqual(r.removidas, ['Ana']);
+  assert.strictEqual(r.itens[0].herdadoDe, undefined, 'Bia perdeu a origem, continua manual');
+  assert.deepStrictEqual(r.itens[1], antiga, 'pessoa antiga continua igual');
+});
+
+test('sincronizar: mudanca no produto aparece na proxima sincronizacao; sem mudanca, nada muda', () => {
+  const itens = CD.sincronizarPessoasHerdadas([prod('ps1', 'Fortes Ponto')], { pessoas: PESSOAS_HER, servicos: [] }).itens;
+  const igual = CD.sincronizarPessoasHerdadas(itens, { pessoas: PESSOAS_HER, servicos: [] });
+  assert.deepStrictEqual([igual.adicionadas, igual.removidas, igual.alteradas], [[], [], 0]);
+  const mudou = PESSOAS_HER.map((p) => (p.id === 'bia' ? { ...p, liderSuporte: false } : p.id === 'davi' ? { ...p, teamLead: true, teamLeadProdutos: ['ps1'] } : p));
+  const r = CD.sincronizarPessoasHerdadas(itens, { pessoas: mudou, servicos: [] });
+  assert.deepStrictEqual([r.adicionadas, r.removidas], [['Davi'], ['Bia']]);
+});

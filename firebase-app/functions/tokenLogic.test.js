@@ -234,6 +234,31 @@ test('salvarDependenciasBIA: Servicos so por id existente, sem duplicar e sem cr
   assert.deepStrictEqual(Object.keys(db._store.servicos), ['s1']);
 });
 
+// 28/10/2026: pessoas herdadas de Produto/Servico e o item de Produto.
+test('salvarDependenciasBIA: preserva herdadoDe/manual das Pessoas e o item de Produto de Software', async () => {
+  const seed = baseSeed();
+  seed.tokens['b9'] = { token: 'b9', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  const origem = [{ tipo: 'produto', id: 'ps1', nome: 'Fortes Ponto', funcoes: ['Tech Lead'] }];
+  seed.dependencias = { ana: { nome: 'Ana', categoria: 'Pessoas' }, bia: { nome: 'Bia', categoria: 'Pessoas' } };
+  seed.processos.ti__backup.dependenciaItens = [
+    { categoria: 'Produtos de Software', nome: 'Fortes Ponto', id: 'ps1' },
+    { categoria: 'Pessoas', nome: 'Ana', id: 'ana', herdadoDe: origem },
+    { categoria: 'Pessoas', nome: 'Bia', id: 'bia', herdadoDe: origem, manual: true },
+  ];
+  const db = makeDb(seed);
+  await WRITE_ACTIONS.salvarDependenciasBIA(db, {
+    token: 'b9',
+    pessoas: JSON.stringify([{ nome: 'Ana', id: 'ana' }, { nome: 'Bia', id: 'bia' }]),
+  });
+  const itens = db._store.processos['ti__backup'].dependenciaItens;
+  const ana = itens.find((it) => it.id === 'ana');
+  const bia = itens.find((it) => it.id === 'bia');
+  assert.deepStrictEqual(ana.herdadoDe, origem);
+  assert.strictEqual(ana.manual, undefined);
+  assert.strictEqual(bia.manual, true);
+  assert.ok(itens.some((it) => it.categoria === 'Produtos de Software' && it.id === 'ps1'), 'produto preservado');
+});
+
 test('validarTokenBIA devolve os Servicos para escolha', async () => {
   const seed = baseSeed();
   seed.tokens['b8'] = { token: 'b8', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };

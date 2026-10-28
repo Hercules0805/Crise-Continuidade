@@ -14,6 +14,13 @@
  * servico.processoIds (onde o vinculo morava antes) ainda e LIDO, unido ao do
  * processo, ate a migracao (functions/scripts/migrar-servicos-para-processos.js).
  *
+ * Produtos de Software Fortes (28/10/2026): o processo tambem aponta produtos
+ * ({categoria:'Produtos de Software', id, nome}); nao tem DRP (fora da cadeia).
+ * As pessoas do produto (as 4 funcoes) e as do Servico (stakeholders) sao
+ * HERDADAS pelo processo: sincronizarPessoasHerdadas grava cada uma como item
+ * de Pessoa com herdadoDe [{tipo, id, nome, funcoes}] -- `manual: true` quando
+ * tambem foi escolhida a mao. Pessoa sem esses campos (antiga) conta como manual.
+ *
  * Puro, sem DOM. functions/cadeiaDependencias.js e uma copia IDENTICA deste
  * arquivo (o teste tests/cadeia-dependencias.test.js confere).
  */
@@ -32,8 +39,12 @@
   var CATEGORIAS_PROCESSO = ['Processos Internos', 'Processo Interno'];
   var CATEGORIAS_FORNECEDOR = ['Fornecedores', 'Fornecedor'];
   var CATEGORIAS_INSTALACAO = ['Instalações', 'Instalação'];
-  // O que o processo aponta direto no BIA: os 4 Ps e os Servicos.
-  var CATEGORIAS_DIRETAS = [].concat(CATEGORIAS_SERVICO, CATEGORIAS_FORNECEDOR, CATEGORIAS_PESSOA, CATEGORIAS_INSTALACAO, CATEGORIAS_PROCESSO);
+  var CATEGORIA_PRODUTO = 'Produtos de Software';
+  var CATEGORIAS_PRODUTO = ['Produtos de Software', 'Produto de Software'];
+  // O que o processo aponta direto no BIA: os 4 Ps, os Servicos e os Produtos.
+  var CATEGORIAS_DIRETAS = [].concat(CATEGORIAS_SERVICO, CATEGORIAS_FORNECEDOR, CATEGORIAS_PESSOA, CATEGORIAS_INSTALACAO, CATEGORIAS_PROCESSO, CATEGORIAS_PRODUTO);
+  // Funcoes da Pessoa num produto (flag + <funcao>Produtos), na ordem de exibicao.
+  var FUNCOES_PRODUTO = [['techLead', 'Tech Lead'], ['teamLead', 'Team Lead'], ['productOwner', 'Product Owner'], ['liderSuporte', 'Liderança de Suporte']];
 
   function _texto(v) {
     return v === null || v === undefined ? '' : String(v).trim();
@@ -135,7 +146,8 @@
   }
 
   function _semDrp(categoria) {
-    return CATEGORIAS_PESSOA.indexOf(categoria) >= 0 || CATEGORIAS_PROCESSO.indexOf(categoria) >= 0 || CATEGORIAS_SERVICO.indexOf(categoria) >= 0;
+    return CATEGORIAS_PESSOA.indexOf(categoria) >= 0 || CATEGORIAS_PROCESSO.indexOf(categoria) >= 0 || CATEGORIAS_SERVICO.indexOf(categoria) >= 0
+      || CATEGORIAS_PRODUTO.indexOf(categoria) >= 0;
   }
 
   /**
@@ -309,9 +321,111 @@
     });
   }
 
+  function ehProduto(item) {
+    return !!item && CATEGORIAS_PRODUTO.indexOf(item.categoria) >= 0;
+  }
+
+  function ehPessoa(item) {
+    return !!item && CATEGORIAS_PESSOA.indexOf(item.categoria) >= 0;
+  }
+
+  /** Pessoas de um produto: [{ pessoa, funcoes: [rotulo] }], pelas 4 funcoes marcadas com o id dele. */
+  function pessoasDoProduto(produtoId, pessoas) {
+    var id = String(produtoId);
+    var saida = [];
+    (pessoas || []).forEach(function (p) {
+      if (!p || !_temId(p) || CATEGORIAS_PESSOA.indexOf(p.categoria) < 0) return;
+      var funcoes = FUNCOES_PRODUTO.filter(function (f) {
+        return p[f[0]] && _lista(p[f[0] + 'Produtos']).map(String).indexOf(id) >= 0;
+      }).map(function (f) { return f[1]; });
+      if (funcoes.length) saida.push({ pessoa: p, funcoes: funcoes });
+    });
+    return saida;
+  }
+
+  /** Item de Pessoa so herdado (sem escolha manual)? Pessoa sem herdadoDe (antiga) e manual. */
+  function soHerdada(item) {
+    return ehPessoa(item) && Array.isArray(item.herdadoDe) && item.herdadoDe.length > 0 && item.manual !== true;
+  }
+
+  /**
+   * Recalcula as Pessoas herdadas dos Produtos e Servicos que estao em `itens`
+   * (processo.dependenciaItens). dados = { pessoas (catalogo, com as funcoes),
+   * servicos (com stakeholders) }. Nao altera `itens`: devolve
+   * { itens, adicionadas: [nomes], removidas: [nomes], alteradas: n }.
+   */
+  function sincronizarPessoasHerdadas(itens, dados) {
+    var d = dados || {};
+    var lista = _lista(itens);
+    var pessoasPorId = {};
+    (d.pessoas || []).forEach(function (p) { if (p && _temId(p)) pessoasPorId[String(p.id)] = p; });
+    var servicosPorId = {};
+    (d.servicos || []).forEach(function (s) { if (s && _temId(s)) servicosPorId[String(s.id)] = s; });
+
+    // pessoaId -> { nome, origens: [...] }, na ordem das origens.
+    var herdadas = {}, ordem = [];
+    function herdar(pessoaId, nome, origem) {
+      var k = String(pessoaId);
+      if (!herdadas[k]) { herdadas[k] = { nome: nome, origens: [] }; ordem.push(k); }
+      herdadas[k].origens.push(origem);
+    }
+    lista.forEach(function (it) {
+      if (ehProduto(it) && _temId(it)) {
+        pessoasDoProduto(it.id, d.pessoas).forEach(function (x) {
+          herdar(x.pessoa.id, _texto(x.pessoa.nome), { tipo: 'produto', id: String(it.id), nome: _texto(it.nome), funcoes: x.funcoes });
+        });
+      } else if (ehServico(it) && _temId(it)) {
+        var s = servicosPorId[String(it.id)];
+        _lista(s && s.stakeholders).forEach(function (st) {
+          if (!st || !_temId(st)) return;
+          var p = pessoasPorId[String(st.id)];
+          herdar(st.id, _texto(p ? p.nome : st.nome), { tipo: 'servico', id: String(it.id), nome: _texto(s.nome || it.nome), funcoes: ['Stakeholder'] });
+        });
+      }
+    });
+
+    var adicionadas = [], removidas = [], alteradas = 0;
+    var presentes = {};
+    var saida = [];
+    lista.forEach(function (it) {
+      if (!ehPessoa(it) || !_temId(it)) { saida.push(it); return; }
+      var k = String(it.id);
+      presentes[k] = true;
+      var h = herdadas[k];
+      var antes = JSON.stringify(it.herdadoDe || []);
+      if (!h) {
+        if (soHerdada(it)) { removidas.push(_texto(it.nome)); return; }
+        var semHeranca = Object.assign({}, it);
+        delete semHeranca.herdadoDe;
+        if (antes !== '[]') alteradas++;
+        saida.push(semHeranca);
+        return;
+      }
+      var novo = Object.assign({}, it, { herdadoDe: h.origens });
+      // Pessoa que ja estava sem heranca (antiga ou escolhida a mao) continua manual.
+      if (!Array.isArray(it.herdadoDe) || !it.herdadoDe.length) novo.manual = true;
+      if (JSON.stringify(novo.herdadoDe) !== antes || novo.manual !== it.manual) alteradas++;
+      saida.push(novo);
+    });
+    ordem.forEach(function (k) {
+      if (presentes[k]) return;
+      var h = herdadas[k];
+      saida.push({ categoria: 'Pessoas', id: k, nome: h.nome, herdadoDe: h.origens });
+      adicionadas.push(h.nome);
+    });
+    return { itens: saida, adicionadas: adicionadas, removidas: removidas, alteradas: alteradas };
+  }
+
   return {
     CATEGORIA_SERVICO: CATEGORIA_SERVICO,
+    CATEGORIA_PRODUTO: CATEGORIA_PRODUTO,
     CATEGORIAS_DIRETAS: CATEGORIAS_DIRETAS,
+    FUNCOES_PRODUTO: FUNCOES_PRODUTO,
+    ehProduto: ehProduto,
+    ehPessoa: ehPessoa,
+    pessoasDoProduto: pessoasDoProduto,
+    soHerdada: soHerdada,
+    sincronizarPessoasHerdadas: sincronizarPessoasHerdadas,
     ehServico: ehServico,
     ehTecnicoDireto: ehTecnicoDireto,
     categoriaPermitidaNoProcesso: categoriaPermitidaNoProcesso,
