@@ -21612,6 +21612,10 @@ function _htmlModalProdutoSoftware() {
           <input type="text" id="prodSoftNome" placeholder="Ex: Fortes Ponto" style="${inp}">
         </div>
         <div style="margin-bottom:16px;">
+          <label style="${lbl}" for="prodSoftDescricao">Descrição</label>
+          <textarea id="prodSoftDescricao" rows="3" maxlength="1000" placeholder="O que é o produto e para que serve" style="${inp}resize:vertical;font-family:inherit;"></textarea>
+        </div>
+        <div style="margin-bottom:16px;">
           <label style="${lbl}" for="prodSoftArea">Área responsável</label>
           <select id="prodSoftArea" onchange="_renderPessoasDoProduto()" style="${inp}"><option value="">Nenhuma</option></select>
         </div>
@@ -21704,6 +21708,7 @@ function _coletarFormularioProdutoSoftware() {
     id: document.getElementById('prodSoftId').value || null,
     nome: document.getElementById('prodSoftNome').value.trim(),
     area: document.getElementById('prodSoftArea').value,
+    descricao: document.getElementById('prodSoftDescricao').value.trim(),
     ativo: document.getElementById('prodSoftAtivo').checked,
     pessoas: Object.keys(_FUNCOES_LIDERANCA).map((f) => (window._produtoPessoas[f] || []).map(String).sort()),
   };
@@ -21716,6 +21721,7 @@ window.abrirModalProdutoSoftware = (id) => {
   document.getElementById('modalProdutoSoftwareTitulo').textContent = p ? 'Editar Produto' : 'Novo Produto';
   document.getElementById('prodSoftId').value = p ? p.id : '';
   document.getElementById('prodSoftNome').value = p ? p.nome : '';
+  document.getElementById('prodSoftDescricao').value = p ? (p.descricao || '') : '';
   document.getElementById('prodSoftAtivo').checked = p ? p.ativo : true;
   _popularSelectAreaProduto(p ? (p.area || '') : '');
   const l = p ? _lideresDoProduto(p.id) : {};
@@ -21726,7 +21732,7 @@ window.abrirModalProdutoSoftware = (id) => {
   // não salvou, então as pessoas do produto ficam para depois.
   document.getElementById('prodSoftPessoasBloco').style.display = _temDrawerPaiEmpilhado() ? 'none' : 'block';
   _renderPessoasDoProduto();
-  ['prodSoftNome', 'prodSoftArea', 'prodSoftAtivo'].forEach((c) => { document.getElementById(c).disabled = !pode; });
+  ['prodSoftNome', 'prodSoftDescricao', 'prodSoftArea', 'prodSoftAtivo'].forEach((c) => { document.getElementById(c).disabled = !pode; });
   document.getElementById('btnSalvarProdutoSoftware').style.display = pode ? '' : 'none';
   document.getElementById('drawerProdutoSoftware').classList.add('open');
   document.getElementById('drawerOverlayProdutoSoftware').classList.add('open');
@@ -21757,6 +21763,7 @@ window.salvarProdutoSoftware = async () => {
         id: document.getElementById('prodSoftId').value || null,
         nome,
         area: document.getElementById('prodSoftArea').value,
+        descricao: document.getElementById('prodSoftDescricao').value.trim(),
         ativo: document.getElementById('prodSoftAtivo').checked,
       });
       produtosSoftwareData = await API.getProdutosSoftware();

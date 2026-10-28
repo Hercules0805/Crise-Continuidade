@@ -922,6 +922,8 @@ async function _lerProdutosSoftware() {
     nome: d.nome || '',
     // Area responsavel pelo produto (27/10/2026), pelo NOME (como processo.area).
     area: d.area || '',
+    // Descricao livre do produto (28/10/2026).
+    descricao: d.descricao || '',
     ativo: d.ativo !== false,
     ordem: Number(d.ordem) || 0,
     criadoEm: d.criadoEm || '',
@@ -929,7 +931,7 @@ async function _lerProdutosSoftware() {
   })).sort((a, b) => (a.ordem - b.ordem) || a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
-const _CAMPOS_PRODUTO_SOFTWARE = ['nome', 'area', 'ativo', 'ordem'];
+const _CAMPOS_PRODUTO_SOFTWARE = ['nome', 'area', 'descricao', 'ativo', 'ordem'];
 
 /** Nome comparavel: sem acento, sem maiuscula, sem espaco sobrando. */
 function _nomeComparavel(nome) {

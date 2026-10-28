@@ -42,7 +42,7 @@ function ambienteApi(docsIniciais) {
   ['_lerProdutosSoftware', '_nomeComparavel', '_salvarProdutoSoftware', '_minutosOuNull', '_refsDependencia', '_lerDependencias', '_salvarDependencia'].forEach((f) => {
     vm.runInContext(extrair(f) + `\nthis.${f} = ${f};`, ctx);
   });
-  vm.runInContext('const _CAMPOS_PRODUTO_SOFTWARE = ["nome", "area", "ativo", "ordem"]; this._CAMPOS_PRODUTO_SOFTWARE = _CAMPOS_PRODUTO_SOFTWARE;', ctx);
+  vm.runInContext('const _CAMPOS_PRODUTO_SOFTWARE = ["nome", "area", "descricao", "ativo", "ordem"]; this._CAMPOS_PRODUTO_SOFTWARE = _CAMPOS_PRODUTO_SOFTWARE;', ctx);
   return { ctx, store };
 }
 
@@ -69,6 +69,25 @@ test('produto: editar a si mesmo (mesmo nome) e desativar funciona', async () =>
   await ctx._salvarProdutoSoftware({ id: 'p1', nome: 'Colabore', ativo: false });
   assert.strictEqual(store.produtos_software.p1.ativo, false);
   assert.strictEqual(store.produtos_software.p1.ordem, 5);
+});
+
+test('descricao: grava, lê (vazia em registro antigo) e é preservada ao editar só o nome', async () => {
+  const { ctx, store } = ambienteApi({ produtos_software: { p1: { nome: 'Colabore', ativo: true, ordem: 1 } } });
+  assert.strictEqual((await ctx._lerProdutosSoftware())[0].descricao, '');
+  await ctx._salvarProdutoSoftware({ id: 'p1', nome: 'Colabore', descricao: 'Plataforma de colaboração' });
+  assert.strictEqual(store.produtos_software.p1.descricao, 'Plataforma de colaboração');
+  await ctx._salvarProdutoSoftware({ id: 'p1', nome: 'Colabore 2' });
+  assert.strictEqual(store.produtos_software.p1.descricao, 'Plataforma de colaboração');
+  assert.strictEqual((await ctx._lerProdutosSoftware())[0].descricao, 'Plataforma de colaboração');
+});
+
+test('pagina: o campo Descrição abre preenchido, sujo ao digitar, e vai no payload', async () => {
+  const { w, calls, doc } = await abrirPagina(['admin']);
+  w.abrirModalProdutoSoftware();
+  doc.getElementById('prodSoftNome').value = 'Fortes Doc';
+  doc.getElementById('prodSoftDescricao').value = '  Gestão de documentos ';
+  await w.salvarProdutoSoftware();
+  assert.strictEqual(calls.salvarProdutoSoftware[0][0].descricao, 'Gestão de documentos');
 });
 
 test('leitura: ordena por ordem e depois por nome; ativo padrao verdadeiro', async () => {
@@ -181,7 +200,7 @@ test('pagina: novo produto grava nome, area e ativo; erro (duplicado) aparece e 
   w.abrirModalProdutoSoftware();
   doc.getElementById('prodSoftNome').value = 'Fortes Doc';
   await w.salvarProdutoSoftware();
-  assert.deepStrictEqual(plano(calls.salvarProdutoSoftware[0][0]), { id: null, nome: 'Fortes Doc', area: '', ativo: true });
+  assert.deepStrictEqual(plano(calls.salvarProdutoSoftware[0][0]), { id: null, nome: 'Fortes Doc', area: '', descricao: '', ativo: true });
   assert.ok(doc.getElementById('drawerProdutoSoftware').classList.contains('open'), 'Salvar mantem o drawer (padrao Fechar + Salvar)');
   assert.strictEqual(doc.getElementById('modalProdutoSoftwareTitulo').textContent, 'Editar Produto');
 
