@@ -83,7 +83,10 @@ const SUFIXOS_FABRICANTE = new Set(['corporation', 'corp', 'inc', 'incorporated'
 const RUIDO_PRODUTO = new Set(['x64', 'x86', 'amd64', 'arm64', 'win64', 'win32', 'bit', 'en', 'us', 'pt', 'br', 'version', 'versao', 'edition', 'x', 'for']);
 // Sozinhos nao identificam nada ("update", "client"...): um produto que so
 // sobra isso depois da limpeza nao casa com noticia nenhuma.
-const GENERICOS = new Set(['update', 'updater', 'driver', 'drivers', 'runtime', 'client', 'server', 'tools', 'tool', 'agent', 'service', 'services', 'sdk', 'redistributable', 'helper', 'plugin', 'addin', 'add', 'in', 'app', 'application', 'manager', 'setup', 'installer', 'library', 'components', 'framework', 'package', 'pack', 'language', 'help', 'host', 'core', 'edge', 'office', 'security']);
+// "software" sozinho casou com "SD-WAN definida por software" (26/10/2026): palavra
+// comum de noticia, em ingles ou portugues, nunca identifica um produto.
+const GENERICOS = new Set(['update', 'updater', 'driver', 'drivers', 'runtime', 'client', 'server', 'tools', 'tool', 'agent', 'service', 'services', 'sdk', 'redistributable', 'helper', 'plugin', 'addin', 'add', 'in', 'app', 'application', 'manager', 'setup', 'installer', 'library', 'components', 'framework', 'package', 'pack', 'language', 'help', 'host', 'core', 'edge', 'office', 'security',
+  'software', 'softwares', 'sistema', 'sistemas', 'system', 'systems', 'platform', 'plataforma', 'suite', 'studio', 'portal', 'web', 'online', 'cloud', 'nuvem', 'desktop', 'mobile', 'network', 'rede', 'firmware', 'utility', 'utilities', 'utilitario', 'console', 'center', 'control', 'panel', 'device', 'devices', 'support', 'suporte', 'graphics', 'audio', 'video', 'media', 'player', 'browser', 'database', 'data', 'files', 'file', 'connector', 'module', 'extension', 'professional', 'pro', 'enterprise', 'standard', 'express', 'basic', 'home', 'free', 'lite', 'plus']);
 
 /** Termos que identificam o software na noticia: { fabricante, produto } normalizados e limpos. */
 function termosDoSoftware(fabricante, produto) {
@@ -94,10 +97,11 @@ function termosDoSoftware(fabricante, produto) {
     .filter((t, i) => t && !RUIDO_PRODUTO.has(t) && !(i > 0 && /^v?\d+$/.test(t)) && !/^\d+bit$/.test(t))
     .join(' ');
   // "Microsoft Edge" -> "edge" quando o fabricante abre o nome do produto; o
-  // casamento exige o fabricante na noticia nesses casos (ver casaNoTexto).
+  // que sobra e um pedaco do nome, entao o casamento EXIGE o fabricante na
+  // noticia (casaNoTexto). Sem isso "Matrox Graphics Software" virava "software".
   let semFabricante = p;
   if (fab && (p + ' ').startsWith(fab + ' ')) semFabricante = p.slice(fab.length).trim();
-  return { fabricante: fab, produto: semFabricante || p };
+  return { fabricante: fab, produto: semFabricante || p, exigeFabricante: !!semFabricante && semFabricante !== p };
 }
 
 /** Software casa com o texto (ja normalizado) da noticia? */
@@ -108,6 +112,7 @@ function casaNoTexto(texto, termos) {
   if (!t.includes(' ' + prod + ' ')) return false;
   const fab = termos.fabricante;
   if (fab && fab.length >= 3 && t.includes(' ' + fab + ' ')) return true;
+  if (termos.exigeFabricante) return false;
   // Sem o fabricante, so produto de nome distintivo: varias palavras ou nome
   // longo que nao seja termo generico.
   if (GENERICOS.has(prod)) return false;
@@ -372,7 +377,8 @@ function candidatosDoInventario(noticia, inventario) {
   const texto = _textoDaNoticia(noticia);
   if (!texto) return [];
   return (inventario || [])
-    .filter((s) => s && casaNoTexto(texto, s.termos || termosDoSoftware(s.fabricante, s.produto)))
+    // Sempre recalcula: os termos gravados na importacao podem ser de uma regra antiga.
+    .filter((s) => s && casaNoTexto(texto, termosDoSoftware(s.fabricante, s.produto)))
     .sort((a, b) => (Number(b.qtdHosts) || 0) - (Number(a.qtdHosts) || 0));
 }
 

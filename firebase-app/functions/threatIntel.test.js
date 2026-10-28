@@ -75,10 +75,10 @@ function deps(resposta, over) {
 
 test('normalizar e termosDoSoftware limpam versao, arquitetura e sufixo do fabricante', () => {
   assert.strictEqual(TI.normalizar('7-Zip Ação'), '7 zip acao');
-  assert.deepStrictEqual(TI.termosDoSoftware('Google LLC', 'Google Chrome'), { fabricante: 'google', produto: 'chrome' });
-  assert.deepStrictEqual(TI.termosDoSoftware('Microsoft Corporation', 'Microsoft Edge'), { fabricante: 'microsoft', produto: 'edge' });
-  assert.deepStrictEqual(TI.termosDoSoftware('Igor Pavlov', '7-Zip 23.01 (x64)'), { fabricante: 'igor pavlov', produto: '7 zip' });
-  assert.deepStrictEqual(TI.termosDoSoftware('Fortinet', 'FortiClient VPN 7.2.1'), { fabricante: 'fortinet', produto: 'forticlient vpn' });
+  assert.deepStrictEqual(TI.termosDoSoftware('Google LLC', 'Google Chrome'), { fabricante: 'google', produto: 'chrome', exigeFabricante: true });
+  assert.deepStrictEqual(TI.termosDoSoftware('Microsoft Corporation', 'Microsoft Edge'), { fabricante: 'microsoft', produto: 'edge', exigeFabricante: true });
+  assert.deepStrictEqual(TI.termosDoSoftware('Igor Pavlov', '7-Zip 23.01 (x64)'), { fabricante: 'igor pavlov', produto: '7 zip', exigeFabricante: false });
+  assert.deepStrictEqual(TI.termosDoSoftware('Fortinet', 'FortiClient VPN 7.2.1'), { fabricante: 'fortinet', produto: 'forticlient vpn', exigeFabricante: false });
 });
 
 test('casaNoTexto: produto generico so casa com o fabricante junto; distintivo casa sozinho', () => {
@@ -86,8 +86,11 @@ test('casaNoTexto: produto generico so casa com o fabricante junto; distintivo c
   assert.strictEqual(TI.casaNoTexto(TI.normalizar('Microsoft corrige falha no Edge'), edge), true);
   assert.strictEqual(TI.casaNoTexto(TI.normalizar('Ataque na edge da rede'), edge), false);
   const chrome = TI.termosDoSoftware('Google LLC', 'Google Chrome');
-  assert.strictEqual(TI.casaNoTexto(TI.normalizar('Zero-day no Chrome explorado'), chrome), true);
-  assert.strictEqual(TI.casaNoTexto(TI.normalizar('Chromebook novo'), chrome), false, 'palavra inteira');
+  assert.strictEqual(TI.casaNoTexto(TI.normalizar('Google corrige zero-day no Chrome'), chrome), true);
+  assert.strictEqual(TI.casaNoTexto(TI.normalizar('Zero-day no Chrome explorado'), chrome), false, 'nome comecava pelo fabricante: exige o fabricante');
+  assert.strictEqual(TI.casaNoTexto(TI.normalizar('Google lanca Chromebook novo'), chrome), false, 'palavra inteira');
+  const forti = TI.termosDoSoftware('Fortinet', 'FortiClient VPN 7.2.1');
+  assert.strictEqual(TI.casaNoTexto(TI.normalizar('Falha no FortiClient VPN'), forti), true, 'nome proprio distintivo casa sem o fabricante');
 });
 
 test('parseRss le RSS 2.0 (CDATA, HTML escapado) e Atom', () => {
@@ -398,4 +401,19 @@ test('colunas extras do inventario: tetos na gravacao e contexto no prompt', () 
   assert.deepStrictEqual(doc.doc.extras, [{ coluna: 'Exposição', valores: ['Internet'] }]);
   const p = TI.promptAnalise({ titulo: 'T', resumo: '', cves: [] }, [Object.assign({ id: 's1' }, doc.doc)]);
   assert.match(p, /"outrasInformacoes":\{"Exposição":\["Internet"\]\}/);
+});
+
+test('caso Matrox x VeloCloud (26/10/2026): pedaco generico do nome nao casa com a noticia', () => {
+  const noticia = TI.noticiaManual({ titulo: 'Arista corrige zero-day no VeloCloud explorado em ataques',
+    texto: 'O VCO e um portal de gerenciamento que ajuda a gerenciar SD-WANs VeloCloud (redes definidas por software).' });
+  const inventario = [
+    { id: 'm', fabricante: 'Matrox Graphics Inc.', produto: 'Matrox Graphics Software (remove only)', versao: '4.1.1.5', qtdHosts: 1 },
+    { id: 's', fabricante: 'Fabricante X', produto: 'Software', versao: '1', qtdHosts: 1 },
+    { id: 'v', fabricante: 'Arista Networks', produto: 'VeloCloud Orchestrator', versao: '4.5', qtdHosts: 1 },
+    // termos antigos gravados na importacao nao valem mais
+    { id: 'old', fabricante: 'Matrox Graphics Inc.', produto: 'Matrox Graphics Software', versao: '1', termos: { fabricante: 'matrox graphics', produto: 'software' } },
+  ];
+  assert.deepStrictEqual(TI.candidatosDoInventario(noticia, inventario).map((s) => s.id), []);
+  const comVco = TI.noticiaManual({ titulo: 'Falha no VeloCloud Orchestrator', texto: 'Arista publica correcao.' });
+  assert.deepStrictEqual(TI.candidatosDoInventario(comVco, inventario).map((s) => s.id), ['v']);
 });
