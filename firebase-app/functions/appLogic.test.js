@@ -1581,6 +1581,27 @@ test('sugerirTextoIA processo-impacto: atalho para sugerirImpactoProcesso', asyn
   assert.match(g.chamadas[0].corpo.contents[0].parts[0].text, /Descrição do Impacto para Indisponibilidade/);
 });
 
+test('sugerirTextoIA processo-impacto e processo-funcional: Produtos de Software do processo vao no prompt com a descricao', async () => {
+  const comProdutos = () => {
+    const s = seedImpacto({ perfis: ['admin'] });
+    s.processos.ti__backup.dependenciaItens.push(
+      { categoria: 'Produtos de Software', id: 'ps1', nome: 'Ponto (nome antigo)' },
+      { categoria: 'Produtos de Software', id: 'apagado', nome: 'Fortes Legado' });
+    s.produtos_software = { ps1: { nome: 'Fortes Ponto', descricao: 'Controle de ponto eletrônico dos clientes', endpoints: ['https://ponto.exemplo'] } };
+    return s;
+  };
+  for (const alvo of ['processo-impacto', 'processo-funcional']) {
+    const { g } = await pedirIA(comProdutos(), { alvo, id: 'ti__backup' });
+    const { prompt, dados } = dadosDoPrompt(g, 'DADOS DO PROCESSO (JSON):');
+    assert.strictEqual(JSON.stringify(dados.produtosSoftware), JSON.stringify([
+      { nome: 'Fortes Ponto', descricao: 'Controle de ponto eletrônico dos clientes' },
+      { nome: 'Fortes Legado' },
+    ]), alvo);
+    assert.doesNotMatch(prompt, /ponto\.exemplo/, 'endpoints fora do prompt');
+    assert.match(prompt, /Produtos de Software Fortes|produtosSoftware/);
+  }
+});
+
 function seedDrp(perfis) {
   const s = seed();
   s.config_perfis['analista@fortestecnologia.com.br'] = { perfis };

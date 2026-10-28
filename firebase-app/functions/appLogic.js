@@ -40,6 +40,7 @@ const COLLECTION = {
   vulnerabilidades: 'vulnerabilidades',
   contratos: 'contratos',
   servicos: 'servicos',
+  produtosSoftware: 'produtos_software',
   statusContrato: 'status_contrato',
 };
 
@@ -1918,6 +1919,7 @@ REGRAS:
 - Quando faltar dado para uma dimensão, não fale dela.
 - Cubra, quando houver base nos dados: clientes, financeiro, operação (outros processos e serviços afetados), reputação e legal/regulatório. As notas do questionário (1 a 4, quanto maior pior) dizem quais dimensões pesam mais.
 - Considere o RTO/MTD: diga o que piora com o tempo parado.
+- "produtosSoftware" são produtos Fortes vendidos a clientes que dependem deste processo: use a descrição deles para dizer quem é afetado e como.
 - De 3 a 6 frases, português do Brasil, direto, na voz do processo ("Sem este processo, ...").
 - Texto puro: sem markdown, sem listas, sem HTML, sem emojis.
 
@@ -1944,12 +1946,14 @@ async function _processoEditavelParaIA(db, data, ctx) {
 
 /** O que o sistema sabe do processo, para os prompts de sugestao (impacto e descricao funcional). */
 async function _dadosProcessoIA(db, p) {
-  const [resposta, depsSnap, servicos, riscosSnap] = await Promise.all([
+  const [resposta, depsSnap, servicos, riscosSnap, produtosSnap] = await Promise.all([
     _ultimaRespostaBia(db, p, p.id),
     db.collection(COLLECTION.dependencias).get(),
     _lerServicos(db),
     db.collection(COLLECTION.riscos).where('processoId', '==', p.id).get().catch(() => ({ docs: [] })),
+    db.collection(COLLECTION.produtosSoftware).get().catch(() => ({ docs: [] })),
   ]);
+  const produtoPorId = new Map(produtosSnap.docs.map((d) => [String(d.id), d.data() || {}]));
   const dependencias = depsSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
   const score = resposta ? Number(resposta.score) || 0 : 0;
   let levantamento = {};
@@ -1972,6 +1976,13 @@ async function _dadosProcessoIA(db, p) {
     dependenciasTecnicas: cadeiaDependencias.cadeiaDoProcesso({ processo: p, servicos, dependencias })
       .filter((it) => it.dep && !['Fornecedores', 'Fornecedor', 'Instalações', 'Instalação'].includes(it.categoria)).slice(0, 25)
       .map((it) => `${it.categoria}: ${it.nome}`),
+    // Produtos de Software Fortes que dependem do processo: a descricao do
+    // cadastro diz quem e afetado (endpoints ficam fora do prompt).
+    produtosSoftware: itens.filter((it) => cadeiaDependencias.ehProduto(it)).slice(0, 15).map((it) => {
+      const cad = it.id ? produtoPorId.get(String(it.id)) : null;
+      const descricao = String((cad && cad.descricao) || '').slice(0, 400);
+      return descricao ? { nome: (cad && cad.nome) || it.nome || '', descricao } : { nome: (cad && cad.nome) || it.nome || '' };
+    }).filter((x) => x.nome),
     fornecedores: porCategoria(['Fornecedores', 'Fornecedor']),
     pessoasChave: porCategoria(['Pessoas', 'Pessoa']).length,
     instalacoes: _instalacoesDoProcessoPCN(p, dependencias).map((i) => i.nome),
@@ -2018,7 +2029,7 @@ const _REGRAS_SUGESTAO_IA = `REGRAS:
 function _promptFuncionalProcesso(dados) {
   return `Você é um analista de continuidade de negócios (ISO 22301) da Fortes Tecnologia e ajuda o dono de um processo a preencher o cadastro.
 
-Escreva a "Descrição Funcional" do processo abaixo: o que ele faz, para quem (cliente interno ou externo), o que recebe e o que entrega, e com o que trabalha (Serviços, sistemas, fornecedores, outros processos). NÃO fale de impacto de parada — isso é outro campo.
+Escreva a "Descrição Funcional" do processo abaixo: o que ele faz, para quem (cliente interno ou externo), o que recebe e o que entrega, e com o que trabalha (Serviços, Produtos de Software Fortes, sistemas, fornecedores, outros processos). NÃO fale de impacto de parada — isso é outro campo.
 
 ${_REGRAS_SUGESTAO_IA}
 - De 2 a 5 frases, sem listas, começando pelo propósito do processo.
