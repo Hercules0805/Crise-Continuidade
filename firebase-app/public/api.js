@@ -924,6 +924,10 @@ async function _lerProdutosSoftware() {
     area: d.area || '',
     // Descricao livre do produto (28/10/2026).
     descricao: d.descricao || '',
+    // Endpoints (URLs) do produto (28/10/2026): [{url, ambiente, descricao}].
+    endpoints: Array.isArray(d.endpoints) ? d.endpoints.filter((e) => e && e.url).map((e) => ({
+      url: String(e.url), ambiente: String(e.ambiente || ''), descricao: String(e.descricao || ''),
+    })) : [],
     ativo: d.ativo !== false,
     ordem: Number(d.ordem) || 0,
     criadoEm: d.criadoEm || '',
@@ -931,7 +935,7 @@ async function _lerProdutosSoftware() {
   })).sort((a, b) => (a.ordem - b.ordem) || a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
-const _CAMPOS_PRODUTO_SOFTWARE = ['nome', 'area', 'descricao', 'ativo', 'ordem'];
+const _CAMPOS_PRODUTO_SOFTWARE = ['nome', 'area', 'descricao', 'endpoints', 'ativo', 'ordem'];
 
 /** Nome comparavel: sem acento, sem maiuscula, sem espaco sobrando. */
 function _nomeComparavel(nome) {

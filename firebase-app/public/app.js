@@ -21639,7 +21639,9 @@ function renderizarProdutosSoftware() {
 
   const busca = ((document.getElementById('buscaProdutoSoftware') || {}).value || '').trim().toLowerCase();
   const filtroArea = (document.getElementById('filtroProdutoArea') || {}).value || '';
-  let data = produtosSoftwareData.filter((p) => !busca || (p.nome || '').toLowerCase().includes(busca));
+  // A busca também acha pelo endpoint (URL ou descrição).
+  let data = produtosSoftwareData.filter((p) => !busca || (p.nome || '').toLowerCase().includes(busca)
+    || (p.endpoints || []).some((e) => `${e.url} ${e.descricao || ''}`.toLowerCase().includes(busca)));
   if (filtroArea) data = data.filter((p) => (filtroArea === '__sem__' ? !p.area : p.area === filtroArea));
   data = produtosSoftwareOrdenacao.aplicar(data, {
     status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
@@ -21715,6 +21717,27 @@ function _htmlModalProdutoSoftware() {
         </div>
         <label class="check-label" style="margin-bottom:4px;"><input type="checkbox" id="prodSoftAtivo" checked> Produto ativo</label>
         <span style="font-size:0.75em;color:#888;display:block;margin-bottom:18px;">Desativar tira o produto das listas para novas associações. Quem já está associado continua vendo o produto marcado como inativo.</span>
+        <div style="border-top:1px solid #f0f0f0;padding-top:14px;margin-bottom:18px;">
+          <label style="${lbl}">Endpoints</label>
+          <p style="font-size:0.78em;color:#888;margin:0 0 10px;">URLs do produto: aplicação, API, portal, ambiente de homologação...</p>
+          <div id="prodSoftEndpointsTabela"></div>
+          <div id="prodSoftEndpointForm" style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;">
+            <div id="prodSoftEndpointEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
+              ✎ Editando endpoint — <a href="#" onclick="cancelarEdicaoEndpointProduto();return false;" style="color:#1565c0;">cancelar edição</a>
+            </div>
+            <div style="display:grid;grid-template-columns:3fr 1fr;gap:10px;margin-bottom:8px;">
+              <input type="url" id="prodSoftEndpointUrl" placeholder="https://..." style="${inp}">
+              <select id="prodSoftEndpointAmbiente" style="${inp}">
+                <option value="">Ambiente...</option>
+                ${AMBIENTES_ENDPOINT_PRODUTO.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}
+              </select>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;">
+              <input type="text" id="prodSoftEndpointDescricao" placeholder="Descrição (ex: API pública, portal do cliente)" style="${inp}">
+              <button class="btn btn-ghost" id="btnAdicionarEndpointProduto" onclick="adicionarEndpointProduto()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+            </div>
+          </div>
+        </div>
         <div id="prodSoftPessoasBloco" style="border-top:1px solid #f0f0f0;padding-top:14px;">
           <label style="${lbl}">Pessoas do produto</label>
           <p style="font-size:0.78em;color:#888;margin:0 0 10px;">O vínculo é o mesmo do cadastro da Pessoa ("Funções em produtos"): mudar aqui muda lá.</p>
@@ -21797,12 +21820,108 @@ function _mudancasPessoasDoProduto() {
   return mudancas;
 }
 
+// ============================================================
+// Endpoints do produto (28/10/2026) -- mesmo padrão dos "Canais de suporte" do
+// Fornecedor: formulário embaixo da lista, "+ Adicionar" / "Salvar alteração".
+// Item: {url, ambiente, descricao}. Só http(s); URL repetida no produto é recusada.
+// ============================================================
+const AMBIENTES_ENDPOINT_PRODUTO = ['Produção', 'Homologação', 'Desenvolvimento', 'Outro'];
+window._produtoEndpoints = [];
+window._endpointProdutoEditandoIndex = null;
+
+/** URL http(s) válida, sem espaços nas pontas; '' se não for. */
+function _normalizarUrlEndpoint(texto) {
+  const t = String(texto || '').trim();
+  if (!/^https?:\/\//i.test(t)) return '';
+  try { new URL(t); return t; } catch (e) { return ''; }
+}
+
+/** Chave de comparação: sem caixa e sem barra final. */
+const _chaveUrlEndpoint = (url) => String(url || '').toLowerCase().replace(/\/+$/, '');
+
+function renderEndpointsProduto() {
+  const container = document.getElementById('prodSoftEndpointsTabela');
+  if (!container) return;
+  const itens = window._produtoEndpoints || [];
+  if (!itens.length) { container.innerHTML = '<p class="vazio-inline">Nenhum endpoint cadastrado.</p>'; return; }
+  const pode = Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS);
+  container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
+    itens.map((e, i) => `<tr>
+        <td>
+          <div><a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer" style="color:#1565c0;word-break:break-all;">${esc(e.url)}</a>${e.ambiente ? ` <span class="badge badge-gray" style="margin-left:6px;">${esc(e.ambiente)}</span>` : ''}</div>
+          ${e.descricao ? `<div style="font-size:0.8em;color:#888;margin-top:2px;">${esc(e.descricao)}</div>` : ''}
+        </td>
+        <td style="text-align:center;white-space:nowrap;width:1%;">${pode ? `
+          <button class="btn-icon" onclick="editarEndpointProduto(${i})" title="Editar">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+          <button class="btn-icon" onclick="removerEndpointProduto(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}
+        </td>
+      </tr>`).join('') + `</tbody></table>`;
+}
+
+function _limparFormularioEndpointProduto() {
+  ['prodSoftEndpointUrl', 'prodSoftEndpointAmbiente', 'prodSoftEndpointDescricao'].forEach((id) => { document.getElementById(id).value = ''; });
+}
+
+window.adicionarEndpointProduto = () => {
+  const url = _normalizarUrlEndpoint(document.getElementById('prodSoftEndpointUrl').value);
+  if (!url) return _avisarCampo('prodSoftEndpointUrl', 'Informe uma URL válida começando com http:// ou https://.');
+  const editando = window._endpointProdutoEditandoIndex;
+  const lista = window._produtoEndpoints = window._produtoEndpoints || [];
+  if (lista.some((e, i) => i !== editando && _chaveUrlEndpoint(e.url) === _chaveUrlEndpoint(url))) {
+    return _avisarCampo('prodSoftEndpointUrl', 'Este endpoint já está na lista.');
+  }
+  const item = {
+    url,
+    ambiente: document.getElementById('prodSoftEndpointAmbiente').value,
+    descricao: document.getElementById('prodSoftEndpointDescricao').value.trim(),
+  };
+  if (editando != null) {
+    lista[editando] = item;
+    window.cancelarEdicaoEndpointProduto();
+  } else {
+    lista.push(item);
+    _limparFormularioEndpointProduto();
+  }
+  renderEndpointsProduto();
+};
+
+window.editarEndpointProduto = (idx) => {
+  const e = (window._produtoEndpoints || [])[idx];
+  if (!e) return;
+  window._endpointProdutoEditandoIndex = idx;
+  // Ambiente fora da lista (dado antigo) vira opção extra, para não se perder.
+  const sel = document.getElementById('prodSoftEndpointAmbiente');
+  if (e.ambiente && !Array.from(sel.options).some((o) => o.value === e.ambiente)) sel.add(new Option(e.ambiente, e.ambiente));
+  document.getElementById('prodSoftEndpointUrl').value = e.url || '';
+  sel.value = e.ambiente || '';
+  document.getElementById('prodSoftEndpointDescricao').value = e.descricao || '';
+  document.getElementById('prodSoftEndpointEdicaoAviso').style.display = 'block';
+  document.getElementById('btnAdicionarEndpointProduto').textContent = 'Salvar alteração';
+};
+
+window.cancelarEdicaoEndpointProduto = () => {
+  window._endpointProdutoEditandoIndex = null;
+  document.getElementById('prodSoftEndpointEdicaoAviso').style.display = 'none';
+  document.getElementById('btnAdicionarEndpointProduto').textContent = '+ Adicionar';
+  _limparFormularioEndpointProduto();
+};
+
+window.removerEndpointProduto = (idx) => {
+  window._produtoEndpoints.splice(idx, 1);
+  if (window._endpointProdutoEditandoIndex === idx) window.cancelarEdicaoEndpointProduto();
+  else if (window._endpointProdutoEditandoIndex != null && window._endpointProdutoEditandoIndex > idx) window._endpointProdutoEditandoIndex--;
+  renderEndpointsProduto();
+};
+
 function _coletarFormularioProdutoSoftware() {
   return {
     id: document.getElementById('prodSoftId').value || null,
     nome: document.getElementById('prodSoftNome').value.trim(),
     area: document.getElementById('prodSoftArea').value,
     descricao: document.getElementById('prodSoftDescricao').value.trim(),
+    endpoints: (window._produtoEndpoints || []).map((e) => ({ ...e })),
     ativo: document.getElementById('prodSoftAtivo').checked,
     pessoas: Object.keys(_FUNCOES_LIDERANCA).map((f) => (window._produtoPessoas[f] || []).map(String).sort()),
   };
@@ -21816,6 +21935,10 @@ window.abrirModalProdutoSoftware = (id) => {
   document.getElementById('prodSoftId').value = p ? p.id : '';
   document.getElementById('prodSoftNome').value = p ? p.nome : '';
   document.getElementById('prodSoftDescricao').value = p ? (p.descricao || '') : '';
+  window._produtoEndpoints = p && Array.isArray(p.endpoints) ? p.endpoints.map((e) => ({ ...e })) : [];
+  window.cancelarEdicaoEndpointProduto();
+  document.getElementById('prodSoftEndpointForm').style.display = pode ? '' : 'none';
+  renderEndpointsProduto();
   document.getElementById('prodSoftAtivo').checked = p ? p.ativo : true;
   _popularSelectAreaProduto(p ? (p.area || '') : '');
   const l = p ? _lideresDoProduto(p.id) : {};
@@ -21858,6 +21981,7 @@ window.salvarProdutoSoftware = async () => {
         nome,
         area: document.getElementById('prodSoftArea').value,
         descricao: document.getElementById('prodSoftDescricao').value.trim(),
+        endpoints: (window._produtoEndpoints || []).map((e) => ({ url: e.url, ambiente: e.ambiente || '', descricao: e.descricao || '' })),
         ativo: document.getElementById('prodSoftAtivo').checked,
       });
       produtosSoftwareData = await API.getProdutosSoftware();

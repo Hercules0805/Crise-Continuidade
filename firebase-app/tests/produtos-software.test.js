@@ -42,7 +42,7 @@ function ambienteApi(docsIniciais) {
   ['_lerProdutosSoftware', '_nomeComparavel', '_salvarProdutoSoftware', '_minutosOuNull', '_refsDependencia', '_lerDependencias', '_salvarDependencia'].forEach((f) => {
     vm.runInContext(extrair(f) + `\nthis.${f} = ${f};`, ctx);
   });
-  vm.runInContext('const _CAMPOS_PRODUTO_SOFTWARE = ["nome", "area", "descricao", "ativo", "ordem"]; this._CAMPOS_PRODUTO_SOFTWARE = _CAMPOS_PRODUTO_SOFTWARE;', ctx);
+  vm.runInContext('const _CAMPOS_PRODUTO_SOFTWARE = ["nome", "area", "descricao", "endpoints", "ativo", "ordem"]; this._CAMPOS_PRODUTO_SOFTWARE = _CAMPOS_PRODUTO_SOFTWARE;', ctx);
   return { ctx, store };
 }
 
@@ -200,7 +200,7 @@ test('pagina: novo produto grava nome, area e ativo; erro (duplicado) aparece e 
   w.abrirModalProdutoSoftware();
   doc.getElementById('prodSoftNome').value = 'Fortes Doc';
   await w.salvarProdutoSoftware();
-  assert.deepStrictEqual(plano(calls.salvarProdutoSoftware[0][0]), { id: null, nome: 'Fortes Doc', area: '', descricao: '', ativo: true });
+  assert.deepStrictEqual(plano(calls.salvarProdutoSoftware[0][0]), { id: null, nome: 'Fortes Doc', area: '', descricao: '', endpoints: [], ativo: true });
   assert.ok(doc.getElementById('drawerProdutoSoftware').classList.contains('open'), 'Salvar mantem o drawer (padrao Fechar + Salvar)');
   assert.strictEqual(doc.getElementById('modalProdutoSoftwareTitulo').textContent, 'Editar Produto');
 
@@ -537,4 +537,111 @@ test('produtos: coluna e bloco de Liderança de Suporte; vincular grava a funcao
   w.adicionarPessoaAoProduto('liderSuporte', 'pe2');
   await w.salvarProdutoSoftware();
   assert.deepStrictEqual(plano(calls.salvarVinculosProdutoPessoas[0]), ['ps1', [{ pessoaId: 'pe2', funcao: 'liderSuporte', vinculado: true }]]);
+});
+
+// ---------------------------------------------------------------- endpoints do produto (28/10/2026)
+const COM_ENDPOINT = { getProdutosSoftware: [
+  { id: 'ps1', nome: 'Conecta', ativo: true, ordem: 1, endpoints: [{ url: 'https://conecta.fortes.com.br', ambiente: 'Produção', descricao: 'Portal do cliente' }] },
+  { id: 'ps2', nome: 'Fortes RH', ativo: true, ordem: 2 },
+] };
+const endpointsNaTela = (doc) => [...doc.querySelectorAll('#prodSoftEndpointsTabela a')].map((a) => a.getAttribute('href'));
+const digitarEndpoint = (doc, url, ambiente, descricao) => {
+  doc.getElementById('prodSoftEndpointUrl').value = url;
+  doc.getElementById('prodSoftEndpointAmbiente').value = ambiente || '';
+  doc.getElementById('prodSoftEndpointDescricao').value = descricao || '';
+};
+
+test('endpoints: leitura normaliza (sem lista vira [], item sem URL sai) e gravacao preserva ao editar so o nome', async () => {
+  const { ctx, store } = ambienteApi({ produtos_software: {
+    p1: { nome: 'Conecta', endpoints: [{ url: 'https://a.x' }, { url: '' }, null] }, p2: { nome: 'RH' },
+  } });
+  const lista = await ctx._lerProdutosSoftware();
+  assert.deepStrictEqual(plano(lista.find((p) => p.id === 'p1').endpoints), [{ url: 'https://a.x', ambiente: '', descricao: '' }]);
+  assert.deepStrictEqual(plano(lista.find((p) => p.id === 'p2').endpoints), []);
+  await ctx._salvarProdutoSoftware({ id: 'p1', nome: 'Conecta 2' });
+  assert.strictEqual(store.produtos_software.p1.endpoints.length, 3, 'sem endpoints no payload, nao mexe');
+});
+
+test('endpoints: o drawer lista os gravados com link, ambiente e descricao', async () => {
+  const { w, doc } = await abrirPagina(['admin'], COM_ENDPOINT);
+  w.abrirModalProdutoSoftware('ps1');
+  assert.deepStrictEqual(endpointsNaTela(doc), ['https://conecta.fortes.com.br']);
+  const tabela = doc.getElementById('prodSoftEndpointsTabela');
+  assert.match(tabela.textContent, /Produção/);
+  assert.match(tabela.textContent, /Portal do cliente/);
+  assert.strictEqual(tabela.querySelector('a').getAttribute('target'), '_blank');
+  w.abrirModalProdutoSoftware('ps2');
+  assert.match(doc.getElementById('prodSoftEndpointsTabela').textContent, /Nenhum endpoint cadastrado/);
+});
+
+test('endpoints: adicionar valida URL http(s) e recusa repetida (sem caixa e sem barra final)', async () => {
+  const { w, doc } = await abrirPagina(['admin'], COM_ENDPOINT);
+  w.abrirModalProdutoSoftware('ps1');
+  digitarEndpoint(doc, 'conecta.fortes.com.br');
+  w.adicionarEndpointProduto();
+  digitarEndpoint(doc, 'ftp://arquivos.x');
+  w.adicionarEndpointProduto();
+  digitarEndpoint(doc, 'HTTPS://CONECTA.FORTES.COM.BR/');
+  w.adicionarEndpointProduto();
+  assert.deepStrictEqual(endpointsNaTela(doc), ['https://conecta.fortes.com.br'], 'nada invalido ou repetido entrou');
+  digitarEndpoint(doc, '  https://api.conecta.fortes.com.br/v1  ', 'Homologação', 'API');
+  w.adicionarEndpointProduto();
+  assert.deepStrictEqual(endpointsNaTela(doc), ['https://conecta.fortes.com.br', 'https://api.conecta.fortes.com.br/v1']);
+  assert.strictEqual(doc.getElementById('prodSoftEndpointUrl').value, '', 'formulario limpa depois de adicionar');
+});
+
+test('endpoints: editar no formulario de cima, cancelar, remover; tudo vai no Salvar', async () => {
+  const { w, doc, calls } = await abrirPagina(['admin'], COM_ENDPOINT);
+  w.abrirModalProdutoSoftware('ps1');
+  digitarEndpoint(doc, 'https://hml.conecta.fortes.com.br', 'Homologação');
+  w.adicionarEndpointProduto();
+
+  w.editarEndpointProduto(0);
+  assert.strictEqual(doc.getElementById('prodSoftEndpointUrl').value, 'https://conecta.fortes.com.br');
+  assert.strictEqual(doc.getElementById('btnAdicionarEndpointProduto').textContent, 'Salvar alteração');
+  doc.getElementById('prodSoftEndpointDescricao').value = 'Portal novo';
+  w.adicionarEndpointProduto();
+  assert.strictEqual(doc.getElementById('btnAdicionarEndpointProduto').textContent, '+ Adicionar');
+
+  w.editarEndpointProduto(1);
+  w.cancelarEdicaoEndpointProduto();
+  assert.strictEqual(doc.getElementById('prodSoftEndpointUrl').value, '');
+
+  w.removerEndpointProduto(1);
+  await w.salvarProdutoSoftware();
+  assert.deepStrictEqual(plano(calls.salvarProdutoSoftware[0][0].endpoints), [
+    { url: 'https://conecta.fortes.com.br', ambiente: 'Produção', descricao: 'Portal novo' },
+  ]);
+});
+
+test('endpoints: mexer na lista suja o drawer; abrir e fechar sem mexer nao grava', async () => {
+  const { w, calls } = await abrirPagina(['admin'], COM_ENDPOINT);
+  w.abrirModalProdutoSoftware('ps1');
+  // O rastreador de edicao compara esta foto do formulario: a lista de endpoints faz parte dela.
+  const antes = JSON.stringify(w._coletarFormularioProdutoSoftware());
+  w.removerEndpointProduto(0);
+  assert.notStrictEqual(JSON.stringify(w._coletarFormularioProdutoSoftware()), antes);
+  w.abrirModalProdutoSoftware('ps1');
+  assert.strictEqual(JSON.stringify(w._coletarFormularioProdutoSoftware()), antes, 'reabrir descarta a mudanca nao salva');
+  await w.fecharModalProdutoSoftware();
+  w.abrirModalProdutoSoftware('ps2');
+  await w.fecharModalProdutoSoftware();
+  assert.ok(!calls.salvarProdutoSoftware, 'nada gravado');
+});
+
+test('endpoints: quem so le ve a lista sem o formulario e sem editar/remover', async () => {
+  const { w, doc } = await abrirPagina(['gestor'], COM_ENDPOINT);
+  w.abrirModalProdutoSoftware('ps1');
+  assert.deepStrictEqual(endpointsNaTela(doc), ['https://conecta.fortes.com.br']);
+  assert.strictEqual(doc.getElementById('prodSoftEndpointForm').style.display, 'none');
+  assert.strictEqual(doc.querySelectorAll('#prodSoftEndpointsTabela .btn-icon').length, 0);
+});
+
+test('endpoints: a busca da lista acha o produto pela URL', async () => {
+  const { w, doc } = await abrirPagina(['admin'], COM_ENDPOINT);
+  doc.getElementById('buscaProdutoSoftware').value = 'conecta.fortes';
+  w.renderizarProdutosSoftware();
+  const linhas = [...doc.querySelectorAll('#listaProdutosSoftware tbody tr')];
+  assert.strictEqual(linhas.length, 1);
+  assert.match(linhas[0].textContent, /Conecta/);
 });
