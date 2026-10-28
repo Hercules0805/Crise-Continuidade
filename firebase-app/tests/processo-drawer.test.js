@@ -166,16 +166,17 @@ test('BIA: dependencia cujo cadastro foi removido vira chip cinza "(removida)"; 
 
 // ---- Hierarquia Processo -> Servico -> componentes (21/10/2026) ----
 
-test('BIA: linhas so dos Servicos e dos 4 Ps; Servico mostra o que contem; tecnico direto vai para o bloco legado', async () => {
+test('Dependencias: cartoes so dos Servicos e dos 4 Ps; Servico achado pela busca; tecnico direto vai para o bloco legado', async () => {
   const { w, doc } = await carregar(['seguranca']);
   w.editarProcesso('p1');
+  w.trocarAbaProcesso('dependencias');
   const tabela = doc.getElementById('fDependenciaTabela');
-  const linhas = [...tabela.querySelectorAll('tbody > tr > td:first-child')].map((td) => td.textContent.replace(/\s+/g, ' ').trim());
-  const esperadas = ['Serviços', 'Fornecedores', 'Pessoas', 'Instalações', 'Processos Internos'];
-  assert.strictEqual(linhas.length, esperadas.length);
-  esperadas.forEach((cat, i) => assert.ok(linhas[i].includes(cat), cat + ' em ' + linhas[i]));
-  // Portal RH suporta o processo pelo processoIds legado -> aparece como disponivel? Nao: ainda nao esta no processo.
-  assert.match(tabela.textContent, /Portal RH/, 'servico disponivel para escolha');
+  const cartoes = [...tabela.querySelectorAll('.deps-cartao')].map((c) => c.dataset.categoria);
+  assert.deepStrictEqual(cartoes, ['Serviços', 'Pessoas', 'Instalações', 'Fornecedores', 'Processos Internos']);
+  // Portal RH suporta o processo pelo processoIds legado, mas ainda nao esta no processo: aparece na busca.
+  doc.getElementById('depsBusca').value = 'portal';
+  w.buscarDependenciaProcesso();
+  assert.match(doc.getElementById('depsBuscaResultados').textContent, /Portal RH/, 'servico disponivel para escolha');
   const legado = tabela.querySelector('.legado-tecnico');
   assert.ok(legado, 'bloco de legado');
   assert.match(legado.textContent, /Ligações técnicas diretas \(legado\) — 2/);
@@ -229,10 +230,10 @@ const AVALIADO = { id: 'p3', area: 'TI', processo: 'Cobrança', dependenciaItens
 const comPerguntas = (extra) => Object.assign({ getPerguntas: PERGUNTAS, getProcessos: [P1, P2, AVALIADO] }, extra || {});
 const selos = (doc) => doc.getElementById('processoSelosPlanos').textContent.replace(/\s+/g, ' ').trim();
 
-test('drawer: 4 abas (Avaliacao dentro do BIA), faixa de selos calculados e sem os selects antigos', async () => {
+test('drawer: 5 abas (Dependencias propria; Avaliacao dentro do BIA), faixa de selos calculados e sem os selects antigos', async () => {
   const { w, doc } = await carregar(['seguranca'], comPerguntas());
   w.editarProcesso('p1');
-  assert.deepStrictEqual([...doc.querySelectorAll('#drawerProcesso [role="tab"]')].map((b) => b.textContent.trim()), ['Identificação', 'BIA', 'BCP', 'DRP']);
+  assert.deepStrictEqual([...doc.querySelectorAll('#drawerProcesso [role="tab"]')].map((b) => b.textContent.trim()), ['Identificação', 'Dependências', 'BIA', 'BCP', 'DRP']);
   ['fBiaHomologada', 'fBcpStatus', 'fDrpStatus', 'painel-avaliacao', 'fBiaScoreInfo'].forEach((id) => assert.strictEqual(doc.getElementById(id), null, id));
   assert.match(selos(doc), /BIA Não avaliado/);
   assert.match(selos(doc), /BCP Sem PCN/);
@@ -323,4 +324,97 @@ test('grade: coluna Planos pelos status calculados (title com o detalhe)', async
   assert.ok(marcas.some((t) => /^BIA: Avaliado — Falta homologar/.test(t)), 'p3');
   assert.ok(marcas.some((t) => /^BIA: Não avaliado/.test(t)));
   assert.ok(doc.querySelector('.plano-mark--falta'), 'nao avaliado = vermelho');
+});
+
+// ---- Aba Dependencias e BIA reordenado (28/10/2026) ----
+const PESSOAS_TI = [
+  { id: 'bia', nome: 'Bia Lima', categoria: 'Pessoas', areas: ['TI'], detalhes: 'Analista', instalacao: { id: 'sede', nome: 'Sede' } },
+  { id: 'caio', nome: 'Caio Rocha', categoria: 'Pessoas', areas: ['RH'] },
+];
+const FORN_INATIVO = { id: 'fx', nome: 'Fornecedor Inativo', categoria: 'Fornecedores', ativo: false };
+const comDeps = (extra) => Object.assign({ getDependencias: DEPS.concat(PESSOAS_TI, [FORN_INATIVO]) }, extra || {});
+const abrirDeps = async (id, extra) => {
+  const r = await carregar(['seguranca'], comDeps(extra));
+  r.w.editarProcesso(id);
+  r.w.trocarAbaProcesso('dependencias');
+  return r;
+};
+const buscar = (w, doc, texto) => { doc.getElementById('depsBusca').value = texto; w.buscarDependenciaProcesso(); return doc.getElementById('depsBuscaResultados'); };
+const tecla = (w, key) => w.teclaBuscaDependenciaProcesso({ key, preventDefault() {} });
+
+test('BIA: impacto e tempos antes do questionario; link e e-mail do formulario de dependencias na aba Dependencias', async () => {
+  const { w, doc } = await carregar(['seguranca'], comPerguntas());
+  w.editarProcesso('p3');
+  const bia = doc.getElementById('painel-bia');
+  const html = bia.innerHTML;
+  assert.ok(html.indexOf('id="fDescricao"') < html.indexOf('id="avaliacaoPerguntas"'), 'impacto antes das perguntas');
+  assert.ok(html.indexOf('id="fMTD"') < html.indexOf('premissas-avaliacao'), 'tempos antes das premissas');
+  assert.match(bia.querySelector('.bia-impacto-tempos__titulo').textContent, /Impacto e tempos de recuperação/);
+  // Link/e-mail sao do formulario de DEPENDENCIAS (bia-dependencias.html): ficam na aba Dependencias.
+  assert.match(doc.getElementById('depsPedirDono').textContent, /Pedir ao dono do processo[\s\S]*Copiar link[\s\S]*Enviar por e-mail/);
+  assert.doesNotMatch(bia.textContent, /Copiar link/);
+  assert.strictEqual(doc.querySelector('#painel-bia #fDependenciaTabela'), null, 'dependencias sairam do BIA');
+  assert.ok(doc.querySelector('#painel-dependencias #fDependenciaTabela'));
+});
+
+test('Dependencias: busca unica acha varias categorias; Enter adiciona o primeiro, seta+Enter o segundo; busca limpa e mantem o foco', async () => {
+  const { w, doc } = await abrirDeps('p2');
+  const grupos = (t) => [...buscar(w, doc, t).querySelectorAll('.deps-busca__grupo-titulo')].map((g) => g.textContent.trim());
+  const ga = grupos('a');
+  const ge = grupos('e');
+  assert.ok(ga.some((g) => /Pessoas/.test(g)) && ga.some((g) => /Serviços/.test(g)), ga.join('|'));
+  assert.ok(ge.some((g) => /Instalações/.test(g)) && ge.some((g) => /Fornecedores/.test(g)), ge.join('|'));
+  // Pessoas por nome e por area, sem acento.
+  const r2 = buscar(w, doc, 'bia');
+  const primeiro = r2.querySelector('.deps-busca__opcao');
+  assert.match(primeiro.textContent, /Bia Lima/);
+  assert.match(primeiro.textContent, /Analista · TI/);
+  tecla(w, 'Enter');
+  assert.strictEqual(JSON.stringify(w._dependenciaSelecionadas.map((s) => s.id)), JSON.stringify(['bia']));
+  assert.strictEqual(doc.getElementById('depsBusca').value, '', 'busca limpa');
+  assert.ok(doc.getElementById('depsBuscaResultados').hidden);
+  assert.strictEqual(doc.activeElement, doc.getElementById('depsBusca'), 'foco fica na busca');
+  buscar(w, doc, 'o');
+  const segundo = w._depsBusca.itens[1];
+  tecla(w, 'ArrowDown');
+  tecla(w, 'Enter');
+  assert.ok(w._dependenciaSelecionadas.some((s) => String(s.id) === String(segundo.id)), 'seta para baixo e Enter adiciona o segundo');
+});
+
+test('Dependencias: "+ Criar" para Pessoas/Instalacoes/Fornecedores, nunca Processo; inativo e tecnico nao aparecem', async () => {
+  const { w, doc } = await abrirDeps('p2');
+  const res = buscar(w, doc, 'Zélia Nova');
+  const criar = [...res.querySelectorAll('.deps-busca__opcao--criar')].map((o) => o.textContent);
+  assert.deepStrictEqual(criar.map((t) => t.replace(/.* em /, '')), ['Pessoas', 'Instalações', 'Fornecedores']);
+  assert.ok(!criar.some((t) => /Processos|Serviços/.test(t)));
+  assert.doesNotMatch(buscar(w, doc, 'inativo').textContent, /Fornecedor Inativo/);
+  assert.doesNotMatch(buscar(w, doc, 'oracle').textContent, /Oracle/, 'Banco de Dados entra pelo Servico');
+});
+
+test('Dependencias: cobertura com alerta no Tier 1/2; sugestoes da area e da lotacao; cadeia com DRP', async () => {
+  const { w, doc } = await abrirDeps('p3', { getPerguntas: PERGUNTAS, getProcessos: [P1, P2, AVALIADO] });
+  const pilulas = [...doc.querySelectorAll('#depsCobertura .deps-cobertura__pilula')].map((b) => b.textContent.trim());
+  assert.ok(pilulas.some((t) => /^⚠ Fornecedores 0$/.test(t)), pilulas.join('|'));
+  assert.ok(!pilulas.some((t) => /⚠ Processos/.test(t)), 'Processos Internos nao e obrigatorio');
+  const cartaoPessoas = () => doc.getElementById('depsCartao-pessoas');
+  assert.match(cartaoPessoas().textContent, /Sugeridos \(da área TI\):[\s\S]*\+ Bia Lima/);
+  assert.doesNotMatch(cartaoPessoas().textContent, /Caio Rocha/, 'so da area do processo');
+  w.selecionarDependenciaCategoria('Bia Lima', 'Pessoas', 'bia');
+  assert.doesNotMatch(cartaoPessoas().querySelector('.deps-cartao__sugestoes') ? cartaoPessoas().querySelector('.deps-cartao__sugestoes').textContent : '', /Bia Lima/, 'escolhida sai das sugestoes');
+  assert.match(cartaoPessoas().textContent, /Bia Lima[\s\S]*Analista · TI/, 'detalhe da pessoa');
+  assert.match(doc.getElementById('depsCartao-instalacoes').textContent, /Sugeridos \(lotação das pessoas escolhidas\):[\s\S]*\+ Sede/);
+  w.selecionarDependenciaCategoria('Sede', 'Instalações', 'sede');
+  assert.match(doc.getElementById('depsCartao-instalacoes').textContent, /⚠ sem instalação alternativa/, 'Tier 2 sem alternativa');
+  w.selecionarDependenciaCategoria('Portal RH', 'Serviços', 's1');
+  const cadeia = doc.querySelector('#fDependenciaTabela .deps-cadeia summary').textContent;
+  assert.match(cadeia, /Cadeia que sustenta o processo: \d+ itens? · \d+ com DRP/);
+});
+
+test('Dependencias: item com cadastro removido continua visivel, "(removida)"', async () => {
+  const P2X = { ...P2, dependenciaItens: [{ id: 'saiu', nome: 'Pessoa Antiga', categoria: 'Pessoas' }] };
+  const { doc } = await abrirDeps('p2', { getProcessos: [P1, P2X] });
+  const chip = [...doc.querySelectorAll('#depsCartao-pessoas .dep-tag-item')].find((el) => /Pessoa Antiga/.test(el.textContent));
+  assert.ok(chip, 'removida aparece no cartao');
+  assert.match(chip.textContent, /\(removida\)/);
+  assert.ok(chip.classList.contains('dep-tag-item--removida'));
 });

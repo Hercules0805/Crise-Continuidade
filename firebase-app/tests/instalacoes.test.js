@@ -175,7 +175,9 @@ test('api: lê e grava os campos da instalação e a lotação; só o que vem no
 test('Processo: linha Instalações sempre presente na aba de dependências, depois de Pessoas', () => {
   const src = fs.readFileSync(path.join(PUB, 'app.js'), 'utf8');
   const linhas = src.split('\n').filter((l) => /\[CadeiaDependencias\.CATEGORIA_SERVICO, 'Fornecedores', 'Pessoas', DEPENDENCIA_CATEGORIA_INSTALACAO, 'Processos Internos'\]/.test(l));
-  assert.strictEqual(linhas.length, 2, 'aba BIA do drawer e edicao em lote');
+  assert.strictEqual(linhas.length, 1, 'edicao em lote');
+  // Aba Dependencias do drawer (28/10/2026): cartoes na ordem Servicos, Pessoas, Instalacoes...
+  assert.match(src, /const _CATEGORIAS_DEP_PROCESSO = \['Serviços', 'Pessoas', 'Instalações', 'Fornecedores', 'Processos Internos'\];/);
 });
 
 test('formulario do gestor (bia-dependencias.html): cartao 4. Instalações, chave e payload', () => {

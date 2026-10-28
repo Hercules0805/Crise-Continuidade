@@ -472,6 +472,62 @@ a.btn { text-decoration: none; }
 .premissas-avaliacao__titulo { font-size: 11px; font-weight: 700; color: var(--red, #d60014); text-transform: uppercase; letter-spacing: .5px; margin-bottom: 6px; }
 .premissas-avaliacao ul { margin: 0; padding-left: 18px; }
 .premissas-avaliacao li { font-size: 13px; color: var(--ink, #333); line-height: 1.6; }
+
+/* Processo: bloco "Impacto e tempos de recuperação" no topo do BIA (28/10/2026). */
+.bia-impacto-tempos { border: 1px solid var(--color-border); border-radius: var(--r-md, 8px); padding: 14px 16px 2px; margin-bottom: 16px; background: #fff; }
+.bia-impacto-tempos__titulo { font-size: 12px; font-weight: 700; color: var(--brand, #d60014); text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 10px; }
+
+/* Processo: aba Dependências (28/10/2026) -- orientação + cobertura, busca única, cartões. */
+.deps-orientacao { margin-bottom: 14px; }
+.deps-orientacao__pergunta { font-size: 14px; font-weight: 700; color: #222; }
+.deps-orientacao__texto { font-size: 12.5px; color: var(--color-text-muted); margin: 4px 0 10px; line-height: 1.5; }
+.deps-cobertura { display: flex; flex-wrap: wrap; gap: 6px; }
+.deps-pedir-dono { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--color-text-muted); }
+.deps-cobertura__pilula { border: 1px solid var(--color-border); background: #fff; color: #555; border-radius: 999px; padding: 4px 12px; font-size: 12px; cursor: pointer; }
+.deps-cobertura__pilula strong { margin-left: 2px; }
+.deps-cobertura__pilula--ok { border-color: var(--color-success); color: var(--color-success); background: var(--color-success-bg); }
+.deps-cobertura__pilula--falta { border-color: var(--color-warning); color: #b45309; background: var(--color-warning-bg); }
+.deps-busca { position: relative; margin-bottom: 16px; }
+.deps-busca__campo { width: 100%; box-sizing: border-box; padding: 11px 14px; border: 2px solid var(--brand-tint); border-radius: 8px; font-size: 14px; outline: none; }
+.deps-busca__campo:focus { border-color: var(--brand, #d60014); }
+.deps-busca__resultados { position: absolute; top: 100%; left: 0; right: 0; z-index: 60; margin-top: 4px; background: #fff; border: 1px solid var(--color-border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.14); max-height: 360px; overflow-y: auto; }
+.deps-busca__grupo { padding: 4px 0; border-bottom: 1px solid #f2f2f2; }
+.deps-busca__grupo:last-child { border-bottom: none; }
+.deps-busca__grupo-titulo { font-size: 11px; font-weight: 700; color: #777; text-transform: uppercase; letter-spacing: 0.4px; padding: 6px 12px 2px; }
+.deps-busca__opcao { padding: 7px 12px; cursor: pointer; display: flex; gap: 8px; align-items: baseline; }
+.deps-busca__opcao--ativa, .deps-busca__opcao:hover { background: var(--brand-tint); }
+.deps-busca__nome { font-size: 13.5px; color: #222; font-weight: 500; }
+.deps-busca__info { font-size: 12px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.deps-busca__opcao--criar { color: var(--brand, #d60014); font-weight: 600; font-size: 13px; }
+.deps-busca__mais { background: none; border: none; color: var(--brand, #d60014); font-size: 12px; padding: 4px 12px; cursor: pointer; }
+.deps-busca__vazio { padding: 10px 12px; font-size: 13px; color: #999; font-style: italic; }
+.deps-cartao { border: 1px solid var(--color-border); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; background: #fff; scroll-margin-top: 8px; }
+.deps-cartao__cab { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.deps-cartao__titulo { font-size: 13px; font-weight: 700; color: #222; text-transform: uppercase; letter-spacing: 0.3px; }
+.deps-cartao__n { display: inline-block; min-width: 20px; text-align: center; font-size: 11px; background: #f0f0f0; color: #555; border-radius: 10px; padding: 1px 6px; margin-left: 4px; }
+.deps-cartao__exemplo { font-size: 11.5px; color: #999; font-style: italic; margin: 2px 0 8px; }
+.deps-cartao__itens { display: flex; flex-direction: column; gap: 6px; }
+.deps-cartao__vazio { font-size: 12.5px; color: #bbb; font-style: italic; }
+.deps-item { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.deps-item__detalhe { font-size: 12px; color: var(--color-text-muted); }
+.deps-item__detalhe .servico-resumo-bia { font-size: 12px; }
+.deps-alerta { color: #b45309; }
+.deps-cartao__sugestoes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; padding-top: 8px; border-top: 1px dashed #eee; }
+.deps-cartao__sugestoes-rotulo { font-size: 11.5px; color: #999; }
+.deps-sugestao { border: 1px dashed var(--brand, #d60014); background: #fff; color: var(--brand, #d60014); border-radius: 14px; padding: 3px 10px; font-size: 12px; cursor: pointer; }
+.deps-sugestao:hover { background: var(--brand-tint); }
+.dep-tag-item { display: inline-flex; align-items: center; gap: 3px; background: var(--brand, #d60014); color: #fff; border: 1.5px solid var(--brand, #d60014); padding: 4px 6px 4px 12px; border-radius: 14px; font-size: 13px; font-weight: 500; white-space: nowrap; cursor: default; }
+.dep-tag-item--sem-vinculo { background: #fff; color: #555; border: 1.5px dashed #bbb; }
+.dep-tag-item--removida { background: #f0f0f0; color: #555; border-color: #ccc; }
+.dep-tag-item__x { background: none; border: none; cursor: pointer; font-size: 1.1em; color: rgba(255,255,255,0.75); line-height: 1; padding: 0 3px; }
+.dep-tag-item__x--escuro { color: rgba(0,0,0,0.4); }
+.deps-cadeia { border: 1px solid var(--color-border); border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; background: #fafafa; }
+.deps-cadeia summary { cursor: pointer; font-size: 13px; font-weight: 600; color: #444; }
+.deps-cadeia ul { list-style: none; margin: 8px 0 0; padding: 0; }
+.deps-cadeia li { display: flex; justify-content: space-between; gap: 8px; font-size: 12.5px; padding: 4px 0; border-bottom: 1px solid #eee; }
+.deps-cadeia__cat { color: #999; font-size: 11.5px; }
+.deps-cadeia__drp { font-size: 11px; font-weight: 600; color: var(--color-danger); white-space: nowrap; }
+.deps-cadeia__drp--ok { color: var(--color-success); }
 .score-bia__valor { font-size: 40px; font-weight: 700; color: var(--red); font-variant-numeric: tabular-nums; }
 
 /* ABAS DOS DRAWERS (_marcarAba) -- ativa: texto ink + sublinhado vermelho (padrão v2 do nav) */
