@@ -420,6 +420,22 @@
     return ehAdmin(valor) || ehSeguranca(valor) || ehTI(valor);
   }
 
+  /**
+   * DECISAO 28/10/2026: categorias que o "+ Criar" da aba Dependencias do
+   * processo oferece -- os Ps que nao sao tecnicos. O Operador de Processos so
+   * CRIA estas (cadastro basico: nome e categoria); completar o cadastro fica
+   * com quem mexe no catalogo. Espelha a regra de /dependencias.
+   */
+  var CATEGORIAS_CRIAVEIS_PELO_PROCESSO = ['Pessoas', 'Pessoa', 'Instalações', 'Instalação', 'Fornecedores', 'Fornecedor'];
+
+  /** Pode criar esta categoria pelo "+ Criar" do processo. */
+  function podeCriarDependenciaPeloProcesso(valor, categoria) {
+    var cat = String(categoria || '').trim();
+    if (podeMexerNaDependencia(valor)) return true;
+    if (ehOperador(valor) && categoriaDeFornecedor(cat)) return true;
+    return ehOperadorProcessos(valor) && CATEGORIAS_CRIAVEIS_PELO_PROCESSO.indexOf(cat) !== -1;
+  }
+
   /** Cadastrar/editar/excluir Produtos de Software (Administracao): Admin ou Seguranca. */
   function podeGerenciarProdutosSoftware(valor) {
     return ehAdmin(valor) || ehSeguranca(valor);
@@ -460,6 +476,8 @@
     paginaInicial: paginaInicial,
     PAGINA_INICIAL: PAGINA_INICIAL,
     categoriaDeFornecedor: categoriaDeFornecedor,
+    CATEGORIAS_CRIAVEIS_PELO_PROCESSO: CATEGORIAS_CRIAVEIS_PELO_PROCESSO,
+    podeCriarDependenciaPeloProcesso: podeCriarDependenciaPeloProcesso,
     podeMexerNaDependencia: podeMexerNaDependencia,
     podeMexerNaArea: podeMexerNaArea,
     podeGerenciarProdutosSoftware: podeGerenciarProdutosSoftware,

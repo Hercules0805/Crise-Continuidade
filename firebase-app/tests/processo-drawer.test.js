@@ -46,7 +46,7 @@ async function carregar(perfis, extra) {
       const r = dados['post:' + acao];
       return r === undefined ? { success: true } : JSON.parse(JSON.stringify(r));
     } : async (arg) => {
-      if (/^(salvar|excluir)/.test(nome)) { gravacoes.push({ nome, arg: JSON.parse(JSON.stringify(arg === undefined ? null : arg)) }); return { success: true, id: 'novo-id' }; }
+      if (/^(salvar|excluir|criar)/.test(nome)) { gravacoes.push({ nome, arg: JSON.parse(JSON.stringify(arg === undefined ? null : arg)) }); return { success: true, id: 'novo-id' }; }
       if (nome === 'invalidate') return undefined;
       if (nome === 'get') return { versoes: [{ versao: 1, html: '<h2>1. Objetivo</h2><p>Recuperar o SRV-01</p>' }] };
       return JSON.parse(JSON.stringify(dados[nome] === undefined ? [] : dados[nome]));
@@ -552,4 +552,58 @@ test('Processos: "Sugerir com IA" no cartao; marcados entram como Processos Inte
   await w.salvarProcesso();
   const itens = gravacoes.find((x) => x.nome === 'salvarProcesso').arg.dependenciaItens;
   assert.ok(itens.some((it) => it.categoria === 'Processos Internos' && it.id === 'p1'));
+});
+
+// ---- "+ Criar" por perfil (28/10/2026): Operador de Processos cria so o cadastro basico ----
+const abrirDepsComo = async (perfis, id) => {
+  const r = await carregar(perfis, comDeps());
+  r.w.editarProcesso(id);
+  r.w.trocarAbaProcesso('dependencias');
+  return r;
+};
+const opcoesCriar = (res) => [...res.querySelectorAll('.deps-busca__opcao--criar')].map((o) => o.textContent.replace(/.* em /, ''));
+
+test('Dependencias: operador de processos ve "+ Criar" de Pessoas/Instalacoes/Fornecedores e cria pelo cadastro basico', async () => {
+  const { w, doc, gravacoes } = await abrirDepsComo(['operador_processos'], 'p2');
+  assert.deepStrictEqual(opcoesCriar(buscar(w, doc, 'Zélia Nova')), ['Pessoas', 'Instalações', 'Fornecedores']);
+  w.adicionarDependenciaCategoria('Zélia Nova', 'Pessoas');
+  await esperar();
+  const g = gravacoes.find((x) => x.nome === 'criarDependenciaBasica');
+  assert.deepStrictEqual(g.arg, { categoria: 'Pessoas', nome: 'Zélia Nova' });
+  assert.ok(!gravacoes.some((x) => x.nome === 'salvarDependencia'), 'nao regrava o documento inteiro');
+  const vinculada = w._dependenciaSelecionadas.find((s) => s.nome === 'Zélia Nova');
+  assert.strictEqual(vinculada.id, 'novo-id');
+});
+
+test('Dependencias: gestor nao ve "+ Criar"; ve a quem pedir, e criar por fora e barrado com aviso', async () => {
+  const { w, doc, gravacoes } = await abrirDepsComo(['gestor'], 'p2');
+  const res = buscar(w, doc, 'Zélia Nova');
+  assert.deepStrictEqual(opcoesCriar(res), []);
+  assert.match(res.textContent, /Peça a Admin, Segurança ou TI para cadastrar/);
+  w.adicionarDependenciaCategoria('Zélia Nova', 'Pessoas');
+  await esperar();
+  assert.ok(!gravacoes.some((x) => x.nome === 'criarDependenciaBasica'));
+  assert.ok(!w._dependenciaSelecionadas.some((s) => s.nome === 'Zélia Nova'));
+  assert.ok(w.__toasts.some((t) => /não está no cadastro/.test(t)));
+});
+
+test('Dependencias: operador administrativo so cria fornecedor; SI cria as tres', async () => {
+  // O Operador Administrativo so consulta processos, mas a regra de "+ Criar" e por perfil.
+  const { w: wsi, doc: dsi } = await abrirDepsComo(['seguranca'], 'p2');
+  assert.deepStrictEqual(opcoesCriar(buscar(wsi, dsi, 'Zélia Nova')), ['Pessoas', 'Instalações', 'Fornecedores']);
+  const W = (await carregar(['operador'], comDeps())).w;
+  assert.strictEqual(W.Perfis.podeCriarDependenciaPeloProcesso(['operador'], 'Fornecedores'), true);
+  assert.strictEqual(W.Perfis.podeCriarDependenciaPeloProcesso(['operador'], 'Pessoas'), false);
+});
+
+test('Dependencias: "+ Criar" de nome que outra pessoa acabou de cadastrar vincula o existente', async () => {
+  const { w, gravacoes } = await abrirDepsComo(['operador_processos'], 'p2');
+  w.API = new Proxy({}, { get: (_, nome) => async (arg) => {
+    if (nome === 'criarDependenciaBasica') { gravacoes.push({ nome, arg }); return { success: true, id: 'ja-existe', duplicado: true, dado: { id: 'ja-existe', nome: 'Zélia Nova', categoria: 'Pessoas' } }; }
+    return nome === 'invalidate' ? undefined : [];
+  } });
+  w.adicionarDependenciaCategoria('Zélia Nova', 'Pessoas');
+  await esperar();
+  assert.strictEqual(w._dependenciaSelecionadas.find((s) => s.nome === 'Zélia Nova').id, 'ja-existe');
+  assert.strictEqual(w.dependenciasCatalogo.filter((d) => d.nome === 'Zélia Nova').length, 1, 'sem placeholder duplicado');
 });

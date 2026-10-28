@@ -1941,6 +1941,29 @@ async function _salvarDependencia(d) {
 }
 
 /**
+ * "+ Criar" da aba Dependencias do processo (28/10/2026): grava SO o cadastro
+ * basico { categoria, nome, criadoEm, criadoPor } -- e o que a regra de
+ * /dependencias aceita do Operador de Processos (keys().hasOnly). Os leitores
+ * tratam campo ausente como vazio (ativo ausente = ativo). Mesma conferencia de
+ * duplicidade de _salvarDependencia: se ja existe, devolve o existente sem gravar.
+ */
+async function _criarDependenciaBasica(b) {
+  const categoria = String((b && b.categoria) || '').trim();
+  const nome = String((b && b.nome) || '').trim();
+  if (!categoria || !nome) throw new Error('Informe a categoria e o nome.');
+  const DD = typeof DependenciaDuplicidade !== 'undefined' ? DependenciaDuplicidade : null;
+  if (DD) {
+    const mesmaCategoria = (await _db.collection(COLLECTION.dependencias).where('categoria', '==', categoria).get())
+      .docs.map((x) => ({ id: x.id, ...x.data() }));
+    const outra = DD.acharDuplicada(mesmaCategoria, { categoria, nome, id: '' });
+    if (outra) return { success: true, id: outra.id, duplicado: true, dado: outra };
+  }
+  const data = { categoria, nome, criadoEm: new Date().toISOString(), criadoPor: (window.USER_EMAIL || '').toLowerCase() };
+  const ref = await _db.collection(COLLECTION.dependencias).add(data);
+  return { success: true, id: ref.id, dado: data };
+}
+
+/**
  * Ativa ou inativa um fornecedor (27/10/2026). Grava SO a situacao -- nao
  * passa por _salvarDependencia, que regrava o documento inteiro a partir do
  * payload e apagaria o que o botao da grade nao conhece.
@@ -2864,6 +2887,7 @@ const _POST_FIRESTORE = {
   excluirConfigResposta: (b) => _db.collection(COLLECTION.configRespostas).doc(String(b.rowIndex || b.id)).delete()
     .then(() => _subirVersaoRegua()).then((versao) => ({ success: true, reguaVersao: versao })),
   salvarDependencia: (b) => _salvarDependencia(b),
+  criarDependenciaBasica: (b) => _criarDependenciaBasica(b),
   alterarSituacaoFornecedor: (b) => _alterarSituacaoFornecedor(b),
   importarFornecedoresInativos: (b) => _importarFornecedoresInativos(b),
   excluirDependencia: (b) => _db.collection(COLLECTION.dependencias).doc(String(b.id)).delete().then(() => ({ success: true })),
@@ -3117,6 +3141,7 @@ const API = {
   excluirConfigResposta: (d) => API.post('excluirConfigResposta', d),
   getDependencias: () => API.get('getDependencias'),
   salvarDependencia: (d) => API.post('salvarDependencia', d),
+  criarDependenciaBasica: (d) => API.post('criarDependenciaBasica', d),
   alterarSituacaoFornecedor: (id, ativo) => API.post('alterarSituacaoFornecedor', { id, ativo })
     .then((r) => { API.invalidate('getDependencias'); return r; }),
   importarFornecedoresInativos: (fornecedores) => API.post('importarFornecedoresInativos', { fornecedores })

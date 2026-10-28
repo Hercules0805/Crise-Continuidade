@@ -889,3 +889,38 @@ describe('Security Rules — Threat Intelligence', () => {
     await assertFails(db(GESTOR).doc('config_threat_intel/geral').set({ limiteAnalisesDia: 10 }));
   });
 });
+
+describe('Security Rules — Operador de Processos cria dependencia basica (28/10/2026)', () => {
+  const OPP = { email: 'opprocessos2@fortestecnologia.com.br' };
+  const basico = (categoria, nome) => ({ categoria, nome, criadoEm: '2026-10-28T10:00:00.000Z', criadoPor: OPP.email });
+  beforeEach(async () => {
+    await seedPerfil(OPP.email, { perfis: ['operador_processos'] });
+  });
+
+  test('cria Pessoa, Instalação e Fornecedor so com o cadastro basico', async () => {
+    await assertSucceeds(db(OPP).collection('dependencias').add(basico('Pessoas', 'Zélia')));
+    await assertSucceeds(db(OPP).collection('dependencias').add(basico('Instalações', 'Filial RJ')));
+    await assertSucceeds(db(OPP).collection('dependencias').add(basico('Fornecedores', 'Alfa')));
+  });
+
+  test('recusa campo alem do basico, categoria tecnica e nome vazio', async () => {
+    await assertFails(db(OPP).collection('dependencias').add({ ...basico('Pessoas', 'Zé'), perfis: ['admin'] }));
+    await assertFails(db(OPP).collection('dependencias').add({ ...basico('Fornecedores', 'Beta'), ativo: true }));
+    await assertFails(db(OPP).collection('dependencias').add({ ...basico('Instalações', 'Sede'), drpSalvo: 'x' }));
+    await assertFails(db(OPP).collection('dependencias').add(basico('Servidor', 'SRV-09')));
+    await assertFails(db(OPP).collection('dependencias').add(basico('Serviços', 'Portal')));
+    await assertFails(db(OPP).collection('dependencias').add(basico('Pessoas', '')));
+  });
+
+  test('nao edita nem exclui cadastro, nem o que ele mesmo criou', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('dependencias/pz').set(basico('Pessoas', 'Zélia'));
+    });
+    await assertFails(db(OPP).doc('dependencias/pz').set({ nome: 'Zélia Souza' }, { merge: true }));
+    await assertFails(db(OPP).doc('dependencias/pz').delete());
+  });
+
+  test('gestor continua sem criar', async () => {
+    await assertFails(db(GESTOR).collection('dependencias').add({ categoria: 'Pessoas', nome: 'X', criadoEm: 'x', criadoPor: 'y' }));
+  });
+});

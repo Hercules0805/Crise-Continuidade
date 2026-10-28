@@ -190,6 +190,15 @@ service cloud.firestore {
         && categoriaFornecedor(resource.data.categoria)
         && categoriaFornecedor(request.resource.data.categoria);
       allow delete: if isOperador() && categoriaFornecedor(resource.data.categoria);
+      // DECISAO 28/10/2026: Operador de Processos cria (so cria) Pessoa/
+      // Instalacao/Fornecedor pela aba Dependencias do processo -- cadastro
+      // basico, nada alem (sem perfis, DRP ou ativo). Editar e excluir seguem
+      // com quem mexe no catalogo. Espelha Perfis.podeCriarDependenciaPeloProcesso.
+      allow create: if isOperadorProcessos()
+        && request.resource.data.categoria in ['Pessoas', 'Pessoa', 'Instalações', 'Instalação', 'Fornecedores', 'Fornecedor']
+        && request.resource.data.keys().hasOnly(['categoria', 'nome', 'criadoEm', 'criadoPor'])
+        && request.resource.data.nome is string
+        && request.resource.data.nome.size() > 0;
     }
 
     // DECISAO 29/09/2026: o HTML de cada versao do DRP GERADO mora aqui, fora do

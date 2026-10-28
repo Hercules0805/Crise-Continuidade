@@ -506,3 +506,36 @@ test('as regras dao ao operador de processos escrita em processos e respostas_bi
   const fn = regras.slice(regras.indexOf('function podeOperarProcessos()'));
   assert.ok(fn.slice(0, fn.indexOf('}')).includes('isOperadorProcessos()'));
 });
+
+// ============================================================
+// "+ CRIAR" DA ABA DEPENDENCIAS DO PROCESSO (28/10/2026)
+// ============================================================
+
+test('podeCriarDependenciaPeloProcesso: operador de processos so cria os Ps nao tecnicos', () => {
+  const op = 'operador_processos';
+  ['Pessoas', 'Pessoa', 'Instalações', 'Instalação', 'Fornecedores', 'Fornecedor'].forEach((c) => {
+    assert.strictEqual(Perfis.podeCriarDependenciaPeloProcesso(op, c), true, c);
+  });
+  ['Servidor', 'Sistemas', 'Banco de Dados', 'Serviços', 'Processos Internos', ''].forEach((c) => {
+    assert.strictEqual(Perfis.podeCriarDependenciaPeloProcesso(op, c), false, c || '(vazio)');
+  });
+  assert.strictEqual(Perfis.podeMexerNaDependencia(op), false, 'criar nao e editar o catalogo');
+});
+
+test('podeCriarDependenciaPeloProcesso: gestor nao; operador administrativo so fornecedor; Admin/SI/TI tudo', () => {
+  ['Pessoas', 'Fornecedores', 'Instalações'].forEach((c) => assert.strictEqual(Perfis.podeCriarDependenciaPeloProcesso('gestor', c), false, c));
+  assert.strictEqual(Perfis.podeCriarDependenciaPeloProcesso('operador', 'Fornecedores'), true);
+  assert.strictEqual(Perfis.podeCriarDependenciaPeloProcesso('operador', 'Pessoas'), false);
+  ['admin', 'seguranca', 'ti'].forEach((p) => {
+    ['Pessoas', 'Servidor', 'Fornecedores'].forEach((c) => assert.strictEqual(Perfis.podeCriarDependenciaPeloProcesso(p, c), true, `${p}/${c}`));
+  });
+});
+
+test('a regra de /dependencias deixa o operador de processos so criar o cadastro basico', () => {
+  const regras = lerRegras();
+  const bloco = regras.slice(regras.indexOf('match /dependencias/{id}'));
+  const corpo = bloco.slice(0, bloco.indexOf('\n    }'));
+  assert.ok(/allow create: if isOperadorProcessos\(\)[^;]*hasOnly\(\['categoria', 'nome', 'criadoEm', 'criadoPor'\]\)/s.test(corpo));
+  assert.ok(!/allow (update|delete|write)[^;]*isOperadorProcessos/.test(corpo), 'nao edita nem exclui');
+  Perfis.CATEGORIAS_CRIAVEIS_PELO_PROCESSO.forEach((c) => assert.ok(corpo.includes(`'${c}'`), c));
+});

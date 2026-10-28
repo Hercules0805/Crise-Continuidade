@@ -3641,7 +3641,8 @@ window.buscarDependenciaProcesso = () => {
   }).join('');
   // "+ Criar" quando nenhum item da categoria tem exatamente esse nome.
   const catalogo = window.dependenciasCatalogo || [];
-  const criar = _CATEGORIAS_DEP_CRIAVEIS
+  const criaveis = _CATEGORIAS_DEP_CRIAVEIS.filter((cat) => Perfis.podeCriarDependenciaPeloProcesso(window.USER_PERFIS, cat));
+  const criar = criaveis
     .filter((cat) => !catalogo.some((d) => (cat === 'Instalações' ? _ehInstalacao(d.categoria) : cat === 'Fornecedores' ? Perfis.categoriaDeFornecedor(d.categoria) : d.categoria === cat) && _normBuscaDep(d.nome) === termo))
     .map((cat) => {
       const i = itens.push({ tipo: 'criar', categoria: cat, nome: texto }) - 1;
@@ -3649,8 +3650,11 @@ window.buscarDependenciaProcesso = () => {
     }).join('');
   window._depsBusca.itens = itens;
   window._depsBusca.ativo = Math.min(window._depsBusca.ativo, Math.max(itens.length - 1, 0));
-  cont.innerHTML = (grupos || '<div class="deps-busca__vazio">Nada encontrado no cadastro.</div>')
-    + (criar ? `<div class="deps-busca__grupo deps-busca__grupo--criar">${criar}</div>` : '');
+  // Quem nao cria (ex.: Gestor) ve a quem pedir, em vez de um "+ Criar" que falharia no banco.
+  const semCriar = !criaveis.length && !grupos
+    ? '<div class="deps-busca__vazio">Não está no cadastro? Peça a Admin, Segurança ou TI para cadastrar.</div>' : '';
+  cont.innerHTML = (grupos || (semCriar ? '' : '<div class="deps-busca__vazio">Nada encontrado no cadastro.</div>'))
+    + (criar ? `<div class="deps-busca__grupo deps-busca__grupo--criar">${criar}</div>` : '') + semCriar;
   cont.hidden = false;
   campo.setAttribute('aria-expanded', 'true');
   _marcarOpcaoAtivaBuscaDep();
@@ -4107,6 +4111,11 @@ window.adicionarDependenciaCategoria = (nome, categoria) => {
     showToast(`"${inativo.nome}" está inativo. Ative-o na tela de Fornecedores (aba Inativos) para vinculá-lo.`, '#e65100');
     return;
   }
+  const existeNoCatalogo = (window.dependenciasCatalogo || []).some((d) => d.nome.toLowerCase() === nome.toLowerCase() && d.categoria === categoria);
+  if (!existeNoCatalogo && !Perfis.podeCriarDependenciaPeloProcesso(window.USER_PERFIS, categoria)) {
+    showToast(`"${nome}" não está no cadastro. Peça a Admin, Segurança ou TI para cadastrar.`, '#e65100');
+    return;
+  }
   const item = { categoria, nome, id: null };
   window._dependenciaSelecionadas.push(item);
   // Verificar se existe no catálogo COM esta categoria específica
@@ -4124,7 +4133,19 @@ window.adicionarDependenciaCategoria = (nome, categoria) => {
   const novaDep = { id: null, categoria, nome };
   window.dependenciasCatalogo.push(novaDep);
   API.invalidate('getDependencias');
-  API.salvarDependencia({ categoria, nome }).then(r => {
+  // Cadastro basico (28/10/2026): so nome e categoria -- o que o Operador de
+  // Processos pode criar; completar o cadastro e com quem mexe no catalogo.
+  API.criarDependenciaBasica({ categoria, nome }).then(r => {
+    if (r.duplicado) {
+      // Ja existia (cadastrado por outra pessoa depois que a tela carregou): vincula o existente.
+      const i = (window.dependenciasCatalogo || []).indexOf(novaDep);
+      if (i !== -1) window.dependenciasCatalogo.splice(i, 1);
+      if (!(window.dependenciasCatalogo || []).some((d) => String(d.id) === String(r.id))) window.dependenciasCatalogo.push(Object.assign({ id: r.id, categoria, nome }, r.dado || {}));
+      item.id = r.id;
+      if (r.dado && r.dado.nome) item.nome = r.dado.nome;
+      renderDependenciaTabela();
+      return;
+    }
     novaDep.id = r.id;
     item.id = r.id;
     renderDependenciaTabela();
