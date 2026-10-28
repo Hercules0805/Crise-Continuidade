@@ -117,11 +117,15 @@
       }
       return nos[id];
     }
-    function ligar(de, para, rel, relInv) {
+    // detalhe (opcional): texto do vinculo, ex. o papel da dependencia no
+    // servico. So entra no rotulo exibido; rel continua a chave semantica
+    // (REL_CAMINHO_TECNICO).
+    function ligar(de, para, rel, relInv, detalhe) {
       if (!de || !para || de === para || !nos[de] || !nos[para]) return;
       if (adj[de].some(function (x) { return x.para === para && x.rel === rel; })) return;
-      adj[de].push({ para: para, rel: rel });
-      adj[para].push({ para: de, rel: relInv });
+      var extra = _texto(detalhe) ? ' — ' + _texto(detalhe) : '';
+      adj[de].push(extra ? { para: para, rel: rel, rotulo: rel + extra } : { para: para, rel: rel });
+      adj[para].push(extra ? { para: de, rel: relInv, rotulo: relInv + extra } : { para: de, rel: relInv });
     }
 
     // ---- Areas (por nome; uma area citada mas nao cadastrada vira no "ausente") ----
@@ -300,7 +304,7 @@
       var id = 'servico:' + s.id;
       if (!nos[id]) return;
       (s.processoIds || []).forEach(function (p) { ligar(id, procPorId[String(p.id)], 'suporta', 'suportado pelo serviço'); });
-      (s.dependenciaItens || []).forEach(function (r) { ligar(id, resolverDep(r), 'usa', 'usada pelo serviço'); });
+      (s.dependenciaItens || []).forEach(function (r) { ligar(id, resolverDep(r), 'usa', 'usada pelo serviço', r && r.papel); });
       // Responsaveis internos (28/10/2026; "stakeholders" antigos contam como Sustentacao
       // enquanto o servico nao for salvo de novo) e as areas consumidoras escolhidas.
       var sustentacao = Array.isArray(s.responsaveisSustentacao) ? s.responsaveisSustentacao : (s.stakeholders || []);
@@ -353,6 +357,9 @@
     return { nos: nos, adj: adj, semContratos: semContratos };
   }
 
+  /** Texto exibido de uma ligacao: a relacao, com o detalhe do vinculo quando houver. */
+  function _rotuloRel(x) { return x.rotulo || x.rel; }
+
   /**
    * Vizinhos de id, agrupados por tipo na ordem de TIPOS. Um mesmo vizinho com
    * mais de uma relacao aparece uma vez, com as relacoes juntas.
@@ -364,7 +371,7 @@
     (indice.adj[id] || []).forEach(function (x) {
       if (vis.indexOf(tipoDoId(x.para)) < 0) return;
       var v = porVizinho[x.para] = porVizinho[x.para] || { id: x.para, rels: [] };
-      if (v.rels.indexOf(x.rel) < 0) v.rels.push(x.rel);
+      if (v.rels.indexOf(_rotuloRel(x)) < 0) v.rels.push(_rotuloRel(x));
     });
     return TIPOS.filter(function (t) { return vis.indexOf(t) >= 0; }).map(function (t) {
       var itens = Object.keys(porVizinho).filter(function (k) { return tipoDoId(k) === t; }).map(function (k) {
@@ -495,7 +502,7 @@
         item = vistos[x.para] = { id: x.para, nome: n.nome, tipo: n.tipo, rels: [], chave: primeiro[x.para] };
         saida.push(item);
       }
-      if (item.rels.indexOf(x.rel) < 0) item.rels.push(x.rel);
+      if (item.rels.indexOf(_rotuloRel(x)) < 0) item.rels.push(_rotuloRel(x));
     });
     return saida.sort(function (a, b) { return a.nome.localeCompare(b.nome, 'pt-BR'); });
   }
@@ -559,7 +566,7 @@
           grau[b] = (grau[b] || 0) + 1;
         }
         // Guarda a relacao no sentido de quem a declarou (de -> para).
-        if (de === a && par.rels.indexOf(x.rel) < 0) par.rels.push(x.rel);
+        if (de === a && par.rels.indexOf(_rotuloRel(x)) < 0) par.rels.push(_rotuloRel(x));
       });
     });
     var nos = Object.keys(indice.nos).filter(visivel).map(function (id) {

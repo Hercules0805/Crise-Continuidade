@@ -480,7 +480,7 @@ async function _lerServicos() {
     id: s.id,
     nome: s.nome || '',
     descricao: s.descricao || '',
-    dependenciaItens: Array.isArray(s.dependenciaItens) ? s.dependenciaItens : [],
+    dependenciaItens: _itensDependenciaServico(s.dependenciaItens),
     // LEGADO (28/10/2026): Pessoas "stakeholders" ({id, nome}), lidas só para
     // migrar para responsaveisSustentacao (CadeiaDependencias.responsaveisSustentacaoDoServico).
     stakeholders: Array.isArray(s.stakeholders) ? s.stakeholders : [],
@@ -504,6 +504,19 @@ async function _lerServicos() {
 
 const _CAMPOS_SERVICO = ['nome', 'descricao', 'dependenciaItens', 'stakeholders', 'responsaveisSustentacao', 'responsaveisDesenvolvimento',
   'consumidores', 'endpoints', 'rtoMin', 'rpoMin', 'mttrMin', 'processoIds'];
+
+/**
+ * Dependências do serviço {categoria, id, nome, papel?}. papel (28/10/2026) é
+ * opcional e do VÍNCULO (o mesmo servidor tem papéis diferentes em serviços
+ * diferentes); vazio não é gravado.
+ */
+function _itensDependenciaServico(lista) {
+  return (Array.isArray(lista) ? lista : []).filter((it) => it && typeof it === 'object').map((it) => {
+    const { papel, ...resto } = it;
+    const p = String(papel == null ? '' : papel).trim().slice(0, 200);
+    return p ? { ...resto, papel: p } : resto;
+  });
+}
 
 /** [{id, nome}] de Pessoas, sem itens sem id. */
 function _refsPessoaServico(lista) {
@@ -535,6 +548,7 @@ async function _salvarServico(s) {
   });
   ['rtoMin', 'rpoMin', 'mttrMin'].forEach((c) => { if (c in data) data[c] = _minutosOuNull(data[c]); });
   ['responsaveisSustentacao', 'responsaveisDesenvolvimento'].forEach((c) => { if (c in data) data[c] = _refsPessoaServico(data[c]); });
+  if ('dependenciaItens' in data) data.dependenciaItens = _itensDependenciaServico(data.dependenciaItens);
   if ('consumidores' in data) data.consumidores = _consumidoresServico(data.consumidores);
   if ('endpoints' in data) data.endpoints = _endpointsLidos(data.endpoints, true);
   // Gravar a Sustentação encerra o legado: os stakeholders migraram para ela.

@@ -6710,7 +6710,12 @@ async function _renderAcimaDaDependencia(d) {
   const alternativaDe = (dependenciasData || []).filter((x) => _ehInstalacao(x.categoria) && x.instalacaoAlternativa && String(x.instalacaoAlternativa.id) === String(d.id));
   const itens = [
     ...alternativaDe.map((x) => `<span onclick="editarDep('${escJs(x.id)}')" style="cursor:pointer;display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.8em;background:white;border:1px solid #e0e0e0;color:#333;" title="Abrir ${esc(x.nome)}">📍 ${esc(x.nome)} <span style="color:#999;">(contingência dela)</span></span>`),
-    ...acima.servicos.map((s) => `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.8em;background:white;border:1px solid #e0e0e0;color:#333;">🧩 ${esc(s.nome)} <span style="color:#999;">(Serviço)</span></span>`),
+    ...acima.servicos.map((s) => {
+      // Papel desta dependência no serviço (do vínculo, opcional).
+      const ref = (s.dependenciaItens || []).find((it) => it && it.id != null && String(it.id) === String(d.id));
+      const papel = ref && ref.papel ? ` — ${esc(ref.papel)}` : '';
+      return `<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.8em;background:white;border:1px solid #e0e0e0;color:#333;">🧩 ${esc(s.nome)} <span style="color:#999;">(Serviço)${papel}</span></span>`;
+    }),
     ...acima.dependencias.map((x) => `<span onclick="editarDep('${escJs(x.id)}')" style="cursor:pointer;display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.8em;background:white;border:1px solid #e0e0e0;color:#333;" title="Abrir ${esc(x.nome)}">${esc(_iconeCategoriaDep(x.categoria))} ${esc(x.nome)} <span style="color:#999;">(${esc(x.categoria)})</span></span>`),
   ];
   cont.innerHTML = `<div style="border-left:3px solid #d60014;background:#fffafa;padding:10px 14px;border-radius:0 6px 6px 0;">
@@ -10226,7 +10231,8 @@ function _coletarFormularioServico() {
     id: document.getElementById('servicoId').value || null,
     nome: document.getElementById('servicoNome').value.trim(),
     descricao: document.getElementById('servicoDescricao').value.trim(),
-    dependenciaItens: window._servicoDependencias || [],
+    // Papel vazio sai do item: digitar e apagar não conta como alteração.
+    dependenciaItens: (window._servicoDependencias || []).map(({ papel, ...it }) => (String(papel || '').trim() ? { ...it, papel: String(papel).trim() } : it)),
     responsaveisSustentacao: (window._servicoResponsaveis || {}).sustentacao || [],
     responsaveisDesenvolvimento: (window._servicoResponsaveis || {}).desenvolvimento || [],
     consumidores: _coletarConsumidoresServico(),
@@ -10564,10 +10570,15 @@ function _renderServicoDependenciasPorCategoria() {
   const ordem = [..._CATEGORIAS_DEP_SERVICO, ...[...grupos.keys()].filter((c) => !_CATEGORIAS_DEP_SERVICO.includes(c)).sort()];
   const linhas = ordem.filter((cat) => grupos.has(cat)).map((cat) => {
     const fora = !_CATEGORIAS_DEP_SERVICO.includes(cat);
-    const chips = grupos.get(cat).map(({ item, i }) => `<span style="display:inline-flex;align-items:center;gap:6px;background:${fora ? '#999' : '#d60014'};color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(item.nome)}<button type="button" onclick="removerDependenciaServico(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`).join('');
-    return `<div class="servico-dep-grupo" data-categoria="${esc(cat)}" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid #f5f5f5;">
-        <span style="font-size:0.8em;font-weight:600;color:#555;min-width:140px;">${DEPENDENCIA_CAT_ICONES[cat] || '📦'} ${esc(cat)}${fora ? ' <span style="font-weight:400;color:#999;" title="Esta categoria não entra mais no Serviço; use Endpoints e APIs">(fora do serviço)</span>' : ''}</span>
-        ${chips}
+    // Uma linha por item: chip + papel do vínculo (opcional, 28/10/2026). Item
+    // "fora do serviço" não ganha papel -- só sai.
+    const linhasItens = grupos.get(cat).map(({ item, i }) => `<div class="servico-dep-item" style="display:flex;align-items:center;gap:8px;">
+          <span style="display:inline-flex;align-items:center;gap:6px;flex-shrink:0;background:${fora ? '#999' : '#d60014'};color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(item.nome)}<button type="button" onclick="removerDependenciaServico(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>
+          ${fora ? '' : `<input type="text" class="servico-dep-papel" data-idx="${i}" value="${esc(item.papel || '')}" maxlength="200" placeholder="Papel no serviço (opcional) — ex.: hospeda a aplicação" aria-label="Papel de ${esc(item.nome)} no serviço" style="flex:1;min-width:0;border:1.5px solid #e0e0e0;border-radius:7px;outline:none;font-size:0.85em;padding:6px 10px;">`}
+        </div>`).join('');
+    return `<div class="servico-dep-grupo" data-categoria="${esc(cat)}" style="display:flex;align-items:flex-start;gap:6px;padding:6px 0;border-bottom:1px solid #f5f5f5;">
+        <span style="font-size:0.8em;font-weight:600;color:#555;min-width:140px;padding-top:6px;">${DEPENDENCIA_CAT_ICONES[cat] || '📦'} ${esc(cat)}${fora ? ' <span style="font-weight:400;color:#999;" title="Esta categoria não entra mais no Serviço; use Endpoints e APIs">(fora do serviço)</span>' : ''}</span>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;">${linhasItens}</div>
       </div>`;
   }).join('');
   cont.innerHTML = `${linhas || '<p class="vazio-inline">Nenhuma dependência no serviço.</p>'}
@@ -10578,6 +10589,9 @@ function _renderServicoDependenciasPorCategoria() {
         onblur="setTimeout(()=>{const dd=document.getElementById('servicoDepDropdown');if(dd)dd.style.display='none';},300)">
       <div id="servicoDepDropdown" class="servico-dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:260px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
     </div>`;
+  cont.querySelectorAll('.servico-dep-papel').forEach((campo) => {
+    campo.addEventListener('input', () => definirPapelDependenciaServico(Number(campo.dataset.idx), campo.value));
+  });
   const input = document.getElementById('servicoDepBusca');
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
@@ -10634,6 +10648,12 @@ window.selecionarDependenciaServicoCategoria = (nome, categoria, id) => {
     _renderServicoProcessosImpactados();
     _renderComposicaoServico();
   }
+};
+
+// Grava no estado sem redesenhar (o campo não perde o foco).
+window.definirPapelDependenciaServico = (idx, valor) => {
+  const item = (window._servicoDependencias || [])[idx];
+  if (item) item.papel = String(valor || '');
 };
 
 window.removerDependenciaServico = (idx) => {

@@ -50,6 +50,19 @@ test('nos de todos os tipos, com ids tipados; Processos Internos de dependencias
   assert.strictEqual(i.nos['area:juridico'].ausente, true, 'area citada mas nao cadastrada');
 });
 
+test('papel da dependencia no servico entra no rotulo exibido, sem mudar a relacao semantica', () => {
+  const dados = JSON.parse(JSON.stringify(DADOS));
+  dados.servicos[0].dependenciaItens[0].papel = 'hospeda a aplicação';
+  const i = MC.montarIndice(dados, OPCOES);
+  assert.deepStrictEqual(rels(i, 'servico:s1', 'dependencia:infra'), ['usa'], 'rel continua a chave do caminho tecnico');
+  const viz = MC.vizinhos(i, 'servico:s1').flatMap((g) => g.itens).find((x) => x.id === 'dependencia:infra');
+  assert.deepStrictEqual(viz.rels, ['usa — hospeda a aplicação']);
+  const volta = MC.vizinhos(i, 'dependencia:infra').flatMap((g) => g.itens).find((x) => x.id === 'servico:s1');
+  assert.deepStrictEqual(volta.rels, ['usada pelo serviço — hospeda a aplicação']);
+  const semPapel = MC.vizinhos(idx(), 'servico:s1').flatMap((g) => g.itens).find((x) => x.id === 'dependencia:infra');
+  assert.deepStrictEqual(semPapel.rels, ['usa']);
+});
+
 test('vinculos do processo: area, dependencia por id, fornecedor por nome (legado), processo interno e contato de crise', () => {
   const i = idx();
   assert.deepStrictEqual(rels(i, 'processo:p1', 'area:financeiro'), ['pertence à área']);

@@ -2306,7 +2306,8 @@ async function _sugerirDescricaoServico(db, data, ctx) {
       const d = doCatalogo(it) || {};
       return {
         item: [it.categoria || d.categoria, it.nome || d.nome].filter(Boolean).join(': '),
-        papel: String(d.detalhes || '').slice(0, 300),
+        // Papel do vínculo no serviço (28/10/2026); sem ele, os detalhes do catálogo.
+        papel: String((it.papel && String(it.papel).trim()) || d.detalhes || '').slice(0, 300),
         componentes: (Array.isArray(d.componentes) ? d.componentes : []).map((c) => [c && c.categoria, c && c.nome].filter(Boolean).join(': ')).filter(Boolean),
       };
     }).slice(0, 30),

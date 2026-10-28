@@ -1751,6 +1751,14 @@ test('sugerirTextoIA servico-descricao: Admin/SI; prompt com composicao, process
   }
 });
 
+test('sugerirTextoIA servico-descricao: papel do vinculo no servico vence os detalhes do catalogo', async () => {
+  const s = seedDrp(['admin']);
+  s.servicos.s1.dependenciaItens[0].papel = 'Banco principal do faturamento';
+  const { g } = await pedirIA(s, { alvo: 'servico-descricao', id: 's1' });
+  const { dados } = dadosDoPrompt(g, 'DADOS DO SERVIÇO (JSON):');
+  assert.strictEqual(dados.composicao[0].papel, 'Banco principal do faturamento');
+});
+
 test('sugerirTextoIA revisao-observacao: perfil por tipo de plano', async () => {
   for (const [perfis, tipo, ok] of [
     [['operador_processos'], 'bia', true], [['operador_processos'], 'pcn', true], [['operador_processos'], 'drp', false],

@@ -161,6 +161,52 @@ test('dependencias: uma busca so, agrupada por categoria, sem Outros/API/Portais
   assert.ok(!doc.querySelector('.servico-dep-grupo[data-categoria="API"]'), 'o legado sai pelo ×');
 });
 
+test('dependencias: papel opcional do vinculo -- abre o gravado, sobrevive a adicionar outra, vai no Salvar; vazio nao grava', async () => {
+  const comPapel = plano(SERVICOS);
+  comPapel[0].dependenciaItens[0].papel = 'Banco principal';
+  const { w, $, doc, calls } = await carregar(['admin'], { getServicos: comPapel });
+  w.abrirDrawerServico('s1');
+  const papeis = () => [...doc.querySelectorAll('.servico-dep-papel')].map((i) => i.value);
+  assert.deepStrictEqual(papeis(), ['Banco principal']);
+  w.selecionarDependenciaServicoCategoria('SRV-01', 'Servidor', 'srv');
+  assert.deepStrictEqual(papeis(), ['Banco principal', '']);
+  const novo = doc.querySelector('.servico-dep-grupo[data-categoria="Servidor"] .servico-dep-papel');
+  novo.value = '  hospeda a aplicação ';
+  novo.dispatchEvent(new w.Event('input'));
+  await w.salvarServico();
+  assert.deepStrictEqual(ultimoSalvo(calls).dependenciaItens, [
+    { id: 'db', nome: 'Banco ERP', categoria: 'Banco de Dados', papel: 'Banco principal' },
+    { categoria: 'Servidor', nome: 'SRV-01', id: 'srv', papel: 'hospeda a aplicação' },
+  ]);
+
+  // Legado "fora do serviço" não ganha campo de papel.
+  w.abrirDrawerServico('s2');
+  assert.ok(!doc.querySelector('.servico-dep-grupo[data-categoria="API"] .servico-dep-papel'));
+});
+
+test('dependencias: mudar so o papel conta como alteracao no Fechar; digitar e apagar nao', async () => {
+  const { w, $, doc, calls } = await carregar(['admin']);
+  const digitar = (valor) => {
+    const campo = doc.querySelector('.servico-dep-papel');
+    campo.value = valor;
+    campo.dispatchEvent(new w.Event('input'));
+  };
+  w.abrirDrawerServico('s1');
+  digitar('x');
+  digitar('');
+  assert.strictEqual(await w.fecharDrawerServico(), true, 'fecha direto, sem perguntar');
+  assert.strictEqual((calls.salvarServico || []).length, 0);
+
+  w.abrirDrawerServico('s1');
+  digitar('Banco principal');
+  const fechando = w.fecharDrawerServico();
+  const pergunta = $('modalAlteracoesNaoSalvas');
+  assert.ok(pergunta, 'pergunta se salva');
+  pergunta.querySelector('[data-resposta="salvar"]').click();
+  await fechando;
+  assert.strictEqual(ultimoSalvo(calls).dependenciaItens[0].papel, 'Banco principal');
+});
+
 test('endpoints e APIs: lista com tipo; adicionar valida URL e duplicata; vai no Salvar; Tecnico conta', async () => {
   const { w, $, calls } = await carregar(['admin']);
   w.abrirDrawerServico('s1');
