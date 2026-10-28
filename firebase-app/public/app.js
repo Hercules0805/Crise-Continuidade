@@ -3538,6 +3538,7 @@ function _adivinharDependenciaLegada(nome) {
 }
 
 function initDependenciaTags(p) {
+  window._sugestaoProcessosIA = null;
   const itensNovos = p && Array.isArray(p.dependenciaItens) ? p.dependenciaItens : null;
   if (itensNovos && itensNovos.length) {
     // Item inteiro (herdadoDe/manual das Pessoas herdadas, 28/10/2026), com id normalizado.
@@ -3829,6 +3830,64 @@ window.removerPapelInstalacao = (idx, papel) => {
   renderDependenciaTabela();
 };
 
+// ---- Processos sugeridos pela IA (28/10/2026) ----
+// Variante com checkbox (como a dos Parâmetros DRP): a IA escolhe entre os
+// processos cadastrados; os marcados entram no cartão e só gravam ao Salvar.
+// O estado fica em window._sugestaoProcessosIA porque o cartão é redesenhado.
+window._sugestaoProcessosIA = null;
+
+function _htmlSugestaoProcessosIA(s) {
+  if (!s) return '';
+  if (s.carregando) return _htmlSugestaoIACarregando('A IA está procurando, entre os processos cadastrados, de quais este depende…');
+  const itens = (s.processos || []).filter((x) => !_depJaEscolhida('Processos Internos', x.id, x.nome));
+  if (!itens.length) {
+    return `<div class="sugestao-ia" role="region" aria-label="Sugestão da IA">
+      <div class="sugestao-ia__titulo">🤖 A IA não encontrou processos de que este dependa com os dados cadastrados</div>
+      <div class="sugestao-ia__acoes"><button type="button" class="btn btn-ghost" onclick="descartarSugestaoProcessosIA()" style="${_ESTILO_ACAO_IA}">Fechar</button></div>
+    </div>`;
+  }
+  return `<div class="sugestao-ia" role="region" aria-label="Sugestão da IA">
+      <div class="sugestao-ia__titulo">🤖 Processos de que este depende, segundo a IA — marque o que entra</div>
+      ${itens.map((x) => `<label class="sugestao-ia__item"><input type="checkbox" checked data-sugestao-processo="${esc(x.id)}"><span><strong>${esc(x.nome)}</strong>${x.area ? ` <span style="color:#888;">· ${esc(x.area)}</span>` : ''}${x.motivo ? ` — ${esc(x.motivo)}` : ''}</span></label>`).join('')}
+      <div class="sugestao-ia__acoes">
+        <button type="button" class="btn btn-ghost" onclick="adicionarSugestoesProcessosIA()" style="${_ESTILO_ACAO_IA}color:#2e7d32;border-color:#2e7d32;">Adicionar selecionados</button>
+        <button type="button" class="btn btn-ghost" onclick="descartarSugestaoProcessosIA()" style="${_ESTILO_ACAO_IA}">Descartar</button>
+      </div>
+      <div class="sugestao-ia__nota">Escolhidos a partir da descrição, área, Serviços e levantamento do PCN deste processo e dos demais. Nada é gravado até Salvar.</div>
+    </div>`;
+}
+
+window.sugerirProcessosComIA = async () => {
+  const id = _idProcessoParaIA();
+  if (!id || (window._sugestaoProcessosIA && window._sugestaoProcessosIA.carregando)) return;
+  window._sugestaoProcessosIA = { carregando: true };
+  renderDependenciaTabela();
+  try {
+    const r = await API.post('sugerirTextoIA', { alvo: 'processo-processos', id });
+    window._sugestaoProcessosIA = { processos: (r && r.processos) || [] };
+  } catch (e) {
+    window._sugestaoProcessosIA = null;
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível gerar a sugestão. Tente de novo.'), '#c62828');
+  }
+  renderDependenciaTabela();
+};
+
+window.adicionarSugestoesProcessosIA = () => {
+  const s = window._sugestaoProcessosIA;
+  if (!s || !s.processos) return;
+  const marcados = [...document.querySelectorAll('#sugestaoProcessosIA input[data-sugestao-processo]:checked')]
+    .map((cb) => s.processos.find((x) => String(x.id) === cb.dataset.sugestaoProcesso)).filter(Boolean);
+  if (!marcados.length) return showToast('Marque ao menos um processo.', '#e65100');
+  window._sugestaoProcessosIA = null;
+  marcados.forEach((x) => selecionarDependenciaCategoria(x.nome, 'Processos Internos', x.id));
+  showToast(`✅ ${marcados.length} ${marcados.length === 1 ? 'processo adicionado' : 'processos adicionados'} — salve o processo para gravar.`, '#2e7d32');
+};
+
+window.descartarSugestaoProcessosIA = () => {
+  window._sugestaoProcessosIA = null;
+  renderDependenciaTabela();
+};
+
 // ---- Itens escolhidos ----
 /** Chip do item escolhido (mesmas regras de antes: sem vínculo, removido, link para o processo). */
 function _htmlTagDependencia(item, globalIdx, ctx, papel) {
@@ -3965,7 +4024,9 @@ function renderDependenciaTabela() {
         <header class="deps-cartao__cab">
           <span class="deps-cartao__titulo">${DEPENDENCIA_CAT_ICONES[cat] || '📦'} ${esc(_TITULO_CARTAO_DEP_PROCESSO[cat] || _ROTULO_CAT_DEP_PROCESSO[cat])} <span class="deps-cartao__n">${itens.length}</span></span>
           ${cat === 'Serviços' && podeNovoServico ? '<button type="button" class="link-acao" onclick="novoServicoDoProcesso()">+ Novo serviço</button>' : ''}
+          ${_ehProcessoInterno(cat) && atual.id ? _htmlBotaoSugerirIA('btnSugerirProcessosIA', 'sugerirProcessosComIA()', { visivel: true, titulo: 'A IA aponta, entre os processos cadastrados, de quais este depende; você marca o que entra' }) : ''}
         </header>
+        ${_ehProcessoInterno(cat) ? `<div id="sugestaoProcessosIA">${_htmlSugestaoProcessosIA(window._sugestaoProcessosIA)}</div>` : ''}
         <div class="deps-cartao__exemplo">${esc(DEPENDENCIA_CAT_EXEMPLOS[cat] || '')}</div>
         ${ehInst ? lista : `<div class="deps-cartao__itens">${lista}</div>`}
         ${sugestoes}

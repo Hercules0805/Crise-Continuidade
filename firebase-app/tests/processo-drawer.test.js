@@ -551,3 +551,27 @@ test('Instalacoes: Producao sugere o site da cadeia dos Servicos; Sustentacao su
   w.selecionarDependenciaCategoria('Sede SP', 'Instalações', 'sedesp', 'sustentacao');
   assert.doesNotMatch(doc.getElementById('depsInst-sustentacao').textContent, /Sugeridos/, 'ja escolhida sai da sugestao');
 });
+
+// ---- Processos sugeridos pela IA (28/10/2026) ----
+test('Processos: "Sugerir com IA" no cartao; marcados entram como Processos Internos; desmarcado fica de fora', async () => {
+  const P3 = { id: 'p3', area: 'TI', processo: 'Infra', dependenciaItens: [], bcpContatos: [] };
+  const { w, doc, gravacoes } = await carregar(['seguranca'], {
+    getProcessos: [P1, P2, P3],
+    'post:sugerirTextoIA': { success: true, processos: [{ id: 'p1', nome: 'Folha', area: 'TI', motivo: 'Recebe a folha' }, { id: 'p3', nome: 'Infra', area: 'TI', motivo: 'Usa os servidores' }] },
+  });
+  w.editarProcesso('p2');
+  w.trocarAbaProcesso('dependencias');
+  assert.ok(doc.querySelector('#depsCartao-processos-internos #btnSugerirProcessosIA'), 'botao no cartao Processos');
+  await w.sugerirProcessosComIA();
+  assert.strictEqual(JSON.stringify(gravacoes.find((x) => x.nome === 'post:sugerirTextoIA').arg), JSON.stringify({ alvo: 'processo-processos', id: 'p2' }));
+  const caixa = doc.getElementById('sugestaoProcessosIA');
+  assert.match(caixa.textContent, /Folha · TI — Recebe a folha[\s\S]*Infra · TI — Usa os servidores/);
+  caixa.querySelector('input[data-sugestao-processo="p3"]').checked = false;
+  w.adicionarSugestoesProcessosIA();
+  const nomes = [...doc.querySelectorAll('#depsCartao-processos-internos .dep-tag-item')].map((c) => c.textContent.replace(/×/g, '').trim());
+  assert.deepStrictEqual(nomes, ['Folha']);
+  assert.strictEqual(doc.getElementById('sugestaoProcessosIA').textContent.trim(), '', 'caixa fecha');
+  await w.salvarProcesso();
+  const itens = gravacoes.find((x) => x.nome === 'salvarProcesso').arg.dependenciaItens;
+  assert.ok(itens.some((it) => it.categoria === 'Processos Internos' && it.id === 'p1'));
+});

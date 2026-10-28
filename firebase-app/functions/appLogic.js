@@ -2028,6 +2028,7 @@ async function sugerirImpactoProcesso(db, data, ctx) {
 // confere o proprio perfil, igual a quem pode editar aquele campo:
 //   processo-funcional  Descricao Funcional do Processo (quem edita o processo)
 //   processo-impacto    Descricao do Impacto (= sugerirImpactoProcesso)
+//   processo-processos  Processos de que ele depende (aba Dependencias; ids do catalogo)
 //   dependencia-drp     itens das listas dos Parametros DRP (Admin, SI, TI)
 //   servico-descricao   Descricao do Servico (Admin, SI -- regra de /servicos)
 //   revisao-observacao  Observacao de "Registrar revisao" (bia/pcn/drp)
@@ -2063,6 +2064,70 @@ async function _sugerirFuncionalProcesso(db, data, ctx) {
   delete dados.riscos;
   const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptFuncionalProcesso(dados), 'a sugestão de descrição', { maxOutputTokens: 1024 });
   return { success: true, texto: _textoDaRespostaIA(json) };
+}
+
+// ---- Processos de que o processo depende (28/10/2026) ----
+// A IA escolhe, entre os processos cadastrados, de quais este depende
+// (recebe insumo, aprovação, dado ou entrega). Só ids do catálogo voltam; a
+// tela mostra com checkbox e nada grava até Salvar.
+const MAX_PROCESSOS_SUGERIDOS_IA = 6;
+const MAX_CATALOGO_PROCESSOS_IA = 150;
+
+function _promptProcessosRelacionados(dados) {
+  return `Você é um analista de continuidade de negócios (ISO 22301) da Fortes Tecnologia e ajuda o dono de um processo a mapear as dependências críticas dele no BIA.
+
+Entre os processos de "catalogo", escolha aqueles de que o processo em "processo" DEPENDE para funcionar: os que entregam a ele um insumo, dado, aprovação, cadastro ou serviço interno sem o qual ele para ou degrada. NÃO escolha processos que apenas dependem dele (recebem o que ele entrega).
+
+${_REGRAS_SUGESTAO_IA}
+- Escolha SOMENTE ids que estão em "catalogo"; nunca invente processos.
+- No máximo ${MAX_PROCESSOS_SUGERIDOS_IA} processos, do mais para o menos evidente. Sem base nos dados, devolva a lista vazia.
+- "servicosEmComum" indica processos que usam os mesmos Serviços: é pista de relação, não prova de dependência.
+- "motivo": uma frase curta (até 160 caracteres) dizendo o que o processo recebe do outro.
+
+FORMATO DA RESPOSTA (JSON):
+{"processos": [{"id": "...", "motivo": "..."}]}
+
+DADOS (JSON):
+${JSON.stringify(dados)}`;
+}
+
+async function _sugerirProcessosRelacionados(db, data, ctx) {
+  const p = await _processoEditavelParaIA(db, data, ctx);
+  const [dados, procSnap, servicos] = await Promise.all([
+    _dadosProcessoIA(db, p),
+    db.collection(COLLECTION.processos).get(),
+    _lerServicos(db),
+  ]);
+  delete dados.impactoPorDimensao;
+  delete dados.riscos;
+  const itens = Array.isArray(p.dependenciaItens) ? p.dependenciaItens : [];
+  const jaLigados = new Set(itens.filter((it) => it && ['Processos Internos', 'Processo Interno'].includes(it.categoria) && it.id).map((it) => String(it.id)));
+  const nomesServicos = (proc) => cadeiaDependencias.servicosDoProcesso(proc, servicos).map((x) => x.nome).filter(Boolean);
+  const meusServicos = new Set(nomesServicos(p));
+  const catalogo = procSnap.docs
+    .map((d) => ({ id: d.id, ...(d.data() || {}) }))
+    .filter((x) => String(x.id) !== String(p.id) && !jaLigados.has(String(x.id)) && x.processo)
+    .slice(0, MAX_CATALOGO_PROCESSOS_IA)
+    .map((x) => {
+      const emComum = nomesServicos(x).filter((n) => meusServicos.has(n));
+      const linha = { id: String(x.id), processo: x.processo, area: x.area || '', descricaoFuncional: String(x.descricaoFuncional || '').slice(0, 300) };
+      if (emComum.length) linha.servicosEmComum = emComum.slice(0, 5);
+      return linha;
+    });
+  if (!catalogo.length) return { success: true, processos: [] };
+
+  const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptProcessosRelacionados({ processo: dados, catalogo }), 'a sugestão de processos', { maxOutputTokens: 1024 });
+  if (!json || typeof json !== 'object' || Array.isArray(json)) throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
+  const porId = new Map(catalogo.map((x) => [x.id, x]));
+  const vistos = new Set();
+  const processos = (Array.isArray(json.processos) ? json.processos : [])
+    .filter((x) => x && porId.has(String(x.id)) && !vistos.has(String(x.id)) && vistos.add(String(x.id)))
+    .slice(0, MAX_PROCESSOS_SUGERIDOS_IA)
+    .map((x) => {
+      const c = porId.get(String(x.id));
+      return { id: c.id, nome: c.processo, area: c.area, motivo: String(x.motivo || '').trim().slice(0, 200) };
+    });
+  return { success: true, processos };
 }
 
 // ---- Parametros DRP da dependencia ----
@@ -2359,6 +2424,7 @@ async function _sugerirObservacaoRevisao(db, data, ctx) {
 const ALVOS_SUGESTAO_IA = {
   'processo-funcional': _sugerirFuncionalProcesso,
   'processo-impacto': sugerirImpactoProcesso,
+  'processo-processos': _sugerirProcessosRelacionados,
   'dependencia-drp': _sugerirParametrosDrp,
   'servico-descricao': _sugerirDescricaoServico,
   'revisao-observacao': _sugerirObservacaoRevisao,

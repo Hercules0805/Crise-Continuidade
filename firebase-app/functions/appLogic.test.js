@@ -1636,6 +1636,33 @@ test('sugerirTextoIA processo-impacto e processo-funcional: Produtos de Software
   }
 });
 
+test('sugerirTextoIA processo-processos: so ids do catalogo, sem o proprio nem os ja ligados; servicos em comum como pista', async () => {
+  const comProcessos = (perfil) => {
+    const s = seedImpacto(perfil);
+    s.processos.ti__backup.dependenciaItens.push({ categoria: 'Processos Internos', id: 'rh__folha', nome: 'Folha' });
+    s.processos.rh__folha = { area: 'RH', processo: 'Folha' };
+    s.processos.ti__infra = { area: 'TI', processo: 'Gestão de Infra', descricaoFuncional: 'Mantém os servidores', dependenciaItens: [{ categoria: 'Serviços', id: 's1', nome: 'Portal' }] };
+    s.processos.fin__compras = { area: 'Financeiro', processo: 'Compras' };
+    return s;
+  };
+  for (const [perfil, ok] of [[{ perfis: ['gestor'], area: 'TI' }, true], [{ perfis: ['gestor'], area: 'RH' }, false], [{ perfis: ['ti'] }, false]]) {
+    const p = pedirIA(comProcessos(perfil), { alvo: 'processo-processos', id: 'ti__backup' }, JSON.stringify({ processos: [] }));
+    if (ok) assert.deepStrictEqual((await p).r.processos, []);
+    else await assert.rejects(() => p, /não pode editar este processo/, JSON.stringify(perfil));
+  }
+  const resposta = JSON.stringify({ processos: [
+    { id: 'ti__infra', motivo: 'Recebe os servidores mantidos pela Infra' },
+    { id: 'inventado', motivo: 'x' }, { id: 'ti__backup', motivo: 'o proprio' }, { id: 'rh__folha', motivo: 'ja ligado' }, { id: 'ti__infra', motivo: 'repetido' },
+  ] });
+  const { r, g } = await pedirIA(comProcessos({ perfis: ['admin'] }), { alvo: 'processo-processos', id: 'ti__backup' }, resposta);
+  assert.strictEqual(JSON.stringify(r.processos), JSON.stringify([{ id: 'ti__infra', nome: 'Gestão de Infra', area: 'TI', motivo: 'Recebe os servidores mantidos pela Infra' }]));
+  const { prompt, dados } = dadosDoPrompt(g, 'DADOS (JSON):');
+  assert.match(prompt, /NÃO escolha processos que apenas dependem dele/);
+  assert.deepStrictEqual(dados.catalogo.map((x) => x.id).sort(), ['fin__compras', 'ti__infra'], 'sem o proprio e sem o ja ligado');
+  assert.deepStrictEqual(dados.catalogo.find((x) => x.id === 'ti__infra').servicosEmComum, ['Portal']);
+  assert.strictEqual(dados.processo.processo, 'Backup');
+});
+
 function seedDrp(perfis) {
   const s = seed();
   s.config_perfis['analista@fortestecnologia.com.br'] = { perfis };
