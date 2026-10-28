@@ -450,7 +450,7 @@ test('Produtos: cartao "Produtos de Software Fortes"; busca acha so os ativos; a
   assert.match((w.__toasts || []).join(' '), /2 pessoa\(s\) herdada\(s\): Tadeu Lead, Paula Owner/);
 });
 
-test('Produtos: tirar o produto tira as herdadas; a escolhida a mao tambem fica; Servico herda os stakeholders', async () => {
+test('Produtos: tirar o produto tira as herdadas; a escolhida a mao tambem fica; Servico herda a Sustentacao (stakeholders antigos)', async () => {
   const { w, doc } = await carregar(['seguranca'], comProdutos());
   w.editarProcesso('p2');
   w.trocarAbaProcesso('dependencias');
@@ -465,8 +465,8 @@ test('Produtos: tirar o produto tira as herdadas; a escolhida a mao tambem fica;
   assert.strictEqual(w._dependenciaSelecionadas[0].herdadoDe, undefined);
   w.selecionarDependenciaCategoria('Folha Online', 'Serviços', 's5');
   const stk = w._dependenciaSelecionadas.find((s) => s.id === 'stk');
-  assert.ok(stk && stk.herdadoDe[0].tipo === 'servico' && stk.herdadoDe[0].funcoes[0] === 'Stakeholder');
-  assert.match(doc.getElementById('depsCartao-servicos').textContent, /1 stakeholder herdado/);
+  assert.ok(stk && stk.herdadoDe[0].tipo === 'servico' && stk.herdadoDe[0].funcoes[0] === 'Sustentação do serviço', 'stakeholder antigo vira Sustentação');
+  assert.match(doc.getElementById('depsCartao-servicos').textContent, /1 responsável de sustentação herdado/);
 });
 
 test('Produtos: abrir processo cujo produto ganhou pessoa mostra o aviso; salvar grava herdadoDe', async () => {

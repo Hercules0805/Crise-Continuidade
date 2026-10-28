@@ -105,7 +105,7 @@ test('sincronizar: produto herda as 4 funcoes; servico herda stakeholders; pesso
   assert.deepStrictEqual(pessoas.map((p) => p.id), ['ana', 'bia', 'davi']);
   assert.deepStrictEqual(plano(pessoas[0].herdadoDe), [
     { tipo: 'produto', id: 'ps1', nome: 'Fortes Ponto', funcoes: ['Tech Lead', 'Product Owner'] },
-    { tipo: 'servico', id: 's1', nome: 'Portal', funcoes: ['Stakeholder'] },
+    { tipo: 'servico', id: 's1', nome: 'Portal', funcoes: ['Sustentação do serviço'] },
   ]);
   assert.deepStrictEqual(plano(pessoas[1].herdadoDe[0].funcoes), ['Liderança de Suporte']);
   assert.strictEqual(pessoas[0].manual, undefined, 'so herdada');
@@ -161,4 +161,20 @@ test('classificarInstalacoesPeloTipo: so toca Instalacao sem papel e de tipo con
   assert.strictEqual(r.itens[1], ja, 'com papel nao e tocada');
   assert.deepStrictEqual(JSON.parse(JSON.stringify(r.classificadas)), [{ nome: 'DC', papel: 'producao' }]);
   assert.strictEqual(itens[0].papeis, undefined, 'nao altera a entrada');
+});
+
+test('responsaveis de sustentacao: campo novo vale (mesmo vazio); sem ele, os stakeholders antigos', () => {
+  const st = [{ id: 'davi', nome: 'Davi' }];
+  assert.deepStrictEqual(plano(CD.responsaveisSustentacaoDoServico({ stakeholders: st })), st);
+  assert.deepStrictEqual(plano(CD.responsaveisSustentacaoDoServico({ responsaveisSustentacao: [{ id: 'ana', nome: 'Ana' }], stakeholders: st })), [{ id: 'ana', nome: 'Ana' }]);
+  assert.deepStrictEqual(plano(CD.responsaveisSustentacaoDoServico({ responsaveisSustentacao: [], stakeholders: st })), [], 'ja salvo depois da mudanca: legado nao volta');
+  assert.deepStrictEqual(plano(CD.responsaveisSustentacaoDoServico(null)), []);
+});
+
+test('sincronizar: so a Sustentacao do servico e herdada; Desenvolvimento nao', () => {
+  const servicos = [{ id: 's1', nome: 'Portal', responsaveisSustentacao: [{ id: 'davi', nome: 'Davi' }], responsaveisDesenvolvimento: [{ id: 'caio', nome: 'Caio' }] }];
+  const r = CD.sincronizarPessoasHerdadas([{ categoria: 'Serviços', id: 's1', nome: 'Portal' }], { pessoas: PESSOAS_HER, servicos });
+  const pessoas = r.itens.filter((it) => it.categoria === 'Pessoas');
+  assert.deepStrictEqual(pessoas.map((p) => p.id), ['davi']);
+  assert.deepStrictEqual(plano(pessoas[0].herdadoDe), [{ tipo: 'servico', id: 's1', nome: 'Portal', funcoes: ['Sustentação do serviço'] }]);
 });

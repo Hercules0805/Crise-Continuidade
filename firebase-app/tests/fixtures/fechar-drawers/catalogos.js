@@ -265,22 +265,31 @@ window.__rodar = async () => {
     && pClone.modo === 'Volume / Disco' && pClone.escopo === 'C:' && pClone.descricao === 'd', 'clonar: Fechar grava 1 backup novo com servicos, ferramenta, modo e escopo');
   ok(JSON.stringify(backupsData.find((x) => x.id === 'b1')) === origemBackup, 'clonar: backup de origem fica intacto');
 
-  // Stakeholders no Servico: herdados dos backups sem sujar o Fechar; salvar grava a lista.
+  // Responsaveis pela sustentacao (28/10/2026; eram os Stakeholders): herdados dos
+  // backups ou dos stakeholders antigos sem sujar o Fechar; salvar grava a lista nova.
   pessoasData = [{ id: 'p1', nome: 'Ana', categoria: 'Pessoas' }, { id: 'p2', nome: 'Bia', categoria: 'Pessoas' }];
   servicosData = [{ id: 's1', nome: 'Serv', descricao: 'd', dependenciaItens: [], stakeholders: [] }];
   backupsData = [{ id: 'b1', nome: 'Bk', servicoIds: ['s1'], stakeholderId: 'p1', stakeholderNome: 'Ana', jobs: [] },
     { id: 'b2', nome: 'Bk2', servicoIds: ['s1', 's9'], stakeholderId: 'p1', stakeholderNome: 'Ana', jobs: [] }];
+  const sust = () => window._servicoResponsaveis.sustentacao;
   zera(); abrirDrawerServico('s1');
-  ok(window._servicoStakeholders.length === 1 && window._servicoStakeholders[0].id === 'p1', 'servico: sem lista propria herda o stakeholder (distinto) dos backups');
-  ok(document.getElementById('servicoStakeholdersMigrados').style.display === 'block', 'servico: avisa que veio dos backups');
+  ok(sust().length === 1 && sust()[0].id === 'p1', 'servico: sem lista propria herda o stakeholder (distinto) dos backups na Sustentacao');
+  ok(document.getElementById('servicoSustentacaoMigrados').style.display === 'block', 'servico: avisa que veio do legado');
   await fecharDrawerServico();
-  ok(n('salvarServico') === 0, 'servico: stakeholder herdado nao suja o Fechar');
-  zera(); abrirDrawerServico('s1'); document.getElementById('servicoStakeholderAdd').value = 'p2'; adicionarStakeholderServico(); await fecharDrawerServico();
+  ok(n('salvarServico') === 0, 'servico: responsavel herdado nao suja o Fechar');
+  zera(); abrirDrawerServico('s1'); document.getElementById('servicoRespSustentacaoAdd').value = 'p2'; adicionarResponsavelServico('sustentacao'); await fecharDrawerServico();
   const ps = ((window.__calls.salvarServico || [])[0] || [])[0] || {};
-  ok(n('salvarServico') === 1 && JSON.stringify((ps.stakeholders || []).map((p) => p.id)) === '["p1","p2"]', 'servico: adicionou pessoa = grava stakeholders');
+  ok(n('salvarServico') === 1 && JSON.stringify((ps.responsaveisSustentacao || []).map((p) => p.id)) === '["p1","p2"]', 'servico: adicionou pessoa = grava responsaveisSustentacao');
+  ok(!('stakeholders' in ps), 'servico: payload nao manda mais stakeholders (a API zera ao gravar a Sustentacao)');
   servicosData = [{ id: 's1', nome: 'Serv', dependenciaItens: [], stakeholders: [{ id: 'p2', nome: 'Bia' }] }];
   zera(); abrirDrawerServico('s1');
-  ok(window._servicoStakeholders.length === 1 && window._servicoStakeholders[0].id === 'p2', 'servico: com lista propria ignora o stakeholder legado dos backups');
+  ok(sust().length === 1 && sust()[0].id === 'p2', 'servico: stakeholder antigo vira Sustentacao e ignora o dos backups');
+  ok(document.getElementById('servicoSustentacaoMigrados').style.display === 'block', 'servico: stakeholder antigo tambem avisa "salve para confirmar"');
+  await fecharDrawerServico();
+  ok(n('salvarServico') === 0, 'servico: stakeholder antigo nao suja o Fechar');
+  servicosData = [{ id: 's1', nome: 'Serv', dependenciaItens: [], stakeholders: [{ id: 'p2', nome: 'Bia' }], responsaveisSustentacao: [] }];
+  zera(); abrirDrawerServico('s1');
+  ok(sust().length === 0 && document.getElementById('servicoSustentacaoMigrados').style.display === 'none', 'servico: ja salvo no modelo novo (mesmo vazio) nao traz legado');
   await fecharDrawerServico();
   pessoasData = [];
 

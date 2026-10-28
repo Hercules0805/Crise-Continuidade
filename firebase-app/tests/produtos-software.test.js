@@ -39,7 +39,7 @@ function ambienteApi(docsIniciais) {
     _getAll: async (nome) => Object.entries(store[nome] || {}).map(([id, d]) => ({ id, ...d })),
   };
   vm.createContext(ctx);
-  ['_lerProdutosSoftware', '_nomeComparavel', '_salvarProdutoSoftware', '_minutosOuNull', '_refsDependencia', '_lerDependencias', '_salvarDependencia'].forEach((f) => {
+  ['_lerProdutosSoftware', '_endpointsLidos', '_nomeComparavel', '_salvarProdutoSoftware', '_minutosOuNull', '_refsDependencia', '_lerDependencias', '_salvarDependencia'].forEach((f) => {
     vm.runInContext(extrair(f) + `\nthis.${f} = ${f};`, ctx);
   });
   vm.runInContext('const _CAMPOS_PRODUTO_SOFTWARE = ["nome", "area", "descricao", "endpoints", "ativo", "ordem"]; this._CAMPOS_PRODUTO_SOFTWARE = _CAMPOS_PRODUTO_SOFTWARE;', ctx);

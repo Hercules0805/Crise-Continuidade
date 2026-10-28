@@ -2201,7 +2201,7 @@ function _espelharPerfilPessoaEmSegundoPlano(dados) {
 // "Áreas"; a mesma regra da coluna Responsável da tela de Processos).
 // Vínculos por ID (confiáveis): bcpContatos/dependenciaItens (Processo),
 // gestoresContrato (Fornecedor), stakeholders (Serviço; antes stakeholderId do
-// Backup, ainda lido para serviço não migrado -- _stakeholdersDoServico), liderImediato
+// Backup, ainda lido para serviço não migrado -- _sustentacaoDoServico), liderImediato
 // (hierarquia), techLeadProdutos/teamLeadProdutos (Produtos de Software, ids
 // do catálogo produtos_software). Vínculos por NOME (Risco.responsavel e Área.responsavel são
 // <select> do catálogo de Pessoas -- comparação por nome é confiável;
@@ -2309,10 +2309,16 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
     .forEach((r) => relacionar(f, 'Pessoa relacionada' + (r.papel ? ' — ' + r.papel : ''))));
   const fornecedoresDaPessoa = [...relacoesPorFornecedor.values()].sort((a, b) => (a.f.nome || '').localeCompare(b.f.nome || '', 'pt-BR'));
 
-  // Serviços onde é Stakeholder (DECISAO 21/10/2026: era do Backup). Serviço sem
-  // lista própria ainda herda os stakeholders dos backups dele.
-  const servicosDaPessoa = (dados.servicos || []).filter((s) =>
-    _stakeholdersDoServico(s, backups || []).lista.some((p) => String(p.id) === String(pessoa.id)));
+  // Serviços onde é Responsável (28/10/2026: Sustentação, que herdou os antigos
+  // stakeholders, e Desenvolvimento). Uma linha por serviço, com os papéis juntos.
+  const ehEla = (p) => String(p.id) === String(pessoa.id);
+  const servicosDaPessoa = (dados.servicos || []).map((s) => ({
+    s,
+    papeis: [
+      _sustentacaoDoServico(s, backups || []).lista.some(ehEla) ? 'Sustentação' : '',
+      (s.responsaveisDesenvolvimento || []).some(ehEla) ? 'Desenvolvimento' : '',
+    ].filter(Boolean),
+  })).filter((x) => x.papeis.length);
 
   // Produtos de Software onde é Tech Lead / Team Lead / Product Owner (vínculo por id). Uma
   // linha por produto, com as funções juntas; função marcada sem produto
@@ -2415,8 +2421,8 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
         + (contratosCarregados ? '' : '<p style="font-size:0.8em;color:#888;">Os contratos não puderam ser lidos com o seu perfil: a gestão de contratos não aparece aqui.</p>');
     }
     if (servicosDaPessoa.length) {
-      html += '<h2>Serviços (Stakeholder)</h2><table><tr><th>Serviço</th></tr>'
-        + linhaOuVazio(servicosDaPessoa, (s) => '<tr><td><b>' + esc(s.nome) + '</b></td></tr>')
+      html += '<h2>Serviços (Responsável)</h2><table><tr><th>Serviço</th><th>Papel</th></tr>'
+        + linhaOuVazio(servicosDaPessoa, (x) => '<tr><td><b>' + esc(x.s.nome) + '</b></td><td>' + esc(x.papeis.join(', ')) + '</td></tr>')
         + '</table>';
     }
     if (produtosDaPessoa.length) {
@@ -3935,8 +3941,8 @@ function _htmlDetalheDependencia(item, ctx, atual) {
     const av = ServicoComposicao.avaliarServico(s, ctx.catalogo);
     const rtoProc = ServicoComposicao.valorMin({ rto: (document.getElementById('fRTO') || {}).value || '' }, 'rto');
     const excede = rtoProc !== null && Number.isFinite(s.rtoMin) && s.rtoMin > rtoProc;
-    const stk = Array.isArray(s.stakeholders) ? s.stakeholders.length : 0;
-    return `<div class="servico-resumo-bia">${esc(s.nome)} · ${nomes.length ? esc(nomes.slice(0, 3).join(', ')) + (nomes.length > 3 ? ' +' + (nomes.length - 3) : '') : 'sem dependências na composição'} · <span class="chip-status" style="height:18px;font-size:10px;">${esc(av.rotuloStatus)}</span>${excede ? ` <span class="deps-alerta">⚠ RTO do serviço (${esc(ServicoComposicao.formatarDuracao(s.rtoMin))}) acima do RTO do processo</span>` : ''}${stk ? ` · ${stk} stakeholder${stk === 1 ? '' : 's'} herdado${stk === 1 ? '' : 's'}` : ''}</div>`;
+    const stk = CadeiaDependencias.responsaveisSustentacaoDoServico(s).length;
+    return `<div class="servico-resumo-bia">${esc(s.nome)} · ${nomes.length ? esc(nomes.slice(0, 3).join(', ')) + (nomes.length > 3 ? ' +' + (nomes.length - 3) : '') : 'sem dependências na composição'} · <span class="chip-status" style="height:18px;font-size:10px;">${esc(av.rotuloStatus)}</span>${excede ? ` <span class="deps-alerta">⚠ RTO do serviço (${esc(ServicoComposicao.formatarDuracao(s.rtoMin))}) acima do RTO do processo</span>` : ''}${stk ? ` · ${stk} responsáve${stk === 1 ? 'l' : 'is'} de sustentação herdado${stk === 1 ? '' : 's'}` : ''}</div>`;
   }
   if (CadeiaDependencias.ehProduto(item)) {
     const pessoas = CadeiaDependencias.pessoasDoProduto(item.id, ctx.catalogo);
@@ -9419,7 +9425,10 @@ function renderizarServicos() {
   const busca = (document.getElementById('buscaServico') || {}).value || '';
   if (busca.trim()) {
     const termo = busca.toLowerCase();
-    data = data.filter((s) => (s.nome || '').toLowerCase().includes(termo) || (s.descricao || '').toLowerCase().includes(termo));
+    // Também acha pelos endpoints (URL/descrição) e pelos responsáveis internos.
+    const pessoasDo = (s) => [...CadeiaDependencias.responsaveisSustentacaoDoServico(s), ...(s.responsaveisDesenvolvimento || [])].map((p) => p.nome || '');
+    data = data.filter((s) => [s.nome, s.descricao, ...(s.endpoints || []).map((e) => `${e.url} ${e.descricao || ''}`), ...pessoasDo(s)]
+      .some((t) => String(t || '').toLowerCase().includes(termo)));
   }
   // Composicao calculada na leitura, nunca gravada (DECISAO 21/10/2026).
   const avaliacoes = new Map(data.map((s) => [s.id, ServicoComposicao.avaliarServico(s, dependenciasData)]));
@@ -9497,8 +9506,9 @@ function _htmlDrawerServico() {
       <div class="drawer-body" style="padding:0;display:flex;flex-direction:column;">
         <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
           <button id="tab-servico-dados" onclick="trocarAbaServico('dados')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Dados</button>
-          <button id="tab-servico-composicao" onclick="trocarAbaServico('composicao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Composição</button>
-          <button id="tab-servico-backups" onclick="trocarAbaServico('backups')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Backups</button>
+          <button id="tab-servico-tecnico" onclick="trocarAbaServico('tecnico')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Técnico<span id="servicoAbaContTecnico" class="aba-contagem"></span></button>
+          <button id="tab-servico-composicao" onclick="trocarAbaServico('composicao')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Composição<span id="servicoAbaContComposicao" class="aba-contagem"></span></button>
+          <button id="tab-servico-backups" onclick="trocarAbaServico('backups')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Backups<span id="servicoAbaContBackups" class="aba-contagem"></span></button>
         </div>
         <div style="flex:1;overflow-y:auto;padding:20px 24px;">
           <input type="hidden" id="servicoId">
@@ -9512,40 +9522,70 @@ function _htmlDrawerServico() {
             <div style="margin-bottom:16px;">
               <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
                 <label for="servicoDescricao" style="${lbl}margin:0;">Descrição</label>
-                ${_htmlBotaoSugerirIA('btnSugerirServico', 'sugerirDescricaoServicoComIA()', { titulo: 'A IA escreve um rascunho com a composição, os processos suportados e os stakeholders; você revisa antes de usar' })}
+                ${_htmlBotaoSugerirIA('btnSugerirServico', 'sugerirDescricaoServicoComIA()', { titulo: 'A IA escreve um rascunho com a composição, os processos suportados, os consumidores e os responsáveis; você revisa antes de usar' })}
               </div>
               <textarea id="servicoDescricao" rows="3" placeholder="O que esse serviço entrega, para quem" style="${inp}resize:vertical;font-family:inherit;"></textarea>
               <div id="sugestaoServico"></div>
             </div>
+            <div style="margin-bottom:16px;padding-top:14px;border-top:1px solid #f0f0f0;">
+              <label style="${lbl}">Consumidores do serviço</label>
+              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:8px;">Quem usa o que este serviço entrega.</span>
+              <div role="radiogroup" aria-label="Áreas da empresa" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;margin-bottom:8px;">
+                <span style="font-size:0.85em;color:#555;font-weight:600;">Áreas da empresa:</span>
+                ${[['nenhuma', 'Nenhuma'], ['algumas', 'Algumas áreas'], ['todas', 'Todas as áreas']].map(([v, r]) => `<label class="check-label" style="margin:0;"><input type="radio" name="servicoConsumidoresAreas" value="${v}" onchange="trocarEscopoConsumidoresServico()"> ${r}</label>`).join('')}
+              </div>
+              <div id="servicoConsumidoresAreasBloco" style="display:none;margin-bottom:8px;">
+                <div id="servicoConsumidoresAreasChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
+                <select id="servicoConsumidorAreaAdd" onchange="adicionarAreaConsumidoraServico()" style="${inp}"><option value="">Adicionar área...</option></select>
+                ${Perfis.podeMexerNaArea(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaAreaDeServico()">+ Nova área</button>' : ''}
+              </div>
+              <label class="check-label" style="margin:0;"><input type="checkbox" id="servicoConsumidoresClientes"> Clientes da empresa</label>
+            </div>
+            <div style="margin-bottom:16px;padding-top:14px;border-top:1px solid #f0f0f0;">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
+                <label style="${lbl}margin:0;">Processos que este serviço suporta</label>
+                ${_htmlBotaoSugerirIA('btnSugerirProcessosServico', 'sugerirProcessosServicoComIA()', { titulo: 'A IA escolhe, entre os processos cadastrados, os que este serviço suporta; você marca o que entra' })}
+              </div>
+              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Processos de Negócio acima do serviço na hierarquia (Processo → Serviço → Dependências).</span>
+              <div id="servicoProcessosChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
+              <select id="servicoProcessoAdd" onchange="adicionarProcessoServico()" style="${inp}"><option value="">Adicionar processo...</option></select>
+              <div id="sugestaoProcessosServico"></div>
+              <details id="servicoImpactadosDetalhe" style="margin-top:10px;">
+                <summary style="cursor:pointer;font-size:0.85em;color:#555;font-weight:600;">Processos impactados <span id="servicoImpactadosContagem" style="color:#888;font-weight:400;"></span></summary>
+                <span style="font-size:0.72em;color:#888;display:block;margin:6px 0;">Os que o serviço suporta mais os que dependem de alguma dependência dele (calculado, não editável aqui).</span>
+                <div id="servicoProcessosImpactados"></div>
+              </details>
+            </div>
+            <div style="margin-bottom:8px;padding-top:14px;border-top:1px solid #f0f0f0;">
+              <label style="${lbl}">Responsáveis internos</label>
+              ${_PAPEIS_RESPONSAVEL_SERVICO.map((r) => `
+              <div style="margin-bottom:12px;">
+                <div style="font-weight:600;font-size:0.88em;color:#222;margin-bottom:2px;">${esc(r.rotulo)}</div>
+                <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">${esc(r.dica)}</span>
+                <div id="servicoResp${r.sufixo}Chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
+                ${r.papel === 'sustentacao' ? '<div id="servicoSustentacaoMigrados" style="display:none;font-size:0.75em;color:#1565c0;font-weight:600;margin-bottom:6px;">Trazidos dos antigos stakeholders deste serviço — salve para confirmar.</div>' : ''}
+                <select id="servicoResp${r.sufixo}Add" onchange="adicionarResponsavelServico('${r.papel}')" style="${inp}"><option value="">Adicionar pessoa...</option></select>
+                ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? `<button type="button" class="link-acao" onclick="novaPessoaDeServico('${r.papel}')">+ Nova pessoa</button>` : ''}
+              </div>`).join('')}
+            </div>
+          </div>
+
+          <div id="painel-servico-tecnico" style="display:none;">
             <div style="margin-bottom:6px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;">
               ${_htmlCampoDuracao('servicoRto', 'RTO', 'Tempo para voltar a funcionar', '_renderComposicaoServico()')}
               ${_htmlCampoDuracao('servicoRpo', 'RPO', 'Perda de dados tolerada', '_renderComposicaoServico()')}
               ${_htmlCampoDuracao('servicoMttr', 'MTTR', 'Tempo médio de reparo', '_renderComposicaoServico()')}
             </div>
             <p style="font-size:0.75em;color:#888;margin:0 0 16px;">Limites do serviço. A soma do caminho crítico das dependências abaixo dele (veja a aba Composição) não pode passar destes valores.</p>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Processos que este serviço suporta</label>
-              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Processos de Negócio acima do serviço na hierarquia (Processo → Serviço → Dependências).</span>
-              <div id="servicoProcessosChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
-              <select id="servicoProcessoAdd" onchange="adicionarProcessoServico()" style="${inp}"><option value="">Adicionar processo...</option></select>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Stakeholders</label>
-              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Pessoas donas do serviço no negócio: quem decide e é avisado quando ele para.</span>
-              <div id="servicoStakeholdersChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
-              <div id="servicoStakeholdersMigrados" style="display:none;font-size:0.75em;color:#1565c0;font-weight:600;margin-bottom:6px;">Trazidos dos backups deste serviço — salve para confirmar.</div>
-              <select id="servicoStakeholderAdd" onchange="adicionarStakeholderServico()" style="${inp}"><option value="">Adicionar pessoa...</option></select>
-              ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaPessoaDeServico()">+ Nova pessoa</button>' : ''}
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="${lbl}">Dependências do Serviço</label>
-              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Itens do catálogo técnico de Dependências que compõem este serviço.</span>
+            <div style="margin-bottom:16px;padding-top:14px;border-top:1px solid #f0f0f0;">
+              <label style="${lbl}">Dependências do serviço</label>
+              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Itens do catálogo técnico de Dependências que compõem este serviço. Busque pelo nome em qualquer categoria.</span>
               <div id="servicoDependenciasPorCategoria"></div>
             </div>
-            <div style="margin-bottom:8px;padding-top:12px;border-top:1px solid #f0f0f0;">
-              <label style="${lbl}">Processos Impactados</label>
-              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Processos que o serviço suporta mais os que dependem de alguma das dependências acima (calculado, não editável aqui).</span>
-              <div id="servicoProcessosImpactados"></div>
+            <div style="margin-bottom:8px;padding-top:14px;border-top:1px solid #f0f0f0;">
+              <label style="${lbl}">Endpoints e APIs</label>
+              <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">URLs pelas quais o serviço é acessado: APIs, portais, aplicações.</span>
+              ${_edEndpointsServico.html(lbl, inp)}
             </div>
           </div>
 
@@ -9568,7 +9608,7 @@ function _htmlDrawerServico() {
 }
 
 window.trocarAbaServico = (aba) => {
-  ['dados', 'composicao', 'backups'].forEach((a) => {
+  ['dados', 'tecnico', 'composicao', 'backups'].forEach((a) => {
     document.getElementById('painel-servico-' + a).style.display = a === aba ? 'block' : 'none';
     _marcarAba(document.getElementById('tab-servico-' + a), a === aba);
   });
@@ -9576,24 +9616,56 @@ window.trocarAbaServico = (aba) => {
 
 window._servicoDependencias = [];
 window._servicoDependenciasCatalogoPorCategoria = {};
-window._servicoStakeholders = [];
+// Responsáveis internos do Serviço (28/10/2026), Pessoas por papel. Só a
+// Sustentação é herdada pelos processos (CadeiaDependencias.sincronizarPessoasHerdadas).
+const _PAPEIS_RESPONSAVEL_SERVICO = [
+  { papel: 'sustentacao', sufixo: 'Sustentacao', campo: 'responsaveisSustentacao', rotulo: 'Responsáveis pela sustentação',
+    dica: 'Quem mantém o serviço no ar e é acionado numa parada. Herdados pelos processos que usam o serviço (contato no PCN).' },
+  { papel: 'desenvolvimento', sufixo: 'Desenvolvimento', campo: 'responsaveisDesenvolvimento', rotulo: 'Responsáveis pelo desenvolvimento',
+    dica: 'Quem evolui e corrige o serviço.' },
+];
+window._servicoResponsaveis = { sustentacao: [], desenvolvimento: [] };
+window._servicoConsumidores = { areas: 'nenhuma', listaAreas: [], clientes: false };
 
 /**
- * Stakeholders de um serviço, {id, nome}. DECISAO 21/10/2026: o Stakeholder era
- * do Backup e passou a ser do Serviço. Serviço que ainda não tem a lista própria
- * herda (só na leitura, nada é gravado) os stakeholders distintos dos backups
- * ligados a ele -- `migrados` diz que veio daí. Usado no drawer do Serviço e no
- * relatório de vínculos da Pessoa.
+ * Responsáveis pela sustentação de um serviço, {id, nome}. O campo novo vale
+ * quando existe; sem ele, os antigos "stakeholders" (DECISAO 28/10/2026) e, na
+ * falta destes, os stakeholders dos backups (DECISAO 21/10/2026). `migrados`
+ * diz que veio do legado e o Salvar confirma. Drawer e relatório da Pessoa.
  */
-function _stakeholdersDoServico(servico, backups) {
+function _sustentacaoDoServico(servico, backups) {
   if (!servico) return { lista: [], migrados: false };
-  if (Array.isArray(servico.stakeholders) && servico.stakeholders.length) {
-    return { lista: servico.stakeholders.map((p) => ({ id: String(p.id), nome: p.nome || '' })), migrados: false };
-  }
+  const ref = (p) => ({ id: String(p.id), nome: p.nome || '' });
+  if (Array.isArray(servico.responsaveisSustentacao)) return { lista: servico.responsaveisSustentacao.map(ref), migrados: false };
+  if (Array.isArray(servico.stakeholders) && servico.stakeholders.length) return { lista: servico.stakeholders.map(ref), migrados: true };
   const vistos = new Map();
   (backups || []).filter((b) => (b.servicoIds || []).includes(String(servico.id)) && b.stakeholderId)
     .forEach((b) => { if (!vistos.has(String(b.stakeholderId))) vistos.set(String(b.stakeholderId), { id: String(b.stakeholderId), nome: b.stakeholderNome || '' }); });
   return { lista: [...vistos.values()], migrados: vistos.size > 0 };
+}
+
+// ---- Endpoints e APIs do Serviço (editor compartilhado com Produto) ----
+window._servicoEndpoints = [];
+const _edEndpointsServico = _criarEditorEndpoints({
+  base: 'servicoEndpoint', botao: 'btnAdicionarEndpointServico', estado: '_servicoEndpoints', comTipo: true,
+  podeEditar: () => Perfis.ehAdmin(window.USER_PERFIS) || Perfis.ehSeguranca(window.USER_PERFIS),
+  fn: { adicionar: 'adicionarEndpointServico', editar: 'editarEndpointServico', cancelar: 'cancelarEdicaoEndpointServico', remover: 'removerEndpointServico' },
+  placeholderDescricao: 'Descrição (ex: API de integração bancária, portal do cliente)',
+  aoMudar: () => _atualizarContagensAbasServico(),
+});
+window.adicionarEndpointServico = () => _edEndpointsServico.adicionar();
+window.editarEndpointServico = (idx) => _edEndpointsServico.editar(idx);
+window.cancelarEdicaoEndpointServico = () => _edEndpointsServico.cancelar();
+window.removerEndpointServico = (idx) => _edEndpointsServico.remover(idx);
+
+/** Contagem nas abas: Técnico (dependências + endpoints), Composição (⚠ em alerta), Backups. */
+function _atualizarContagensAbasServico() {
+  const por = (idEl, txt) => { const el = document.getElementById(idEl); if (el) el.textContent = txt; };
+  const nTec = (window._servicoDependencias || []).length + (window._servicoEndpoints || []).length;
+  por('servicoAbaContTecnico', nTec ? ` (${nTec})` : '');
+  const id = (document.getElementById('servicoId') || {}).value || '';
+  const nBk = id ? (backupsData || []).filter((b) => (b.servicoIds || []).includes(String(id))).length : 0;
+  por('servicoAbaContBackups', nBk ? ` (${nBk})` : '');
 }
 
 window.abrirDrawerServico = (id) => {
@@ -9620,19 +9692,38 @@ window.abrirDrawerServico = (id) => {
   window._servicoProcessosAntes = (window._servicoProcessos || []).map((p) => p.id);
   window._servicoProcessosLegado = !!(s && Array.isArray(s.processoIds) && s.processoIds.length);
   _renderProcessosServico();
-  // Antes do marcar() do rastreador: os stakeholders herdados dos backups contam
-  // como estado inicial (Fechar sem mexer não pergunta nada; só grava ao Salvar).
-  const stk = _stakeholdersDoServico(s, backupsData);
-  window._servicoStakeholders = stk.lista;
-  document.getElementById('servicoStakeholdersMigrados').style.display = stk.migrados ? 'block' : 'none';
-  _renderStakeholdersServico();
+  // Antes do marcar() do rastreador: os stakeholders antigos (e os dos backups)
+  // contam como estado inicial da Sustentação (Fechar sem mexer não pergunta
+  // nada; só grava ao Salvar).
+  const sust = _sustentacaoDoServico(s, backupsData);
+  window._servicoResponsaveis = {
+    sustentacao: sust.lista,
+    desenvolvimento: (s && Array.isArray(s.responsaveisDesenvolvimento) ? s.responsaveisDesenvolvimento : []).map((p) => ({ id: String(p.id), nome: p.nome || '' })),
+  };
+  document.getElementById('servicoSustentacaoMigrados').style.display = sust.migrados ? 'block' : 'none';
+  _PAPEIS_RESPONSAVEL_SERVICO.forEach((r) => _renderResponsaveisServico(r.papel));
+  const cons = (s && s.consumidores) || {};
+  window._servicoConsumidores = {
+    areas: ['nenhuma', 'algumas', 'todas'].includes(cons.areas) ? cons.areas : 'nenhuma',
+    listaAreas: Array.isArray(cons.listaAreas) ? [...cons.listaAreas] : [],
+    clientes: cons.clientes === true,
+  };
+  document.querySelectorAll('input[name="servicoConsumidoresAreas"]').forEach((r) => { r.checked = r.value === window._servicoConsumidores.areas; });
+  document.getElementById('servicoConsumidoresClientes').checked = window._servicoConsumidores.clientes;
+  _renderConsumidoresServico();
+  _edEndpointsServico.carregar(s ? s.endpoints : []);
+  window._sugestaoProcessosServicoIA = null;
+  _renderSugestaoProcessosServico();
+  document.getElementById('btnSugerirProcessosServico').style.display = s && (Perfis.ehAdmin(window.USER_PERFIS) || Perfis.ehSeguranca(window.USER_PERFIS)) ? 'inline-block' : 'none';
+  document.getElementById('servicoImpactadosDetalhe').open = false;
 
-  // Catálogo pickável: só as 7 categorias técnicas (decisão confirmada) --
+  // Catálogo pickável: as categorias técnicas do Serviço (sem Outros, API e
+  // Portais Web: API/portal viraram "Endpoints e APIs", 28/10/2026) --
   // Fornecedores/Pessoas/Processos Internos ficam de fora, apesar de
   // morarem na mesma coleção, porque têm telas e significado próprios.
   const catalogo = window.dependenciasCatalogo || [];
   const porCategoria = {};
-  DEPENDENCIA_CATEGORIAS_TECNICAS.forEach((cat) => { porCategoria[cat] = []; });
+  _CATEGORIAS_DEP_SERVICO.forEach((cat) => { porCategoria[cat] = []; });
   catalogo.forEach((d) => {
     if (porCategoria[d.categoria]) porCategoria[d.categoria].push({ nome: d.nome, id: d.id || null });
   });
@@ -9642,6 +9733,7 @@ window.abrirDrawerServico = (id) => {
   _renderServicoProcessosImpactados();
   _renderComposicaoServico();
   _renderServicoBackupsTab(s ? s.id : null);
+  _atualizarContagensAbasServico();
   trocarAbaServico('dados');
   document.getElementById('drawerServico').classList.add('open');
   document.getElementById('drawerOverlayServico').classList.add('open');
@@ -9713,7 +9805,7 @@ window.sugerirDescricaoServicoComIA = () => {
     acao: 'sugerirTextoIA', corpo: { alvo: 'servico-descricao', id },
     idBotao: 'btnSugerirServico', idCaixa: 'sugestaoServico', idCampo: 'servicoDescricao',
     carregando: 'A IA está escrevendo a descrição com o que o sistema sabe deste serviço…',
-    nota: 'Escrita a partir da composição salva, dos processos suportados e dos stakeholders. Confira antes de salvar.',
+    nota: 'Escrita a partir da composição salva, dos processos suportados, dos consumidores e dos responsáveis. Confira antes de salvar.',
   });
 };
 
@@ -9723,7 +9815,10 @@ function _coletarFormularioServico() {
     nome: document.getElementById('servicoNome').value.trim(),
     descricao: document.getElementById('servicoDescricao').value.trim(),
     dependenciaItens: window._servicoDependencias || [],
-    stakeholders: window._servicoStakeholders || [],
+    responsaveisSustentacao: (window._servicoResponsaveis || {}).sustentacao || [],
+    responsaveisDesenvolvimento: (window._servicoResponsaveis || {}).desenvolvimento || [],
+    consumidores: _coletarConsumidoresServico(),
+    endpoints: _edEndpointsServico.paraGravar(),
     rtoMin: _lerCampoDuracao('servicoRto'),
     rpoMin: _lerCampoDuracao('servicoRpo'),
     mttrMin: _lerCampoDuracao('servicoMttr'),
@@ -9792,6 +9887,8 @@ window._renderComposicaoServico = () => {
   }
   const cont = document.getElementById('servicoComposicao');
   if (cont) cont.innerHTML = _htmlComposicaoServico(av);
+  const abaComp = document.getElementById('servicoAbaContComposicao');
+  if (abaComp) abaComp.textContent = av.status === 'alerta' ? ' ⚠️' : '';
 };
 
 const _celulaDuracao = (min) => (min === null || min === undefined)
@@ -9854,50 +9951,176 @@ function _htmlComposicaoServico(av) {
     </div>`;
 }
 
-// ---- Stakeholders do Serviço (chips de Pessoas, mesmo molde de Áreas da Pessoa) ----
-function _renderStakeholdersServico() {
-  const cont = document.getElementById('servicoStakeholdersChips');
+// ---- Responsáveis internos do Serviço (chips de Pessoas por papel, mesmo molde de Áreas da Pessoa) ----
+const _papelResponsavel = (papel) => _PAPEIS_RESPONSAVEL_SERVICO.find((r) => r.papel === papel);
+
+function _renderResponsaveisServico(papel) {
+  const r = _papelResponsavel(papel);
+  const cont = document.getElementById('servicoResp' + r.sufixo + 'Chips');
   if (!cont) return;
-  const lista = window._servicoStakeholders || [];
+  const lista = (window._servicoResponsaveis || {})[papel] || [];
   cont.innerHTML = lista.length ? lista.map((p, i) => {
     const pessoa = (pessoasData || []).find((x) => String(x.id) === String(p.id));
     const removida = (pessoasData || []).length && !pessoa;
     const nome = pessoa ? pessoa.nome : (p.nome || '(sem nome)');
-    return `<span style="display:inline-flex;align-items:center;gap:6px;background:${removida ? '#999' : '#d60014'};color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(nome)}${removida ? ' (removida)' : ''}<button type="button" onclick="removerStakeholderServico(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
-  }).join('') : '<p class="vazio-inline">Nenhum stakeholder.</p>';
-  _popularSelectStakeholderServico();
+    return `<span style="display:inline-flex;align-items:center;gap:6px;background:${removida ? '#999' : '#d60014'};color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(nome)}${removida ? ' (removida)' : ''}<button type="button" onclick="removerResponsavelServico('${papel}',${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
+  }).join('') : '<p class="vazio-inline">Ninguém indicado.</p>';
+  const sel = document.getElementById('servicoResp' + r.sufixo + 'Add');
+  if (sel) {
+    const ja = new Set(lista.map((p) => String(p.id)));
+    sel.innerHTML = '<option value="">Adicionar pessoa...</option>' +
+      [...(pessoasData || [])].filter((p) => !ja.has(String(p.id))).sort((a, c) => (a.nome || '').localeCompare(c.nome || '', 'pt-BR'))
+        .map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('');
+    sel.value = '';
+  }
 }
 
-function _popularSelectStakeholderServico() {
-  const sel = document.getElementById('servicoStakeholderAdd');
-  if (!sel) return;
-  const ja = new Set((window._servicoStakeholders || []).map((p) => String(p.id)));
-  sel.innerHTML = '<option value="">Adicionar pessoa...</option>' +
-    [...(pessoasData || [])].filter((p) => !ja.has(String(p.id))).sort((a, c) => (a.nome || '').localeCompare(c.nome || '', 'pt-BR'))
-      .map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('');
+function _incluirResponsavelServico(papel, id) {
+  const pessoa = (pessoasData || []).find((p) => String(p.id) === String(id));
+  if (!pessoa) return;
+  const lista = (window._servicoResponsaveis[papel] = window._servicoResponsaveis[papel] || []);
+  if (lista.some((p) => String(p.id) === String(id))) return;
+  lista.push({ id: String(pessoa.id), nome: pessoa.nome || '' });
+  _renderResponsaveisServico(papel);
+}
+
+window.adicionarResponsavelServico = (papel) => {
+  const sel = document.getElementById('servicoResp' + _papelResponsavel(papel).sufixo + 'Add');
+  if (sel && sel.value) _incluirResponsavelServico(papel, sel.value);
+};
+
+window.removerResponsavelServico = (papel, i) => {
+  window._servicoResponsaveis[papel].splice(i, 1);
+  _renderResponsaveisServico(papel);
+};
+
+window.novaPessoaDeServico = (papel) => _cadastroRapidoPessoa('drawerServico', 'drawerOverlayServico', (p) => _incluirResponsavelServico(papel || 'sustentacao', p.id));
+
+// ---- Consumidores do Serviço (28/10/2026): áreas internas (nenhuma/algumas/todas) + clientes ----
+function _coletarConsumidoresServico() {
+  const marcado = document.querySelector('input[name="servicoConsumidoresAreas"]:checked');
+  const areas = marcado ? marcado.value : 'nenhuma';
+  const cb = document.getElementById('servicoConsumidoresClientes');
+  return {
+    areas,
+    listaAreas: areas === 'algumas' ? [...((window._servicoConsumidores || {}).listaAreas || [])] : [],
+    clientes: !!(cb && cb.checked),
+  };
+}
+
+function _renderConsumidoresServico() {
+  const c = window._servicoConsumidores || {};
+  const marcado = document.querySelector('input[name="servicoConsumidoresAreas"]:checked');
+  const bloco = document.getElementById('servicoConsumidoresAreasBloco');
+  if (!bloco) return;
+  bloco.style.display = marcado && marcado.value === 'algumas' ? 'block' : 'none';
+  const lista = c.listaAreas || [];
+  const cadastradas = window.areasData || [];
+  document.getElementById('servicoConsumidoresAreasChips').innerHTML = lista.length ? lista.map((nome, i) => {
+    const fora = cadastradas.length && !cadastradas.some((a) => a.nome === nome);
+    return `<span style="display:inline-flex;align-items:center;gap:6px;background:${fora ? '#999' : '#d60014'};color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(nome)}${fora ? ' (fora do cadastro)' : ''}<button type="button" onclick="removerAreaConsumidoraServico(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
+  }).join('') : '<p class="vazio-inline">Nenhuma área escolhida.</p>';
+  const sel = document.getElementById('servicoConsumidorAreaAdd');
+  const ja = new Set(lista);
+  sel.innerHTML = '<option value="">Adicionar área...</option>' +
+    [...cadastradas].filter((a) => a.nome && !ja.has(a.nome)).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+      .map((a) => `<option value="${esc(a.nome)}">${esc(a.nome)}</option>`).join('');
   sel.value = '';
 }
 
-function _incluirStakeholderServico(id) {
-  const pessoa = (pessoasData || []).find((p) => String(p.id) === String(id));
-  if (!pessoa) return;
-  window._servicoStakeholders = window._servicoStakeholders || [];
-  if (window._servicoStakeholders.some((p) => String(p.id) === String(id))) return;
-  window._servicoStakeholders.push({ id: String(pessoa.id), nome: pessoa.nome || '' });
-  _renderStakeholdersServico();
+window.trocarEscopoConsumidoresServico = () => _renderConsumidoresServico();
+
+window.adicionarAreaConsumidoraServico = (nome) => {
+  const sel = document.getElementById('servicoConsumidorAreaAdd');
+  const valor = nome || (sel && sel.value);
+  if (!valor) return;
+  const lista = (window._servicoConsumidores.listaAreas = window._servicoConsumidores.listaAreas || []);
+  if (!lista.includes(valor)) lista.push(valor);
+  _renderConsumidoresServico();
+};
+
+window.removerAreaConsumidoraServico = (i) => {
+  window._servicoConsumidores.listaAreas.splice(i, 1);
+  _renderConsumidoresServico();
+};
+
+window.novaAreaDeServico = () => _abrirCadastroRapido({
+  pai: 'drawerServico', overlay: 'drawerOverlayServico',
+  preparar: async () => { _garantirHtmlCadastro('modal', _htmlModalArea); },
+  abrir: () => abrirModalArea(),
+  aoSalvar: (a) => window.adicionarAreaConsumidoraServico(a.nome),
+});
+
+// ---- Processos suportados sugeridos pela IA (28/10/2026) -- mesmo molde da
+// sugestão de processos do Processo (_htmlSugestaoProcessosIA): checkbox +
+// motivo, nada grava até Salvar. ----
+window._sugestaoProcessosServicoIA = null;
+
+function _renderSugestaoProcessosServico() {
+  const cont = document.getElementById('sugestaoProcessosServico');
+  if (!cont) return;
+  const s = window._sugestaoProcessosServicoIA;
+  if (!s) { cont.innerHTML = ''; return; }
+  if (s.carregando) { cont.innerHTML = _htmlSugestaoIACarregando('A IA está procurando, entre os processos cadastrados, os que este serviço suporta…'); return; }
+  const ja = new Set((window._servicoProcessos || []).map((p) => String(p.id)));
+  const itens = (s.processos || []).filter((x) => !ja.has(String(x.id)));
+  if (!itens.length) {
+    cont.innerHTML = `<div class="sugestao-ia" role="region" aria-label="Sugestão da IA">
+      <div class="sugestao-ia__titulo">🤖 A IA não encontrou outros processos que este serviço suporte com os dados cadastrados</div>
+      <div class="sugestao-ia__acoes"><button type="button" class="btn btn-ghost" onclick="descartarSugestaoProcessosServicoIA()" style="${_ESTILO_ACAO_IA}">Fechar</button></div>
+    </div>`;
+    return;
+  }
+  cont.innerHTML = `<div class="sugestao-ia" role="region" aria-label="Sugestão da IA">
+      <div class="sugestao-ia__titulo">🤖 Processos que este serviço suporta, segundo a IA — marque o que entra</div>
+      ${itens.map((x) => `<label class="sugestao-ia__item"><input type="checkbox" checked data-sugestao-processo-servico="${esc(x.id)}"><span><strong>${esc(x.nome)}</strong>${x.area ? ` <span style="color:#888;">· ${esc(x.area)}</span>` : ''}${x.motivo ? ` — ${esc(x.motivo)}` : ''}</span></label>`).join('')}
+      <div class="sugestao-ia__acoes">
+        <button type="button" class="btn btn-ghost" onclick="adicionarSugestoesProcessosServicoIA()" style="${_ESTILO_ACAO_IA}color:#2e7d32;border-color:#2e7d32;">Adicionar selecionados</button>
+        <button type="button" class="btn btn-ghost" onclick="descartarSugestaoProcessosServicoIA()" style="${_ESTILO_ACAO_IA}">Descartar</button>
+      </div>
+      <div class="sugestao-ia__nota">Escolhidos a partir da descrição, das dependências e dos consumidores deste serviço e da descrição e das dependências de cada processo. Nada é gravado até Salvar.</div>
+    </div>`;
 }
 
-window.adicionarStakeholderServico = () => {
-  const sel = document.getElementById('servicoStakeholderAdd');
-  if (sel && sel.value) _incluirStakeholderServico(sel.value);
+window.sugerirProcessosServicoComIA = async () => {
+  const id = document.getElementById('servicoId').value;
+  if (!id) return showToast('Salve o serviço antes de pedir a sugestão.', '#e65100');
+  if (window._sugestaoProcessosServicoIA && window._sugestaoProcessosServicoIA.carregando) return;
+  window._sugestaoProcessosServicoIA = { carregando: true };
+  _renderSugestaoProcessosServico();
+  try {
+    const r = await API.post('sugerirTextoIA', { alvo: 'servico-processos', id });
+    window._sugestaoProcessosServicoIA = { processos: (r && r.processos) || [] };
+  } catch (e) {
+    window._sugestaoProcessosServicoIA = null;
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível gerar a sugestão. Tente de novo.'), '#c62828');
+  }
+  _renderSugestaoProcessosServico();
 };
 
-window.removerStakeholderServico = (i) => {
-  window._servicoStakeholders.splice(i, 1);
-  _renderStakeholdersServico();
+window.adicionarSugestoesProcessosServicoIA = () => {
+  const s = window._sugestaoProcessosServicoIA;
+  if (!s || !s.processos) return;
+  const marcados = [...document.querySelectorAll('#sugestaoProcessosServico input[data-sugestao-processo-servico]:checked')]
+    .map((cb) => s.processos.find((x) => String(x.id) === cb.dataset.sugestaoProcessoServico)).filter(Boolean);
+  if (!marcados.length) return showToast('Marque ao menos um processo.', '#e65100');
+  const ja = new Set((window._servicoProcessos || []).map((p) => String(p.id)));
+  marcados.forEach((x) => {
+    if (ja.has(String(x.id))) return;
+    const atual = (window.processosData || []).find((p) => String(p.id) === String(x.id));
+    window._servicoProcessos.push({ id: String(x.id), nome: atual ? _nomeProcessoServico(atual) : [x.area, x.nome].filter(Boolean).join(' · ') });
+  });
+  window._sugestaoProcessosServicoIA = null;
+  _renderProcessosServico();
+  _renderServicoProcessosImpactados();
+  _renderSugestaoProcessosServico();
+  showToast(`✅ ${marcados.length} ${marcados.length === 1 ? 'processo adicionado' : 'processos adicionados'} — salve o serviço para gravar.`, '#2e7d32');
 };
 
-window.novaPessoaDeServico = () => _cadastroRapidoPessoa('drawerServico', 'drawerOverlayServico', (p) => _incluirStakeholderServico(p.id));
+window.descartarSugestaoProcessosServicoIA = () => {
+  window._sugestaoProcessosServicoIA = null;
+  _renderSugestaoProcessosServico();
+};
 
 /**
  * Uma seção por categoria técnica (mesmo padrão já usado 2x nesta sessão:
@@ -9905,79 +10128,83 @@ window.novaPessoaDeServico = () => _cadastroRapidoPessoa('drawerServico', 'drawe
  * exemplo, chips dos itens já adicionados e um campo de busca com dropdown.
  * Só as 7 categorias técnicas -- decisão confirmada com o usuário.
  */
+// Categorias técnicas que o Serviço agrupa (28/10/2026): sem Outros e sem
+// API/Portais Web, que viraram a lista livre "Endpoints e APIs".
+const _CATEGORIAS_DEP_SERVICO = DEPENDENCIA_CATEGORIAS_TECNICAS.filter((c) => !['Outros', 'API', 'Portais Web'].includes(c));
+const _chaveDepServico = (d, cat) => d.id || ((cat || d.categoria) + '|' + d.nome);
+
+/**
+ * Dependências do Serviço (28/10/2026): chips agrupados só nas categorias com
+ * itens e UMA busca para todas as categorias (eram 8 blocos, cada um com a sua).
+ * Item de categoria que saiu do Serviço (Outros/API/Portais Web) continua como
+ * chip, só para remover.
+ */
 function _renderServicoDependenciasPorCategoria() {
   const cont = document.getElementById('servicoDependenciasPorCategoria');
   if (!cont) return;
-  const porCategoria = window._servicoDependenciasCatalogoPorCategoria || {};
   const selecionadas = window._servicoDependencias || [];
-
-  const categoriasSet = new Set(DEPENDENCIA_CATEGORIAS_TECNICAS);
-  selecionadas.forEach((item) => categoriasSet.add(item.categoria || 'Outros'));
-  const categorias = [...categoriasSet].sort();
-
-  cont.innerHTML = categorias.map((cat) => {
-    const icon = DEPENDENCIA_CAT_ICONES[cat] || '📦';
-    const example = DEPENDENCIA_CAT_EXEMPLOS[cat] || '';
-    const itensCat = selecionadas.filter((item) => (item.categoria || 'Outros') === cat);
-    const chips = itensCat.map((item) => {
-      const globalIdx = selecionadas.indexOf(item);
-      return `<span style="display:inline-flex;align-items:center;gap:6px;background:#d60014;color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(item.nome)}<button onclick="removerDependenciaServico(${globalIdx})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`;
-    }).join(' ');
-    return `
-      <div style="padding:12px 0;border-bottom:1px solid #f0f0f0;">
-        <div style="font-weight:600;font-size:0.88em;color:#222;margin-bottom:2px;"><span style="margin-right:4px;">${icon}</span>${esc(cat)}${itensCat.length ? ` <span style="font-size:0.8em;color:#888;font-weight:400;">(${itensCat.length})</span>` : ''}</div>
-        ${example ? `<div style="font-size:0.72em;color:#999;font-style:italic;margin-bottom:6px;">${esc(example)}</div>` : ''}
-        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;">${chips}</div>
-        <div style="position:relative;">
-          <input type="text" class="servico-dep-cat-input" data-categoria="${esc(cat)}" placeholder="Buscar ${esc(cat).toLowerCase()}..." autocomplete="off" style="width:100%;box-sizing:border-box;border:1.5px solid #e0e0e0;border-radius:7px;outline:none;font-size:0.88em;padding:7px 10px;" onfocus="mostrarDropdownServicoCategoria(this,'${escJs(cat)}')" oninput="mostrarDropdownServicoCategoria(this,'${escJs(cat)}')" onblur="setTimeout(()=>{const dd=this.parentElement.querySelector('.servico-dep-cat-dropdown');if(dd)dd.style.display='none';},300)">
-          <div class="servico-dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:180px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
-        </div>
+  const grupos = new Map();
+  selecionadas.forEach((item, i) => {
+    const cat = item.categoria || 'Outros';
+    if (!grupos.has(cat)) grupos.set(cat, []);
+    grupos.get(cat).push({ item, i });
+  });
+  const ordem = [..._CATEGORIAS_DEP_SERVICO, ...[...grupos.keys()].filter((c) => !_CATEGORIAS_DEP_SERVICO.includes(c)).sort()];
+  const linhas = ordem.filter((cat) => grupos.has(cat)).map((cat) => {
+    const fora = !_CATEGORIAS_DEP_SERVICO.includes(cat);
+    const chips = grupos.get(cat).map(({ item, i }) => `<span style="display:inline-flex;align-items:center;gap:6px;background:${fora ? '#999' : '#d60014'};color:#fff;padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(item.nome)}<button type="button" onclick="removerDependenciaServico(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:rgba(255,255,255,0.75);line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`).join('');
+    return `<div class="servico-dep-grupo" data-categoria="${esc(cat)}" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid #f5f5f5;">
+        <span style="font-size:0.8em;font-weight:600;color:#555;min-width:140px;">${DEPENDENCIA_CAT_ICONES[cat] || '📦'} ${esc(cat)}${fora ? ' <span style="font-weight:400;color:#999;" title="Esta categoria não entra mais no Serviço; use Endpoints e APIs">(fora do serviço)</span>' : ''}</span>
+        ${chips}
       </div>`;
   }).join('');
-
-  cont.querySelectorAll('.servico-dep-cat-input').forEach((input) => {
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        const cat = input.dataset.categoria;
-        const filtro = input.value.trim().toLowerCase();
-        if (!filtro) return;
-        const jaNaCategoria = new Set((window._servicoDependencias || []).filter((d) => d.categoria === cat).map((d) => d.id || d.nome));
-        const match = (porCategoria[cat] || []).find((d) => !jaNaCategoria.has(d.id || d.nome) && d.nome.toLowerCase().includes(filtro));
-        if (match) {
-          selecionarDependenciaServicoCategoria(match.nome, cat, match.id);
-          input.value = '';
-          const dd = input.parentElement.querySelector('.servico-dep-cat-dropdown');
-          if (dd) dd.style.display = 'none';
-        }
-      } else if (e.key === 'Escape') {
-        const dd = input.parentElement.querySelector('.servico-dep-cat-dropdown');
-        if (dd) dd.style.display = 'none';
-        input.blur();
-      }
-    });
+  cont.innerHTML = `${linhas || '<p class="vazio-inline">Nenhuma dependência no serviço.</p>'}
+    <div style="position:relative;margin-top:8px;">
+      <input type="text" id="servicoDepBusca" placeholder="Buscar dependência (servidor, banco, sistema, infraestrutura...)" autocomplete="off" aria-label="Buscar dependência"
+        style="width:100%;box-sizing:border-box;border:1.5px solid #e0e0e0;border-radius:7px;outline:none;font-size:0.88em;padding:8px 10px;"
+        onfocus="mostrarDropdownServicoDependencias()" oninput="mostrarDropdownServicoDependencias()"
+        onblur="setTimeout(()=>{const dd=document.getElementById('servicoDepDropdown');if(dd)dd.style.display='none';},300)">
+      <div id="servicoDepDropdown" class="servico-dep-cat-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;background:white;border:1.5px solid #e0e0e0;border-radius:0 0 7px 7px;max-height:260px;overflow-y:auto;z-index:50;box-shadow:0 4px 16px rgba(0,0,0,0.12);"></div>
+    </div>`;
+  const input = document.getElementById('servicoDepBusca');
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const primeiro = _dependenciasDisponiveisServico(input.value)[0];
+      if (primeiro && primeiro[1].length) selecionarDependenciaServicoCategoria(primeiro[1][0].nome, primeiro[0], primeiro[1][0].id);
+    } else if (e.key === 'Escape') {
+      document.getElementById('servicoDepDropdown').style.display = 'none';
+      input.blur();
+    }
   });
+  _atualizarContagensAbasServico();
 }
 
-window.mostrarDropdownServicoCategoria = (input, categoria) => {
-  const dropdown = input.parentElement.querySelector('.servico-dep-cat-dropdown');
-  if (!dropdown) return;
-  const filtroOriginal = input.value.trim();
-  const filtro = filtroOriginal.toLowerCase();
-  const jaNaCategoria = new Set((window._servicoDependencias || []).filter((d) => d.categoria === categoria).map((d) => d.id || d.nome));
-  const disponiveis = ((window._servicoDependenciasCatalogoPorCategoria || {})[categoria] || [])
-    .filter((d) => !jaNaCategoria.has(d.id || d.nome) && (filtro === '' || d.nome.toLowerCase().includes(filtro)));
+/** [[categoria, [itens]]] do catálogo que ainda não estão no serviço e casam com o texto. */
+function _dependenciasDisponiveisServico(texto) {
+  const filtro = String(texto || '').trim().toLowerCase();
+  const ja = new Set((window._servicoDependencias || []).map((d) => _chaveDepServico(d)));
+  const porCat = window._servicoDependenciasCatalogoPorCategoria || {};
+  return _CATEGORIAS_DEP_SERVICO.map((cat) => [cat, (porCat[cat] || [])
+    .filter((d) => !ja.has(_chaveDepServico(d, cat)) && (!filtro || (d.nome || '').toLowerCase().includes(filtro)))
+    .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'))]).filter(([, l]) => l.length);
+}
 
-  // "+ Cadastrar" só aparece com texto digitado -- criar com um clique
-  // explícito, nunca sozinho num campo em foco (evita cadastro acidental).
-  const criarHtml = filtroOriginal
-    ? `<div class="servico-dep-option" onmousedown="abrirDrawerDependenciaDeServico('${escJs(categoria)}','${escJs(filtroOriginal)}')" style="padding:8px 12px;cursor:pointer;font-size:0.88em;color:#d60014;font-weight:600;${disponiveis.length ? 'border-top:1px solid #e0e0e0;' : ''}">+ Cadastrar "${esc(filtroOriginal)}" como nova dependência</div>`
+window.mostrarDropdownServicoDependencias = () => {
+  const input = document.getElementById('servicoDepBusca');
+  const dd = document.getElementById('servicoDepDropdown');
+  if (!input || !dd) return;
+  const texto = input.value.trim();
+  const grupos = _dependenciasDisponiveisServico(texto);
+  // "+ Cadastrar" só com texto digitado -- criar com um clique explícito, escolhendo a categoria.
+  const criar = texto
+    ? `<div style="padding:8px 12px;font-size:0.85em;color:#555;${grupos.length ? 'border-top:1px solid #e0e0e0;' : ''}">+ Cadastrar "${esc(texto)}" como: ${_CATEGORIAS_DEP_SERVICO.map((c) => `<button type="button" class="link-acao" onmousedown="abrirDrawerDependenciaDeServico('${escJs(c)}','${escJs(texto)}')">${esc(c)}</button>`).join(' · ')}</div>`
     : '';
-  if (!disponiveis.length && !criarHtml) { dropdown.style.display = 'none'; return; }
-
-  dropdown.innerHTML = disponiveis.map((d) => `<div class="servico-dep-option" onmousedown="selecionarDependenciaServicoCategoria('${escJs(d.nome)}','${escJs(categoria)}','${escJs(d.id)}')" style="padding:8px 12px;cursor:pointer;font-size:0.88em;color:#222;border-bottom:1px solid #f8f8f8;">${esc(d.nome)}</div>`).join('') + criarHtml;
-  dropdown.style.display = 'block';
-  dropdown.querySelectorAll('.servico-dep-option').forEach((el) => {
+  if (!grupos.length && !criar) { dd.style.display = 'none'; return; }
+  dd.innerHTML = grupos.map(([cat, itens]) => `<div style="padding:6px 12px 2px;font-size:0.72em;font-weight:700;color:#999;text-transform:uppercase;letter-spacing:0.4px;">${DEPENDENCIA_CAT_ICONES[cat] || '📦'} ${esc(cat)}</div>`
+    + itens.map((d) => `<div class="servico-dep-option" data-categoria="${esc(cat)}" onmousedown="selecionarDependenciaServicoCategoria('${escJs(d.nome)}','${escJs(cat)}','${escJs(d.id)}')" style="padding:7px 12px 7px 22px;cursor:pointer;font-size:0.88em;color:#222;">${esc(d.nome)}</div>`).join('')).join('') + criar;
+  dd.style.display = 'block';
+  dd.querySelectorAll('.servico-dep-option').forEach((el) => {
     el.addEventListener('mouseenter', () => { el.style.background = '#f0f4ff'; });
     el.addEventListener('mouseleave', () => { el.style.background = 'transparent'; });
   });
@@ -10017,6 +10244,8 @@ function _renderServicoProcessosImpactados() {
   const processos = window.processosData || [];
   const suportados = (window._servicoProcessos || []).map((x) => processos.find((p) => String(p.id) === String(x.id))).filter(Boolean);
 
+  const contagem = document.getElementById('servicoImpactadosContagem');
+  if (contagem) contagem.textContent = '';
   if (!itens.length && !suportados.length) {
     cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:4px 0;">Vincule processos ou adicione dependências ao serviço para ver os processos impactados.</p>';
     return;
@@ -10031,6 +10260,7 @@ function _renderServicoProcessosImpactados() {
     });
   });
   const vinculados = [...vistos.values()];
+  if (contagem) contagem.textContent = `(${vinculados.length})`;
 
   if (!vinculados.length) {
     cont.innerHTML = '<p class="vazio-inline">Nenhum processo vinculado a estas dependências.</p>';
@@ -10079,7 +10309,7 @@ window.salvarServico = async () => {
       if (falhas) showToast(`⚠️ Serviço salvo, mas ${falhas} processo(s) não foram atualizados. Tente salvar de novo.`, '#e65100');
       const idx = servicosData.findIndex((x) => String(x.id) === String(r.id));
       if (idx >= 0) servicosData[idx] = item; else servicosData.push(item);
-      document.getElementById('servicoStakeholdersMigrados').style.display = 'none';
+      document.getElementById('servicoSustentacaoMigrados').style.display = 'none';
       if (_temDrawerPaiEmpilhado()) {
         // Cadastro rápido a partir do Backup: devolve o serviço, que entra na lista dele.
         _entregarCadastroRapido(item, _fecharDrawerServicoSemSalvar);
@@ -21957,23 +22187,7 @@ function _htmlModalProdutoSoftware() {
         <div style="border-top:1px solid #f0f0f0;padding-top:14px;margin-bottom:18px;">
           <label style="${lbl}">Endpoints</label>
           <p style="font-size:0.78em;color:#888;margin:0 0 10px;">URLs do produto: aplicação, API, portal, ambiente de homologação...</p>
-          <div id="prodSoftEndpointsTabela"></div>
-          <div id="prodSoftEndpointForm" style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;">
-            <div id="prodSoftEndpointEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
-              ✎ Editando endpoint — <a href="#" onclick="cancelarEdicaoEndpointProduto();return false;" style="color:#1565c0;">cancelar edição</a>
-            </div>
-            <div style="display:grid;grid-template-columns:3fr 1fr;gap:10px;margin-bottom:8px;">
-              <input type="url" id="prodSoftEndpointUrl" placeholder="https://..." style="${inp}">
-              <select id="prodSoftEndpointAmbiente" style="${inp}">
-                <option value="">Ambiente...</option>
-                ${AMBIENTES_ENDPOINT_PRODUTO.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('')}
-              </select>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;">
-              <input type="text" id="prodSoftEndpointDescricao" placeholder="Descrição (ex: API pública, portal do cliente)" style="${inp}">
-              <button class="btn btn-ghost" id="btnAdicionarEndpointProduto" onclick="adicionarEndpointProduto()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
-            </div>
-          </div>
+          ${_edEndpointsProduto.html(lbl, inp)}
         </div>
         <div id="prodSoftPessoasBloco" style="border-top:1px solid #f0f0f0;padding-top:14px;">
           <label style="${lbl}">Pessoas do produto</label>
@@ -22058,13 +22272,15 @@ function _mudancasPessoasDoProduto() {
 }
 
 // ============================================================
-// Endpoints do produto (28/10/2026) -- mesmo padrão dos "Canais de suporte" do
-// Fornecedor: formulário embaixo da lista, "+ Adicionar" / "Salvar alteração".
-// Item: {url, ambiente, descricao}. Só http(s); URL repetida no produto é recusada.
+// Endpoints (28/10/2026): mini-CRUD de URLs no molde dos "Canais de suporte"
+// do Fornecedor -- lista em tabela + formulário embaixo ("+ Adicionar" /
+// "Salvar alteração", aviso "Editando… — cancelar edição"). Um editor por
+// tela: Produto (sem Tipo) e Serviço ("Endpoints e APIs", com Tipo).
+// Item: {url, [tipo], ambiente, descricao}. Só http(s); URL repetida na mesma
+// lista é recusada (sem caixa e sem barra final).
 // ============================================================
 const AMBIENTES_ENDPOINT_PRODUTO = ['Produção', 'Homologação', 'Desenvolvimento', 'Outro'];
-window._produtoEndpoints = [];
-window._endpointProdutoEditandoIndex = null;
+const TIPOS_ENDPOINT_SERVICO = ['API', 'Portal Web', 'Aplicação', 'Outro'];
 
 /** URL http(s) válida, sem espaços nas pontas; '' se não for. */
 function _normalizarUrlEndpoint(texto) {
@@ -22076,81 +22292,143 @@ function _normalizarUrlEndpoint(texto) {
 /** Chave de comparação: sem caixa e sem barra final. */
 const _chaveUrlEndpoint = (url) => String(url || '').toLowerCase().replace(/\/+$/, '');
 
-function renderEndpointsProduto() {
-  const container = document.getElementById('prodSoftEndpointsTabela');
-  if (!container) return;
-  const itens = window._produtoEndpoints || [];
-  if (!itens.length) { container.innerHTML = '<p class="vazio-inline">Nenhum endpoint cadastrado.</p>'; return; }
-  const pode = Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS);
-  container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
-    itens.map((e, i) => `<tr>
-        <td>
-          <div><a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer" style="color:#1565c0;word-break:break-all;">${esc(e.url)}</a>${e.ambiente ? ` <span class="badge badge-gray" style="margin-left:6px;">${esc(e.ambiente)}</span>` : ''}</div>
-          ${e.descricao ? `<div style="font-size:0.8em;color:#888;margin-top:2px;">${esc(e.descricao)}</div>` : ''}
-        </td>
-        <td style="text-align:center;white-space:nowrap;width:1%;">${pode ? `
-          <button class="btn-icon" onclick="editarEndpointProduto(${i})" title="Editar">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
-          <button class="btn-icon" onclick="removerEndpointProduto(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}
-        </td>
-      </tr>`).join('') + `</tbody></table>`;
-}
+/**
+ * cfg: { base (prefixo dos ids, ex. 'prodSoftEndpoint'), botao (id do botão),
+ * estado (nome da lista em window), comTipo, podeEditar(), fn: nomes globais
+ * { adicionar, editar, cancelar, remover }, placeholderDescricao }.
+ */
+function _criarEditorEndpoints(cfg) {
+  const id = (sufixo) => cfg.base + sufixo;
+  const el = (sufixo) => document.getElementById(id(sufixo));
+  const campos = ['Url', ...(cfg.comTipo ? ['Tipo'] : []), 'Ambiente', 'Descricao'];
+  const ed = { indice: null };
+  const lista = () => (window[cfg.estado] = window[cfg.estado] || []);
+  const opcoes = (rotulo, valores) => `<option value="">${rotulo}</option>` + valores.map((v) => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
 
-function _limparFormularioEndpointProduto() {
-  ['prodSoftEndpointUrl', 'prodSoftEndpointAmbiente', 'prodSoftEndpointDescricao'].forEach((id) => { document.getElementById(id).value = ''; });
-}
+  ed.html = (lbl, inp) => `
+    <div id="${id('sTabela')}"></div>
+    <div id="${id('Form')}" style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;">
+      <div id="${id('EdicaoAviso')}" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
+        ✎ Editando endpoint — <a href="#" onclick="${cfg.fn.cancelar}();return false;" style="color:#1565c0;">cancelar edição</a>
+      </div>
+      <div style="display:grid;grid-template-columns:${cfg.comTipo ? '3fr 1fr 1fr' : '3fr 1fr'};gap:10px;margin-bottom:8px;">
+        <input type="url" id="${id('Url')}" placeholder="https://..." aria-label="URL" style="${inp}">
+        ${cfg.comTipo ? `<select id="${id('Tipo')}" aria-label="Tipo" style="${inp}">${opcoes('Tipo...', TIPOS_ENDPOINT_SERVICO)}</select>` : ''}
+        <select id="${id('Ambiente')}" aria-label="Ambiente" style="${inp}">${opcoes('Ambiente...', AMBIENTES_ENDPOINT_PRODUTO)}</select>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;">
+        <input type="text" id="${id('Descricao')}" placeholder="${esc(cfg.placeholderDescricao || 'Descrição')}" aria-label="Descrição" style="${inp}">
+        <button class="btn btn-ghost" id="${cfg.botao}" onclick="${cfg.fn.adicionar}()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+      </div>
+    </div>`;
 
-window.adicionarEndpointProduto = () => {
-  const url = _normalizarUrlEndpoint(document.getElementById('prodSoftEndpointUrl').value);
-  if (!url) return _avisarCampo('prodSoftEndpointUrl', 'Informe uma URL válida começando com http:// ou https://.');
-  const editando = window._endpointProdutoEditandoIndex;
-  const lista = window._produtoEndpoints = window._produtoEndpoints || [];
-  if (lista.some((e, i) => i !== editando && _chaveUrlEndpoint(e.url) === _chaveUrlEndpoint(url))) {
-    return _avisarCampo('prodSoftEndpointUrl', 'Este endpoint já está na lista.');
-  }
-  const item = {
-    url,
-    ambiente: document.getElementById('prodSoftEndpointAmbiente').value,
-    descricao: document.getElementById('prodSoftEndpointDescricao').value.trim(),
+  ed.render = () => {
+    const container = el('sTabela');
+    if (!container) return;
+    const itens = lista();
+    if (!itens.length) { container.innerHTML = '<p class="vazio-inline">Nenhum endpoint cadastrado.</p>'; return; }
+    const pode = cfg.podeEditar();
+    const selo = (t) => (t ? ` <span class="badge badge-gray" style="margin-left:6px;">${esc(t)}</span>` : '');
+    container.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` +
+      itens.map((e, i) => `<tr>
+          <td>
+            <div><a href="${esc(e.url)}" target="_blank" rel="noopener noreferrer" style="color:#1565c0;word-break:break-all;">${esc(e.url)}</a>${cfg.comTipo ? selo(e.tipo) : ''}${selo(e.ambiente)}</div>
+            ${e.descricao ? `<div style="font-size:0.8em;color:#888;margin-top:2px;">${esc(e.descricao)}</div>` : ''}
+          </td>
+          <td style="text-align:center;white-space:nowrap;width:1%;">${pode ? `
+            <button class="btn-icon" onclick="${cfg.fn.editar}(${i})" title="Editar">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#ff6b35" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            <button class="btn-icon" onclick="${cfg.fn.remover}(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}
+          </td>
+        </tr>`).join('') + `</tbody></table>`;
   };
-  if (editando != null) {
-    lista[editando] = item;
-    window.cancelarEdicaoEndpointProduto();
-  } else {
-    lista.push(item);
-    _limparFormularioEndpointProduto();
-  }
-  renderEndpointsProduto();
-};
 
-window.editarEndpointProduto = (idx) => {
-  const e = (window._produtoEndpoints || [])[idx];
-  if (!e) return;
-  window._endpointProdutoEditandoIndex = idx;
-  // Ambiente fora da lista (dado antigo) vira opção extra, para não se perder.
-  const sel = document.getElementById('prodSoftEndpointAmbiente');
-  if (e.ambiente && !Array.from(sel.options).some((o) => o.value === e.ambiente)) sel.add(new Option(e.ambiente, e.ambiente));
-  document.getElementById('prodSoftEndpointUrl').value = e.url || '';
-  sel.value = e.ambiente || '';
-  document.getElementById('prodSoftEndpointDescricao').value = e.descricao || '';
-  document.getElementById('prodSoftEndpointEdicaoAviso').style.display = 'block';
-  document.getElementById('btnAdicionarEndpointProduto').textContent = 'Salvar alteração';
-};
+  ed.limpar = () => campos.forEach((c) => { const x = el(c); if (x) x.value = ''; });
 
-window.cancelarEdicaoEndpointProduto = () => {
-  window._endpointProdutoEditandoIndex = null;
-  document.getElementById('prodSoftEndpointEdicaoAviso').style.display = 'none';
-  document.getElementById('btnAdicionarEndpointProduto').textContent = '+ Adicionar';
-  _limparFormularioEndpointProduto();
-};
+  ed.adicionar = () => {
+    const url = _normalizarUrlEndpoint(el('Url').value);
+    if (!url) return _avisarCampo(id('Url'), 'Informe uma URL válida começando com http:// ou https://.');
+    const itens = lista();
+    if (itens.some((e, i) => i !== ed.indice && _chaveUrlEndpoint(e.url) === _chaveUrlEndpoint(url))) {
+      return _avisarCampo(id('Url'), 'Este endpoint já está na lista.');
+    }
+    const item = Object.assign({ url }, cfg.comTipo ? { tipo: el('Tipo').value } : {},
+      { ambiente: el('Ambiente').value, descricao: el('Descricao').value.trim() });
+    if (ed.indice != null) {
+      itens[ed.indice] = item;
+      ed.cancelar();
+    } else {
+      itens.push(item);
+      ed.limpar();
+    }
+    ed.render();
+    if (cfg.aoMudar) cfg.aoMudar();
+  };
 
-window.removerEndpointProduto = (idx) => {
-  window._produtoEndpoints.splice(idx, 1);
-  if (window._endpointProdutoEditandoIndex === idx) window.cancelarEdicaoEndpointProduto();
-  else if (window._endpointProdutoEditandoIndex != null && window._endpointProdutoEditandoIndex > idx) window._endpointProdutoEditandoIndex--;
-  renderEndpointsProduto();
-};
+  ed.editar = (idx) => {
+    const e = lista()[idx];
+    if (!e) return;
+    ed.indice = idx;
+    // Valor fora da lista (dado antigo) vira opção extra, para não se perder.
+    [['Tipo', e.tipo], ['Ambiente', e.ambiente]].forEach(([c, v]) => {
+      const sel = el(c);
+      if (sel && v && !Array.from(sel.options).some((o) => o.value === v)) sel.add(new Option(v, v));
+    });
+    el('Url').value = e.url || '';
+    if (cfg.comTipo) el('Tipo').value = e.tipo || '';
+    el('Ambiente').value = e.ambiente || '';
+    el('Descricao').value = e.descricao || '';
+    el('EdicaoAviso').style.display = 'block';
+    document.getElementById(cfg.botao).textContent = 'Salvar alteração';
+  };
+
+  ed.cancelar = () => {
+    ed.indice = null;
+    const aviso = el('EdicaoAviso');
+    if (aviso) aviso.style.display = 'none';
+    const b = document.getElementById(cfg.botao);
+    if (b) b.textContent = '+ Adicionar';
+    ed.limpar();
+  };
+
+  ed.remover = (idx) => {
+    lista().splice(idx, 1);
+    if (ed.indice === idx) ed.cancelar();
+    else if (ed.indice != null && ed.indice > idx) ed.indice--;
+    ed.render();
+    if (cfg.aoMudar) cfg.aoMudar();
+  };
+
+  /** Abre a lista de um registro (cópia: mexer não altera o dado carregado). */
+  ed.carregar = (itens) => {
+    window[cfg.estado] = (Array.isArray(itens) ? itens : []).map((e) => ({ ...e }));
+    ed.cancelar();
+    const form = el('Form');
+    if (form) form.style.display = cfg.podeEditar() ? '' : 'none';
+    ed.render();
+  };
+
+  /** O que vai para a gravação. */
+  ed.paraGravar = () => lista().map((e) => Object.assign({ url: e.url }, cfg.comTipo ? { tipo: e.tipo || '' } : {},
+    { ambiente: e.ambiente || '', descricao: e.descricao || '' }));
+
+  return ed;
+}
+
+// ---- Endpoints do Produto ----
+window._produtoEndpoints = [];
+const _edEndpointsProduto = _criarEditorEndpoints({
+  base: 'prodSoftEndpoint', botao: 'btnAdicionarEndpointProduto', estado: '_produtoEndpoints', comTipo: false,
+  podeEditar: () => Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS),
+  fn: { adicionar: 'adicionarEndpointProduto', editar: 'editarEndpointProduto', cancelar: 'cancelarEdicaoEndpointProduto', remover: 'removerEndpointProduto' },
+  placeholderDescricao: 'Descrição (ex: API pública, portal do cliente)',
+});
+function renderEndpointsProduto() { _edEndpointsProduto.render(); }
+window.adicionarEndpointProduto = () => _edEndpointsProduto.adicionar();
+window.editarEndpointProduto = (idx) => _edEndpointsProduto.editar(idx);
+window.cancelarEdicaoEndpointProduto = () => _edEndpointsProduto.cancelar();
+window.removerEndpointProduto = (idx) => _edEndpointsProduto.remover(idx);
 
 function _coletarFormularioProdutoSoftware() {
   return {
@@ -22172,10 +22450,7 @@ window.abrirModalProdutoSoftware = (id) => {
   document.getElementById('prodSoftId').value = p ? p.id : '';
   document.getElementById('prodSoftNome').value = p ? p.nome : '';
   document.getElementById('prodSoftDescricao').value = p ? (p.descricao || '') : '';
-  window._produtoEndpoints = p && Array.isArray(p.endpoints) ? p.endpoints.map((e) => ({ ...e })) : [];
-  window.cancelarEdicaoEndpointProduto();
-  document.getElementById('prodSoftEndpointForm').style.display = pode ? '' : 'none';
-  renderEndpointsProduto();
+  _edEndpointsProduto.carregar(p ? p.endpoints : []);
   document.getElementById('prodSoftAtivo').checked = p ? p.ativo : true;
   _popularSelectAreaProduto(p ? (p.area || '') : '');
   const l = p ? _lideresDoProduto(p.id) : {};
@@ -22218,7 +22493,7 @@ window.salvarProdutoSoftware = async () => {
         nome,
         area: document.getElementById('prodSoftArea').value,
         descricao: document.getElementById('prodSoftDescricao').value.trim(),
-        endpoints: (window._produtoEndpoints || []).map((e) => ({ url: e.url, ambiente: e.ambiente || '', descricao: e.descricao || '' })),
+        endpoints: _edEndpointsProduto.paraGravar(),
         ativo: document.getElementById('prodSoftAtivo').checked,
       });
       produtosSoftwareData = await API.getProdutosSoftware();

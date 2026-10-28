@@ -72,7 +72,7 @@ test('vinculos de area, pessoa, fornecedor, dependencia, servico, contrato e bac
   assert.deepStrictEqual(rels(i, 'dependencia:infra', 'area:ti'), ['área responsável']);
   assert.deepStrictEqual(rels(i, 'servico:s1', 'processo:p1'), ['suporta']);
   assert.deepStrictEqual(rels(i, 'servico:s1', 'dependencia:infra'), ['usa']);
-  assert.deepStrictEqual(rels(i, 'servico:s1', 'pessoa:pAna'), ['stakeholder']);
+  assert.deepStrictEqual(rels(i, 'servico:s1', 'pessoa:pAna'), ['sustentação'], 'stakeholder antigo conta como Sustentação');
   assert.deepStrictEqual(rels(i, 'contrato:c1', 'fornecedor:fX'), ['fornecedor']);
   assert.deepStrictEqual(rels(i, 'contrato:c1', 'dependencia:db'), ['cobre']);
   assert.deepStrictEqual(rels(i, 'contrato:c1', 'pessoa:pBeto'), ['gestor'], 'gestor sem id casa pelo nome');
@@ -309,4 +309,18 @@ test('arvore: grupos recolhidos por padrao (sem nos, com total e lacunas do grup
   assert.strictEqual(unico.raiz.grupos.length, 1);
   assert.strictEqual(unico.raiz.grupos[0].expandido, true, 'grupo unico ja aberto');
   assert.strictEqual(unico.raiz.grupos[0].nos[0].id, 'processo:p1');
+});
+
+test('servico (28/10/2026): Sustentacao e Desenvolvimento viram arestas; areas consumidoras ligam a area', () => {
+  const dados = JSON.parse(JSON.stringify(DADOS));
+  Object.assign(dados.servicos[0], {
+    stakeholders: [{ id: 'pAna', nome: 'Ana Souza' }],
+    responsaveisSustentacao: [], responsaveisDesenvolvimento: [{ id: 'pAna', nome: 'Ana Souza' }],
+    consumidores: { areas: 'algumas', listaAreas: ['TI'], clientes: true },
+  });
+  const i = MC.montarIndice(dados, OPCOES);
+  assert.deepStrictEqual(rels(i, 'servico:s1', 'pessoa:pAna'), ['desenvolvimento'], 'campo novo vazio: o stakeholder antigo nao volta');
+  const area = Object.keys(i.nos).find((k) => k.startsWith('area:') && /^ti$/i.test(i.nos[k].rotulo || i.nos[k].nome || ''));
+  assert.ok(area, 'no da area TI');
+  assert.deepStrictEqual(rels(i, 'servico:s1', area), ['consumido pela área']);
 });

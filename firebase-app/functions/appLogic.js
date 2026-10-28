@@ -2031,6 +2031,7 @@ async function sugerirImpactoProcesso(db, data, ctx) {
 //   processo-processos  Processos de que ele depende (aba Dependencias; ids do catalogo)
 //   dependencia-drp     itens das listas dos Parametros DRP (Admin, SI, TI)
 //   servico-descricao   Descricao do Servico (Admin, SI -- regra de /servicos)
+//   servico-processos   Processos que o Servico suporta (Admin, SI; ids do catalogo)
 //   revisao-observacao  Observacao de "Registrar revisao" (bia/pcn/drp)
 // ============================================================
 
@@ -2257,7 +2258,7 @@ async function _sugerirParametrosDrp(db, data, ctx) {
 function _promptDescricaoServico(dados) {
   return `Você é um analista de continuidade de negócios (ISO 22301) da Fortes Tecnologia e ajuda a manter o catálogo de Serviços de TI.
 
-Escreva a "Descrição" do Serviço abaixo: o que ele entrega, para quem (processos e áreas que o usam) e, em linhas gerais, do que é composto.
+Escreva a "Descrição" do Serviço abaixo: o que ele entrega, para quem (processos, áreas consumidoras e clientes) e, em linhas gerais, do que é composto.
 
 ${_REGRAS_SUGESTAO_IA}
 - De 2 a 4 frases, sem listas, começando pelo que o serviço entrega.
@@ -2304,10 +2305,104 @@ async function _sugerirDescricaoServico(db, data, ctx) {
       };
     }).slice(0, 30),
     processosSuportados,
-    stakeholders: (Array.isArray(s.stakeholders) ? s.stakeholders : []).map((x) => (x && typeof x === 'object' ? (x.nome || x.area || '') : String(x || ''))).filter(Boolean).slice(0, 20),
+    consumidores: _consumidoresParaIA(s.consumidores),
+    responsaveisSustentacao: _nomesPessoasIA(cadeiaDependencias.responsaveisSustentacaoDoServico(s)),
+    responsaveisDesenvolvimento: _nomesPessoasIA(s.responsaveisDesenvolvimento),
+    endpoints: (Array.isArray(s.endpoints) ? s.endpoints : []).filter((e) => e && e.url)
+      .map((e) => [e.tipo, e.descricao].filter(Boolean).join(': ') || 'endpoint').slice(0, 10),
   };
   const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptDescricaoServico(dados), 'a sugestão de descrição', { maxOutputTokens: 1024 });
   return { success: true, texto: _textoDaRespostaIA(json) };
+}
+
+const _nomesPessoasIA = (lista) => (Array.isArray(lista) ? lista : [])
+  .map((x) => (x && typeof x === 'object' ? (x.nome || '') : String(x || ''))).filter(Boolean).slice(0, 20);
+
+/** Consumidores do Servico em texto para o prompt ("todas as areas", lista, clientes). */
+function _consumidoresParaIA(c) {
+  const x = c && typeof c === 'object' ? c : {};
+  return {
+    areas: x.areas === 'todas' ? 'todas as áreas da empresa'
+      : x.areas === 'algumas' ? (Array.isArray(x.listaAreas) ? x.listaAreas.filter(Boolean).slice(0, 30) : [])
+        : 'nenhuma área informada',
+    clientes: x.clientes === true,
+  };
+}
+
+// ---- Processos que o Servico suporta (28/10/2026) ----
+// Mesmo molde de processo-processos: a IA escolhe, entre os processos
+// cadastrados, os que USAM este servico; so ids do catalogo voltam, com motivo.
+function _promptProcessosDoServico(dados) {
+  return `Você é um analista de continuidade de negócios (ISO 22301) da Fortes Tecnologia e ajuda a manter o catálogo de Serviços de TI.
+
+Entre os processos de "catalogo", escolha os que o Serviço em "servico" SUPORTA: processos de negócio que usam o que o serviço entrega e param ou degradam quando ele para.
+
+${_REGRAS_SUGESTAO_IA}
+- Escolha SOMENTE ids que estão em "catalogo"; nunca invente processos.
+- No máximo ${MAX_PROCESSOS_SUGERIDOS_IA} processos, do mais para o menos evidente. Sem base nos dados, devolva a lista vazia.
+- "usaDependenciasDoServico" lista dependências do serviço que o processo já usa direto: é pista forte. "areaConsumidora" diz que a área do processo consome o serviço: é pista, não prova.
+- "motivo": uma frase curta (até 160 caracteres) dizendo o que o processo usa do serviço.
+
+FORMATO DA RESPOSTA (JSON):
+{"processos": [{"id": "...", "motivo": "..."}]}
+
+DADOS (JSON):
+${JSON.stringify(dados)}`;
+}
+
+async function _sugerirProcessosDoServico(db, data, ctx) {
+  await _exigirPerfil(db, ctx.email, ['admin', 'seguranca'], 'Seu perfil não pode editar Serviços.');
+  const id = exigir(data.id, 'id');
+  if (!ctx.geminiApiKey) throw new AppError('API Key do Gemini não configurada.');
+  const snap = await db.collection(COLLECTION.servicos).doc(String(id)).get();
+  if (!snap.exists) throw new AppError('Serviço não encontrado.');
+  const s = { id: snap.id, ...(snap.data() || {}) };
+  const procSnap = await db.collection(COLLECTION.processos).get();
+  const processos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+
+  const itensServico = Array.isArray(s.dependenciaItens) ? s.dependenciaItens : [];
+  const idsDepsServico = new Map(itensServico.filter((it) => it && it.id != null).map((it) => [String(it.id), it.nome || '']));
+  const idsAntigos = new Set((Array.isArray(s.processoIds) ? s.processoIds : []).map((x) => String(x && x.id != null ? x.id : x)));
+  const jaSuporta = (p) => idsAntigos.has(String(p.id))
+    || (Array.isArray(p.dependenciaItens) && p.dependenciaItens.some((it) => it && it.categoria === 'Serviços' && String(it.id) === String(s.id)));
+  const cons = _consumidoresParaIA(s.consumidores);
+  const areasCons = new Set(Array.isArray(cons.areas) ? cons.areas.map((a) => String(a).toLowerCase()) : []);
+
+  const catalogo = processos
+    .filter((p) => p.processo && !jaSuporta(p))
+    .slice(0, MAX_CATALOGO_PROCESSOS_IA)
+    .map((p) => {
+      const linha = { id: String(p.id), processo: p.processo, area: p.area || '', descricaoFuncional: String(p.descricaoFuncional || '').slice(0, 300) };
+      const usa = (Array.isArray(p.dependenciaItens) ? p.dependenciaItens : [])
+        .filter((it) => it && it.id != null && idsDepsServico.has(String(it.id))).map((it) => it.nome || idsDepsServico.get(String(it.id)));
+      if (usa.length) linha.usaDependenciasDoServico = [...new Set(usa)].slice(0, 5);
+      if (cons.areas === 'todas as áreas da empresa' || areasCons.has(String(p.area || '').toLowerCase())) linha.areaConsumidora = true;
+      return linha;
+    });
+  if (!catalogo.length) return { success: true, processos: [] };
+
+  const dados = {
+    servico: {
+      nome: s.nome || '',
+      descricao: String(s.descricao || '').slice(0, 1500),
+      dependencias: itensServico.map((it) => [it.categoria, it.nome].filter(Boolean).join(': ')).filter(Boolean).slice(0, 30),
+      consumidores: cons,
+      processosJaSuportados: processos.filter(jaSuporta).map((p) => [p.area, p.processo].filter(Boolean).join(' · ')).slice(0, 20),
+    },
+    catalogo,
+  };
+  const json = await _chamarGeminiJson(ctx.geminiApiKey, _promptProcessosDoServico(dados), 'a sugestão de processos', { maxOutputTokens: 1024 });
+  if (!json || typeof json !== 'object' || Array.isArray(json)) throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
+  const porId = new Map(catalogo.map((x) => [x.id, x]));
+  const vistos = new Set();
+  const sugeridos = (Array.isArray(json.processos) ? json.processos : [])
+    .filter((x) => x && porId.has(String(x.id)) && !vistos.has(String(x.id)) && vistos.add(String(x.id)))
+    .slice(0, MAX_PROCESSOS_SUGERIDOS_IA)
+    .map((x) => {
+      const c = porId.get(String(x.id));
+      return { id: c.id, nome: c.processo, area: c.area, motivo: String(x.motivo || '').trim().slice(0, 200) };
+    });
+  return { success: true, processos: sugeridos };
 }
 
 // ---- Observacao da revisao do plano ----
@@ -2427,6 +2522,7 @@ const ALVOS_SUGESTAO_IA = {
   'processo-processos': _sugerirProcessosRelacionados,
   'dependencia-drp': _sugerirParametrosDrp,
   'servico-descricao': _sugerirDescricaoServico,
+  'servico-processos': _sugerirProcessosDoServico,
   'revisao-observacao': _sugerirObservacaoRevisao,
 };
 

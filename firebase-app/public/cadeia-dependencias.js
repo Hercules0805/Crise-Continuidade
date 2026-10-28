@@ -16,8 +16,8 @@
  *
  * Produtos de Software Fortes (28/10/2026): o processo tambem aponta produtos
  * ({categoria:'Produtos de Software', id, nome}); nao tem DRP (fora da cadeia).
- * As pessoas do produto (as 4 funcoes) e as do Servico (stakeholders) sao
- * HERDADAS pelo processo: sincronizarPessoasHerdadas grava cada uma como item
+ * As pessoas do produto (as 4 funcoes) e os Responsaveis pela sustentacao do
+ * Servico (28/10/2026; antes "stakeholders") sao HERDADAS pelo processo: sincronizarPessoasHerdadas grava cada uma como item
  * de Pessoa com herdadoDe [{tipo, id, nome, funcoes}] -- `manual: true` quando
  * tambem foi escolhida a mao. Pessoa sem esses campos (antiga) conta como manual.
  *
@@ -343,6 +343,20 @@
     return saida;
   }
 
+  /** Funcao gravada em herdadoDe para quem vem do Servico. */
+  var FUNCAO_SUSTENTACAO_SERVICO = 'Sustentação do serviço';
+
+  /**
+   * Responsaveis pela sustentacao do Servico, [{id, nome}] (28/10/2026). O campo
+   * novo vale quando existe (mesmo vazio: alguem ja salvou o servico depois da
+   * mudanca); senao, os "stakeholders" antigos, que migraram para ca.
+   */
+  function responsaveisSustentacaoDoServico(s) {
+    if (!s) return [];
+    if (Array.isArray(s.responsaveisSustentacao)) return s.responsaveisSustentacao;
+    return _lista(s.stakeholders);
+  }
+
   /** Item de Pessoa so herdado (sem escolha manual)? Pessoa sem herdadoDe (antiga) e manual. */
   function soHerdada(item) {
     return ehPessoa(item) && Array.isArray(item.herdadoDe) && item.herdadoDe.length > 0 && item.manual !== true;
@@ -351,7 +365,7 @@
   /**
    * Recalcula as Pessoas herdadas dos Produtos e Servicos que estao em `itens`
    * (processo.dependenciaItens). dados = { pessoas (catalogo, com as funcoes),
-   * servicos (com stakeholders) }. Nao altera `itens`: devolve
+   * servicos (com os responsaveis pela sustentacao) }. Nao altera `itens`: devolve
    * { itens, adicionadas: [nomes], removidas: [nomes], alteradas: n }.
    */
   function sincronizarPessoasHerdadas(itens, dados) {
@@ -376,10 +390,10 @@
         });
       } else if (ehServico(it) && _temId(it)) {
         var s = servicosPorId[String(it.id)];
-        _lista(s && s.stakeholders).forEach(function (st) {
+        responsaveisSustentacaoDoServico(s).forEach(function (st) {
           if (!st || !_temId(st)) return;
           var p = pessoasPorId[String(st.id)];
-          herdar(st.id, _texto(p ? p.nome : st.nome), { tipo: 'servico', id: String(it.id), nome: _texto(s.nome || it.nome), funcoes: ['Stakeholder'] });
+          herdar(st.id, _texto(p ? p.nome : st.nome), { tipo: 'servico', id: String(it.id), nome: _texto(s.nome || it.nome), funcoes: [FUNCAO_SUSTENTACAO_SERVICO] });
         });
       }
     });
@@ -473,6 +487,8 @@
     pessoasDoProduto: pessoasDoProduto,
     soHerdada: soHerdada,
     sincronizarPessoasHerdadas: sincronizarPessoasHerdadas,
+    FUNCAO_SUSTENTACAO_SERVICO: FUNCAO_SUSTENTACAO_SERVICO,
+    responsaveisSustentacaoDoServico: responsaveisSustentacaoDoServico,
     ehServico: ehServico,
     ehTecnicoDireto: ehTecnicoDireto,
     categoriaPermitidaNoProcesso: categoriaPermitidaNoProcesso,

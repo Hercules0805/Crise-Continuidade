@@ -301,7 +301,13 @@
       if (!nos[id]) return;
       (s.processoIds || []).forEach(function (p) { ligar(id, procPorId[String(p.id)], 'suporta', 'suportado pelo serviço'); });
       (s.dependenciaItens || []).forEach(function (r) { ligar(id, resolverDep(r), 'usa', 'usada pelo serviço'); });
-      (s.stakeholders || []).forEach(function (p) { ligar(id, pessoaPor(p.id) || pessoaPor(p.nome), 'stakeholder', 'stakeholder do serviço'); });
+      // Responsaveis internos (28/10/2026; "stakeholders" antigos contam como Sustentacao
+      // enquanto o servico nao for salvo de novo) e as areas consumidoras escolhidas.
+      var sustentacao = Array.isArray(s.responsaveisSustentacao) ? s.responsaveisSustentacao : (s.stakeholders || []);
+      sustentacao.forEach(function (p) { ligar(id, pessoaPor(p.id) || pessoaPor(p.nome), 'sustentação', 'sustenta o serviço'); });
+      (s.responsaveisDesenvolvimento || []).forEach(function (p) { ligar(id, pessoaPor(p.id) || pessoaPor(p.nome), 'desenvolvimento', 'desenvolve o serviço'); });
+      var cons = s.consumidores || {};
+      if (cons.areas === 'algumas') (cons.listaAreas || []).forEach(function (nome) { ligar(id, areaId(nome), 'consumido pela área', 'consome o serviço'); });
     });
 
     (d.contratos || []).forEach(function (c) {

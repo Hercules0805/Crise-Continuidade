@@ -481,9 +481,17 @@ async function _lerServicos() {
     nome: s.nome || '',
     descricao: s.descricao || '',
     dependenciaItens: Array.isArray(s.dependenciaItens) ? s.dependenciaItens : [],
-    // Pessoas (categoria Pessoas de dependencias) donas do serviço, {id, nome}.
-    // DECISAO 21/10/2026: o Stakeholder saiu do Backup e veio pra cá.
+    // LEGADO (28/10/2026): Pessoas "stakeholders" ({id, nome}), lidas só para
+    // migrar para responsaveisSustentacao (CadeiaDependencias.responsaveisSustentacaoDoServico).
     stakeholders: Array.isArray(s.stakeholders) ? s.stakeholders : [],
+    // Responsáveis internos (28/10/2026), Pessoas {id, nome}. Sustentação só vem
+    // quando o campo existe: ausente = serviço ainda não migrado (usa stakeholders).
+    ...(Array.isArray(s.responsaveisSustentacao) ? { responsaveisSustentacao: _refsPessoaServico(s.responsaveisSustentacao) } : {}),
+    responsaveisDesenvolvimento: _refsPessoaServico(s.responsaveisDesenvolvimento),
+    // Quem consome o serviço (28/10/2026): áreas internas (nenhuma/algumas/todas) e clientes.
+    consumidores: _consumidoresServico(s.consumidores),
+    // Endpoints e APIs (28/10/2026), lista livre: {url, tipo, ambiente, descricao}.
+    endpoints: _endpointsLidos(s.endpoints, true),
     // Composicao de Servicos (21/10/2026): limites do servico em minutos e os
     // Processos que ele suporta ({id, nome}) -- o nivel "servico abaixo de
     // processo". Fica no servico (escrita Admin/SI), nao em processos.
@@ -494,7 +502,31 @@ async function _lerServicos() {
   })).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
 }
 
-const _CAMPOS_SERVICO = ['nome', 'descricao', 'dependenciaItens', 'stakeholders', 'rtoMin', 'rpoMin', 'mttrMin', 'processoIds'];
+const _CAMPOS_SERVICO = ['nome', 'descricao', 'dependenciaItens', 'stakeholders', 'responsaveisSustentacao', 'responsaveisDesenvolvimento',
+  'consumidores', 'endpoints', 'rtoMin', 'rpoMin', 'mttrMin', 'processoIds'];
+
+/** [{id, nome}] de Pessoas, sem itens sem id. */
+function _refsPessoaServico(lista) {
+  return (Array.isArray(lista) ? lista : []).filter((p) => p && p.id != null && p.id !== '')
+    .map((p) => ({ id: String(p.id), nome: String(p.nome || '') }));
+}
+
+const _ESCOPOS_CONSUMIDORES = ['nenhuma', 'algumas', 'todas'];
+/** {areas: nenhuma|algumas|todas, listaAreas: [nomes], clientes: bool}; lista só vale em "algumas". */
+function _consumidoresServico(c) {
+  const x = c && typeof c === 'object' ? c : {};
+  const areas = _ESCOPOS_CONSUMIDORES.includes(x.areas) ? x.areas : 'nenhuma';
+  const listaAreas = areas === 'algumas' ? [...new Set((Array.isArray(x.listaAreas) ? x.listaAreas : []).map((n) => String(n || '').trim()).filter(Boolean))] : [];
+  return { areas, listaAreas, clientes: x.clientes === true };
+}
+
+/** Endpoints {url, ambiente, descricao} (+ tipo no Serviço), só os que têm URL. Produto e Serviço. */
+function _endpointsLidos(lista, comTipo) {
+  return (Array.isArray(lista) ? lista : []).filter((e) => e && e.url).map((e) => Object.assign(
+    { url: String(e.url) }, comTipo ? { tipo: String(e.tipo || '') } : {},
+    { ambiente: String(e.ambiente || ''), descricao: String(e.descricao || '') },
+  ));
+}
 
 async function _salvarServico(s) {
   const data = {};
@@ -502,6 +534,11 @@ async function _salvarServico(s) {
     if (Object.prototype.hasOwnProperty.call(s, campo) && s[campo] !== undefined) data[campo] = s[campo];
   });
   ['rtoMin', 'rpoMin', 'mttrMin'].forEach((c) => { if (c in data) data[c] = _minutosOuNull(data[c]); });
+  ['responsaveisSustentacao', 'responsaveisDesenvolvimento'].forEach((c) => { if (c in data) data[c] = _refsPessoaServico(data[c]); });
+  if ('consumidores' in data) data.consumidores = _consumidoresServico(data.consumidores);
+  if ('endpoints' in data) data.endpoints = _endpointsLidos(data.endpoints, true);
+  // Gravar a Sustentação encerra o legado: os stakeholders migraram para ela.
+  if ('responsaveisSustentacao' in data) data.stakeholders = [];
   if ('processoIds' in data) {
     data.processoIds = (Array.isArray(data.processoIds) ? data.processoIds : [])
       .filter((p) => p && p.id).map((p) => ({ id: String(p.id), nome: p.nome || '' }));
@@ -925,9 +962,7 @@ async function _lerProdutosSoftware() {
     // Descricao livre do produto (28/10/2026).
     descricao: d.descricao || '',
     // Endpoints (URLs) do produto (28/10/2026): [{url, ambiente, descricao}].
-    endpoints: Array.isArray(d.endpoints) ? d.endpoints.filter((e) => e && e.url).map((e) => ({
-      url: String(e.url), ambiente: String(e.ambiente || ''), descricao: String(e.descricao || ''),
-    })) : [],
+    endpoints: _endpointsLidos(d.endpoints, false),
     ativo: d.ativo !== false,
     ordem: Number(d.ordem) || 0,
     criadoEm: d.criadoEm || '',

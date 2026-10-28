@@ -50,11 +50,13 @@ test('Portais Web: categoria tecnica do catalogo, com icone e exemplo; entra em 
   assert.strictEqual(w.document.getElementById('depCategoria').value, 'Portais Web');
 });
 
-test('Portais Web: o Servico pode usa-la; o Processo nao a aponta direto (vem pelo Servico)', async () => {
+test('Portais Web: sai do seletor do Servico (virou "Endpoints e APIs", 28/10/2026); o Processo nao a aponta direto', async () => {
   const w = await carregar(['admin']);
   await w.servicos();
   w.abrirDrawerServico();
-  assert.strictEqual(JSON.stringify(w._servicoDependenciasCatalogoPorCategoria['Portais Web'].map((d) => d.nome)), JSON.stringify(['Área do Cliente']));
+  assert.strictEqual(w._servicoDependenciasCatalogoPorCategoria['Portais Web'], undefined);
+  assert.strictEqual(w._servicoDependenciasCatalogoPorCategoria.API, undefined);
+  assert.ok(w._servicoDependenciasCatalogoPorCategoria.Servidor, 'as outras tecnicas continuam');
   await w.processos();
   w.editarProcesso('p1');
   assert.doesNotMatch(w.document.getElementById('fDependenciaTabela').textContent, /Portais Web/);

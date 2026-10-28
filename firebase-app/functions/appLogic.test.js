@@ -1728,9 +1728,12 @@ test('sugerirTextoIA dependencia-drp: resposta que nao e objeto vira erro de for
   await assert.rejects(() => pedirIA(seedDrp(['admin']), { alvo: 'dependencia-drp', id: 'nao' }, '{}'), /Dependência não encontrada/);
 });
 
-test('sugerirTextoIA servico-descricao: Admin/SI; prompt com composicao, processos suportados e stakeholders', async () => {
+test('sugerirTextoIA servico-descricao: Admin/SI; prompt com composicao, processos suportados, consumidores e responsaveis', async () => {
   const s = seedDrp(['seguranca']);
   s.servicos.s1.stakeholders = [{ id: 'pe1', nome: 'Ana' }];
+  s.servicos.s1.responsaveisDesenvolvimento = [{ id: 'pe2', nome: 'Bruno' }];
+  s.servicos.s1.consumidores = { areas: 'algumas', listaAreas: ['Financeiro'], clientes: true };
+  s.servicos.s1.endpoints = [{ url: 'https://api.x', tipo: 'API', descricao: 'Emissão' }];
   s.servicos.s1.descricao = 'Emite notas';
   const { r, g } = await pedirIA(s, { alvo: 'servico-descricao', id: 's1' });
   assert.strictEqual(r.texto, 'Sugestão.');
@@ -1738,7 +1741,11 @@ test('sugerirTextoIA servico-descricao: Admin/SI; prompt com composicao, process
   assert.strictEqual(dados.descricaoAtual, 'Emite notas');
   assert.deepStrictEqual(dados.composicao, [{ item: 'Banco de Dados: Banco ERP', papel: 'Base do ERP', componentes: ['Servidor: SRV-01'] }]);
   assert.deepStrictEqual(dados.processosSuportados, [{ processo: 'Faturar', area: 'Financeiro', tier: 'Tier 1 (Crítico)' }]);
-  assert.deepStrictEqual(dados.stakeholders, ['Ana']);
+  assert.deepStrictEqual(dados.responsaveisSustentacao, ['Ana'], 'stakeholder antigo conta como Sustentação');
+  assert.deepStrictEqual(dados.responsaveisDesenvolvimento, ['Bruno']);
+  assert.deepStrictEqual(dados.consumidores, { areas: ['Financeiro'], clientes: true });
+  assert.deepStrictEqual(dados.endpoints, ['API: Emissão'], 'sem a URL no prompt');
+  assert.strictEqual(dados.stakeholders, undefined);
   for (const perfis of [['ti'], ['operador_processos']]) {
     await assert.rejects(() => pedirIA(seedDrp(perfis), { alvo: 'servico-descricao', id: 's1' }), /não pode editar Serviços/, perfis[0]);
   }
@@ -1816,4 +1823,30 @@ test('gerarResumoExecutivo riscos: o papel do prompt continua o de riscos', asyn
     await WRITE_ACTIONS.gerarResumoExecutivo(makeDb(seedPerfil(['seguranca'])), { tipo: 'riscos', indicadores: { a: 1 } }, ctx({ geminiApiKey: 'k' }));
   } finally { g.restaurar(); }
   assert.match(g.chamadas[0].corpo.contents[0].parts[0].text, /analista sênior de riscos de segurança da informação/);
+});
+
+test('sugerirTextoIA servico-processos: Admin/SI; so ids do catalogo, sem os ja suportados; pistas de dependencia e area', async () => {
+  const comProcessos = (perfis) => {
+    const s = seedDrp(perfis);
+    s.servicos.s1.consumidores = { areas: 'algumas', listaAreas: ['RH'], clientes: false };
+    s.processos.p2 = { area: 'Financeiro', processo: 'Conciliar', dependenciaItens: [{ id: 'db1', nome: 'Banco ERP', categoria: 'Banco de Dados' }] };
+    s.processos.p3 = { area: 'RH', processo: 'Folha' };
+    s.processos.p4 = { area: 'Comercial', processo: 'Vender' };
+    return s;
+  };
+  for (const perfis of [['ti'], ['operador_processos'], ['gestor']]) {
+    await assert.rejects(() => pedirIA(comProcessos(perfis), { alvo: 'servico-processos', id: 's1' }, JSON.stringify({ processos: [] })), /não pode editar Serviços/, perfis[0]);
+  }
+  const resposta = JSON.stringify({ processos: [
+    { id: 'p2', motivo: 'Concilia com os dados do Banco ERP' }, { id: 'p1', motivo: 'ja suporta' }, { id: 'inventado', motivo: 'x' }, { id: 'p2', motivo: 'repetido' },
+  ] });
+  const { r, g } = await pedirIA(comProcessos(['seguranca']), { alvo: 'servico-processos', id: 's1' }, resposta);
+  assert.strictEqual(JSON.stringify(r.processos), JSON.stringify([{ id: 'p2', nome: 'Conciliar', area: 'Financeiro', motivo: 'Concilia com os dados do Banco ERP' }]));
+  const { prompt, dados } = dadosDoPrompt(g, 'DADOS (JSON):');
+  assert.match(prompt, /SUPORTA/);
+  assert.deepStrictEqual(dados.catalogo.map((x) => x.id).sort(), ['p2', 'p3', 'p4'], 'sem o processo ja suportado');
+  assert.deepStrictEqual(dados.catalogo.find((x) => x.id === 'p2').usaDependenciasDoServico, ['Banco ERP']);
+  assert.strictEqual(dados.catalogo.find((x) => x.id === 'p3').areaConsumidora, true);
+  assert.strictEqual(dados.catalogo.find((x) => x.id === 'p4').areaConsumidora, undefined);
+  assert.deepStrictEqual(dados.servico.processosJaSuportados, ['Financeiro · Faturar']);
 });
