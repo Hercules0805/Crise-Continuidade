@@ -155,7 +155,7 @@ function buildFornecedoresEditor(data) {
   var html = '<p style="font-size:0.85em;color:#666;margin-bottom:12px;">Fornecedores e contingência:</p>';
   html += '<table style="width:100%;border-collapse:collapse;font-size:0.85em;"><thead><tr style="background:#f5f6fa;"><th style="padding:8px;text-align:left;">Fornecedor</th><th style="padding:8px;text-align:left;">Plano B</th><th style="padding:8px;text-align:left;">SLA</th></tr></thead><tbody>';
   Object.keys(planoBData).forEach(function(dep) { html += '<tr style="border-bottom:1px solid #f0f0f0;"><td style="padding:8px;font-weight:600;">' + dep + '</td><td style="padding:8px;">' + (planoBData[dep] || '-') + '</td><td style="padding:8px;">' + (slasData[dep] || '-') + '</td></tr>'; });
-  html += '</tbody></table><p style="font-size:0.78em;color:#999;margin-top:8px;">Para editar, use a aba BCP do processo.</p>';
+  html += '</tbody></table><p style="font-size:0.78em;color:#999;margin-top:8px;">Registrado no BCP do processo; para mudar, ajuste o texto desta seção do PCN.</p>';
   return html;
 }
 

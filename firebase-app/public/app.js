@@ -1022,11 +1022,7 @@ window.trocarAbaProcesso = (aba) => {
     document.getElementById('painel-' + a).style.display = a === aba ? 'block' : 'none';
     _marcarAba(document.getElementById('tab-' + a), a === aba);
   });
-  if (aba === 'bcp') {
-    renderFornecedoresBcp();
-    renderPcnResumoBcp();
-    renderContatosCriseBcp();
-  }
+  if (aba === 'bcp') renderPcnResumoBcp();
   // Selo do ciclo de revisao (23/10/2026): BIA e PCN no topo da aba.
   const idProcesso = (document.getElementById('fId') || {}).value || '';
   if (aba === 'bia') renderCicloRevisao('bia', idProcesso);
@@ -2959,14 +2955,6 @@ async function processos() {
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">PCN Gerado</label>
               <div id="bcpPcnResumo"></div>
             </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Equipe de crise</label>
-              <div id="bcpContatosCrise"></div>
-            </div>
-            <div style="margin-bottom:16px;">
-              <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Fornecedores</label>
-              <div id="bcpFornecedoresTabela"></div>
-            </div>
             <div style="margin-bottom:16px;padding-top:12px;border-top:1px solid #f0f0f0;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px;">Levantamento PCN</label>
               <div id="levantamentoStatus" style="font-size:0.82em;color:#999;margin-bottom:8px;"></div>
@@ -4310,11 +4298,6 @@ window.abrirModalProcesso = (p) => {
   window._bcpPcnVersaoAtual = null;
   window._bcpPcnEditando = false;
   renderPcnResumoBcp();
-  // A tabela de Fornecedores do BCP e a aba DRP sao do processo ANTERIOR ate
-  // a aba ser aberta de novo -- sem limpar, salvar este processo gravaria o
-  // Plano B/SLA daquele.
-  const tabFornBcp = document.getElementById('bcpFornecedoresTabela');
-  if (tabFornBcp) tabFornBcp.innerHTML = '';
   // Mostrar status e botão do levantamento PCN
   const levStatus = document.getElementById('levantamentoStatus');
   const btnAbrirLev = document.getElementById('btnAbrirLev');
@@ -4602,16 +4585,6 @@ window.editarProcesso = (id) => {
 // Le o formulario do drawer de Processo (puro: sem toast, sem efeito) --
 // usado por salvarProcesso e pelo rastreador de edicao (_edProcesso).
 function _coletarFormularioProcesso() {
-  // Contingencia e SLA por fornecedor, lidos da tabela da aba BCP. Essa tabela
-  // so existe no DOM quando a aba foi aberta nesta edicao: se nao foi, os dois
-  // campos ficam FORA do payload, em vez de irem vazios e apagarem o que ja
-  // estava gravado.
-  const camposFornecedoresBcp = {};
-  const _planoB = _coletarMapaBcp('.planoB-contingencia');
-  const _slas = _coletarMapaBcp('.sla-valor');
-  if (_planoB !== null) camposFornecedoresBcp.bcpPlanoBProvedores = JSON.stringify(_planoB);
-  if (_slas !== null) camposFornecedoresBcp.bcpSlas = JSON.stringify(_slas);
-
   const p = {
     id: document.getElementById('fId').value || null,
     area: document.getElementById('fArea').value.trim(),
@@ -4629,7 +4602,6 @@ function _coletarFormularioProcesso() {
     descricaoFuncional: document.getElementById('fDescricaoFuncional').value.trim(),
     tierManual: document.getElementById('fTierManual').value,
     bcpContatos: window._bcpContatos || [],
-    ...camposFornecedoresBcp,
   };
   // RTO preenchido pela avaliacao continua "sugerido" ate alguem escolher outro.
   const salvoRto = window._processoAberto;
@@ -19903,108 +19875,7 @@ async function salvarVersaoDRP(){
 
 
 // ============================================================
-// BCP - TABELA DE FORNECEDORES (com Plano B e SLA)
-// ============================================================
-/**
- * Coleta {nomeDoFornecedor: valor} dos campos da tabela da aba BCP.
- *
- * Devolve null quando a tabela nao esta no DOM — ou seja, quando a aba BCP nao
- * foi aberta nesta edicao. Isso e o que impede o salvamento de apagar o que ja
- * estava gravado: sem a tabela desenhada, o campo nem entra no payload.
- */
-function _coletarMapaBcp(seletor) {
-  const campos = document.querySelectorAll('#bcpFornecedoresTabela ' + seletor);
-  if (!campos.length) return null;
-  const mapa = {};
-  campos.forEach((el) => {
-    const nome = el.dataset.dep;
-    const valor = (el.value || '').trim();
-    if (nome && valor) mapa[nome] = valor;
-  });
-  return mapa;
-}
-
-/** Le um campo do processo que guarda um mapa JSON {nome: valor}. */
-function _mapaDoProcesso(campo) {
-  const id = document.getElementById('fId').value || '';
-  const p = id ? (window.processosData || []).find(proc => proc.id === id) : null;
-  if (!p || !p[campo]) return {};
-  try {
-    const m = typeof p[campo] === 'string' ? JSON.parse(p[campo]) : p[campo];
-    return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {};
-  } catch { return {}; }
-}
-
-function renderFornecedoresBcp() {
-  const container = document.getElementById('bcpFornecedoresTabela');
-  if (!container) return;
-  const catalogo = window.dependenciasCatalogo || [];
-  const selecionadas = window._dependenciaSelecionadas || [];
-  // Ate 20/09/2026 estes dois campos eram desenhados sempre vazios e ninguem os
-  // lia de volta: o usuario digitava contingencia e SLA, salvava, e o conteudo
-  // sumia — inclusive so de trocar de aba, porque a tabela e refeita do zero.
-  // O que ja foi digitado nesta edicao (tabela ja desenhada) vence o gravado:
-  // trocar de aba e voltar nao pode apagar o que ainda nao foi salvo.
-  // (abrirModalProcesso limpa a tabela, entao o que esta no DOM e deste processo.)
-  const planoBSalvo = _coletarMapaBcp('.planoB-contingencia') || _mapaDoProcesso('bcpPlanoBProvedores');
-  const slasSalvo = _coletarMapaBcp('.sla-valor') || _mapaDoProcesso('bcpSlas');
-  
-  // Fornecedores do processo. Os itens sao {categoria, nome, id}: ate
-  // 21/10/2026 este filtro comparava o OBJETO com d.nome, nunca achava nada e
-  // a tabela dizia "Nenhum fornecedor mapeado" -- Plano B e SLA nao tinham
-  // mais onde ser editados. As chaves dos dois mapas continuam sendo o nome.
-  const vistos = new Set();
-  const fornecedores = selecionadas.filter((item) => {
-    const dep = item.id ? catalogo.find(d => d.id === item.id) : null;
-    const categoria = item.categoria || (dep && dep.categoria);
-    if (!['Fornecedores', 'Fornecedor'].includes(categoria) || vistos.has(item.nome)) return false;
-    vistos.add(item.nome);
-    return true;
-  });
-  
-  if (!fornecedores.length) {
-    container.innerHTML = '<p class="vazio-inline">Nenhum fornecedor mapeado na BIA.</p>';
-    return;
-  }
-  
-  let html = `<table style="width:100%;border-collapse:collapse;font-size:0.88em;border:1.5px solid #e0e0e0;border-radius:8px;overflow:hidden;">
-    <thead>
-      <tr style="background:#f5f6fa;">
-        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Empresa</th>
-        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Contato</th>
-        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Papel</th>
-        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Telefone</th>
-        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">Contingência / Plano B</th>
-        <th style="padding:10px 14px;text-align:left;font-weight:700;color:#333;border-bottom:1.5px solid #e0e0e0;">SLA Contratado</th>
-      </tr>
-    </thead>
-    <tbody>`;
-  
-  fornecedores.forEach((item) => {
-    const nome = item.nome;
-    const dep = (item.id && catalogo.find(d => d.id === item.id)) || catalogo.find(d => d.nome === nome && ['Fornecedores', 'Fornecedor'].includes(d.categoria)) || {};
-    // Pessoa relacionada (cadastro de Pessoas, por id) antes da lista solta antiga.
-    const relacionada = (dep.pessoasRelacionadas || [])[0];
-    const pessoaRel = relacionada && relacionada.id ? catalogo.find(d => d.id === relacionada.id) : null;
-    const contato = relacionada
-      ? { nome: relacionada.nome || (pessoaRel && pessoaRel.nome), telefone: pessoaRel && pessoaRel.telefone }
-      : (dep.pessoas || [])[0];
-    html += `<tr style="border-bottom:1px solid #f0f0f0;">
-      <td style="padding:10px 14px;font-weight:600;color:#222;">${esc(nome)}</td>
-      <td style="padding:10px 14px;color:#555;">${esc(contato ? contato.nome : '-')}</td>
-      <td style="padding:10px 14px;color:#555;">${esc(dep.detalhes || '-')}</td>
-      <td style="padding:10px 14px;color:#555;">${esc(contato ? contato.telefone || '-' : '-')}</td>
-      <td style="padding:6px 8px;"><input type="text" class="planoB-contingencia" data-dep="${esc(nome)}" value="${esc(planoBSalvo[nome] || '')}" placeholder="Ex: Provedor alternativo..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
-      <td style="padding:6px 8px;"><input type="text" class="sla-valor" data-dep="${esc(nome)}" value="${esc(slasSalvo[nome] || '')}" placeholder="Ex: Suporte 24x7, 15min..." style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:6px;font-size:0.9em;box-sizing:border-box;"></td>
-    </tr>`;
-  });
-  
-  html += `</tbody></table>`;
-  container.innerHTML = html;
-}
-
-// ============================================================
-// Processo: Equipe de crise (BCP), DRPs (aba DRP) e Vínculos (Identificação)
+// Processo: DRPs (aba DRP) e Vínculos (Identificação)
 // -- 21/10/2026. Tudo somente leitura: cada coisa continua sendo editada no
 // seu lugar (PCN, Dependência, Serviço, Risco). O caminho processo ->
 // dependências é o mesmo do Mapa de Continuidade (mapa-continuidade.js).
@@ -20033,32 +19904,6 @@ window.abrirVinculoDoProcesso = async (tipo, id) => {
     return;
   }
   mapaAbrirCadastro(tipo, id);
-};
-
-window.renderContatosCriseBcp = () => {
-  const cont = document.getElementById('bcpContatosCrise');
-  if (!cont) return;
-  const catalogo = window.dependenciasCatalogo || [];
-  const p = _processoDoFormulario();
-  let papeis = {};
-  try { papeis = p.bcpPapeisCrise ? JSON.parse(p.bcpPapeisCrise) : {}; } catch (e) { papeis = {}; }
-  const dono = (document.getElementById('fDono') || {}).value || '';
-  const linhas = (p.bcpContatos || []).map((cid) => {
-    const pessoa = catalogo.find((d) => String(d.id) === String(cid));
-    if (!pessoa) return `<li style="color:#888;">Pessoa removida do cadastro <span class="badge badge-gray">(removida)</span></li>`;
-    const papel = papeis[pessoa.nome] || papeis[pessoa.id] || pessoa.detalhes || '';
-    const extra = [papel, pessoa.telefone].filter(Boolean).join(' · ');
-    return `<li><strong>${esc(pessoa.nome)}</strong>${extra ? ` <span style="color:#888;">— ${esc(extra)}</span>` : ''}</li>`;
-  });
-  const temPcn = !!p.pcnSalvo;
-  cont.innerHTML = `
-    <div style="font-size:0.85em;color:#444;margin-bottom:6px;">Dono do processo: <strong>${esc(dono || '—')}</strong> <span style="color:#888;">(responsável da área)</span></div>
-    ${linhas.length
-      ? `<ul style="margin:0 0 8px 18px;padding:0;font-size:0.85em;line-height:1.7;">${linhas.join('')}</ul>`
-      : '<p class="vazio-inline">Nenhum contato de crise definido.</p>'}
-    <div style="font-size:0.74em;color:#888;">${temPcn
-      ? 'A equipe de crise é editada dentro do PCN (📂 Abrir PCN → Equipe de Crise).'
-      : 'Gere o PCN para definir a equipe de crise — ela é editada dentro dele.'}</div>`;
 };
 
 /** Última linha do registro de testes do DRP da dependência ("dd/mm/aaaa · resultado"), ou ''. */

@@ -1,5 +1,5 @@
 // Drawer de Processo (revisao de 21/10/2026): tabela de Fornecedores do BCP,
-// aba DRP (DRPs das dependencias que sustentam o processo), Equipe de crise,
+// aba DRP (DRPs das dependencias que sustentam o processo),
 // Vinculos e chip "(removida)". Carrega o app.js REAL no jsdom.
 const { test } = require('node:test');
 const assert = require('node:assert');
@@ -62,41 +62,19 @@ async function carregar(perfis, extra) {
 
 const esperar = () => new Promise((r) => setTimeout(r, 20));
 
-test('BCP: tabela de Fornecedores lista o fornecedor do processo, com o SLA gravado e a pessoa relacionada', async () => {
+test('BCP: sem as secoes Equipe de crise e Fornecedores (28/10/2026); salvar nao mexe no Plano B/SLA gravados', async () => {
   const { w, doc, gravacoes } = await carregar(['seguranca']);
   w.editarProcesso('p1');
   w.trocarAbaProcesso('bcp');
-  const tabela = doc.getElementById('bcpFornecedoresTabela');
-  assert.match(tabela.textContent, /Fornecedor X/);
-  assert.match(tabela.textContent, /Ana/);
-  assert.strictEqual(tabela.querySelector('.sla-valor').value, '24x7');
-  tabela.querySelector('.planoB-contingencia').value = 'Provedor Y';
+  const painel = doc.getElementById('painel-bcp').textContent;
+  assert.doesNotMatch(painel, /Equipe de crise|Fornecedores/);
+  assert.strictEqual(doc.getElementById('bcpContatosCrise'), null);
+  assert.strictEqual(doc.getElementById('bcpFornecedoresTabela'), null);
+  assert.match(painel, /PCN Gerado[\s\S]*Levantamento PCN/);
   await w.salvarProcesso();
   const g = gravacoes.find((x) => x.nome === 'salvarProcesso').arg;
-  assert.deepStrictEqual(JSON.parse(g.bcpPlanoBProvedores), { 'Fornecedor X': 'Provedor Y' });
-  assert.deepStrictEqual(JSON.parse(g.bcpSlas), { 'Fornecedor X': '24x7' });
-});
-
-test('BCP: abrir outro processo limpa a tabela -- salvar nao leva o Plano B/SLA do anterior', async () => {
-  const { w, gravacoes } = await carregar(['seguranca']);
-  w.editarProcesso('p1');
-  w.trocarAbaProcesso('bcp');
-  w.editarProcesso('p2');
-  await w.salvarProcesso();
-  const g = gravacoes.find((x) => x.nome === 'salvarProcesso').arg;
-  assert.strictEqual(g.id, 'p2');
-  assert.ok(!('bcpSlas' in g) && !('bcpPlanoBProvedores' in g));
-});
-
-test('BCP: equipe de crise mostra o dono e os contatos, somente leitura', async () => {
-  const { w, doc } = await carregar(['seguranca']);
-  w.editarProcesso('p1');
-  w.trocarAbaProcesso('bcp');
-  const box = doc.getElementById('bcpContatosCrise').textContent;
-  assert.match(box, /Dono do processo: Bruno/);
-  assert.match(box, /Ana/);
-  assert.match(box, /85 9999-0000/);
-  assert.match(box, /Gere o PCN/);
+  assert.ok(!('bcpSlas' in g) && !('bcpPlanoBProvedores' in g), 'campos fora do payload: o gravado fica');
+  assert.strictEqual(JSON.stringify(g.bcpContatos), JSON.stringify(['ana']), 'equipe de crise continua (editada no PCN)');
 });
 
 test('DRP: lista dependencias diretas, via servico e componentes, com DRP, RTO acima do processo e ultimo teste', async () => {
