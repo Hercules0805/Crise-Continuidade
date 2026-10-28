@@ -424,16 +424,28 @@ function _instalacoesDoProcessoPCN(p, dependencias) {
     : String(p.dependencia || '').split(',').map((s) => s.trim()).filter(Boolean).map((nome) => dependencias.find((d) => ehInst(d) && d.nome === nome)).filter(Boolean);
   const vistos = new Set();
   refs = refs.filter((d) => { const k = d.id || d.nome; if (vistos.has(k)) return false; vistos.add(k); return true; });
+  // Papel no processo (28/10/2026): Site de Producao e/ou Site de Sustentacao.
+  const papeisPorId = new Map();
+  (Array.isArray(p.dependenciaItens) ? p.dependenciaItens : []).filter((it) => it && CATEGORIAS_INSTALACAO.includes(it.categoria))
+    .forEach((it) => papeisPorId.set(String(it.id || it.nome), cadeiaDependencias.papeisDaInstalacao(it)));
   return refs.map((d) => {
     const altRef = d.instalacaoAlternativa && d.instalacaoAlternativa.id ? porId.get(String(d.instalacaoAlternativa.id)) : null;
     return {
       nome: d.nome || '',
       tipo: d.tipoInstalacao || '',
       endereco: d.endereco || '',
+      papeis: (papeisPorId.get(String(d.id || d.nome)) || []),
       pessoasLotadas: d.id ? dependencias.filter((x) => (x.categoria === 'Pessoas' || x.categoria === 'Pessoa') && x.instalacao && String(x.instalacao.id) === String(d.id)).length : 0,
       alternativa: altRef ? { nome: altRef.nome || '', tipo: altRef.tipoInstalacao || '', endereco: altRef.endereco || '' } : null,
     };
   });
+}
+
+/** Instalacoes do PCN por papel: [[titulo, lista]], so os grupos com itens (site com dois papeis aparece nos dois). */
+function _gruposInstalacoesPCN(instalacoes) {
+  const grupos = cadeiaDependencias.PAPEIS_INSTALACAO.map(([papel, titulo]) => [titulo, instalacoes.filter((i) => (i.papeis || []).includes(papel))]);
+  grupos.push(['Não classificadas', instalacoes.filter((i) => !(i.papeis || []).length)]);
+  return grupos.filter(([, lista]) => lista.length);
 }
 
 async function gerarPCN(db, data, ctx) {
@@ -533,7 +545,8 @@ ${depsDetalhadas.length ? depsDetalhadas.map((d) => `- **${d.categoria || 'Outro
 ${servicosDoProc.length ? servicosDoProc.map((s) => `- **${s.nome}**${s.descricao ? ' — ' + s.descricao : ''}${Number.isFinite(s.rtoMin) ? ' | RTO do serviço: ' + s.rtoMin + ' min' : ''}`).join('\n') : 'Nenhum serviço vinculado.'}
 
 ### Instalações (4 Ps do BIA — locais físicos do processo)
-${instalacoesPCN.length ? instalacoesPCN.map((i) => `- **${i.nome}**${i.tipo ? ' (' + i.tipo + ')' : ''}${i.endereco ? ' — ' + i.endereco : ''} | Pessoas lotadas: ${i.pessoasLotadas} | ${i.alternativa ? 'Instalação alternativa (contingência): ' + i.alternativa.nome + (i.alternativa.tipo ? ' (' + i.alternativa.tipo + ')' : '') + (i.alternativa.endereco ? ' — ' + i.alternativa.endereco : '') : 'SEM instalação alternativa definida'}`).join('\n') : 'Nenhuma instalação mapeada.'}
+Site de Produção = onde a solução tecnológica roda (contingência da tecnologia). Site de Sustentação = onde ficam as pessoas de suporte (contingência das pessoas).
+${instalacoesPCN.length ? _gruposInstalacoesPCN(instalacoesPCN).map(([titulo, lista]) => `#### ${titulo}\n` + lista.map((i) => `- **${i.nome}**${i.tipo ? ' (' + i.tipo + ')' : ''}${i.endereco ? ' — ' + i.endereco : ''} | Pessoas lotadas: ${i.pessoasLotadas} | ${i.alternativa ? 'Instalação alternativa (contingência): ' + i.alternativa.nome + (i.alternativa.tipo ? ' (' + i.alternativa.tipo + ')' : '') + (i.alternativa.endereco ? ' — ' + i.alternativa.endereco : '') : 'SEM instalação alternativa definida'}`).join('\n')).join('\n') : 'Nenhuma instalação mapeada.'}
 
 ### Equipe de Crise (Contatos)
 ${contatosDetalhados.length ? contatosDetalhados.map((d) => {
@@ -1985,7 +1998,7 @@ async function _dadosProcessoIA(db, p) {
     }).filter((x) => x.nome),
     fornecedores: porCategoria(['Fornecedores', 'Fornecedor']),
     pessoasChave: porCategoria(['Pessoas', 'Pessoa']).length,
-    instalacoes: _instalacoesDoProcessoPCN(p, dependencias).map((i) => i.nome),
+    instalacoes: _instalacoesDoProcessoPCN(p, dependencias).map((i) => (i.papeis.length ? { nome: i.nome, papeis: i.papeis.map((x) => (x === 'producao' ? 'Site de Produção' : 'Site de Sustentação')) } : { nome: i.nome })),
     processosInternos: porCategoria(['Processos Internos', 'Processo Interno']),
     levantamentoPCN: lev,
     riscos: riscosSnap.docs.map((d) => d.data() || {}).filter((r) => r.status !== 'Encerrado').slice(0, 10).map((r) => r.titulo).filter(Boolean),

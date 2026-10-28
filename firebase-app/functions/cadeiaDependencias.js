@@ -416,8 +416,55 @@
     return { itens: saida, adicionadas: adicionadas, removidas: removidas, alteradas: alteradas };
   }
 
+  // ---- Papel da Instalacao no processo (28/10/2026) ----
+  // Site de Producao hospeda a solucao tecnologica; Site de Sustentacao abriga
+  // as pessoas de suporte. O papel e da ligacao (item.papeis), nao do cadastro:
+  // a mesma Sede pode ter os dois papeis.
+  var PAPEIS_INSTALACAO = [['producao', 'Site de Produção'], ['sustentacao', 'Site de Sustentação']];
+  var _PAPEL_POR_TIPO = { 'data center': 'producao', 'sede': 'sustentacao', 'filial': 'sustentacao', 'escritório': 'sustentacao', 'escritorio': 'sustentacao', 'home office': 'sustentacao' };
+
+  function ehInstalacao(item) {
+    return !!item && CATEGORIAS_INSTALACAO.indexOf(item.categoria) >= 0;
+  }
+
+  /** Papeis validos do item, sem repeticao, na ordem de PAPEIS_INSTALACAO. */
+  function papeisDaInstalacao(item) {
+    var atuais = _lista(item && item.papeis);
+    return PAPEIS_INSTALACAO.map(function (p) { return p[0]; }).filter(function (k) { return atuais.indexOf(k) >= 0; });
+  }
+
+  /** Papel sugerido pelo tipo do cadastro (Data center -> producao; Sede/Filial/Escritorio/Home office -> sustentacao). */
+  function papelPeloTipo(tipo) {
+    return _PAPEL_POR_TIPO[_texto(tipo).trim().toLowerCase()] || null;
+  }
+
+  /**
+   * Instalacoes do processo sem papel recebem o do tipo do cadastro (as de
+   * tipo desconhecido ficam sem). Nao altera `itens`: devolve
+   * { itens, classificadas: [{ nome, papel }] }.
+   */
+  function classificarInstalacoesPeloTipo(itens, dependencias) {
+    var idx = {};
+    (dependencias || []).forEach(function (d) { if (d && _temId(d)) idx[String(d.id)] = d; });
+    var classificadas = [];
+    var saida = _lista(itens).map(function (it) {
+      if (!ehInstalacao(it) || papeisDaInstalacao(it).length) return it;
+      var d = _temId(it) ? idx[String(it.id)] : null;
+      var papel = d ? papelPeloTipo(d.tipoInstalacao) : null;
+      if (!papel) return it;
+      classificadas.push({ nome: _texto(it.nome || d.nome), papel: papel });
+      return Object.assign({}, it, { papeis: [papel] });
+    });
+    return { itens: saida, classificadas: classificadas };
+  }
+
   return {
     CATEGORIA_SERVICO: CATEGORIA_SERVICO,
+    PAPEIS_INSTALACAO: PAPEIS_INSTALACAO,
+    ehInstalacao: ehInstalacao,
+    papeisDaInstalacao: papeisDaInstalacao,
+    papelPeloTipo: papelPeloTipo,
+    classificarInstalacoesPeloTipo: classificarInstalacoesPeloTipo,
     CATEGORIA_PRODUTO: CATEGORIA_PRODUTO,
     CATEGORIAS_DIRETAS: CATEGORIAS_DIRETAS,
     FUNCOES_PRODUTO: FUNCOES_PRODUTO,

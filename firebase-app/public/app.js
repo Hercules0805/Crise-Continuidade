@@ -3634,8 +3634,11 @@ window.buscarDependenciaProcesso = () => {
     const visiveis = expandido ? doGrupo : doGrupo.slice(0, _MAX_POR_GRUPO_BUSCA_DEP);
     const linhas = visiveis.map((c) => {
       const i = itens.push({ tipo: 'item', ...c }) - 1;
+      // Instalação (28/10/2026): escolhe o papel ali mesmo; clicar na linha usa o tipo do cadastro.
+      const papeis = cat === 'Instalações'
+        ? `<span class="deps-busca__papeis">${CadeiaDependencias.PAPEIS_INSTALACAO.map(([papel]) => `<button type="button" class="deps-busca__papel" onmousedown="event.preventDefault();event.stopPropagation();escolherResultadoBuscaDependencia(${i},'${papel}')">+ ${_ROTULO_CURTO_PAPEL_INST[papel]}</button>`).join('')}</span>` : '';
       return `<div class="deps-busca__opcao" role="option" id="depsOpcao${i}" data-i="${i}" onmousedown="event.preventDefault();escolherResultadoBuscaDependencia(${i})">
-          <span class="deps-busca__nome">${esc(c.nome)}</span>${c.info ? `<span class="deps-busca__info">${esc(c.info)}</span>` : ''}</div>`;
+          <span class="deps-busca__nome">${esc(c.nome)}</span>${c.info ? `<span class="deps-busca__info">${esc(c.info)}</span>` : ''}${papeis}</div>`;
     }).join('');
     const mais = doGrupo.length > visiveis.length
       ? `<button type="button" class="deps-busca__mais" onmousedown="event.preventDefault();expandirGrupoBuscaDependencia('${escJs(cat)}')">+ ver mais ${doGrupo.length - visiveis.length}</button>` : '';
@@ -3689,11 +3692,11 @@ window.teclaBuscaDependenciaProcesso = (e) => {
   }
 };
 
-window.escolherResultadoBuscaDependencia = (i) => {
+window.escolherResultadoBuscaDependencia = (i, papel) => {
   const it = window._depsBusca.itens[i];
   if (!it) return;
   if (it.tipo === 'criar') adicionarDependenciaCategoria(it.nome, it.categoria);
-  else selecionarDependenciaCategoria(it.nome, it.categoria, it.id);
+  else selecionarDependenciaCategoria(it.nome, it.categoria, it.id, papel);
   // Pronto para o próximo: limpa, fecha e mantém o foco.
   const campo = document.getElementById('depsBusca');
   if (campo) { campo.value = ''; campo.focus(); }
@@ -3732,11 +3735,6 @@ function _sugestoesDependenciaProcesso(cat, atual) {
     if (!atual.area) return { motivo: '', itens: [] };
     return { motivo: `da área ${atual.area}`, itens: unicos(catalogo.filter((d) => d.categoria === 'Pessoas' && ((d.areas || []).includes(atual.area) || d.setor === atual.area))) };
   }
-  if (cat === 'Instalações') {
-    const pessoas = selecionadas.filter((s) => s.categoria === 'Pessoas').map((s) => catalogo.find((d) => String(d.id) === String(s.id))).filter(Boolean);
-    const inst = pessoas.map((p) => p.instalacao && catalogo.find((d) => String(d.id) === String(p.instalacao.id))).filter(Boolean);
-    return { motivo: 'lotação das pessoas escolhidas', itens: unicos(inst) };
-  }
   if (cat === 'Serviços') {
     if (!atual.area) return { motivo: '', itens: [] };
     const servicos = window.servicosCatalogoProcesso || [];
@@ -3757,9 +3755,83 @@ function _sugestoesDependenciaProcesso(cat, atual) {
   return { motivo: '', itens: [] };
 }
 
+// ---- Instalações: Site de Produção e Site de Sustentação (28/10/2026) ----
+// O papel é da ligação com o processo (item.papeis), não do cadastro.
+const _ROTULO_CURTO_PAPEL_INST = { producao: 'Produção', sustentacao: 'Sustentação' };
+const _INFO_PAPEL_INST = {
+  producao: { icone: '🖥', dica: 'hospeda a solução tecnológica' },
+  sustentacao: { icone: '🎧', dica: 'abriga as pessoas de suporte à solução' },
+};
+
+/** Sugestões de uma subseção: Produção = Instalações na cadeia dos Serviços; Sustentação = lotação das pessoas. */
+function _sugestoesInstalacao(papel) {
+  const catalogo = window.dependenciasCatalogo || [];
+  const selecionadas = window._dependenciaSelecionadas || [];
+  const candidatas = papel === 'producao'
+    ? CadeiaDependencias.cadeiaDoProcesso({ processo: { id: '', dependenciaItens: selecionadas.filter((s) => CadeiaDependencias.ehServico(s)) }, dependencias: catalogo, servicos: window.servicosCatalogoProcesso || [] })
+      .filter((it) => it.dep && _ehInstalacao(it.dep.categoria)).map((it) => it.dep)
+    : selecionadas.filter((s) => CadeiaDependencias.ehPessoa(s)).map((s) => catalogo.find((d) => String(d.id) === String(s.id)))
+      .map((p) => p && p.instalacao && catalogo.find((d) => String(d.id) === String(p.instalacao.id)));
+  const vistos = new Set();
+  const itens = candidatas.filter((d) => {
+    if (!d || !d.id || vistos.has(String(d.id))) return false;
+    vistos.add(String(d.id));
+    const ja = selecionadas.find((s) => CadeiaDependencias.ehInstalacao(s) && String(s.id) === String(d.id));
+    return !ja || !CadeiaDependencias.papeisDaInstalacao(ja).includes(papel);
+  }).slice(0, _MAX_SUGESTOES_DEP);
+  return { motivo: papel === 'producao' ? 'na cadeia dos Serviços escolhidos' : 'lotação das pessoas escolhidas', itens };
+}
+
+function _htmlSugestoesDep(sug, cat, papel) {
+  if (!sug.itens.length) return '';
+  const extra = papel ? `,'${papel}'` : '';
+  return `<div class="deps-cartao__sugestoes"><span class="deps-cartao__sugestoes-rotulo">Sugeridos (${esc(sug.motivo)}):</span>${sug.itens.map((d) => `<button type="button" class="deps-sugestao" onclick="selecionarDependenciaCategoria('${escJs(d.nome)}','${escJs(cat)}','${escJs(d.id)}'${extra})" title="Adicionar ${esc(d.nome)}">+ ${esc(d.nome)}</button>`).join('')}</div>`;
+}
+
+/** Corpo do cartão Instalações: "A classificar" (se houver) e as duas subseções. */
+function _htmlInstalacoesProcesso(itens, selecionadas, ctx, atual) {
+  const linha = (it, papel, acoes) => {
+    const det = _htmlDetalheDependencia(it, ctx, atual);
+    return `<div class="deps-item">${_htmlTagDependencia(it, selecionadas.indexOf(it), ctx, papel)}${acoes || ''}${det ? `<div class="deps-item__detalhe">${det}</div>` : ''}</div>`;
+  };
+  const semPapel = itens.filter((it) => !CadeiaDependencias.papeisDaInstalacao(it).length);
+  const aClassificar = semPapel.length
+    ? `<div class="deps-subsecao deps-subsecao--classificar" id="depsInst-classificar">
+        <div class="deps-subsecao__titulo">A classificar <span class="deps-cartao__n">${semPapel.length}</span> <span class="deps-subsecao__dica">o site hospeda a solução ou abriga o suporte?</span></div>
+        <div class="deps-cartao__itens">${semPapel.map((it) => linha(it, null, `<span class="deps-papel-acoes">${CadeiaDependencias.PAPEIS_INSTALACAO.map(([papel]) => `<button type="button" class="deps-sugestao" onclick="definirPapelInstalacao(${selecionadas.indexOf(it)},'${papel}')">→ ${_ROTULO_CURTO_PAPEL_INST[papel]}</button>`).join('')}</span>`)).join('')}</div>
+      </div>` : '';
+  const subsecoes = CadeiaDependencias.PAPEIS_INSTALACAO.map(([papel, titulo]) => {
+    const doPapel = itens.filter((it) => CadeiaDependencias.papeisDaInstalacao(it).includes(papel));
+    const info = _INFO_PAPEL_INST[papel];
+    return `<div class="deps-subsecao" id="depsInst-${papel}">
+        <div class="deps-subsecao__titulo">${info.icone} ${esc(titulo)} <span class="deps-cartao__n">${doPapel.length}</span> <span class="deps-subsecao__dica">${esc(info.dica)}</span></div>
+        <div class="deps-cartao__itens">${doPapel.length ? doPapel.map((it) => linha(it, papel)).join('') : '<div class="deps-cartao__vazio">Nenhum mapeado.</div>'}</div>
+        ${_htmlSugestoesDep(_sugestoesInstalacao(papel), 'Instalações', papel)}
+      </div>`;
+  }).join('');
+  return aClassificar + subsecoes;
+}
+
+window.definirPapelInstalacao = (idx, papel) => {
+  const it = (window._dependenciaSelecionadas || [])[idx];
+  if (!it || !CadeiaDependencias.ehInstalacao(it)) return;
+  it.papeis = CadeiaDependencias.papeisDaInstalacao({ papeis: CadeiaDependencias.papeisDaInstalacao(it).concat(papel) });
+  renderDependenciaTabela();
+};
+
+/** × dentro de uma subseção: tira só aquele papel; sem papel nenhum, a Instalação sai do processo. */
+window.removerPapelInstalacao = (idx, papel) => {
+  const it = (window._dependenciaSelecionadas || [])[idx];
+  if (!it) return;
+  const resto = CadeiaDependencias.papeisDaInstalacao(it).filter((x) => x !== papel);
+  if (!resto.length) { removerDependenciaTag(idx); return; }
+  it.papeis = resto;
+  renderDependenciaTabela();
+};
+
 // ---- Itens escolhidos ----
 /** Chip do item escolhido (mesmas regras de antes: sem vínculo, removido, link para o processo). */
-function _htmlTagDependencia(item, globalIdx, ctx) {
+function _htmlTagDependencia(item, globalIdx, ctx, papel) {
   const ehProcesso = _ehProcessoInterno(item.categoria);
   const ehServico = CadeiaDependencias.ehServico(item);
   const ehProduto = CadeiaDependencias.ehProduto(item);
@@ -3788,7 +3860,9 @@ function _htmlTagDependencia(item, globalIdx, ctx) {
   const classes = 'dep-tag-item' + (removida ? ' dep-tag-item--removida' : semVinculo ? ' dep-tag-item--sem-vinculo' : herdada ? ' dep-tag-item--herdada' : '');
   const onclickTag = isProcessoLink ? ` onclick="editarProcesso('${escJs(item.id)}')"` : '';
   const sufixo = removida ? ' <span style="opacity:0.8;">(removida)</span>' : semVinculo ? ' <span style="opacity:0.7;">⚠</span>' : '';
-  const x = soHerdada ? '' : `<button type="button" onclick="event.stopPropagation();removerDependenciaTag(${globalIdx})" class="dep-tag-item__x${apagada || herdada ? ' dep-tag-item__x--escuro' : ''}" title="${herdada ? 'Tirar a escolha manual (continua herdada)' : 'Remover'}" aria-label="Remover ${esc(item.nome)}">&times;</button>`;
+  const acaoX = papel ? `removerPapelInstalacao(${globalIdx},'${papel}')` : `removerDependenciaTag(${globalIdx})`;
+  const tituloX = herdada ? 'Tirar a escolha manual (continua herdada)' : papel ? `Tirar de ${_ROTULO_CURTO_PAPEL_INST[papel]}` : 'Remover';
+  const x = soHerdada ? '' : `<button type="button" onclick="event.stopPropagation();${acaoX}" class="dep-tag-item__x${apagada || herdada ? ' dep-tag-item__x--escuro' : ''}" title="${tituloX}" aria-label="${papel ? 'Tirar ' + esc(item.nome) + ' de ' + _ROTULO_CURTO_PAPEL_INST[papel] : 'Remover ' + esc(item.nome)}">&times;</button>`;
   return `<span class="${classes}"${onclickTag} style="${isProcessoLink ? 'cursor:pointer;' : ''}" title="${esc(tooltip)}">${herdada ? '🔗 ' : ''}${esc(item.nome)}${sufixo}${x}</span>`;
 }
 
@@ -3879,34 +3953,41 @@ function renderDependenciaTabela() {
 
   const cartoes = _CATEGORIAS_DEP_PROCESSO.map((cat) => {
     const itens = porCartao[cat];
-    const lista = itens.length
+    const ehInst = cat === 'Instalações';
+    const lista = ehInst ? _htmlInstalacoesProcesso(itens, selecionadas, ctx, atual) : itens.length
       ? itens.map((item) => {
         const det = _htmlDetalheDependencia(item, ctx, atual);
         return `<div class="deps-item">${_htmlTagDependencia(item, selecionadas.indexOf(item), ctx)}${det ? `<div class="deps-item__detalhe">${det}</div>` : ''}</div>`;
       }).join('')
       : '<div class="deps-cartao__vazio">Nenhum mapeado.</div>';
-    const sug = _sugestoesDependenciaProcesso(cat, atual);
-    const sugestoes = sug.itens.length
-      ? `<div class="deps-cartao__sugestoes"><span class="deps-cartao__sugestoes-rotulo">Sugeridos (${esc(sug.motivo)}):</span>${sug.itens.map((d) => `<button type="button" class="deps-sugestao" onclick="selecionarDependenciaCategoria('${escJs(d.nome)}','${escJs(cat)}','${escJs(d.id)}')" title="Adicionar ${esc(d.nome)}">+ ${esc(d.nome)}</button>`).join('')}</div>`
-      : '';
+    const sugestoes = ehInst ? '' : _htmlSugestoesDep(_sugestoesDependenciaProcesso(cat, atual), cat);
     return `<section class="deps-cartao" id="depsCartao-${_slugCatDep(cat)}" data-categoria="${esc(cat)}">
         <header class="deps-cartao__cab">
           <span class="deps-cartao__titulo">${DEPENDENCIA_CAT_ICONES[cat] || '📦'} ${esc(_TITULO_CARTAO_DEP_PROCESSO[cat] || _ROTULO_CAT_DEP_PROCESSO[cat])} <span class="deps-cartao__n">${itens.length}</span></span>
           ${cat === 'Serviços' && podeNovoServico ? '<button type="button" class="link-acao" onclick="novoServicoDoProcesso()">+ Novo serviço</button>' : ''}
         </header>
         <div class="deps-cartao__exemplo">${esc(DEPENDENCIA_CAT_EXEMPLOS[cat] || '')}</div>
-        <div class="deps-cartao__itens">${lista}</div>
+        ${ehInst ? lista : `<div class="deps-cartao__itens">${lista}</div>`}
         ${sugestoes}
       </section>`;
   }).join('');
 
-  const aviso = window._depsAvisoSync;
-  const partesAviso = aviso ? [
-    aviso.adicionadas.length ? `+${aviso.adicionadas.length} (${esc(aviso.adicionadas.join(', '))})` : '',
-    aviso.removidas.length ? `−${aviso.removidas.length} (${esc(aviso.removidas.join(', '))})` : '',
-  ].filter(Boolean) : [];
-  const htmlAviso = aviso
-    ? `<div class="deps-aviso-sync" role="status">🔗 Atualizado pelos produtos e serviços: ${partesAviso.length ? partesAviso.join(', ') + ' pessoa(s)' : 'origem das pessoas atualizada'} — salve para gravar.</div>`
+  // Aviso do que mudou sozinho ao abrir: pessoas herdadas e Instalações classificadas pelo tipo.
+  const aviso = window._depsAvisoSync || {};
+  const linhasAviso = [];
+  if (aviso.pessoas) {
+    const pa = aviso.pessoas;
+    const partes = [
+      pa.adicionadas.length ? `+${pa.adicionadas.length} (${esc(pa.adicionadas.join(', '))})` : '',
+      pa.removidas.length ? `−${pa.removidas.length} (${esc(pa.removidas.join(', '))})` : '',
+    ].filter(Boolean);
+    linhasAviso.push(`🔗 Atualizado pelos produtos e serviços: ${partes.length ? partes.join(', ') + ' pessoa(s)' : 'origem das pessoas atualizada'}`);
+  }
+  if (aviso.classificadas && aviso.classificadas.length) {
+    linhasAviso.push(`📍 Instalações classificadas pelo tipo: ${aviso.classificadas.map((c) => `${esc(c.nome)} → ${_ROTULO_CURTO_PAPEL_INST[c.papel]}`).join(', ')}`);
+  }
+  const htmlAviso = linhasAviso.length
+    ? `<div class="deps-aviso-sync" role="status">${linhasAviso.join('<br>')} — salve para gravar.</div>`
     : '';
   tabelaContainer.innerHTML = htmlAviso + cartoes + _htmlCadeiaDependencias(ctx) + _htmlLegadoTecnicoProcesso(legados, selecionadas, ctx.servicosCat, ctx.catalogo);
 
@@ -3916,7 +3997,7 @@ function renderDependenciaTabela() {
   if (typeof _renderSelosPlanos === 'function' && document.getElementById('processoSelosPlanos')) _renderSelosPlanos();
 }
 
-window.selecionarDependenciaCategoria = (nome, categoria, id) => {
+window.selecionarDependenciaCategoria = (nome, categoria, id, papel) => {
   const idReal = id || null;
   const cat = categoria || 'Outros';
   if (!CadeiaDependencias.categoriaPermitidaNoProcesso(cat)) {
@@ -3925,12 +4006,17 @@ window.selecionarDependenciaCategoria = (nome, categoria, id) => {
   const existente = idReal
     ? window._dependenciaSelecionadas.find((s) => s.id === idReal)
     : window._dependenciaSelecionadas.find((s) => s.nome === nome && s.categoria === cat);
+  // Instalação: o papel pedido; sem ele, o do tipo do cadastro (ou fica "A classificar").
+  const ehInst = _ehInstalacao(cat);
+  const cadInst = ehInst && idReal ? (window.dependenciasCatalogo || []).find((d) => String(d.id) === String(idReal)) : null;
+  const papelInst = ehInst ? (papel || (cadInst && CadeiaDependencias.papelPeloTipo(cadInst.tipoInstalacao)) || null) : null;
   if (existente) {
     // Escolher à mão quem já veio herdado: passa a ser também manual (fica se a origem sair).
     if (CadeiaDependencias.soHerdada(existente)) { existente.manual = true; renderDependenciaTabela(); }
+    else if (ehInst && papelInst && !CadeiaDependencias.papeisDaInstalacao(existente).includes(papelInst)) definirPapelInstalacao(window._dependenciaSelecionadas.indexOf(existente), papelInst);
     return;
   }
-  window._dependenciaSelecionadas.push({ categoria: cat, nome, id: idReal });
+  window._dependenciaSelecionadas.push(papelInst ? { categoria: cat, nome, id: idReal, papeis: [papelInst] } : { categoria: cat, nome, id: idReal });
   _sincronizarHerdadasProcesso(true);
   renderDependenciaTabela();
 };
@@ -4187,8 +4273,12 @@ window.abrirModalProcesso = (p) => {
   window._depsAvisoSync = null;
   if (p && p.id) {
     const sync = _sincronizarHerdadasProcesso(false);
-    if (sync.adicionadas.length || sync.removidas.length || sync.alteradas) {
-      window._depsAvisoSync = sync;
+    // Instalações sem papel (antes de 28/10/2026) ganham o do tipo do cadastro.
+    const cls = CadeiaDependencias.classificarInstalacoesPeloTipo(window._dependenciaSelecionadas, window.dependenciasCatalogo || []);
+    window._dependenciaSelecionadas = cls.itens;
+    const mudouPessoas = sync.adicionadas.length || sync.removidas.length || sync.alteradas;
+    if (mudouPessoas || cls.classificadas.length) {
+      window._depsAvisoSync = { pessoas: mudouPessoas ? sync : null, classificadas: cls.classificadas };
       renderDependenciaTabela();
     }
   }
@@ -4809,7 +4899,7 @@ const DEPENDENCIA_CAT_EXEMPLOS = {
   'Pessoa': 'Ex: DBA, analista financeiro, gerente aprovador, operador do sistema, técnico especialista',
   'Processos Internos': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
   'Processo Interno': 'Ex: Faturamento, folha de pagamento, processamento de pagamentos, aprovação de crédito, atendimento ao cliente',
-  'Instalações': 'Ex: Sede São Paulo, Filial Recife, Data center Tamboré, escritório de atendimento',
+  'Instalações': 'Produção: onde a solução roda (Data center Tamboré, Site AWS) · Sustentação: onde fica o suporte (Sede São Paulo, Filial Recife)',
   'Instalação': 'Ex: Sede São Paulo, Filial Recife, Data center Tamboré, escritório de atendimento',
   'Produtos de Software': 'Ex: Fortes Ponto, Fortes RH, Fortes AC Pessoal — as pessoas do produto (Tech Lead, Team Lead, PO, Suporte) entram no processo sozinhas',
   'API': 'Ex: API de pagamento (PIX/cartão), API de CEP, integração com Receita Federal, webhook de terceiros',
@@ -19832,7 +19922,8 @@ window.renderVinculosProcesso = async () => {
       const alt = inst.instalacaoAlternativa && inst.instalacaoAlternativa.id
         ? `contingência: ${esc(inst.instalacaoAlternativa.nome || '')}`
         : '<span style="color:#c62828;">sem instalação alternativa</span>';
-      return `<strong>${esc(inst.nome)}</strong> <span style="color:#888;">(${lotadas} pessoa${lotadas === 1 ? '' : 's'} lotada${lotadas === 1 ? '' : 's'} · </span>${alt}<span style="color:#888;">)</span>`;
+      const papeis = CadeiaDependencias.papeisDaInstalacao((p.dependenciaItens || []).find((it) => _ehInstalacao(it.categoria) && String(it.id) === String(inst.id)));
+      return `<strong>${esc(inst.nome)}</strong>${papeis.length ? ' · ' + papeis.map((x) => _ROTULO_CURTO_PAPEL_INST[x]).join(' e ') : ''} <span style="color:#888;">(${lotadas} pessoa${lotadas === 1 ? '' : 's'} lotada${lotadas === 1 ? '' : 's'} · </span>${alt}<span style="color:#888;">)</span>`;
     }).join('<br>')
     : '<span style="color:#888;">nenhuma — adicione na aba BIA</span>';
 

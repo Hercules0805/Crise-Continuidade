@@ -395,19 +395,22 @@ async function salvarDependenciasBIA(db, data) {
   // Pessoas herdadas de Produto/Servico (28/10/2026): o formulario so manda
   // {nome, id}; a origem (herdadoDe) e a escolha manual vem do que ja estava
   // gravado. Quem o dono tirar e herdado volta na proxima sincronizacao (tela).
+  // Instalacoes (28/10/2026): o papel (Site de Producao/Sustentacao) tambem.
   const procIdAntes = await _acharProcessoId(db, area, processo);
-  const pessoasAntes = new Map();
+  const grupoDe = (cat) => (cat === 'Pessoas' || cat === 'Pessoa') ? 'pessoa' : (cat === 'Instalações' || cat === 'Instalação') ? 'instalacao' : null;
+  const itensAntes = new Map();
   if (procIdAntes) {
     const antesSnap = await db.collection(COLLECTION.processos).doc(procIdAntes).get();
     ((antesSnap.exists && (antesSnap.data() || {}).dependenciaItens) || [])
-      .filter((it) => it && (it.categoria === 'Pessoas' || it.categoria === 'Pessoa') && it.id)
-      .forEach((it) => pessoasAntes.set(String(it.id), it));
+      .filter((it) => it && it.id && grupoDe(it.categoria))
+      .forEach((it) => itensAntes.set(grupoDe(it.categoria) + ':' + it.id, it));
   }
   dependenciaItens.forEach((it) => {
-    if (it.categoria !== 'Pessoas' || !it.id || !pessoasAntes.has(String(it.id))) return;
-    const antes = pessoasAntes.get(String(it.id));
+    const antes = it.id && grupoDe(it.categoria) ? itensAntes.get(grupoDe(it.categoria) + ':' + it.id) : null;
+    if (!antes) return;
     if (Array.isArray(antes.herdadoDe) && antes.herdadoDe.length) it.herdadoDe = antes.herdadoDe;
     if (antes.manual === true) it.manual = true;
+    if (Array.isArray(antes.papeis) && antes.papeis.length) it.papeis = antes.papeis;
   });
   // Servicos: so por id de servico que existe (nunca cria).
   if (Array.isArray(servicosEnviados) && servicosEnviados.length) {

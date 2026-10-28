@@ -134,3 +134,31 @@ test('sincronizar: mudanca no produto aparece na proxima sincronizacao; sem muda
   const r = CD.sincronizarPessoasHerdadas(itens, { pessoas: mudou, servicos: [] });
   assert.deepStrictEqual([r.adicionadas, r.removidas], [['Davi'], ['Bia']]);
 });
+
+// ---- Papel da Instalacao no processo (28/10/2026) ----
+test('papelPeloTipo: Data center e producao; Sede/Filial/Escritorio/Home office sustentacao; resto nada', () => {
+  assert.deepStrictEqual(['Data center', 'Sede', 'Filial', 'Escritório', 'Home office', 'Site alternativo', 'Outro', '', undefined].map(CD.papelPeloTipo),
+    ['producao', 'sustentacao', 'sustentacao', 'sustentacao', 'sustentacao', null, null, null, null]);
+});
+
+test('papeisDaInstalacao: so validos, sem repeticao, na ordem producao/sustentacao', () => {
+  assert.deepStrictEqual(CD.papeisDaInstalacao({ papeis: ['sustentacao', 'x', 'producao', 'sustentacao'] }), ['producao', 'sustentacao']);
+  assert.deepStrictEqual(CD.papeisDaInstalacao({}), []);
+  assert.deepStrictEqual(CD.papeisDaInstalacao(null), []);
+});
+
+test('classificarInstalacoesPeloTipo: so toca Instalacao sem papel e de tipo conhecido', () => {
+  const cad = [
+    { id: 'dc', categoria: 'Instalações', nome: 'DC', tipoInstalacao: 'Data center' },
+    { id: 'sede', categoria: 'Instalações', nome: 'Sede', tipoInstalacao: 'Sede' },
+    { id: 'aws', categoria: 'Instalações', nome: 'AWS' },
+  ];
+  const ja = { categoria: 'Instalações', id: 'sede', nome: 'Sede', papeis: ['producao'] };
+  const pessoa = { categoria: 'Pessoas', id: 'p', nome: 'P' };
+  const itens = [{ categoria: 'Instalações', id: 'dc', nome: 'DC' }, ja, { categoria: 'Instalações', id: 'aws', nome: 'AWS' }, pessoa];
+  const r = CD.classificarInstalacoesPeloTipo(itens, cad);
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(r.itens.map((it) => it.papeis || null))), [['producao'], ['producao'], null, null]);
+  assert.strictEqual(r.itens[1], ja, 'com papel nao e tocada');
+  assert.deepStrictEqual(JSON.parse(JSON.stringify(r.classificadas)), [{ nome: 'DC', papel: 'producao' }]);
+  assert.strictEqual(itens[0].papeis, undefined, 'nao altera a entrada');
+});

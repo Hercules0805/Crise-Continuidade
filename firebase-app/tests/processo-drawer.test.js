@@ -485,3 +485,69 @@ test('Produtos: abrir processo cujo produto ganhou pessoa mostra o aviso; salvar
   assert.ok(paula && paula.herdadoDe[0].funcoes.includes('Product Owner'), 'herdadoDe vai no payload');
   assert.ok(itens.some((it) => it.categoria === 'Produtos de Software' && it.id === 'ps1'));
 });
+
+// ---- Instalações: Site de Produção e Site de Sustentação (28/10/2026) ----
+const DC = { id: 'dc', nome: 'Data center', categoria: 'Instalações', tipoInstalacao: 'Data center' };
+const SEDE_SP = { id: 'sedesp', nome: 'Sede SP', categoria: 'Instalações', tipoInstalacao: 'Sede' };
+const AWS = { id: 'aws', nome: 'Site AWS', categoria: 'Instalações' };
+const BETO = { id: 'beto', nome: 'Beto', categoria: 'Pessoas', instalacao: { id: 'sedesp', nome: 'Sede SP' } };
+const SERV_DC = { id: 's7', nome: 'Hospedagem', dependenciaItens: [ref(DC)] };
+const comInst = (extra) => Object.assign({ getDependencias: DEPS.concat([DC, SEDE_SP, AWS, BETO]), getServicos: SERVICOS.concat([SERV_DC]) }, extra || {});
+const nomesEm = (doc, id) => [...doc.querySelectorAll(`#${id} .dep-tag-item`)].map((c) => c.textContent.replace(/×/g, '').trim());
+
+test('Instalacoes: processo antigo abre classificado pelo tipo, com aviso; sem tipo fica "A classificar"; salvar grava papeis', async () => {
+  const P3 = { id: 'p3', area: 'TI', processo: 'Hospedar', dependenciaItens: [ref(DC), ref(SEDE_SP), ref(AWS)], bcpContatos: [] };
+  const { w, doc, gravacoes } = await carregar(['seguranca'], comInst({ getProcessos: [P1, P2, P3] }));
+  w.editarProcesso('p3');
+  w.trocarAbaProcesso('dependencias');
+  assert.match(doc.querySelector('#fDependenciaTabela .deps-aviso-sync').textContent, /Instalações classificadas pelo tipo: Data center → Produção, Sede SP → Sustentação — salve para gravar/);
+  assert.deepStrictEqual(nomesEm(doc, 'depsInst-producao'), ['Data center']);
+  assert.deepStrictEqual(nomesEm(doc, 'depsInst-sustentacao'), ['Sede SP']);
+  assert.deepStrictEqual(nomesEm(doc, 'depsInst-classificar'), ['Site AWS']);
+  assert.match(doc.getElementById('depsCartao-instalacoes').textContent, /Site de Produção[\s\S]*hospeda a solução tecnológica[\s\S]*Site de Sustentação[\s\S]*abriga as pessoas de suporte/);
+  w.definirPapelInstalacao(w._dependenciaSelecionadas.findIndex((s) => s.id === 'aws'), 'producao');
+  assert.strictEqual(doc.getElementById('depsInst-classificar'), null, 'nada a classificar');
+  assert.deepStrictEqual(nomesEm(doc, 'depsInst-producao'), ['Data center', 'Site AWS']);
+  await w.salvarProcesso();
+  const itens = gravacoes.find((x) => x.nome === 'salvarProcesso').arg.dependenciaItens;
+  assert.strictEqual(JSON.stringify(itens.filter((it) => it.categoria === 'Instalações').map((it) => [it.id, it.papeis])),
+    JSON.stringify([['dc', ['producao']], ['sedesp', ['sustentacao']], ['aws', ['producao']]]));
+});
+
+test('Instalacoes: busca com "+ Producao"; mesmo site nos dois papeis; × tira so o papel da subsecao', async () => {
+  const { w, doc } = await carregar(['seguranca'], comInst());
+  w.editarProcesso('p2');
+  w.trocarAbaProcesso('dependencias');
+  const res = buscar(w, doc, 'sede sp');
+  const linha = [...res.querySelectorAll('.deps-busca__opcao')].find((el) => /Sede SP/.test(el.textContent));
+  assert.deepStrictEqual([...linha.querySelectorAll('.deps-busca__papel')].map((b) => b.textContent), ['+ Produção', '+ Sustentação']);
+  w.escolherResultadoBuscaDependencia(Number(linha.dataset.i), 'producao');
+  assert.deepStrictEqual(nomesEm(doc, 'depsInst-producao'), ['Sede SP'], 'papel escolhido vence o tipo');
+  w.selecionarDependenciaCategoria('Sede SP', 'Instalações', 'sedesp', 'sustentacao');
+  assert.deepStrictEqual(nomesEm(doc, 'depsInst-sustentacao'), ['Sede SP']);
+  assert.strictEqual(w._dependenciaSelecionadas.filter((s) => s.id === 'sedesp').length, 1, 'um item so');
+  assert.strictEqual(doc.querySelector('#depsCobertura').textContent.match(/Instalações (\d+)/)[1], '1');
+  const idx = () => w._dependenciaSelecionadas.findIndex((s) => s.id === 'sedesp');
+  w.removerPapelInstalacao(idx(), 'producao');
+  assert.deepStrictEqual(nomesEm(doc, 'depsInst-producao'), []);
+  assert.deepStrictEqual(nomesEm(doc, 'depsInst-sustentacao'), ['Sede SP'], 'continua na sustentacao');
+  w.removerPapelInstalacao(idx(), 'sustentacao');
+  assert.strictEqual(idx(), -1, 'sem papel, sai do processo');
+  // Sem papel pedido: o do tipo; tipo vazio vai para "A classificar".
+  w.selecionarDependenciaCategoria('Data center', 'Instalações', 'dc');
+  w.selecionarDependenciaCategoria('Site AWS', 'Instalações', 'aws');
+  assert.deepStrictEqual(nomesEm(doc, 'depsInst-producao'), ['Data center']);
+  assert.deepStrictEqual(nomesEm(doc, 'depsInst-classificar'), ['Site AWS']);
+});
+
+test('Instalacoes: Producao sugere o site da cadeia dos Servicos; Sustentacao sugere a lotacao das pessoas', async () => {
+  const { w, doc } = await carregar(['seguranca'], comInst());
+  w.editarProcesso('p2');
+  w.trocarAbaProcesso('dependencias');
+  w.selecionarDependenciaCategoria('Hospedagem', 'Serviços', 's7');
+  w.selecionarDependenciaCategoria('Beto', 'Pessoas', 'beto');
+  assert.match(doc.getElementById('depsInst-producao').textContent, /Sugeridos \(na cadeia dos Serviços escolhidos\):[\s\S]*\+ Data center/);
+  assert.match(doc.getElementById('depsInst-sustentacao').textContent, /Sugeridos \(lotação das pessoas escolhidas\):[\s\S]*\+ Sede SP/);
+  w.selecionarDependenciaCategoria('Sede SP', 'Instalações', 'sedesp', 'sustentacao');
+  assert.doesNotMatch(doc.getElementById('depsInst-sustentacao').textContent, /Sugeridos/, 'ja escolhida sai da sugestao');
+});

@@ -259,6 +259,21 @@ test('salvarDependenciasBIA: preserva herdadoDe/manual das Pessoas e o item de P
   assert.ok(itens.some((it) => it.categoria === 'Produtos de Software' && it.id === 'ps1'), 'produto preservado');
 });
 
+test('salvarDependenciasBIA: preserva o papel das Instalações (Site de Produção/Sustentação)', async () => {
+  const seed = baseSeed();
+  seed.tokens['b7'] = { token: 'b7', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  seed.dependencias = { sede: { nome: 'Sede', categoria: 'Instalações' }, dc: { nome: 'DC', categoria: 'Instalações' } };
+  seed.processos.ti__backup.dependenciaItens = [{ categoria: 'Instalações', nome: 'Sede', id: 'sede', papeis: ['sustentacao'] }];
+  const db = makeDb(seed);
+  await WRITE_ACTIONS.salvarDependenciasBIA(db, {
+    token: 'b7',
+    instalacoes: JSON.stringify([{ nome: 'Sede', id: 'sede' }, { nome: 'DC', id: 'dc' }]),
+  });
+  const itens = db._store.processos['ti__backup'].dependenciaItens;
+  assert.deepStrictEqual(itens.find((it) => it.id === 'sede').papeis, ['sustentacao']);
+  assert.strictEqual(itens.find((it) => it.id === 'dc').papeis, undefined, 'nova chega sem papel');
+});
+
 test('validarTokenBIA devolve os Servicos para escolha', async () => {
   const seed = baseSeed();
   seed.tokens['b8'] = { token: 'b8', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };

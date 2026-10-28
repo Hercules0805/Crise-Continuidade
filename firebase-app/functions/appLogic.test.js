@@ -1225,6 +1225,40 @@ test('gerarPCN: prompt traz as Instalações do processo (tipo, endereço, pesso
   assert.match(prompt, /NÃO invente nome nem endereço de local alternativo/);
 });
 
+test('gerarPCN e Sugerir com IA: Instalações agrupadas por papel (Site de Produção / Sustentação / não classificadas)', async () => {
+  const s = seed();
+  s.dependencias = Object.assign({}, s.dependencias, {
+    sede: { categoria: 'Instalações', nome: 'Sede SP', tipoInstalacao: 'Sede' },
+    aws: { categoria: 'Instalações', nome: 'Site AWS' },
+    dc: { categoria: 'Instalações', nome: 'Data center', tipoInstalacao: 'Data center' },
+  });
+  s.processos.ti__backup.dependenciaItens = [
+    { categoria: 'Instalações', nome: 'Sede SP', id: 'sede', papeis: ['producao', 'sustentacao'] },
+    { categoria: 'Instalações', nome: 'Site AWS', id: 'aws', papeis: ['producao'] },
+    { categoria: 'Instalações', nome: 'Data center', id: 'dc' },
+  ];
+  let prompt = '';
+  const original = global.fetch;
+  global.fetch = async (_url, opts) => {
+    prompt = JSON.parse(opts.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<h1>PCN</h1>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarPCN(makeDb(s), { id: 'ti__backup' }, ctx({ geminiApiKey: 'chave-teste' }));
+  } finally { global.fetch = original; }
+  assert.match(prompt, /Site de Produção = onde a solução tecnológica roda/);
+  assert.match(prompt, /#### Site de Produção\n- \*\*Sede SP\*\*[^\n]*\n- \*\*Site AWS\*\*[^\n]*\n#### Site de Sustentação\n- \*\*Sede SP\*\*[^\n]*\n#### Não classificadas\n- \*\*Data center\*\*/);
+
+  s.config_perfis['analista@fortestecnologia.com.br'] = { perfis: ['admin'] };
+  const { g } = await pedirIA(s, { alvo: 'processo-impacto', id: 'ti__backup' });
+  const { dados } = dadosDoPrompt(g, 'DADOS DO PROCESSO (JSON):');
+  assert.strictEqual(JSON.stringify(dados.instalacoes), JSON.stringify([
+    { nome: 'Sede SP', papeis: ['Site de Produção', 'Site de Sustentação'] },
+    { nome: 'Site AWS', papeis: ['Site de Produção'] },
+    { nome: 'Data center' },
+  ]));
+});
+
 // ---- Processo renomeado (21/10/2026) ----
 // O id do documento e a chave de quando o processo foi criado: depois de
 // renomear, processoKey(area, nome novo) nao acha nada. O id vem primeiro.
