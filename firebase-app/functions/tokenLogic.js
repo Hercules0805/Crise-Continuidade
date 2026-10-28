@@ -130,7 +130,8 @@ async function validarTokenArea(db, token) {
   const { data } = await _carregarToken(db, token, '_AREA_');
   const area = data.area;
   const procSnap = await db.collection(COLLECTION.processos).where('area', '==', area).get();
-  const processos = procSnap.docs.map((d) => {
+  // Cadastro de Processos (28/10/2026): o questionario BIA e so dos processos de Continuidade.
+  const processos = procSnap.docs.filter((d) => d.data().continuidade !== false).map((d) => {
     const p = d.data();
     return { area: p.area, processo: p.processo, descricao: p.descricao || '' };
   });
@@ -171,7 +172,8 @@ async function validarTokenBIA(db, token) {
   // (um nome digitado virava uma entrada solta, nunca um Processo de
   // verdade). Exclui o proprio processo da lista de opcoes.
   catalogoPorCategoria.processos = procsSnap.docs
-    .filter((d) => d.id !== procId)
+    // Cadastro de Processos (28/10/2026): so os avaliados em Continuidade.
+    .filter((d) => d.id !== procId && d.data().continuidade !== false)
     .map((d) => ({ id: d.id, nome: d.data().processo || '', empresa: d.data().area || '' }));
   // Servicos (21/10/2026): o processo aponta o Servico; o tecnico granular
   // (Banco, Servidor...) vem da composicao dele. So escolha da lista -- o
@@ -303,7 +305,7 @@ async function salvarRespostasArea(db, data) {
   // O processo tambem e conferido: so e aceito se pertencer a area do token,
   // que e exatamente o conjunto que validarTokenArea entregou para a pagina.
   const procSnap = await db.collection(COLLECTION.processos).where('area', '==', area).get();
-  const processosDaArea = new Set(procSnap.docs.map((d) => slug(d.data().processo)));
+  const processosDaArea = new Set(procSnap.docs.filter((d) => d.data().continuidade !== false).map((d) => slug(d.data().processo)));
 
   let total = 0;
   const ignorados = [];

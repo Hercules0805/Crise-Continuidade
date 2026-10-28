@@ -456,3 +456,23 @@ test('validarTokenBIA nao envia fornecedor INATIVO ao formulario externo (27/10/
   const res = await READ_ACTIONS.validarTokenBIA(makeDb(seed), 'b9');
   assert.deepStrictEqual(res.catalogo.fornecedores, [{ id: 'dep-aws', nome: 'AWS' }]);
 });
+
+// Cadastro de Processos (28/10/2026): os formularios de BIA so tratam processos de Continuidade.
+test('token de area e de BIA ignoram processo fora de Continuidade (continuidade false)', async () => {
+  const seed = baseSeed();
+  seed.processos.ti__compras = { area: 'TI', processo: 'Compras', continuidade: false };
+  seed.tokens['tok-area'] = { area: 'TI', processo: '_AREA_', usado: false, expiraEm: '2999-01-01' };
+  seed.tokens['b5'] = { token: 'b5', area: 'TI', processo: '_BIA_Backup', usado: false, expiraEm: '2999-01-01' };
+  const db = makeDb(seed);
+
+  const area = await READ_ACTIONS.validarTokenArea(db, 'tok-area');
+  assert.deepStrictEqual(area.processos.map((p) => p.processo), ['Backup']);
+  const bia = await READ_ACTIONS.validarTokenBIA(db, 'b5');
+  assert.ok(!bia.catalogo.processos.some((p) => p.nome === 'Compras'));
+
+  const res = await WRITE_ACTIONS.salvarRespostasArea(db, {
+    token: 'tok-area', nome: 'Fulano', respostas: [{ processo: 'Compras', scores: { 'Q1?': 4, 'Q2?': 4 } }],
+  });
+  assert.strictEqual(res.total, 0);
+  assert.strictEqual(db._store.processos.ti__compras.tier, undefined);
+});

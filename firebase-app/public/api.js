@@ -1632,8 +1632,33 @@ async function _lerProcessos() {
       pcnHistoricoRevisao: Array.isArray(d.pcnHistoricoRevisao) ? d.pcnHistoricoRevisao : [],
       atualizadoEm: d.atualizadoEm || '',
       atualizadoPor: d.atualizadoPor || '',
+      // Cadastro de Processos (28/10/2026): a colecao e o cadastro geral de
+      // processos das areas; Continuidade e o recorte continuidade !== false.
+      // Ausente = legado, que era todo de Continuidade e Processo de Negocio.
+      categoria: _CATEGORIAS_PROCESSO.indexOf(d.categoria) !== -1 ? d.categoria : 'Processo de Negócio',
+      criadorId: d.criadorId || '',
+      aprovadorId: d.aprovadorId || '',
+      links: _linksLidos(d.links),
+      continuidade: d.continuidade !== false,
+      criadoEm: d.criadoEm || '',
+      criadoPor: d.criadoPor || '',
     };
   });
+}
+
+const _CATEGORIAS_PROCESSO = ['Departamental', 'Intersetorial', 'Processo de Negócio'];
+
+// Links do processo: [{titulo, url}], so http(s) (mesmo formato de
+// contratos.documentos).
+function _linksLidos(v) {
+  return Array.isArray(v)
+    ? v.filter((l) => l && /^https?:\/\//i.test(String(l.url || '').trim()))
+      .map((l) => ({ titulo: String(l.titulo || '').trim(), url: String(l.url).trim() }))
+    : [];
+}
+
+function _ehDeContinuidade(p) {
+  return p && p.continuidade !== false;
 }
 
 /**
@@ -2150,6 +2175,7 @@ const _CAMPOS_PROCESSO = [
   'area', 'processo', 'descricao', 'dependencia', 'dependenciaItens', 'rto', 'rtoOrigem', 'rpo', 'mtd', 'tier',
   'descricaoFuncional', 'bcpContatos', 'biaHomologacao',
   'bcpPlanoBProvedores', 'bcpSlas', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual', 'tierManualPor', 'tierManualEm',
+  'categoria', 'criadorId', 'aprovadorId', 'links', 'continuidade',
 ];
 
 // Localiza o docId de um processo por id explícito ou por área+processo.
@@ -2182,8 +2208,14 @@ async function _salvarProcesso(p) {
   });
 
   if (Object.prototype.hasOwnProperty.call(data, 'bcpContatos')) data.bcpContatos = _listaContatos(data.bcpContatos);
+  if (Object.prototype.hasOwnProperty.call(data, 'links')) data.links = _linksLidos(data.links);
+  if (Object.prototype.hasOwnProperty.call(data, 'continuidade')) data.continuidade = data.continuidade !== false;
+  if (Object.prototype.hasOwnProperty.call(data, 'categoria') && _CATEGORIAS_PROCESSO.indexOf(data.categoria) === -1) {
+    throw new Error('Categoria de processo inválida.');
+  }
 
   let docId = await _acharProcessoId(p);
+  const novo = !docId;
   if (!docId) {
     docId = _processoKey(p.area, p.processo);
   }
@@ -2213,6 +2245,7 @@ async function _salvarProcesso(p) {
   // Autoria da ultima alteracao (23/10/2026): base do acompanhamento do
   // Operador de Processos.
   paraGravar = { ...paraGravar, atualizadoEm: new Date().toISOString(), atualizadoPor: (window.USER_EMAIL || '').toLowerCase() };
+  if (novo) paraGravar = { ...paraGravar, criadoEm: paraGravar.atualizadoEm, criadoPor: paraGravar.atualizadoPor };
   await ref.set(paraGravar, { merge: true });
   return { success: true, id: docId };
 }
@@ -3126,8 +3159,11 @@ const API = {
   getPerfil: (email) => _lerPerfil(email),
   getPerguntas: () => API.get('getPerguntas'),
   getAreas: () => API.get('getAreas'),
-  getProcessos: () => API.get('getProcessos'),
-  getProcessosPorArea: (area) => API.get('getProcessosPorArea', { area }),
+  // getProcessos e o recorte de Continuidade (BIA/BCP/DRP e tudo que deriva
+  // deles); getProcessosCadastro e o cadastro geral. Mesmo cache.
+  getProcessos: () => API.get('getProcessos').then((ps) => ps.filter(_ehDeContinuidade)),
+  getProcessosCadastro: () => API.get('getProcessos'),
+  getProcessosPorArea: (area) => API.get('getProcessosPorArea', { area }).then((ps) => ps.filter(_ehDeContinuidade)),
   getResumoRespostas: () => API.get('getResumoRespostas'),
   getConfigRespostas: () => API.get('getConfigRespostas'),
   salvarPergunta: (p) => API.post('salvarPergunta', p),

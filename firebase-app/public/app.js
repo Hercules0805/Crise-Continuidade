@@ -35,6 +35,7 @@ const pages = {
   perfis,
   conformidade,
   'threat-intel': threatIntel,
+  'cadastro-processos': cadastroProcessos,
 };
 
 // Paleta rotativa de 10 cores para tags de categoria dinâmicas (dependências/BIA).
@@ -2723,6 +2724,398 @@ window.excluirPessoaCadastro = async (id) => {
 };
 
 // ============================================================
+// PÁGINA: CADASTRO DE PROCESSOS (28/10/2026)
+//
+// Cadastro geral dos processos mapeados nas áreas -- a entidade principal de
+// processos. É a mesma coleção `processos`: Continuidade (Processos de
+// Negócio, BIA/BCP/DRP, Conformidade, Mapa...) é o recorte marcado "Avaliar
+// em Continuidade" (API.getProcessos); esta tela lê todos
+// (API.getProcessosCadastro). Criador e Aprovador são Pessoas do cadastro
+// (por id); Links são [{titulo, url}].
+// ============================================================
+const CATEGORIAS_PROCESSO = ['Departamental', 'Intersetorial', 'Processo de Negócio'];
+let cadastroProcessosData = [];
+let cadastroProcessosOrdenacao = criarOrdenacao('area', 'asc');
+const cadastroProcessosPaginacao = criarPaginacao(20);
+window.filtrarCadastroProcessos = () => { cadastroProcessosPaginacao.reiniciar(); renderizarCadastroProcessos(); };
+window.irParaPaginaCadastroProcessos = (d) => { cadastroProcessosPaginacao.mover(d); renderizarCadastroProcessos(); };
+window.ordenarCadastroProcessos = (coluna) => { cadastroProcessosOrdenacao.ordenar(coluna); cadastroProcessosPaginacao.reiniciar(); renderizarCadastroProcessos(); };
+
+const _nomePessoaPorId = (id) => {
+  if (!id) return '';
+  const p = (pessoasData || []).find((x) => String(x.id) === String(id));
+  return p ? p.nome : '(pessoa removida)';
+};
+const _badgeContinuidade = (sim) => sim ? '<span class="badge badge-green">Sim</span>' : '<span class="badge badge-gray">Não</span>';
+const _badgeCategoriaProcesso = (cat) => `<span class="badge badge-gray">${esc(cat || 'Processo de Negócio')}</span>`;
+/** Processo que já tem algo de Continuidade (BIA respondido, PCN, revisão ou homologação). */
+const _temDadosDeContinuidade = (p) => !!(p && (p.avaliado || p.pcnSalvo || p.biaRevisao || p.pcnRevisao || p.biaHomologacao));
+
+async function cadastroProcessos() {
+  const pode = Perfis.podeEditarProcessos(window.USER_PERFIS);
+  app.innerHTML = `
+    ${_htmlCabecalhoLista({ titulo: 'Cadastro de Processos', sub: 'Todos os processos mapeados nas áreas; os marcados "Avaliar em Continuidade" seguem para BIA, PCN e DRP.',
+      primario: pode ? { rotulo: '+ Novo processo', onclick: 'abrirDrawerCadastroProcesso()', id: 'btnNovoCadastroProcesso' } : null })}
+    ${_htmlBarraLista({ busca: { id: 'buscaCadastroProcesso', placeholder: 'Buscar processo…' }, aoMudar: 'filtrarCadastroProcessos', contadorId: 'cadastroProcessosContador',
+      filtros: [
+        { id: 'filtroCadProcArea', rotulo: 'Área', opcoes: [] },
+        { id: 'filtroCadProcCategoria', rotulo: 'Categoria', opcoes: CATEGORIAS_PROCESSO.map((c) => [c, c]) },
+        { id: 'filtroCadProcContinuidade', rotulo: 'Continuidade', todos: 'Todos', opcoes: [['sim', 'Sim'], ['nao', 'Não']] },
+      ] })}
+    <div class="loading" id="loadingCadastroProcessos">⏳ Carregando...</div>
+    <div id="listaCadastroProcessos"></div>
+    ${_htmlDrawerCadastroProcesso()}`;
+
+  let areas;
+  try {
+    const [procs, deps, as] = await Promise.all([
+      API.getProcessosCadastro(),
+      // Pessoas (Criador/Aprovador): sem elas a tela abre igual, sem os nomes.
+      API.getDependencias().catch(() => null),
+      API.getAreas(),
+    ]);
+    cadastroProcessosData = procs;
+    if (deps) pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+    areas = as;
+    window.areasDisponiveis = as;
+  } catch (e) {
+    console.error('Cadastro de Processos: falha ao carregar', e);
+    document.getElementById('loadingCadastroProcessos').style.display = 'none';
+    document.getElementById('listaCadastroProcessos').innerHTML = _htmlErroCarga('Não foi possível carregar os processos.', 'cadastroProcessos');
+    return;
+  }
+  document.getElementById('loadingCadastroProcessos').style.display = 'none';
+
+  const filtroArea = document.getElementById('filtroCadProcArea');
+  if (_limitadoAArea()) {
+    // Gestor: só a própria área (filtro travado, o "Limpar" o ignora).
+    filtroArea.innerHTML = `<option value="${esc(window.USER_AREA || '')}">Área: ${esc(window.USER_AREA || 'não definida')}</option>`;
+    filtroArea.disabled = true;
+  } else {
+    const nomes = [...new Set([...areas.map((a) => a.nome), ...cadastroProcessosData.map((p) => p.area)].filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    _preencherFiltroLista('filtroCadProcArea', 'Área', nomes.map((n) => [n, n]));
+  }
+  renderizarCadastroProcessos();
+
+  // "Editar no cadastro" (drawer de Processos de Negócio): #cadastro-processos?processo=<id>
+  const alvo = new URLSearchParams(window.location.hash.split('?')[1] || '').get('processo');
+  if (alvo && cadastroProcessosData.some((p) => String(p.id) === String(alvo))) abrirDrawerCadastroProcesso(alvo);
+}
+
+function renderizarCadastroProcessos() {
+  const pode = Perfis.podeEditarProcessos(window.USER_PERFIS);
+  const area = (document.getElementById('filtroCadProcArea') || {}).value || '';
+  const categoria = (document.getElementById('filtroCadProcCategoria') || {}).value || '';
+  const cont = (document.getElementById('filtroCadProcContinuidade') || {}).value || '';
+  const visiveis = _limitadoAArea() ? cadastroProcessosData.filter((p) => p.area === window.USER_AREA) : cadastroProcessosData;
+  _renderGradeLista({
+    alvoId: 'listaCadastroProcessos',
+    itens: visiveis,
+    buscaId: 'buscaCadastroProcesso',
+    camposBusca: ['processo', 'area', (p) => _nomePessoaPorId(p.criadorId), (p) => _nomePessoaPorId(p.aprovadorId),
+      (p) => (p.links || []).map((l) => `${l.titulo} ${l.url}`).join(' ')],
+    filtrar: (p) => (!area || p.area === area) && (!categoria || p.categoria === categoria)
+      && (!cont || (cont === 'sim') === (p.continuidade !== false)),
+    ordenacao: cadastroProcessosOrdenacao,
+    comparadores: {
+      criador: (a, b, dir) => dir * _nomePessoaPorId(a.criadorId).localeCompare(_nomePessoaPorId(b.criadorId), 'pt-BR'),
+      aprovador: (a, b, dir) => dir * _nomePessoaPorId(a.aprovadorId).localeCompare(_nomePessoaPorId(b.aprovadorId), 'pt-BR'),
+      continuidade: (a, b, dir) => dir * ((a.continuidade !== false ? 1 : 0) - (b.continuidade !== false ? 1 : 0)),
+    },
+    colunas: [
+      { rotulo: 'Área', w: 130, ordem: 'area' },
+      { rotulo: 'Processo', w: 220, ordem: 'processo' },
+      { rotulo: 'Categoria', w: 150, ordem: 'categoria' },
+      { rotulo: 'Criador', w: 130, ordem: 'criador' },
+      { rotulo: 'Aprovador', w: 130, ordem: 'aprovador' },
+      { rotulo: 'Links', w: 60 },
+      { rotulo: 'Continuidade', w: 110, ordem: 'continuidade' },
+    ],
+    linha: (p) => `
+      <tr style="cursor:pointer;" onclick="abrirDrawerCadastroProcesso('${escJs(p.id)}')">
+        ${_tdLista(p.area)}${_tdLista(p.processo, 'forte')}
+        <td>${_badgeCategoriaProcesso(p.categoria)}</td>
+        ${_tdLista(_nomePessoaPorId(p.criadorId) || '–')}${_tdLista(_nomePessoaPorId(p.aprovadorId) || '–')}
+        <td title="${esc((p.links || []).map((l) => l.titulo || l.url).join(' · '))}">${(p.links || []).length || '–'}</td>
+        <td>${_badgeContinuidade(p.continuidade !== false)}</td>
+        ${pode ? _htmlAcoesLinha([_acaoEditar(`abrirDrawerCadastroProcesso('${escJs(p.id)}')`), _acaoExcluir(`excluirCadastroProcesso('${escJs(p.id)}')`)]) : '<td class="col-acoes"></td>'}
+      </tr>`,
+    paginacao: cadastroProcessosPaginacao,
+    fnPagina: 'irParaPaginaCadastroProcessos',
+    fnOrdenar: 'ordenarCadastroProcessos',
+    prefixoSeta: 'sort-cadproc-',
+    contadorId: 'cadastroProcessosContador',
+    contador: ['processo', 'processos'],
+    vazio: 'Nenhum processo cadastrado ainda.',
+    vazioDetalhe: pode ? 'Use "+ Novo processo" para cadastrar o primeiro.' : '',
+  });
+}
+
+function _htmlDrawerCadastroProcesso() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  return `
+    <div class="drawer-overlay" id="drawerOverlayCadastroProcesso" onclick="fecharDrawerCadastroProcesso()"></div>
+    <div class="drawer" id="drawerCadastroProcesso">
+      <div class="drawer-header">
+        <h3 id="cadProcTitulo">Novo processo</h3>
+        <button onclick="fecharDrawerCadastroProcesso()" aria-label="Fechar" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <input type="hidden" id="cadProcId">
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}" for="cadProcArea">Área <span class="req" aria-hidden="true">*</span></label>
+          <select id="cadProcArea" style="${inp}"></select>
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}" for="cadProcNome">Processo <span class="req" aria-hidden="true">*</span></label>
+          <input type="text" id="cadProcNome" maxlength="200" placeholder="Ex: Folha de pagamento" style="${inp}">
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}" for="cadProcCategoria">Categoria <span class="req" aria-hidden="true">*</span></label>
+          <select id="cadProcCategoria" style="${inp}">${CATEGORIAS_PROCESSO.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+          <div>
+            <label style="${lbl}" for="cadProcCriador">Criador</label>
+            <select id="cadProcCriador" style="${inp}"></select>
+          </div>
+          <div>
+            <label style="${lbl}" for="cadProcAprovador">Aprovador</label>
+            <select id="cadProcAprovador" style="${inp}"></select>
+          </div>
+        </div>
+        <label class="check-label" style="margin-bottom:4px;"><input type="checkbox" id="cadProcContinuidade"> Avaliar em Continuidade</label>
+        <span style="font-size:0.75em;color:#888;display:block;margin-bottom:18px;">Marcado, o processo aparece em Processos de Negócio e passa por BIA, PCN e DRP.</span>
+        <div style="border-top:1px solid #f0f0f0;padding-top:14px;">
+          <label style="${lbl}">Links</label>
+          <p style="font-size:0.78em;color:#888;margin:0 0 10px;">Documentos, fluxogramas, procedimentos e sistemas do processo.</p>
+          ${_edLinksProcesso.html(inp)}
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerCadastroProcesso()">Fechar</button>
+        <button class="btn btn-primary" id="btnSalvarCadastroProcesso" onclick="salvarCadastroProcesso()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+/** Select de Pessoas (Criador/Aprovador): as da área do processo primeiro. */
+function _popularSelectPessoaProcesso(idSelect, valor, area) {
+  const sel = document.getElementById(idSelect);
+  if (!sel) return;
+  const pessoas = (pessoasData || []).slice().sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  const opt = (p) => `<option value="${esc(p.id)}">${esc(p.nome)}${_areaPrincipalPessoa(p) ? ` — ${esc(_areaPrincipalPessoa(p))}` : ''}</option>`;
+  const daArea = area ? pessoas.filter((p) => (p.areas || [p.setor]).includes(area)) : [];
+  const outras = pessoas.filter((p) => !daArea.includes(p));
+  const removida = valor && !pessoas.some((p) => String(p.id) === String(valor)) ? `<option value="${esc(valor)}">(pessoa removida)</option>` : '';
+  sel.innerHTML = '<option value="">Ninguém</option>'
+    + (daArea.length ? `<optgroup label="Da área ${esc(area)}">${daArea.map(opt).join('')}</optgroup><optgroup label="Outras pessoas">${outras.map(opt).join('')}</optgroup>` : outras.map(opt).join(''))
+    + removida;
+  sel.value = valor || '';
+}
+
+function _popularPessoasCadastroProcesso() {
+  const area = document.getElementById('cadProcArea').value;
+  _popularSelectPessoaProcesso('cadProcCriador', document.getElementById('cadProcCriador').value, area);
+  _popularSelectPessoaProcesso('cadProcAprovador', document.getElementById('cadProcAprovador').value, area);
+}
+
+function _coletarCadastroProcesso() {
+  return {
+    id: document.getElementById('cadProcId').value || null,
+    area: document.getElementById('cadProcArea').value,
+    processo: document.getElementById('cadProcNome').value.trim(),
+    categoria: document.getElementById('cadProcCategoria').value,
+    criadorId: document.getElementById('cadProcCriador').value,
+    aprovadorId: document.getElementById('cadProcAprovador').value,
+    continuidade: document.getElementById('cadProcContinuidade').checked,
+    links: _edLinksProcesso.paraGravar(),
+  };
+}
+const _edCadastroProcesso = criarRastreadorEdicao(() => _coletarCadastroProcesso());
+
+window.abrirDrawerCadastroProcesso = (id) => {
+  const p = id ? cadastroProcessosData.find((x) => String(x.id) === String(id)) : null;
+  const pode = Perfis.podeEditarProcessos(window.USER_PERFIS) && (!_limitadoAArea() || !p || p.area === window.USER_AREA);
+  document.getElementById('cadProcTitulo').textContent = p ? 'Editar processo' : 'Novo processo';
+  document.getElementById('cadProcId').value = p ? p.id : '';
+  // Área: o Gestor só cadastra na própria; área fora do cadastro continua escolhível.
+  const nomes = _limitadoAArea() ? [window.USER_AREA].filter(Boolean)
+    : (window.areasDisponiveis || []).map((a) => a.nome).filter(Boolean).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const areaAtual = p ? p.area : (_limitadoAArea() ? (window.USER_AREA || '') : '');
+  const fora = areaAtual && !nomes.includes(areaAtual) ? `<option value="${esc(areaAtual)}">${esc(areaAtual)} (fora do cadastro)</option>` : '';
+  const selArea = document.getElementById('cadProcArea');
+  selArea.innerHTML = (_limitadoAArea() ? '' : '<option value="">Selecione...</option>') + nomes.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('') + fora;
+  selArea.value = areaAtual;
+  selArea.onchange = _popularPessoasCadastroProcesso;
+  document.getElementById('cadProcNome').value = p ? p.processo : '';
+  document.getElementById('cadProcCategoria').value = p ? (p.categoria || 'Processo de Negócio') : 'Processo de Negócio';
+  _popularSelectPessoaProcesso('cadProcCriador', p ? p.criadorId : '', areaAtual);
+  _popularSelectPessoaProcesso('cadProcAprovador', p ? p.aprovadorId : '', areaAtual);
+  document.getElementById('cadProcContinuidade').checked = p ? p.continuidade !== false : false;
+  _edLinksProcesso.carregar(p ? p.links : [], pode);
+  ['cadProcArea', 'cadProcNome', 'cadProcCategoria', 'cadProcCriador', 'cadProcAprovador', 'cadProcContinuidade'].forEach((c) => { document.getElementById(c).disabled = !pode; });
+  document.getElementById('btnSalvarCadastroProcesso').style.display = pode ? '' : 'none';
+  document.getElementById('drawerCadastroProcesso').classList.add('open');
+  document.getElementById('drawerOverlayCadastroProcesso').classList.add('open');
+  _edCadastroProcesso.marcar();
+};
+
+function _fecharCadastroProcessoSemSalvar() {
+  document.getElementById('drawerCadastroProcesso').classList.remove('open');
+  document.getElementById('drawerOverlayCadastroProcesso').classList.remove('open');
+}
+
+window.fecharDrawerCadastroProcesso = () => _fecharComRastreador({
+  idDrawer: 'drawerCadastroProcesso',
+  sujo: () => document.getElementById('btnSalvarCadastroProcesso').style.display !== 'none' && _edCadastroProcesso.sujo(),
+  salvar: () => salvarCadastroProcesso(),
+  fecharSemSalvar: _fecharCadastroProcessoSemSalvar,
+});
+
+window.salvarCadastroProcesso = async () => {
+  const dados = _coletarCadastroProcesso();
+  if (!dados.area) { _avisarCampo('cadProcArea', 'Escolha a área do processo.'); return false; }
+  if (!dados.processo) { _avisarCampo('cadProcNome', 'Informe o nome do processo.'); return false; }
+  const chave = (s) => String(s || '').trim().toLowerCase();
+  if (cadastroProcessosData.some((p) => String(p.id) !== String(dados.id || '') && p.area === dados.area && chave(p.processo) === chave(dados.processo))) {
+    _avisarCampo('cadProcNome', `Já existe o processo "${dados.processo}" na área ${dados.area}.`);
+    return false;
+  }
+  const atual = dados.id ? cadastroProcessosData.find((p) => String(p.id) === String(dados.id)) : null;
+  if (atual && atual.continuidade !== false && !dados.continuidade && _temDadosDeContinuidade(atual)
+    && !await confirmarAcao(`Tirar "${atual.processo}" de Continuidade?\n\nOs dados de continuidade (BIA, PCN, revisões) são mantidos; o processo só sai das telas de Continuidade até ser marcado de novo.`, { rotulo: 'Tirar de Continuidade' })) {
+    return false;
+  }
+  let ok = false;
+  await comBotaoCarregando('btnSalvarCadastroProcesso', async () => {
+    let r;
+    try {
+      r = await API.salvarProcesso(dados);
+      API.invalidate('getProcessos', 'getProcessosPorArea');
+      cadastroProcessosData = await API.getProcessosCadastro();
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
+      return;
+    }
+    ok = true;
+    document.getElementById('cadProcId').value = String(dados.id || (r && r.id) || '');
+    document.getElementById('cadProcTitulo').textContent = 'Editar processo';
+    _edCadastroProcesso.marcar();
+    renderizarCadastroProcessos();
+    showToast('✅ Salvo!', '#2e7d32');
+  });
+  return ok;
+};
+
+window.excluirCadastroProcesso = async (id) => {
+  const p = cadastroProcessosData.find((x) => String(x.id) === String(id));
+  if (!p) return;
+  const aviso = p.continuidade !== false ? '\n\nEle também sai de Continuidade (Processos de Negócio, BIA, PCN e DRP).' : '';
+  if (!await confirmarAcao(`Excluir o processo "${p.processo}" (${p.area})?${aviso}`)) return;
+  try {
+    await API.excluirProcesso(p.id);
+    API.invalidate('getProcessos', 'getProcessosPorArea');
+    cadastroProcessosData = await API.getProcessosCadastro();
+    renderizarCadastroProcessos();
+    showToast('🗑️ Excluído.', '#555');
+  } catch (e) {
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ---- Links do processo (28/10/2026): mini-CRUD título + URL, no molde dos
+// Endpoints (lista + formulário "+ Adicionar"/"Salvar alteração", aviso
+// "Editando… — cancelar edição"). Só http(s); URL repetida é recusada.
+function _criarEditorLinks(cfg) {
+  const id = (sufixo) => cfg.base + sufixo;
+  const el = (sufixo) => document.getElementById(id(sufixo));
+  const ed = { indice: null, pode: false, itens: [] };
+
+  ed.html = (inp) => `
+    <div id="${id('Lista')}"></div>
+    <div id="${id('Form')}" style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;">
+      <div id="${id('EdicaoAviso')}" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
+        ✎ Editando link — <a href="#" onclick="${cfg.fn}.cancelar();return false;" style="color:#1565c0;">cancelar edição</a>
+      </div>
+      <input type="text" id="${id('Titulo')}" maxlength="120" placeholder="Título (ex: Fluxograma do processo)" aria-label="Título do link" style="${inp}margin-bottom:8px;">
+      <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;">
+        <input type="url" id="${id('Url')}" placeholder="https://..." aria-label="URL do link" style="${inp}">
+        <button class="btn btn-ghost" id="${id('Botao')}" onclick="${cfg.fn}.adicionar()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
+      </div>
+    </div>`;
+
+  ed.render = () => {
+    const cont = el('Lista');
+    if (!cont) return;
+    if (!ed.itens.length) { cont.innerHTML = '<p class="vazio-inline">Nenhum link cadastrado.</p>'; return; }
+    cont.innerHTML = '<table class="data-table" style="box-shadow:none;"><tbody>' + ed.itens.map((l, i) => `<tr>
+        <td>
+          <div style="font-weight:600;">${esc(l.titulo || l.url)}</div>
+          <a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer" style="font-size:0.8em;color:#1565c0;word-break:break-all;">${esc(l.url)}</a>
+        </td>
+        <td style="text-align:center;white-space:nowrap;width:1%;">${ed.pode ? `
+          <button class="btn-icon" onclick="${cfg.fn}.editar(${i})" title="Editar" aria-label="Editar">${SVG_EDITAR}</button>
+          <button class="btn-icon" onclick="${cfg.fn}.remover(${i})" title="Remover" aria-label="Remover" style="color:#c62828;font-weight:700;">&times;</button>` : ''}
+        </td>
+      </tr>`).join('') + '</tbody></table>';
+  };
+
+  ed.limpar = () => { el('Titulo').value = ''; el('Url').value = ''; };
+
+  ed.adicionar = () => {
+    const url = _normalizarUrlEndpoint(el('Url').value);
+    if (!url) return _avisarCampo(id('Url'), 'Informe uma URL válida começando com http:// ou https://.');
+    if (ed.itens.some((l, i) => i !== ed.indice && _chaveUrlEndpoint(l.url) === _chaveUrlEndpoint(url))) {
+      return _avisarCampo(id('Url'), 'Este link já está na lista.');
+    }
+    const item = { titulo: el('Titulo').value.trim(), url };
+    if (ed.indice != null) { ed.itens[ed.indice] = item; ed.cancelar(); } else { ed.itens.push(item); ed.limpar(); }
+    ed.render();
+  };
+
+  ed.editar = (i) => {
+    const l = ed.itens[i];
+    if (!l) return;
+    ed.indice = i;
+    el('Titulo').value = l.titulo || '';
+    el('Url').value = l.url || '';
+    el('EdicaoAviso').style.display = 'block';
+    el('Botao').textContent = 'Salvar alteração';
+  };
+
+  ed.cancelar = () => {
+    ed.indice = null;
+    el('EdicaoAviso').style.display = 'none';
+    el('Botao').textContent = '+ Adicionar';
+    ed.limpar();
+  };
+
+  ed.remover = (i) => {
+    ed.itens.splice(i, 1);
+    if (ed.indice === i) ed.cancelar();
+    else if (ed.indice != null && ed.indice > i) ed.indice--;
+    ed.render();
+  };
+
+  /** Abre a lista de um registro (cópia: mexer não altera o dado carregado). */
+  ed.carregar = (itens, pode) => {
+    ed.itens = (Array.isArray(itens) ? itens : []).map((l) => ({ titulo: l.titulo || '', url: l.url }));
+    ed.pode = !!pode;
+    ed.cancelar();
+    el('Form').style.display = ed.pode ? '' : 'none';
+    ed.render();
+  };
+
+  ed.paraGravar = () => ed.itens.map((l) => ({ titulo: l.titulo || '', url: l.url }));
+  return ed;
+}
+const _edLinksProcesso = _criarEditorLinks({ base: 'cadProcLink', fn: '_edLinksProcesso' });
+window._edLinksProcesso = _edLinksProcesso;
+
+// ============================================================
 // PÁGINA: PROCESSOS (Tabela com ordenação e filtro)
 // ============================================================
 let processosOrdenacao = criarOrdenacao('score', 'desc');
@@ -2738,7 +3131,9 @@ let processosSelecionados = new Set();
 async function processos() {
   app.innerHTML = `
     ${_htmlCabecalhoLista({ titulo: 'Processos de Negócio', sub: 'Processos críticos de cada área, com BIA, PCN e DRP.',
-      primario: Perfis.podeEditarProcessos(window.USER_PERFIS) ? { rotulo: '+ Novo processo', onclick: 'abrirModalProcesso()' } : null,
+      // Cadastro de Processos (28/10/2026): processo novo nasce no cadastro geral
+      // e entra aqui marcado "Avaliar em Continuidade".
+      primario: Perfis.podeEditarProcessos(window.USER_PERFIS) ? { rotulo: '+ Incluir pelo cadastro', onclick: "location.hash='#cadastro-processos'" } : null,
       extra: '<button class="btn btn-ghost" onclick="abrirDrawerProcessosLote()" id="btnEditarProcessosLote" style="display:none;">Editar selecionados</button>',
       maisAcoes: _limitadoAArea() ? [] : [
         { rotulo: 'Enviar questionário para a área', onclick: 'enviarParaArea()' },
@@ -2830,6 +3225,8 @@ async function processos() {
                 <input type="text" id="fDono" placeholder="Responsável pela área" readonly style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;background:#f9f9f9;color:#555;">
               </div>
             </div>
+            <!-- Dados do Cadastro de Processos (28/10/2026), so leitura aqui. -->
+            <div id="fCadastroResumo" style="display:none;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.85em;color:#555;"></div>
             <div style="margin-bottom:16px;">
               <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
                 <label for="fDescricaoFuncional" style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin:0;">Descrição Funcional</label>
@@ -4246,6 +4643,27 @@ function _atualizarTituloDrawerProcesso(p) {
   document.getElementById('modalTitulo').innerHTML = titulo + scoreHtml + (p ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(p.processo)}</div>` : '');
 }
 
+/** Categoria, Criador, Aprovador e Links do Cadastro de Processos (edita-se lá). */
+function _renderResumoCadastroProcesso(p) {
+  const cont = document.getElementById('fCadastroResumo');
+  if (!cont) return;
+  if (!p || !p.id) { cont.style.display = 'none'; cont.innerHTML = ''; return; }
+  const pessoa = (id) => {
+    if (!id) return '–';
+    const x = (window.dependenciasCatalogo || pessoasData || []).find((d) => String(d.id) === String(id));
+    return x ? x.nome : '(pessoa removida)';
+  };
+  const links = (p.links || []).map((l) => `<a href="${esc(l.url)}" target="_blank" rel="noopener noreferrer" style="color:#1565c0;">${esc(l.titulo || l.url)}</a>`).join(' · ');
+  cont.style.display = '';
+  cont.innerHTML = `
+    <div style="display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px;">
+      <b style="color:#333;">Cadastro de Processos</b>
+      ${Perfis.podeVerTela(window.USER_PERFIS, 'cadastro-processos') ? `<a href="#cadastro-processos?processo=${encodeURIComponent(p.id)}" style="color:#1565c0;font-weight:600;">Editar no cadastro</a>` : ''}
+    </div>
+    <div>Categoria: <b>${esc(p.categoria || 'Processo de Negócio')}</b> · Criador: <b>${esc(pessoa(p.criadorId))}</b> · Aprovador: <b>${esc(pessoa(p.aprovadorId))}</b></div>
+    <div style="margin-top:4px;">Links: ${links || '–'}</div>`;
+}
+
 window.abrirModalProcesso = (p) => {
   // Recarregar catálogos se foram invalidados
   API.getDependencias().then(deps => { window.dependenciasCatalogo = deps; }).catch(()=>{});
@@ -4272,6 +4690,7 @@ window.abrirModalProcesso = (p) => {
 
   // Registro como estava ao abrir: base da atualizacao otimista do Salvar.
   window._processoAberto = p || null;
+  _renderResumoCadastroProcesso(p);
 
   // Preencher Dono do Processo com base na area selecionada
   const atualizarDono = () => {

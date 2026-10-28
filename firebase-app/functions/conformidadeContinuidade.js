@@ -209,6 +209,12 @@
     return { status: proximo < _dia(hojeISO) ? 'atrasado' : 'em-dia', ultimo: ultimo, proximo: proximo, frequenciaDias: freq };
   }
 
+  // Cadastro de Processos (28/10/2026): Continuidade e o recorte do cadastro
+  // geral marcado "Avaliar em Continuidade". Ausente = legado = de Continuidade.
+  function ehDeContinuidade(p) {
+    return !!p && p.continuidade !== false;
+  }
+
   function ehTierCritico(tier) {
     return /^Tier [12]\b/.test(_texto(tier));
   }
@@ -332,7 +338,7 @@
     var ciclos = normalizarCiclos(d.ciclos);
     var tierDe = d.tierDe || function (p) { return _texto(p && p.tier); };
     var cadeiaDe = d.cadeiaDoProcesso || function () { return []; };
-    var processos = Array.isArray(d.processos) ? d.processos : [];
+    var processos = (Array.isArray(d.processos) ? d.processos : []).filter(ehDeContinuidade);
     var depPorId = {};
     (d.dependencias || []).forEach(function (dep) { if (dep && dep.id !== undefined) depPorId[String(dep.id)] = dep; });
 
@@ -475,6 +481,7 @@
     diasDaFrequencia: diasDaFrequencia,
     testeDrp: testeDrp,
     ehTierCritico: ehTierCritico,
+    ehDeContinuidade: ehDeContinuidade,
     biaParcial: biaParcial,
     biaHomologado: biaHomologado,
     statusDosPlanos: statusDosPlanos,

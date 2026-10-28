@@ -344,16 +344,26 @@ service cloud.firestore {
     // ---- Dados operacionais: admin (tudo) ou gestor (própria área) ----
     // DECISAO 23/10/2026: SI (a tela ja mostrava os botoes e o banco recusava)
     // e o Operador de Processos escrevem em processos de qualquer area.
+    // Cadastro de Processos (28/10/2026): a colecao e o cadastro geral; os
+    // campos do cadastro, quando vierem, tem de ter o formato combinado.
+    function processoCadastroValido(d) {
+      return (!('categoria' in d) || d.categoria in ['Departamental', 'Intersetorial', 'Processo de Negócio'])
+        && (!('continuidade' in d) || d.continuidade is bool)
+        && (!('links' in d) || d.links is list)
+        && (!('criadorId' in d) || d.criadorId is string)
+        && (!('aprovadorId' in d) || d.aprovadorId is string);
+    }
+
     match /processos/{id} {
       allow read: if isCorpUser();
       // Homologar o BIA (biaHomologacao, 27/10/2026) e de quem opera os
       // processos (Admin, SI, Operador de Processos): o Gestor avalia a
       // propria area, mas nao homologa a propria avaliacao.
-      allow create: if podeOperarProcessos()
-        || (isGestorDaArea(request.resource.data.area) && !('biaHomologacao' in request.resource.data));
-      allow update: if podeOperarProcessos()
+      allow create: if processoCadastroValido(request.resource.data) && (podeOperarProcessos()
+        || (isGestorDaArea(request.resource.data.area) && !('biaHomologacao' in request.resource.data)));
+      allow update: if processoCadastroValido(request.resource.data) && (podeOperarProcessos()
         || ((isGestorDaArea(request.resource.data.area) || isGestorDaArea(resource.data.area))
-            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['biaHomologacao']));
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['biaHomologacao'])));
       allow delete: if podeOperarProcessos() || isGestorDaArea(resource.data.area);
     }
 

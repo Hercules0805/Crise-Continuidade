@@ -162,6 +162,19 @@ test('avaliar: indicadores de BIA, PCN (Tier 1/2) e DRP (dependencias criticas)'
   assert.strictEqual(i.aHomologar, 1, 'p1 avaliado sem homologacao (p2 vencido nao conta)');
 });
 
+// Cadastro de Processos (28/10/2026): processo fora de Continuidade nao conta.
+test('avaliar: ignora processo com continuidade false (o legado, sem o campo, conta)', () => {
+  const c = cenario();
+  const base = CC.avaliar(cenario()).indicadores;
+  c.processos = c.processos.concat([{ ...c.processos[0], id: 'fora', nome: 'Fora', continuidade: false }]);
+  const i = CC.avaliar(c).indicadores;
+  assert.strictEqual(i.processos, base.processos);
+  assert.strictEqual(i.biaEmDia, base.biaEmDia);
+  assert.strictEqual(i.depsCriticas, base.depsCriticas);
+  assert.strictEqual(CC.ehDeContinuidade({}), true);
+  assert.strictEqual(CC.ehDeContinuidade({ continuidade: false }), false);
+});
+
 test('avaliar: lista as pendencias certas, vencido primeiro', () => {
   const { pendencias } = CC.avaliar(cenario());
   const chaves = pendencias.map((p) => `${p.tipo}:${p.situacao}:${p.id}`);

@@ -94,7 +94,8 @@ test('Processos: admin continua com tudo', async () => {
   const { w, doc } = await carregar(['admin']);
   await w.processos();
   const tela = html(doc);
-  assert.match(tela, /onclick="abrirModalProcesso\(\)"/);
+  // Cadastro de Processos (28/10/2026): processo novo nasce no cadastro geral.
+  assert.match(tela, /onclick="location.hash='#cadastro-processos'"/);
   assert.match(tela, /editarProcesso\('p1'\)/);
   assert.match(tela, /avaliarProcesso\('p1'\)/);
   assert.match(tela, /excluirProcesso\('p1'\)/);

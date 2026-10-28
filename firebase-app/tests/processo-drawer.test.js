@@ -607,3 +607,18 @@ test('Dependencias: "+ Criar" de nome que outra pessoa acabou de cadastrar vincu
   assert.strictEqual(w._dependenciaSelecionadas.find((s) => s.nome === 'Zélia Nova').id, 'ja-existe');
   assert.strictEqual(w.dependenciasCatalogo.filter((d) => d.nome === 'Zélia Nova').length, 1, 'sem placeholder duplicado');
 });
+
+// Cadastro de Processos (28/10/2026): a aba Identificacao mostra o que vem do
+// cadastro geral (so leitura) e leva ate ele para editar.
+test('Identificacao: resumo do Cadastro de Processos com link "Editar no cadastro"', async () => {
+  const P = { ...P1, categoria: 'Intersetorial', criadorId: 'ana', aprovadorId: '', links: [{ titulo: 'Fluxo', url: 'https://wiki/folha' }] };
+  const { w, doc } = await carregar(['operador_processos'], { getProcessos: [P, P2] });
+  w.editarProcesso('p1');
+  const resumo = doc.getElementById('fCadastroResumo');
+  assert.notStrictEqual(resumo.style.display, 'none');
+  assert.match(resumo.textContent, /Categoria: Intersetorial · Criador: Ana · Aprovador: –/);
+  assert.strictEqual(resumo.querySelector('a[href="https://wiki/folha"]').textContent, 'Fluxo');
+  assert.strictEqual(resumo.querySelector('a[href^="#cadastro-processos"]').getAttribute('href'), '#cadastro-processos?processo=p1');
+  // "+ Novo processo" virou o atalho para o cadastro geral.
+  assert.match(doc.getElementById('app').innerHTML, /location.hash='#cadastro-processos'/);
+});

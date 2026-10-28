@@ -25,6 +25,7 @@ const transporteEmail = require('./transporteEmail');
 const historicoRisco = require('./historicoRisco');
 const retratoRisco = require('./retratoRisco');
 const cadeiaDependencias = require('./cadeiaDependencias');
+const conformidadeContinuidade = require('./conformidadeContinuidade');
 const threatIntel = require('./threatIntel');
 const threatIntelServico = require('./threatIntelServico');
 
@@ -219,6 +220,12 @@ async function gerarLink(db, data, ctx) {
 
   const link = `${ctx.baseUrl}/${PAGINA[tipo]}?token=${encodeURIComponent(token)}`;
   return { success: true, token, link, expiraEm: expira.toISOString() };
+}
+
+// Cadastro de Processos (28/10/2026): listas de DRP, SLA e sugestoes de IA
+// so consideram os processos avaliados em Continuidade.
+function _processosDeContinuidade(procSnap) {
+  return procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) })).filter(conformidadeContinuidade.ehDeContinuidade);
 }
 
 /**
@@ -916,7 +923,7 @@ async function obterSlasDependencia(db, query, ctx) {
     db.collection(COLLECTION.processos).get(),
   ]);
   const catalogo = catSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-  const processos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const processos = _processosDeContinuidade(procSnap);
   const servicos = await _lerServicos(db);
   const ligados = _processosLigadosADependencia(String(id), dep.nome, dep.categoria, processos, { servicos, dependencias: catalogo });
   const slas = await _slasDaDependencia(db, String(id), dep, catalogo, ligados);
@@ -1069,7 +1076,7 @@ async function gerarDRP(db, data, ctx) {
   let processosLigados = [];
   try {
     const procSnap = await db.collection(COLLECTION.processos).get();
-    const todosProcessos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+    const todosProcessos = _processosDeContinuidade(procSnap);
     const servicos = await _lerServicos(db);
     processosLigados = _processosLigadosADependencia(String(id), dep.nome, dep.categoria, todosProcessos, catalogo.length ? { servicos, dependencias: catalogo } : null);
   } catch (e) { processosLigados = []; }
@@ -2105,8 +2112,7 @@ async function _sugerirProcessosRelacionados(db, data, ctx) {
   const jaLigados = new Set(itens.filter((it) => it && ['Processos Internos', 'Processo Interno'].includes(it.categoria) && it.id).map((it) => String(it.id)));
   const nomesServicos = (proc) => cadeiaDependencias.servicosDoProcesso(proc, servicos).map((x) => x.nome).filter(Boolean);
   const meusServicos = new Set(nomesServicos(p));
-  const catalogo = procSnap.docs
-    .map((d) => ({ id: d.id, ...(d.data() || {}) }))
+  const catalogo = _processosDeContinuidade(procSnap)
     .filter((x) => String(x.id) !== String(p.id) && !jaLigados.has(String(x.id)) && x.processo)
     .slice(0, MAX_CATALOGO_PROCESSOS_IA)
     .map((x) => {
@@ -2189,7 +2195,7 @@ async function _dadosDependenciaDrpIA(db, id) {
     _lerServicos(db),
   ]);
   const catalogo = catSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-  const processos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const processos = _processosDeContinuidade(procSnap);
   const ligados = _processosLigadosADependencia(String(id), dep.nome, dep.categoria, processos, { servicos, dependencias: catalogo });
   const processosComTier = await Promise.all(ligados.slice(0, 20).map(async (p) => ({
     processo: p.processo || '', area: p.area || '',
@@ -2282,7 +2288,7 @@ async function _sugerirDescricaoServico(db, data, ctx) {
 
   const [catSnap, procSnap] = await Promise.all([db.collection(COLLECTION.dependencias).get(), db.collection(COLLECTION.processos).get()]);
   const catalogo = catSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-  const processos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const processos = _processosDeContinuidade(procSnap);
   const doCatalogo = (it) => (it && it.id != null ? catalogo.find((d) => String(d.id) === String(it.id)) : null);
   const itens = Array.isArray(s.dependenciaItens) ? s.dependenciaItens : [];
   // Processos suportados: o vinculo mora no processo (item 'Servicos'); processoIds antigo ainda conta.
@@ -2358,7 +2364,7 @@ async function _sugerirProcessosDoServico(db, data, ctx) {
   if (!snap.exists) throw new AppError('Serviço não encontrado.');
   const s = { id: snap.id, ...(snap.data() || {}) };
   const procSnap = await db.collection(COLLECTION.processos).get();
-  const processos = procSnap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const processos = _processosDeContinuidade(procSnap);
 
   const itensServico = Array.isArray(s.dependenciaItens) ? s.dependenciaItens : [];
   const idsDepsServico = new Map(itensServico.filter((it) => it && it.id != null).map((it) => [String(it.id), it.nome || '']));

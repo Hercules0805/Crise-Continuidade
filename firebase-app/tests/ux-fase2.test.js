@@ -52,9 +52,9 @@ test('Gestor sem area comeca em Processos (o Dashboard fica bloqueado para ele)'
   w.close();
 });
 
-test('menu lateral: operacao primeiro (continuidade no topo), configuracao e administracao no rodape', () => {
+test('menu lateral: operacao primeiro (Processos, a entidade principal, e Continuidade no topo), configuracao e administracao no rodape', () => {
   const m = menu();
-  assert.deepStrictEqual(m.map((g) => g.grupo), ['continuidade', 'riscos', 'terceiros', 'servicos', 'indicadores', 'configuracoes', 'administracao']);
+  assert.deepStrictEqual(m.map((g) => g.grupo), ['processos', 'continuidade', 'riscos', 'terceiros', 'servicos', 'indicadores', 'configuracoes', 'administracao']);
   assert.deepStrictEqual(m.filter((g) => g.rodape).map((g) => g.grupo), ['configuracoes', 'administracao']);
   // Ordem de uso do módulo: painel/tela principal primeiro.
   const principal = { continuidade: 'admin', terceiros: 'terceiros-dashboard', servicos: 'servicos', indicadores: 'indicadores-dashboard' };

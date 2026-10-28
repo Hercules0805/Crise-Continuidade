@@ -170,6 +170,18 @@ describe('Security Rules — processos e respostas', () => {
   test('admin homologa o BIA', async () => {
     await assertSucceeds(db(ADMIN).doc('processos/ti__proc').set({ biaHomologacao: { em: '2026-10-27T10:00:00Z', por: 'admin@x' } }, { merge: true }));
   });
+
+  // Cadastro de Processos (28/10/2026): campos do cadastro com formato fixo.
+  test('cadastro: categoria da lista, continuidade bool e links lista', async () => {
+    const ok = { area: 'TI', processo: 'Dep', categoria: 'Departamental', continuidade: false, links: [{ titulo: 'Wiki', url: 'https://x' }], criadorId: 'p1', aprovadorId: '' };
+    await assertSucceeds(db(GESTOR).doc('processos/ti__dep').set(ok));
+    await assertSucceeds(db(ADMIN).doc('processos/rh__inter').set({ area: 'RH', processo: 'Inter', categoria: 'Intersetorial' }));
+    await assertFails(db(ADMIN).doc('processos/ti__x').set({ area: 'TI', processo: 'X', categoria: 'Outra' }));
+    await assertFails(db(ADMIN).doc('processos/ti__x').set({ area: 'TI', processo: 'X', continuidade: 'sim' }));
+    await assertFails(db(ADMIN).doc('processos/ti__x').set({ area: 'TI', processo: 'X', links: 'https://x' }));
+    await assertFails(db(ADMIN).doc('processos/ti__proc').set({ categoria: 'Outra' }, { merge: true }));
+    await assertFails(db(GESTOR).doc('processos/rh__dep').set({ ...ok, area: 'RH' }));
+  });
 });
 
 // --- Regressao: a colecao de tokens ficava legivel para todo o dominio ---
