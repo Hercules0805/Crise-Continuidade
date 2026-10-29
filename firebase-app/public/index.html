@@ -39,8 +39,10 @@
         <div class="nav-group" data-group="processos">
           <button type="button" class="nav-group-label" aria-expanded="false" title="Processos"><svg class="nav-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="7" height="6" rx="1"/><rect x="14" y="14" width="7" height="6" rx="1"/><path d="M6.5 10v4a2 2 0 0 0 2 2H14"/></svg><span class="rot">Processos</span><svg class="nav-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg></button>
           <div class="nav-itens">
+            <a href="#processos-dashboard" class="nav-link" data-page="processos-dashboard">Dashboard de Processos</a>
             <a href="#cadastro-processos" class="nav-link" data-page="cadastro-processos">Cadastro de Processos</a>
             <a href="#processos-categorias" class="nav-link" data-page="processos-categorias">Categorias de Processo</a>
+            <a href="#processos-relatorios" class="nav-link" data-page="processos-relatorios">Relatórios de Processos</a>
           </div>
         </div>
         <div class="nav-group" data-group="continuidade">
@@ -179,7 +181,7 @@
   <script src="vendor/purify-3.4.15.min.js?v=1"></script>
   <script src="sanitizar-pcn.js?v=1"></script>
   <script src="util.js?v=5"></script>
-  <script src="perfis.js?v=27"></script>
+  <script src="perfis.js?v=28"></script>
   <script src="criticidade.js?v=2"></script>
   <script src="cadeia-dependencias.js?v=4"></script>
   <script src="fornecedor-score.js?v=2"></script>
@@ -192,6 +194,7 @@
   <script src="contrato-ciclo.js?v=5"></script>
   <script src="dependencia-duplicidade.js?v=1"></script>
   <script src="areas-hierarquia.js?v=1"></script>
+  <script src="processos-indicadores.js?v=1"></script>
   <script src="servico-composicao.js?v=4"></script>
   <script src="mapa-continuidade.js?v=14"></script>
   <script src="conformidade-continuidade.js?v=3"></script>
@@ -340,6 +343,6 @@
       if (window._routePendente) route();
     });
   </script>
-  <script src="app.js?v=268"></script>
+  <script src="app.js?v=269"></script>
 </body>
 </html>

@@ -36,6 +36,8 @@ const pages = {
   conformidade,
   'threat-intel': threatIntel,
   'cadastro-processos': cadastroProcessos,
+  'processos-dashboard': processosDashboard,
+  'processos-relatorios': processosRelatorios,
   'processos-categorias': processosCategorias,
 };
 
@@ -2814,6 +2816,422 @@ window.excluirPessoaCadastro = async (id) => {
 };
 
 // ============================================================
+// PÁGINAS: DASHBOARD DE PROCESSOS e RELATÓRIOS DE PROCESSOS (29/10/2026)
+//
+// Visão do Cadastro de Processos inteiro (dentro e fora de Continuidade).
+// Cálculo em processos-indicadores.js (puro). O Gestor vê só a área dele e
+// as de baixo (_areaNoMeuEscopo). Relatórios: página para imprimir/PDF e
+// planilha CSV -- sem IA e sem edições salvas.
+// ============================================================
+
+/** Carga comum às duas telas: processos (já no recorte do Gestor), categorias, áreas e pessoas. */
+async function _carregarBaseProcessos() {
+  const [procs, cats, areas, deps] = await Promise.all([
+    API.getProcessosCadastro(), API.getCategoriasProcesso(), API.getAreas(),
+    // Pessoas (Criador/Aprovador): sem elas as telas abrem igual, sem os nomes.
+    API.getDependencias().catch(() => null),
+  ]);
+  categoriasProcessoData = cats;
+  window.areasDisponiveis = areas;
+  if (deps) pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
+  return { processos: procs.filter((p) => _areaNoMeuEscopo(p.area)), categorias: cats, areas: areas.filter((a) => _areaNoMeuEscopo(a.nome)) };
+}
+
+/** Gestor ainda sem área: nada a mostrar (mesmo aviso do Dashboard de Continuidade). */
+function _semAreaConfigurada() {
+  if (!(_limitadoAArea() && !window.USER_AREA)) return false;
+  document.querySelector('.loading').outerHTML = `<div class="painel-card"><div class="painel-card__titulo">🔒 Acesso não configurado</div>
+    <div class="vazio-inline">Seu perfil de Gestor ainda não tem área definida. Peça ao administrador para configurá-la.</div></div>`;
+  return true;
+}
+
+async function processosDashboard() {
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Dashboard de Processos</h2><p class="page-sub">Situação do Cadastro de Processos. Clique num número para abrir a lista já filtrada.</p></div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div id="processosPainel"></div>`;
+  if (_semAreaConfigurada()) return;
+  let base;
+  try {
+    base = await _carregarBaseProcessos();
+  } catch (e) {
+    console.error('Dashboard de Processos: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar o Dashboard de Processos.', 'processosDashboard');
+    return;
+  }
+  document.querySelector('.loading').style.display = 'none';
+  const { processos, categorias, areas } = base;
+  const r = ProcessosIndicadores.resumo(processos, { categorias });
+  const linhasArea = ProcessosIndicadores.porArea(processos, areas, { categorias });
+  const cardFiltro = (label, value, filtros, cor, titulo) => _htmlMetricCardFiltro({ label, value, cor, ativo: false, titulo: titulo || 'Abrir o Cadastro filtrado',
+    onclick: `_abrirListaFiltrada('cadastro-processos', ${esc(JSON.stringify(filtros))})` });
+  const barra = (pct, cor) => `<div class="barra"><div class="barra__valor" style="width:${pct}%;background:${cor};"></div></div>`;
+  const pct = (n) => (r.total ? Math.round((n / r.total) * 100) : 0);
+  const catsComProcesso = r.porCategoria.filter((c) => c.n || c.ativo);
+  const colunasCat = categorias.filter((c) => c.ativo);
+  const nomePessoa = (email) => esc(String(email || '').split('@')[0] || '–');
+
+  document.getElementById('processosPainel').innerHTML = !r.total ? _htmlVazio('Nenhum processo cadastrado ainda.', 'Os indicadores aparecem quando houver processos no Cadastro de Processos.') : `
+    <div class="painel-secao">Totais</div>
+    <div class="painel-metricas painel-metricas--auto metricas-filtro">
+      ${cardFiltro('Processos cadastrados', r.total, {})}
+      ${cardFiltro(`Em Continuidade (${r.pctContinuidade}%)`, r.emContinuidade, { filtroCadProcContinuidade: 'sim' })}
+      ${catsComProcesso.map((c) => cardFiltro(c.nome, c.n, { filtroCadProcCategoria: c.id })).join('')}
+    </div>
+    <div class="painel-card" style="margin-top:16px;">
+      <div class="painel-card__titulo">Distribuição por categoria</div>
+      ${catsComProcesso.map((c) => `<div class="painel-linha">
+          <span class="painel-linha__rotulo">${esc(c.nome)}</span>${barra(pct(c.n), '#d60014')}
+          <span class="painel-linha__valor num">${c.n}</span>
+        </div>`).join('')}
+    </div>
+
+    <div class="painel-secao">Qualidade do cadastro</div>
+    <div class="painel-metricas painel-metricas--auto metricas-filtro">
+      ${cardFiltro(`Cadastro completo (${r.pctCompletos}%)`, r.completos, { filtroCadProcPendencia: 'completo' }, '#2e7d32')}
+      ${ProcessosIndicadores.PENDENCIAS.map((x) => cardFiltro(x.rotulo, r.pendencias[x.chave], { filtroCadProcPendencia: x.chave }, r.pendencias[x.chave] ? '#e65100' : '')).join('')}
+    </div>
+
+    <div class="painel-secao">Por área</div>
+    <div class="painel-card">
+      <div class="data-table data-table--compact"><table>
+        <thead><tr><th>Área</th><th class="num">Total</th><th class="num">Em Continuidade</th>
+          ${colunasCat.map((c) => `<th class="num">${esc(c.nome)}</th>`).join('')}<th style="width:180px;">Cadastro completo</th></tr></thead>
+        <tbody>${linhasArea.map((l) => `<tr>
+          <td style="padding-left:${10 + l.nivel * 18}px;">${l.total
+            ? `<a href="#" onclick="_abrirListaFiltrada('cadastro-processos', ${esc(JSON.stringify({ filtroCadProcArea: l.area }))});return false;">${esc(l.area)}</a>`
+            : esc(l.area)}${l.foraDoCadastro ? ' <span style="color:#999;">(fora do cadastro)</span>' : ''}</td>
+          <td class="num">${l.total}</td><td class="num">${l.continuidade}</td>
+          ${colunasCat.map((c) => `<td class="num">${l.porCategoria[c.id] || 0}</td>`).join('')}
+          <td>${l.total ? `<div class="painel-linha" style="margin:0;">${barra(l.pct, l.pct === 100 ? '#2e7d32' : '#e65100')}<span class="painel-linha__valor num">${l.pct}%</span></div>` : '–'}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+    </div>
+
+    <div class="painel-secao">Movimentação recente</div>
+    <div class="painel-metricas painel-metricas--auto">
+      ${_htmlMetricCard({ label: `Criados nos últimos ${ProcessosIndicadores.JANELA_RECENTE_DIAS} dias`, value: r.criados30d })}
+      ${_htmlMetricCard({ label: `Atualizados nos últimos ${ProcessosIndicadores.JANELA_RECENTE_DIAS} dias`, value: r.atualizados30d })}
+    </div>
+    <div class="painel-card" style="margin-top:16px;">
+      <div class="painel-card__titulo">Alterados mais recentemente</div>
+      ${r.recentes.length ? `<div class="data-table data-table--lista"><table><colgroup><col><col style="width:200px"><col style="width:140px"><col style="width:160px"></colgroup>
+        <thead><tr><th>Processo</th><th>Área</th><th>Atualizado em</th><th>Por</th></tr></thead>
+        <tbody>${r.recentes.map((p) => `<tr style="cursor:pointer;" onclick="location.hash='#cadastro-processos?processo=${escJs(encodeURIComponent(p.id))}'">
+          ${_tdLista(p.processo, 'forte')}${_tdLista(p.area)}${_tdLista(_dataBR(String(p.atualizadoEm).slice(0, 10)))}<td>${nomePessoa(p.atualizadoPor)}</td></tr>`).join('')}</tbody>
+      </table></div>` : '<div class="vazio-inline">Nenhuma alteração registrada.</div>'}
+    </div>`;
+}
+
+// ---- Relatórios de Processos ----
+const _TIPOS_RELATORIO_PROCESSOS = [
+  { tipo: 'inventario', rotulo: 'Inventário de Processos', dica: 'Todos os processos por área, com categoria, criador, aprovador, Continuidade, descrição funcional e links.' },
+  { tipo: 'pendencias', rotulo: 'Pendências do cadastro', dica: 'Por área, os processos com dados faltando (descrição, criador, aprovador, links, categoria), para cobrar os responsáveis.' },
+  { tipo: 'categorias', rotulo: 'Processos por Categoria', dica: 'Cada categoria com finalidade, critérios e exemplos, seguida dos processos classificados nela.' },
+  { tipo: 'pessoas', rotulo: 'Processos por Pessoa', dica: 'Para cada pessoa, os processos em que ela é Criador ou Aprovador; no fim, os processos sem criador ou sem aprovador.' },
+];
+let _baseRelatorioProcessos = null;
+
+async function processosRelatorios() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  app.innerHTML = `
+    <div class="page-header">
+      <div><h2>Relatórios de Processos</h2><p class="page-sub">Relatórios do Cadastro de Processos para imprimir, salvar em PDF ou baixar em planilha.</p></div>
+    </div>
+    <div class="loading">⏳ Carregando...</div>
+    <div class="painel-card" id="relProcCard" style="display:none;max-width:760px;">
+      <div class="painel-card__titulo">Gerar relatório</div>
+      <div style="margin-bottom:14px;">
+        <label style="${lbl}" for="relProcTipo">Relatório</label>
+        <select id="relProcTipo" style="${inp}" onchange="atualizarEscopoRelatorioProcessos()">
+          ${_TIPOS_RELATORIO_PROCESSOS.map((t) => `<option value="${t.tipo}">${esc(t.rotulo)}</option>`).join('')}
+        </select>
+        <div id="relProcDica" style="font-size:0.8em;color:#888;margin-top:4px;"></div>
+      </div>
+      <div style="${lbl}margin-top:6px;">Escopo do relatório</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px;">
+        <select id="relProcArea" aria-label="Área" style="${inp}" onchange="atualizarEscopoRelatorioProcessos()"></select>
+        <select id="relProcCategoria" aria-label="Categoria" style="${inp}" onchange="atualizarEscopoRelatorioProcessos()"></select>
+        <select id="relProcContinuidade" aria-label="Continuidade" style="${inp}" onchange="atualizarEscopoRelatorioProcessos()">
+          <option value="">Continuidade: Todos</option><option value="sim">Continuidade: Sim</option><option value="nao">Continuidade: Não</option>
+        </select>
+      </div>
+      <div id="relProcContagem" style="font-size:0.85em;color:#555;margin-bottom:14px;"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;">
+        <button class="btn btn-primary" id="btnGerarRelProc" onclick="gerarRelatorioProcessos()">🖨️ Gerar (imprimir/PDF)</button>
+        <button class="btn btn-ghost" id="btnCsvRelProc" onclick="baixarCsvRelatorioProcessos()">Baixar planilha (CSV)</button>
+      </div>
+    </div>`;
+  if (_semAreaConfigurada()) return;
+  try {
+    _baseRelatorioProcessos = await _carregarBaseProcessos();
+  } catch (e) {
+    console.error('Relatórios de Processos: falha ao carregar', e);
+    document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar os processos.', 'processosRelatorios');
+    return;
+  }
+  document.querySelector('.loading').style.display = 'none';
+  document.getElementById('relProcCard').style.display = '';
+  const selArea = document.getElementById('relProcArea');
+  if (_limitadoAArea() && _minhasAreas().length <= 1) {
+    selArea.innerHTML = `<option value="${esc(window.USER_AREA || '')}">Área: ${esc(window.USER_AREA || '')}</option>`;
+    selArea.disabled = true;
+  } else {
+    const nomes = [...new Set([..._baseRelatorioProcessos.areas.map((a) => a.nome), ..._baseRelatorioProcessos.processos.map((p) => p.area)].filter(Boolean))];
+    selArea.innerHTML = _opcoesFiltroLista('Área', _opcoesFiltroAreaHierarquia(nomes), 'Todas');
+  }
+  document.getElementById('relProcCategoria').innerHTML = _opcoesFiltroLista('Categoria',
+    _baseRelatorioProcessos.categorias.map((c) => [c.id, c.ativo ? c.nome : `${c.nome} (inativa)`]), 'Todas');
+  atualizarEscopoRelatorioProcessos();
+}
+
+/** Processos dentro do escopo escolhido (já no recorte do Gestor). */
+function _processosNoEscopoRelatorio() {
+  const base = _baseRelatorioProcessos;
+  if (!base) return [];
+  const area = document.getElementById('relProcArea').value;
+  const cat = document.getElementById('relProcCategoria').value;
+  const cont = document.getElementById('relProcContinuidade').value;
+  return base.processos.filter((p) => _casaFiltroArea(area, p.area) && (!cat || String(p.categoriaId) === cat)
+    && (!cont || (cont === 'sim') === (p.continuidade !== false)));
+}
+
+window.atualizarEscopoRelatorioProcessos = () => {
+  const tipo = _TIPOS_RELATORIO_PROCESSOS.find((t) => t.tipo === document.getElementById('relProcTipo').value);
+  document.getElementById('relProcDica').textContent = tipo ? tipo.dica : '';
+  const n = _processosNoEscopoRelatorio().length;
+  document.getElementById('relProcContagem').textContent = n ? `${n} processo${n === 1 ? '' : 's'} no escopo.` : 'Nenhum processo neste escopo.';
+  ['btnGerarRelProc', 'btnCsvRelProc'].forEach((id) => { document.getElementById(id).disabled = !n; });
+};
+
+/** Contexto dos documentos: nomes de pessoa e categoria resolvidos. */
+function _ctxRelatorioProcessos() {
+  const base = _baseRelatorioProcessos;
+  const cat = (id) => _nomeCategoriaProcesso(id) || '–';
+  return { categorias: base.categorias, areas: base.areas, pessoas: pessoasData || [], nomeCategoria: cat, nomePessoa: (id) => _nomePessoaPorId(id) || '–' };
+}
+
+/** Descrição do escopo para o subtítulo ("Área: TI · Categoria: Todas · Continuidade: Sim"). */
+function _textoEscopoRelatorioProcessos() {
+  const txt = (id) => { const s = document.getElementById(id); return s && s.selectedIndex >= 0 ? s.options[s.selectedIndex].textContent.trim() : ''; };
+  return ['relProcArea', 'relProcCategoria', 'relProcContinuidade'].map(txt).filter(Boolean).join(' · ');
+}
+
+window.gerarRelatorioProcessos = () => {
+  const tipo = document.getElementById('relProcTipo').value;
+  const procs = _processosNoEscopoRelatorio();
+  if (!procs.length) return;
+  // Abre no clique (antes de qualquer espera) para o navegador não bloquear.
+  const win = window.open('', '_blank');
+  if (!win) return showToast('O navegador bloqueou a nova aba. Permita pop-ups para este site e tente de novo.', '#e65100');
+  win.document.write(_htmlRelatorioProcessos(tipo, procs, _ctxRelatorioProcessos(), _textoEscopoRelatorioProcessos()));
+  win.document.close();
+};
+
+window.baixarCsvRelatorioProcessos = () => {
+  const tipo = document.getElementById('relProcTipo').value;
+  const procs = _processosNoEscopoRelatorio();
+  if (!procs.length) return;
+  const { cabecalho, linhas } = _csvRelatorioProcessos(tipo, procs, _ctxRelatorioProcessos());
+  _baixarCsv(`processos-${tipo}-${new Date().toISOString().slice(0, 10)}.csv`, cabecalho, linhas);
+};
+
+/** CSV pronto para o Excel pt-BR: BOM, ';' e aspas só quando precisa (mesmo formato de exportarContratosCSV). */
+function _textoCsv(cabecalho, linhas) {
+  const cel = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  return '﻿' + [cabecalho, ...linhas].map((l) => l.map(cel).join(';')).join('\r\n');
+}
+function _baixarCsv(nomeArquivo, cabecalho, linhas) {
+  const url = URL.createObjectURL(new Blob([_textoCsv(cabecalho, linhas)], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = nomeArquivo;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/** Linhas do CSV de cada relatório (puro). */
+function _csvRelatorioProcessos(tipo, procs, ctx) {
+  const simNao = (b) => (b ? 'Sim' : 'Não');
+  const links = (p) => (p.links || []).map((l) => (l.titulo ? `${l.titulo}: ${l.url}` : l.url)).join(' | ');
+  const base = (p) => [p.area, p.processo, ctx.nomeCategoria(p.categoriaId), ctx.nomePessoa(p.criadorId), ctx.nomePessoa(p.aprovadorId),
+    simNao(p.continuidade !== false), p.descricaoFuncional || '', links(p), String(p.atualizadoEm || '').slice(0, 10)];
+  const cabBase = ['Área', 'Processo', 'Categoria', 'Criador', 'Aprovador', 'Continuidade', 'Descrição Funcional', 'Links', 'Atualizado em'];
+  const porAreaNome = (a, b) => (String(a.area) + '|' + String(a.processo)).localeCompare(String(b.area) + '|' + String(b.processo), 'pt-BR');
+  if (tipo === 'pendencias') {
+    const P = ProcessosIndicadores.PENDENCIAS;
+    return {
+      cabecalho: [...cabBase.slice(0, 6), ...P.map((x) => x.rotulo)],
+      linhas: procs.slice().sort(porAreaNome).filter((p) => !ProcessosIndicadores.cadastroCompleto(p, ctx)).map((p) => {
+        const pend = ProcessosIndicadores.pendenciasDoProcesso(p, ctx);
+        return [...base(p).slice(0, 6), ...P.map((x) => simNao(pend[x.chave]))];
+      }),
+    };
+  }
+  if (tipo === 'categorias') {
+    const ordem = {};
+    ctx.categorias.forEach((c, i) => { ordem[c.id] = i; });
+    const pos = (p) => (ordem[p.categoriaId] === undefined ? 9999 : ordem[p.categoriaId]);
+    return { cabecalho: cabBase, linhas: procs.slice().sort((a, b) => (pos(a) - pos(b)) || porAreaNome(a, b)).map(base) };
+  }
+  if (tipo === 'pessoas') {
+    const r = ProcessosIndicadores.porPessoa(procs, ctx.pessoas);
+    const linhas = [];
+    r.pessoas.forEach((g) => {
+      g.criador.forEach((p) => linhas.push([g.pessoa.nome, 'Criador', p.area, p.processo]));
+      g.aprovador.forEach((p) => linhas.push([g.pessoa.nome, 'Aprovador', p.area, p.processo]));
+    });
+    r.semCriador.forEach((p) => linhas.push(['(sem pessoa)', 'Criador', p.area, p.processo]));
+    r.semAprovador.forEach((p) => linhas.push(['(sem pessoa)', 'Aprovador', p.area, p.processo]));
+    return { cabecalho: ['Pessoa', 'Papel', 'Área', 'Processo'], linhas };
+  }
+  return { cabecalho: cabBase, linhas: procs.slice().sort(porAreaNome).map(base) };
+}
+
+/** Documento HTML completo de cada relatório (puro; mesmo visual do "Processos por Área"). */
+function _htmlRelatorioProcessos(tipo, procs, ctx, escopo) {
+  const T = _TIPOS_RELATORIO_PROCESSOS.find((t) => t.tipo === tipo) || _TIPOS_RELATORIO_PROCESSOS[0];
+  const r = ProcessosIndicadores.resumo(procs, { categorias: ctx.categorias });
+  const simNao = (b) => (b ? 'Sim' : 'Não');
+  const card = (titulo, num, de) => `<div class="resumo-card"><div class="resumo-titulo">${esc(titulo)}</div><div class="resumo-num">${num}${de !== undefined ? ` <span class="resumo-de">de ${de}</span>` : ''}</div></div>`;
+  const resumoCat = r.porCategoria.filter((c) => c.n).map((c) => `<li><span>${esc(c.nome)}</span><strong>${c.n}</strong></li>`).join('');
+  const blocoArea = (l, conteudo, extra) => `<div class="area-bloco"><h2 style="padding-left:${l.nivel * 14}px;">${esc(l.area)}${l.foraDoCadastro ? ' <span class="aviso-cadastro">(fora do cadastro)</span>' : ''}</h2>
+      <div class="area-meta">${extra || ''}</div>${conteudo}</div>`;
+  const linhaDesc = (p) => {
+    const ls = (p.links || []).map((l) => `<a href="${esc(l.url)}">${esc(l.titulo || l.url)}</a>`).join(' · ');
+    if (!p.descricaoFuncional && !ls) return '';
+    return `<tr class="descricoes"><td colspan="5">${p.descricaoFuncional ? `<div class="desc"><b>Descrição Funcional:</b> <span class="desc-texto">${esc(p.descricaoFuncional)}</span></div>` : ''}${ls ? `<div class="desc"><b>Links:</b> ${ls}</div>` : ''}</td></tr>`;
+  };
+  let resumoHtml = `<div class="resumo-geral"><h2>Resumo</h2><div class="resumo-cards">
+      ${card('Processos', r.total)}${card('Em Continuidade', r.emContinuidade, r.total)}${card('Cadastro completo', r.completos, r.total)}
+      ${resumoCat ? `<div class="resumo-card"><div class="resumo-titulo">Por categoria</div><ul>${resumoCat}</ul></div>` : ''}
+    </div></div>`;
+  let corpo = '';
+
+  if (tipo === 'inventario') {
+    corpo = ProcessosIndicadores.porArea(procs, ctx.areas, { categorias: ctx.categorias }).filter((l) => l.total).map((l) => blocoArea(l, `<table>
+        <thead><tr><th>Processo</th><th>Categoria</th><th>Criador</th><th>Aprovador</th><th class="c">Continuidade</th></tr></thead>
+        <tbody>${l.processos.map((p) => `<tr${p.descricaoFuncional || (p.links || []).length ? ' class="com-descricoes"' : ''}>
+          <td><strong>${esc(p.processo)}</strong></td><td>${esc(ctx.nomeCategoria(p.categoriaId))}</td><td>${esc(ctx.nomePessoa(p.criadorId))}</td>
+          <td>${esc(ctx.nomePessoa(p.aprovadorId))}</td><td class="c">${simNao(p.continuidade !== false)}</td></tr>${linhaDesc(p)}`).join('')}</tbody>
+      </table>`, `${l.total} processo${l.total === 1 ? '' : 's'} · ${l.continuidade} em Continuidade · cadastro completo ${l.pct}%`)).join('');
+  } else if (tipo === 'pendencias') {
+    const P = ProcessosIndicadores.PENDENCIAS;
+    resumoHtml = `<div class="resumo-geral"><h2>Resumo</h2><div class="resumo-cards">
+        ${card('Processos no escopo', r.total)}${card('Com pendência', r.total - r.completos, r.total)}
+        <div class="resumo-card"><div class="resumo-titulo">Pendências</div><ul>${P.map((x) => `<li><span>${esc(x.rotulo)}</span><strong${r.pendencias[x.chave] ? ' class="alerta"' : ''}>${r.pendencias[x.chave]}</strong></li>`).join('')}</ul></div>
+      </div></div>`;
+    corpo = ProcessosIndicadores.porArea(procs, ctx.areas, { categorias: ctx.categorias }).map((l) => {
+      const incompletos = l.processos.filter((p) => !ProcessosIndicadores.cadastroCompleto(p, ctx));
+      if (!incompletos.length) return '';
+      return blocoArea(l, `<table>
+          <thead><tr><th>Processo</th><th>O que falta</th><th>Criador</th><th>Aprovador</th></tr></thead>
+          <tbody>${incompletos.map((p) => {
+            const pend = ProcessosIndicadores.pendenciasDoProcesso(p, ctx);
+            return `<tr><td><strong>${esc(p.processo)}</strong></td><td>${esc(P.filter((x) => pend[x.chave]).map((x) => x.rotulo).join(' · '))}</td>
+              <td>${esc(ctx.nomePessoa(p.criadorId))}</td><td>${esc(ctx.nomePessoa(p.aprovadorId))}</td></tr>`;
+          }).join('')}</tbody>
+        </table>`, `${incompletos.length} de ${l.total} processo${l.total === 1 ? '' : 's'} com pendência`);
+    }).join('') || '<p class="vazio">Nenhuma pendência: todos os processos do escopo estão com o cadastro completo.</p>';
+  } else if (tipo === 'categorias') {
+    const grupos = {};
+    procs.forEach((p) => { (grupos[String(p.categoriaId)] = grupos[String(p.categoriaId)] || []).push(p); });
+    const cats = ctx.categorias.filter((c) => grupos[c.id]).concat(Object.keys(grupos).filter((id) => !ctx.categorias.some((c) => c.id === id))
+      .map((id) => ({ id, nome: '(categoria removida)' })));
+    const texto = (rot, t) => (t ? `<div class="desc"><b>${rot}:</b> <span class="desc-texto">${esc(t)}</span></div>` : '');
+    corpo = cats.map((c) => {
+      const lista = grupos[c.id].slice().sort((a, b) => (String(a.area) + String(a.processo)).localeCompare(String(b.area) + String(b.processo), 'pt-BR'));
+      return `<div class="area-bloco"><h2>${esc(c.nome)}${c.ativo === false ? ' <span class="aviso-cadastro">(inativa)</span>' : ''}</h2>
+        <div class="area-meta">${lista.length} processo${lista.length === 1 ? '' : 's'}</div>
+        ${texto('Finalidade', c.finalidade)}${texto('Critérios de identificação', c.criteriosIdentificacao)}${texto('Exemplos', c.exemplos)}
+        <table style="margin-top:10px;"><thead><tr><th>Área</th><th>Processo</th><th class="c">Continuidade</th></tr></thead>
+        <tbody>${lista.map((p) => `<tr><td>${esc(p.area)}</td><td><strong>${esc(p.processo)}</strong></td><td class="c">${simNao(p.continuidade !== false)}</td></tr>`).join('')}</tbody></table>
+      </div>`;
+    }).join('');
+  } else if (tipo === 'pessoas') {
+    const g = ProcessosIndicadores.porPessoa(procs, ctx.pessoas);
+    const tabela = (rot, lista) => (lista.length ? `<div class="desc" style="margin-top:8px;"><b>${rot} (${lista.length})</b></div>
+        <table><thead><tr><th>Área</th><th>Processo</th></tr></thead>
+        <tbody>${lista.map((p) => `<tr><td>${esc(p.area)}</td><td><strong>${esc(p.processo)}</strong></td></tr>`).join('')}</tbody></table>` : '');
+    resumoHtml = `<div class="resumo-geral"><h2>Resumo</h2><div class="resumo-cards">
+        ${card('Processos no escopo', r.total)}${card('Pessoas envolvidas', g.pessoas.length)}
+        ${card('Sem criador', g.semCriador.length, r.total)}${card('Sem aprovador', g.semAprovador.length, r.total)}
+      </div></div>`;
+    corpo = g.pessoas.map((x) => `<div class="area-bloco"><h2>${esc(x.pessoa.nome)}</h2>
+        <div class="area-meta">Criador de ${x.criador.length} · Aprovador de ${x.aprovador.length}</div>
+        ${tabela('Criador de', x.criador)}${tabela('Aprovador de', x.aprovador)}</div>`).join('')
+      + (g.semCriador.length || g.semAprovador.length ? `<div class="area-bloco"><h2>Sem pessoa</h2>
+        <div class="area-meta">Processos que ainda não têm criador ou aprovador.</div>
+        ${tabela('Sem criador', g.semCriador)}${tabela('Sem aprovador', g.semAprovador)}</div>` : '');
+  }
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>${esc(T.rotulo)}</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',Arial,sans-serif;color:#222;background:#f5f6fa;padding:24px}
+.header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:24px}
+.header h1{font-size:18pt;color:#d60014}
+.header .sub{font-size:9pt;color:#888;margin-top:4px}
+.btn-print{padding:9px 18px;background:#d60014;color:#fff;border:none;border-radius:8px;font-size:9.5pt;cursor:pointer;font-weight:600}
+.area-bloco{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:20px;margin-bottom:20px;page-break-inside:avoid}
+.area-bloco h2{font-size:13pt;color:#d60014;margin-bottom:6px}
+.aviso-cadastro{font-size:8.5pt;font-weight:400;color:#e65100}
+.area-meta{font-size:9.5pt;color:#555;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #fce8ea}
+table{width:100%;border-collapse:collapse;font-size:9.5pt}
+th{text-align:left;padding:8px 10px;background:#f5f6fa;color:#555;font-size:8.5pt;text-transform:uppercase;letter-spacing:.3px}
+td{padding:8px 10px;border-bottom:1px solid #f0f0f0}
+.c{text-align:center}
+.vazio{font-size:9.5pt;color:#999;font-style:italic;padding:4px 0}
+tr.com-descricoes td{border-bottom:none}
+tr.descricoes td{background:#fafafa;font-size:9pt;color:#444;padding:6px 10px 10px 22px;border-bottom:1px solid #e8e8e8}
+tr.com-descricoes,tr.descricoes{page-break-inside:avoid;break-inside:avoid}
+.desc{margin-top:3px;font-size:9.5pt}
+.desc-texto{white-space:pre-line}
+a{color:#1565c0}
+.resumo-geral{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:20px;margin-bottom:20px;page-break-inside:avoid}
+.resumo-geral h2{font-size:13pt;color:#d60014;margin-bottom:12px}
+.resumo-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+.resumo-card{border:1px solid #eee;border-top:3px solid #d60014;border-radius:8px;padding:12px 14px}
+.resumo-titulo{font-size:8.5pt;font-weight:700;color:#555;text-transform:uppercase;letter-spacing:.3px}
+.resumo-num{font-size:20pt;font-weight:700;color:#222;margin:4px 0 8px}
+.resumo-de{font-size:9pt;font-weight:400;color:#777}
+.resumo-card ul{list-style:none;font-size:9pt}
+.resumo-card li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:3px 0;border-bottom:1px dashed #f0f0f0}
+.resumo-card li strong.alerta{color:#d60014}
+.footer{margin-top:30px;text-align:center;font-size:8pt;color:#aaa}
+@media print{body{background:#fff}.btn-print{display:none!important}.area-bloco,.resumo-geral,.resumo-card,tr.descricoes td{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}}
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <img src="https://bia-forte-2025.web.app/logo_fortes.png" style="height:40px;margin-bottom:4px;display:block;" alt="Fortes Tecnologia" onerror="this.style.display='none'">
+    <div style="font-size:0.72em;color:#d60014;font-weight:700;letter-spacing:0.3px;margin-bottom:8px;">BIA · Governança, Riscos e Conformidade</div>
+    <h1>${esc(T.rotulo)}</h1>
+    <div class="sub">${r.total} processo${r.total === 1 ? '' : 's'}${escopo ? ' • ' + esc(escopo) : ''} • ${new Date().toLocaleDateString('pt-BR')} • Fortes Tecnologia</div>
+  </div>
+  <button class="btn-print" onclick="window.print()">🖨️ Imprimir / PDF</button>
+</div>
+${resumoHtml}
+${corpo || '<p class="vazio">Nenhum processo neste escopo.</p>'}
+<div class="footer">Relatório gerado a partir do Cadastro de Processos.</div>
+</body>
+</html>`;
+}
+
+// ============================================================
 // PÁGINA: CATEGORIAS DE PROCESSO (29/10/2026)
 //
 // Cadastro das categorias do Cadastro de Processos (coleção
@@ -3060,12 +3478,15 @@ async function cadastroProcessos() {
   const pode = Perfis.podeEditarProcessos(window.USER_PERFIS);
   app.innerHTML = `
     ${_htmlCabecalhoLista({ titulo: 'Cadastro de Processos', sub: 'Todos os processos mapeados nas áreas; os marcados "Avaliar em Continuidade" seguem para BIA, PCN e DRP.',
-      primario: pode ? { rotulo: '+ Novo processo', onclick: 'abrirDrawerCadastroProcesso()', id: 'btnNovoCadastroProcesso' } : null })}
+      primario: pode ? { rotulo: '+ Novo processo', onclick: 'abrirDrawerCadastroProcesso()', id: 'btnNovoCadastroProcesso' } : null,
+      maisAcoes: [_seVeTela('processos-relatorios', 'x') ? { rotulo: 'Relatórios de Processos', onclick: "location.hash='#processos-relatorios'" } : null] })}
     ${_htmlBarraLista({ busca: { id: 'buscaCadastroProcesso', placeholder: 'Buscar processo…' }, aoMudar: 'filtrarCadastroProcessos', contadorId: 'cadastroProcessosContador',
       filtros: [
         { id: 'filtroCadProcArea', rotulo: 'Área', opcoes: [] },
         { id: 'filtroCadProcCategoria', rotulo: 'Categoria', opcoes: [] },
         { id: 'filtroCadProcContinuidade', rotulo: 'Continuidade', todos: 'Todos', opcoes: [['sim', 'Sim'], ['nao', 'Não']] },
+        // Pendência (29/10/2026): os números do Dashboard de Processos abrem a lista por aqui.
+        { id: 'filtroCadProcPendencia', rotulo: 'Pendência', todos: 'Todas', opcoes: [...ProcessosIndicadores.PENDENCIAS.map((x) => [x.chave, x.rotulo]), ['completo', 'Cadastro completo']] },
       ] })}
     <div class="loading" id="loadingCadastroProcessos">⏳ Carregando...</div>
     <div id="listaCadastroProcessos"></div>
@@ -3105,6 +3526,7 @@ async function cadastroProcessos() {
     _preencherFiltroLista('filtroCadProcArea', 'Área', _opcoesFiltroAreaHierarquia(nomes));
   }
   _preencherFiltroLista('filtroCadProcCategoria', 'Categoria', categoriasProcessoData.map((c) => [c.id, c.ativo ? c.nome : `${c.nome} (inativa)`]));
+  _aplicarFiltroInicialLista('cadastro-processos');
   renderizarCadastroProcessos();
 
   // "Editar no cadastro" (drawer de Processos de Negócio): #cadastro-processos?processo=<id>
@@ -3117,6 +3539,10 @@ function renderizarCadastroProcessos() {
   const area = (document.getElementById('filtroCadProcArea') || {}).value || '';
   const categoria = (document.getElementById('filtroCadProcCategoria') || {}).value || '';
   const cont = (document.getElementById('filtroCadProcContinuidade') || {}).value || '';
+  const pendencia = (document.getElementById('filtroCadProcPendencia') || {}).value || '';
+  const ctxPend = { categorias: categoriasProcessoData };
+  const casaPendencia = (p) => !pendencia || (pendencia === 'completo'
+    ? ProcessosIndicadores.cadastroCompleto(p, ctxPend) : ProcessosIndicadores.pendenciasDoProcesso(p, ctxPend)[pendencia]);
   const visiveis = _limitadoAArea() ? cadastroProcessosData.filter((p) => _areaNoMeuEscopo(p.area)) : cadastroProcessosData;
   _renderGradeLista({
     alvoId: 'listaCadastroProcessos',
@@ -3125,7 +3551,7 @@ function renderizarCadastroProcessos() {
     camposBusca: ['processo', 'area', (p) => _nomeCategoriaProcesso(p.categoriaId), (p) => _nomePessoaPorId(p.criadorId), (p) => _nomePessoaPorId(p.aprovadorId),
       (p) => (p.links || []).map((l) => `${l.titulo} ${l.url}`).join(' ')],
     filtrar: (p) => _casaFiltroArea(area, p.area) && (!categoria || String(p.categoriaId) === categoria)
-      && (!cont || (cont === 'sim') === (p.continuidade !== false)),
+      && (!cont || (cont === 'sim') === (p.continuidade !== false)) && casaPendencia(p),
     ordenacao: cadastroProcessosOrdenacao,
     comparadores: {
       categoria: (a, b, dir) => dir * _nomeCategoriaProcesso(a.categoriaId).localeCompare(_nomeCategoriaProcesso(b.categoriaId), 'pt-BR'),

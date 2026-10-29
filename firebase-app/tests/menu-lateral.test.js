@@ -130,7 +130,7 @@ test('tela estreita: o botao do topo abre a gaveta; trocar de tela e o veu fecha
 test('nenhuma rota mudou de hash e cada tela aparece uma vez so no menu', () => {
   const doc = new JSDOM(INDEX).window.document;
   const pages = Array.from(doc.querySelectorAll('#menuLateral .nav-link')).map((a) => a.dataset.page);
-  assert.strictEqual(pages.length, 43);
-  assert.strictEqual(new Set(pages).size, 43);
+  assert.strictEqual(pages.length, 45);
+  assert.strictEqual(new Set(pages).size, 45);
   for (const a of doc.querySelectorAll('#menuLateral .nav-link')) assert.strictEqual(a.getAttribute('href'), '#' + a.dataset.page);
 });

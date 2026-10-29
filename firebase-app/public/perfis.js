@@ -70,7 +70,7 @@
   var TELAS = {};
   TELAS[PERFIL.ADMIN] = '*';
   TELAS[PERFIL.SEGURANCA] = [
-    'processos', 'cadastro-processos', 'processos-categorias', 'pcns', 'drp', 'riscos-dashboard', 'riscos', 'monitor', 'riscos-relatorio', 'vulnerabilidades', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
+    'processos', 'cadastro-processos', 'processos-categorias', 'processos-dashboard', 'processos-relatorios', 'pcns', 'drp', 'riscos-dashboard', 'riscos', 'monitor', 'riscos-relatorio', 'vulnerabilidades', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
     // Threat Intelligence (26/10/2026): triagem das acoes recomendadas e inventario de software.
     'threat-intel',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
@@ -100,7 +100,7 @@
   // Pessoas e Areas; gera Relatorios (leitura). Sem DRP, PCN, riscos, indicadores,
   // perfis ou perguntas. Processos primeiro: e a pagina inicial dele.
   TELAS[PERFIL.OPERADOR] = [
-    'processos', 'cadastro-processos', 'processos-categorias', 'pessoas', 'areas', 'relatorios',
+    'processos', 'cadastro-processos', 'processos-categorias', 'processos-dashboard', 'processos-relatorios', 'pessoas', 'areas', 'relatorios',
     'terceiros-dashboard', 'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
   ];
@@ -116,7 +116,7 @@
   // Fornecedores e Contratos) -- quem vê Fornecedores ou Contratos; a tela mostra
   // só a seção que o perfil vê (Gestor: só Contratos, da área dele).
   TELAS[PERFIL.GESTOR] = [
-    'processos', 'cadastro-processos', 'processos-categorias', 'pcns', 'drp', 'riscos-dashboard', 'riscos', 'riscos-relatorio', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
+    'processos', 'cadastro-processos', 'processos-categorias', 'processos-dashboard', 'processos-relatorios', 'pcns', 'drp', 'riscos-dashboard', 'riscos', 'riscos-relatorio', 'vulnerabilidades-painel', 'vulnerabilidades-relatorio',
     'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
     'contratos', 'terceiros-dashboard',
     'admin', 'conformidade',
@@ -126,7 +126,7 @@
   // PCN; so CONSULTA DRP, Dependencias, Mapa, Areas e Pessoas. Abre no Painel
   // de Conformidade (o que esta vencido, faltando ou a homologar).
   TELAS[PERFIL.OPERADOR_PROCESSOS] = [
-    'conformidade', 'admin', 'processos', 'cadastro-processos', 'processos-categorias', 'pcns', 'drp', 'dependencias', 'mapa', 'areas', 'pessoas', 'relatorios',
+    'conformidade', 'admin', 'processos', 'cadastro-processos', 'processos-categorias', 'processos-dashboard', 'processos-relatorios', 'pcns', 'drp', 'dependencias', 'mapa', 'areas', 'pessoas', 'relatorios',
     // DECISAO 27/10/2026: Relatorio de Status de Continuidade (edicoes salvas + IA) para Admin, SI e Operador de Processos.
     'continuidade-relatorio',
   ];
