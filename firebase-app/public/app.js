@@ -27142,7 +27142,7 @@ function _desenharAvisosIntel() {
   }
   const uc = intelConfig.geral.ultimaColeta;
   if (uc && Array.isArray(uc.erros) && uc.erros.length) {
-    avisos.push(`Na última coleta (${esc(_dataHoraIntel(uc.em))}) ${uc.erros.length === 1 ? 'uma fonte falhou' : uc.erros.length + ' fontes falharam'}: ${uc.erros.map((x) => esc(x.feed)).join(', ')}.`);
+    avisos.push(`Na última coleta (${esc(_dataHoraIntel(uc.em))}) ${uc.erros.length === 1 ? 'uma fonte falhou' : uc.erros.length + ' fontes falharam'}: ${uc.erros.map((x) => esc(x.feed) + (x.erro ? ` (${esc(x.erro)})` : '')).join(', ')}.`);
   }
   el.innerHTML = avisos.map((a) => `<div class="lista-alerta">${a}</div>`).join('');
 }
