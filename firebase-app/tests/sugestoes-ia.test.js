@@ -25,7 +25,7 @@ async function carregar(perfis, extra) {
   const posts = [];
   const dados = Object.assign({
     getDependencias: [DEP], getServicos: [SERVICO], getAreas: [{ id: 'a1', nome: 'TI' }], getBackups: [],
-    getProcessos: [P1], getPerguntas: [], getConfigRespostas: null, getRiscosPorProcesso: [],
+    getProcessos: [P1], getProcessosCadastro: [P1], getCategoriasProcesso: [], getPerguntas: [], getConfigRespostas: null, getRiscosPorProcesso: [],
     getSlasDependencia: { success: true, contratos: [] },
   }, extra || {});
   w.API = new Proxy({}, {
@@ -49,41 +49,50 @@ async function carregar(perfis, extra) {
 
 const visivel = (el) => el && el.style.display !== 'none';
 
-test('Descricao Funcional: botao para quem edita o processo salvo; usar preenche com confirmacao se ja ha texto', async () => {
+// Descricao Funcional (29/10/2026): editada (e sugerida pela IA) no Cadastro
+// de Processos; Processos de Negocio so mostra.
+test('Descricao Funcional: botao no Cadastro de Processos para quem edita o processo salvo; usar preenche com confirmacao se ja ha texto', async () => {
   const { w, doc, posts } = await carregar(['operador_processos'], { 'post:sugerirTextoIA': { texto: 'Processa a folha de pagamento.' } });
   let perguntou = 0;
   w.confirmarAcao = async () => { perguntou++; return true; };
-  await w.processos();
-  w.editarProcesso('p1');
-  assert.ok(visivel(doc.getElementById('btnSugerirFuncional')));
-  await w.sugerirFuncionalComIA();
+  await w.cadastroProcessos();
+  w.abrirDrawerCadastroProcesso('p1');
+  assert.ok(visivel(doc.getElementById('btnSugerirFuncionalCadastro')));
+  await w.sugerirFuncionalCadastroComIA();
   assert.deepStrictEqual(posts.map((p) => p.corpo), [{ alvo: 'processo-funcional', id: 'p1' }]);
-  assert.match(doc.getElementById('sugestaoFuncional').textContent, /revise antes de usar[\s\S]*folha de pagamento/);
-  assert.strictEqual(doc.getElementById('fDescricaoFuncional').value, '', 'nada muda sozinho');
-  await w.usarSugestaoIA('sugestaoFuncional');
+  assert.match(doc.getElementById('sugestaoFuncionalCadastro').textContent, /revise antes de usar[\s\S]*folha de pagamento/);
+  assert.strictEqual(doc.getElementById('cadProcDescricaoFuncional').value, '', 'nada muda sozinho');
+  await w.usarSugestaoIA('sugestaoFuncionalCadastro');
   assert.strictEqual(perguntou, 0, 'campo vazio: sem pergunta');
-  assert.strictEqual(doc.getElementById('fDescricaoFuncional').value, 'Processa a folha de pagamento.');
-  assert.strictEqual(doc.getElementById('sugestaoFuncional').textContent.trim(), '');
+  assert.strictEqual(doc.getElementById('cadProcDescricaoFuncional').value, 'Processa a folha de pagamento.');
+  assert.strictEqual(doc.getElementById('sugestaoFuncionalCadastro').textContent.trim(), '');
 
-  doc.getElementById('fDescricaoFuncional').value = 'Outro texto';
-  await w.sugerirFuncionalComIA();
-  await w.usarSugestaoIA('sugestaoFuncional');
+  doc.getElementById('cadProcDescricaoFuncional').value = 'Outro texto';
+  await w.sugerirFuncionalCadastroComIA();
+  await w.usarSugestaoIA('sugestaoFuncionalCadastro');
   assert.strictEqual(perguntou, 1, 'ja havia texto diferente: confirma');
 
-  // Reabrir limpa a caixa; processo novo esconde o botao.
-  await w.sugerirFuncionalComIA();
-  w.abrirModalProcesso();
-  assert.strictEqual(doc.getElementById('sugestaoFuncional').textContent.trim(), '');
-  assert.ok(!visivel(doc.getElementById('btnSugerirFuncional')));
+  // Reabrir limpa a caixa; processo novo esconde o botao e mostra a dica.
+  await w.sugerirFuncionalCadastroComIA();
+  w.abrirDrawerCadastroProcesso();
+  assert.strictEqual(doc.getElementById('sugestaoFuncionalCadastro').textContent.trim(), '');
+  assert.ok(!visivel(doc.getElementById('btnSugerirFuncionalCadastro')));
+  assert.ok(visivel(doc.getElementById('cadProcFuncionalDica')));
 });
 
-test('Descricao Funcional: erro da IA some com a caixa e avisa', async () => {
+test('Descricao Funcional: erro da IA some com a caixa e avisa; quem so consulta nao ve o botao', async () => {
   const { w, doc } = await carregar(['admin'], { 'post:sugerirTextoIA': new Error('quota') });
-  await w.processos();
-  w.editarProcesso('p1');
-  await w.sugerirFuncionalComIA();
-  assert.strictEqual(doc.getElementById('sugestaoFuncional').innerHTML, '');
+  await w.cadastroProcessos();
+  w.abrirDrawerCadastroProcesso('p1');
+  await w.sugerirFuncionalCadastroComIA();
+  assert.strictEqual(doc.getElementById('sugestaoFuncionalCadastro').innerHTML, '');
   assert.match((w.__toasts || []).join(' '), /Não foi possível gerar a sugestão/);
+
+  const leitor = await carregar(['operador']);
+  await leitor.w.cadastroProcessos();
+  leitor.w.abrirDrawerCadastroProcesso('p1');
+  assert.ok(!visivel(leitor.doc.getElementById('btnSugerirFuncionalCadastro')));
+  assert.ok(!visivel(leitor.doc.getElementById('cadProcFuncionalDica')));
 });
 
 test('Parametros DRP: caixa com checkboxes; so os marcados entram, sem repetir o que a tela ja tem; nada grava', async () => {

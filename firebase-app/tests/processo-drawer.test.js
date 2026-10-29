@@ -622,3 +622,30 @@ test('Identificacao: resumo do Cadastro de Processos com link "Editar no cadastr
   // "+ Novo processo" virou o atalho para o cadastro geral.
   assert.match(doc.getElementById('app').innerHTML, /location.hash='#cadastro-processos'/);
 });
+
+// Herdados do Cadastro de Processos (29/10/2026): Nome, Area e Descricao
+// Funcional so leitura aqui; o Salvar nao grava a Descricao Funcional por cima.
+test('Identificacao: Nome, Area e Descricao Funcional herdados do cadastro (so leitura, fora do payload)', async () => {
+  const { w, doc, gravacoes } = await carregar(['seguranca'], { getProcessos: [{ ...P1, descricaoFuncional: 'Paga a folha.' }, P2] });
+  w.editarProcesso('p1');
+  assert.ok(doc.getElementById('fProcesso').disabled);
+  assert.ok(doc.getElementById('fArea').disabled);
+  assert.ok(doc.getElementById('fDescricaoFuncional').readOnly);
+  assert.strictEqual(doc.getElementById('fDescricaoFuncional').value, 'Paga a folha.');
+  assert.strictEqual(doc.getElementById('btnSugerirFuncional'), null, 'a IA da descricao fica no cadastro principal');
+  assert.notStrictEqual(doc.getElementById('fHerdadoDica').style.display, 'none');
+  doc.getElementById('fProcesso').value = 'Outro nome';
+  await w.salvarProcesso();
+  const g = gravacoes.find((x) => x.nome === 'salvarProcesso').arg;
+  assert.ok(!('descricaoFuncional' in g));
+  assert.strictEqual(g.processo, 'Folha', 'nome vem do registro aberto');
+  assert.strictEqual(g.area, 'TI');
+});
+
+test('Identificacao: processo novo (caminho antigo) continua editavel', async () => {
+  const { w, doc } = await carregar(['seguranca']);
+  w.abrirModalProcesso();
+  assert.ok(!doc.getElementById('fProcesso').disabled);
+  assert.ok(!doc.getElementById('fDescricaoFuncional').readOnly);
+  assert.strictEqual(doc.getElementById('fHerdadoDica').style.display, 'none');
+});

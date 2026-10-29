@@ -18,7 +18,7 @@ const CATS = [
   { id: 'processo-de-negocio', nome: 'Processo de Negócio', ativo: true, ordem: 3, finalidade: 'Valor ao cliente.', criteriosIdentificacao: '', exemplos: '' },
 ];
 const FOLHA = { id: 'ti__folha', area: 'TI', processo: 'Folha', categoriaId: 'processo-de-negocio', continuidade: true, criadorId: 'ana', aprovadorId: 'bruno',
-  links: [{ titulo: 'Fluxo', url: 'https://wiki/folha' }], avaliado: true };
+  links: [{ titulo: 'Fluxo', url: 'https://wiki/folha' }], avaliado: true, descricaoFuncional: 'Paga os colaboradores.' };
 const PONTO = { id: 'rh__ponto', area: 'RH', processo: 'Ponto', categoriaId: 'departamental', continuidade: false, criadorId: '', aprovadorId: '', links: [] };
 const COMPRAS = { id: 'ti__compras', area: 'TI', processo: 'Compras', categoriaId: 'intersetorial', continuidade: false, criadorId: 'sumiu', aprovadorId: '', links: [] };
 
@@ -29,7 +29,7 @@ async function carregar(perfis, extra) {
   w.GRC360 = {}; w.APP_API_URL = ''; w.USER_PERFIS = perfis; w.USER_PERFIL = perfis[0]; w.USER_AREA = 'TI';
   const gravacoes = [];
   const dados = Object.assign({
-    getDependencias: [ANA, BRUNO], getAreas: [{ id: 'a1', nome: 'TI' }, { id: 'a2', nome: 'RH' }],
+    getDependencias: [ANA, BRUNO], getAreas: [{ id: 'a1', nome: 'TI', responsavel: 'Carla' }, { id: 'a2', nome: 'RH' }],
     getProcessosCadastro: [FOLHA, PONTO, COMPRAS], getCategoriasProcesso: CATS,
   }, extra || {});
   w.API = new Proxy({}, {
@@ -118,7 +118,7 @@ test('novo processo: grava area, nome, categoria, criador, aprovador, links e Co
   assert.strictEqual(await w.salvarCadastroProcesso(), true);
   const g = gravacoes.find((x) => x.nome === 'salvarProcesso').arg;
   assert.deepStrictEqual(g, {
-    id: null, area: 'RH', processo: 'Admissão', categoriaId: 'departamental', criadorId: 'bruno', aprovadorId: 'ana',
+    id: null, area: 'RH', processo: 'Admissão', categoriaId: 'departamental', descricaoFuncional: '', criadorId: 'bruno', aprovadorId: 'ana',
     continuidade: true, links: [{ titulo: 'Procedimento', url: 'https://wiki/admissao' }],
   });
 });
@@ -211,4 +211,24 @@ test('categoria inativa continua no processo que ja a usa, marcada; sem categori
   sel.value = '';
   assert.strictEqual(await w.salvarCadastroProcesso(), false);
   assert.ok(!gravacoes.some((x) => x.nome === 'salvarProcesso'));
+});
+
+// Herdados (29/10/2026): o cadastro principal mostra o Dono (responsavel da
+// Area) e edita a Descricao Funcional; Processos de Negocio so mostra.
+test('Dono do processo vem do responsavel da area e acompanha a troca de area', async () => {
+  const { doc, w } = await carregar(['admin']);
+  w.abrirDrawerCadastroProcesso('ti__folha');
+  assert.strictEqual(doc.getElementById('cadProcDono').value, 'Carla');
+  assert.ok(doc.getElementById('cadProcDono').readOnly);
+  mudar(doc, 'cadProcArea', 'RH');
+  assert.strictEqual(doc.getElementById('cadProcDono').value, '–', 'area sem responsavel');
+});
+
+test('Descricao Funcional: abre com a existente e e gravada pelo cadastro principal', async () => {
+  const { doc, w, gravacoes } = await carregar(['admin']);
+  w.abrirDrawerCadastroProcesso('ti__folha');
+  assert.strictEqual(doc.getElementById('cadProcDescricaoFuncional').value, 'Paga os colaboradores.');
+  doc.getElementById('cadProcDescricaoFuncional').value = 'Calcula e paga a folha.';
+  assert.strictEqual(await w.salvarCadastroProcesso(), true);
+  assert.strictEqual(gravacoes.find((g) => g.nome === 'salvarProcesso').arg.descricaoFuncional, 'Calcula e paga a folha.');
 });

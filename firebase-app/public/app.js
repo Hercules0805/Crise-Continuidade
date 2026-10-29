@@ -3165,6 +3165,9 @@ function _htmlDrawerCadastroProcesso() {
         <div style="margin-bottom:16px;">
           <label style="${lbl}" for="cadProcArea">Área <span class="req" aria-hidden="true">*</span></label>
           <select id="cadProcArea" style="${inp}"></select>
+          <!-- Dono (29/10/2026): o responsável da Área, só leitura. -->
+          <label style="${lbl}margin-top:10px;" for="cadProcDono">Dono do processo</label>
+          <input type="text" id="cadProcDono" readonly placeholder="Responsável pela área" style="${inp}background:#f9f9f9;color:#555;">
         </div>
         <div style="margin-bottom:16px;">
           <label style="${lbl}" for="cadProcNome">Processo <span class="req" aria-hidden="true">*</span></label>
@@ -3175,6 +3178,16 @@ function _htmlDrawerCadastroProcesso() {
           <select id="cadProcCategoria" style="${inp}"></select>
           <!-- Ajuda ao escolher (29/10/2026): finalidade, critérios e exemplos da categoria. -->
           <div id="cadProcCategoriaAjuda" style="display:none;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:10px 14px;margin-top:8px;font-size:0.82em;color:#555;"></div>
+        </div>
+        <!-- Descrição Funcional (29/10/2026): mora aqui; Processos de Negócio só mostra. -->
+        <div style="margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
+            <label style="${lbl}margin:0;" for="cadProcDescricaoFuncional">Descrição Funcional</label>
+            ${_htmlBotaoSugerirIA('btnSugerirFuncionalCadastro', 'sugerirFuncionalCadastroComIA()', { titulo: 'A IA escreve um rascunho com o que o sistema sabe do processo; você revisa antes de usar' })}
+          </div>
+          <textarea id="cadProcDescricaoFuncional" rows="4" maxlength="2000" placeholder="Descreva a função deste processo" style="${inp}resize:vertical;font-family:inherit;"></textarea>
+          <span id="cadProcFuncionalDica" style="display:none;font-size:0.75em;color:#888;margin-top:3px;">Salve o processo para pedir a sugestão da IA.</span>
+          <div id="sugestaoFuncionalCadastro"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
           <div>
@@ -3243,6 +3256,31 @@ function _renderAjudaCategoriaProcesso() {
   caixa.innerHTML = partes.map(([rot, t]) => `<div style="margin-bottom:6px;"><b style="color:#333;">${rot}</b><div style="white-space:pre-line;">${esc(t)}</div></div>`).join('');
 }
 
+/** Dono do processo = responsável da Área escolhida (só leitura). */
+function _atualizarDonoCadastroProcesso() {
+  const area = document.getElementById('cadProcArea').value;
+  const a = (window.areasDisponiveis || []).find((x) => x.nome === area);
+  document.getElementById('cadProcDono').value = (a && a.responsavel) || (area ? '–' : '');
+}
+
+/** "Sugerir com IA" só para quem edita e com o processo já salvo (a IA lê o que o sistema sabe dele). */
+function _atualizarIACadastroProcesso(pode) {
+  const salvo = !!document.getElementById('cadProcId').value;
+  document.getElementById('btnSugerirFuncionalCadastro').style.display = pode && salvo ? 'inline-block' : 'none';
+  document.getElementById('cadProcFuncionalDica').style.display = pode && !salvo ? 'block' : 'none';
+}
+
+window.sugerirFuncionalCadastroComIA = () => {
+  const id = document.getElementById('cadProcId').value;
+  if (!id) return showToast('Salve o processo antes de pedir a sugestão.', '#e65100');
+  return _sugerirTextoComIA({
+    acao: 'sugerirTextoIA', corpo: { alvo: 'processo-funcional', id },
+    idBotao: 'btnSugerirFuncionalCadastro', idCaixa: 'sugestaoFuncionalCadastro', idCampo: 'cadProcDescricaoFuncional',
+    carregando: 'A IA está escrevendo a descrição com o que o sistema sabe deste processo…',
+    nota: 'Escrita a partir da área, Serviços, dependências e levantamento do PCN. Confira antes de salvar.',
+  });
+};
+
 function _popularPessoasCadastroProcesso() {
   const area = document.getElementById('cadProcArea').value;
   _popularSelectPessoaProcesso('cadProcCriador', document.getElementById('cadProcCriador').value, area);
@@ -3255,6 +3293,7 @@ function _coletarCadastroProcesso() {
     area: document.getElementById('cadProcArea').value,
     processo: document.getElementById('cadProcNome').value.trim(),
     categoriaId: document.getElementById('cadProcCategoria').value,
+    descricaoFuncional: document.getElementById('cadProcDescricaoFuncional').value.trim(),
     criadorId: document.getElementById('cadProcCriador').value,
     aprovadorId: document.getElementById('cadProcAprovador').value,
     continuidade: document.getElementById('cadProcContinuidade').checked,
@@ -3276,15 +3315,19 @@ window.abrirDrawerCadastroProcesso = (id) => {
   const selArea = document.getElementById('cadProcArea');
   selArea.innerHTML = (_limitadoAArea() ? '' : '<option value="">Selecione...</option>') + nomes.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('') + fora;
   selArea.value = areaAtual;
-  selArea.onchange = _popularPessoasCadastroProcesso;
+  selArea.onchange = () => { _popularPessoasCadastroProcesso(); _atualizarDonoCadastroProcesso(); };
+  _atualizarDonoCadastroProcesso();
   document.getElementById('cadProcNome').value = p ? p.processo : '';
+  document.getElementById('cadProcDescricaoFuncional').value = p ? (p.descricaoFuncional || '') : '';
+  descartarSugestaoIA('sugestaoFuncionalCadastro');
   _popularSelectCategoriaProcesso(p ? p.categoriaId : '');
   _popularSelectPessoaProcesso('cadProcCriador', p ? p.criadorId : '', areaAtual);
   _popularSelectPessoaProcesso('cadProcAprovador', p ? p.aprovadorId : '', areaAtual);
   document.getElementById('cadProcContinuidade').checked = p ? p.continuidade !== false : false;
   _edLinksProcesso.carregar(p ? p.links : [], pode);
-  ['cadProcArea', 'cadProcNome', 'cadProcCategoria', 'cadProcCriador', 'cadProcAprovador', 'cadProcContinuidade'].forEach((c) => { document.getElementById(c).disabled = !pode; });
+  ['cadProcArea', 'cadProcNome', 'cadProcCategoria', 'cadProcDescricaoFuncional', 'cadProcCriador', 'cadProcAprovador', 'cadProcContinuidade'].forEach((c) => { document.getElementById(c).disabled = !pode; });
   document.getElementById('btnSalvarCadastroProcesso').style.display = pode ? '' : 'none';
+  _atualizarIACadastroProcesso(pode);
   document.getElementById('drawerCadastroProcesso').classList.add('open');
   document.getElementById('drawerOverlayCadastroProcesso').classList.add('open');
   _edCadastroProcesso.marcar();
@@ -3331,6 +3374,7 @@ window.salvarCadastroProcesso = async () => {
     ok = true;
     document.getElementById('cadProcId').value = String(dados.id || (r && r.id) || '');
     document.getElementById('cadProcTitulo').textContent = 'Editar processo';
+    _atualizarIACadastroProcesso(true);
     _edCadastroProcesso.marcar();
     renderizarCadastroProcessos();
     showToast('✅ Salvo!', '#2e7d32');
@@ -3555,15 +3599,13 @@ async function processos() {
                 <input type="text" id="fDono" placeholder="Responsável pela área" readonly style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;background:#f9f9f9;color:#555;">
               </div>
             </div>
+            <!-- Nome, Área e Descrição Funcional vêm do Cadastro de Processos (29/10/2026). -->
+            <div id="fHerdadoDica" style="display:none;font-size:0.75em;color:#888;margin:-8px 0 12px;">Nome, Área e Descrição Funcional são editados no Cadastro de Processos.</div>
             <!-- Dados do Cadastro de Processos (28/10/2026), so leitura aqui. -->
             <div id="fCadastroResumo" style="display:none;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:0.85em;color:#555;"></div>
             <div style="margin-bottom:16px;">
-              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;">
-                <label for="fDescricaoFuncional" style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin:0;">Descrição Funcional</label>
-                ${_htmlBotaoSugerirIA('btnSugerirFuncional', 'sugerirFuncionalComIA()', { titulo: 'A IA escreve um rascunho com o que o sistema sabe do processo; você revisa antes de usar' })}
-              </div>
+              <label for="fDescricaoFuncional" style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Descrição Funcional</label>
               <textarea id="fDescricaoFuncional" rows="4" placeholder="Descreva a função deste processo" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;resize:vertical;box-sizing:border-box;"></textarea>
-              <div id="sugestaoFuncional"></div>
             </div>
             <div style="margin-bottom:16px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Criticidade (Pré-Avaliação)</label>
@@ -5062,9 +5104,19 @@ window.abrirModalProcesso = (p) => {
   if (resumoAval) resumoAval.innerHTML = '';
   const progAval = document.getElementById('avaliacaoProgresso');
   if (progAval) progAval.innerHTML = '';
-  // Sugestoes por IA (impacto e descricao funcional): so para quem edita, processo salvo.
+  // Herdados do Cadastro de Processos (29/10/2026): processo salvo nao edita
+  // aqui Nome, Area nem Descricao Funcional.
+  const herdado = !!(p && p.id);
+  ['fProcesso', 'fArea'].forEach((c) => { const el = document.getElementById(c); if (el) el.disabled = herdado; });
+  const funcional = document.getElementById('fDescricaoFuncional');
+  funcional.readOnly = herdado;
+  funcional.style.background = herdado ? '#f9f9f9' : '';
+  funcional.style.color = herdado ? '#555' : '';
+  document.getElementById('fHerdadoDica').style.display = herdado ? 'block' : 'none';
+  // Sugestao por IA da Descricao do Impacto: so para quem edita, processo salvo.
+  // (A da Descricao Funcional fica no Cadastro de Processos.)
   const podeIA = !!(p && p.id && Perfis.podeEditarProcessos(window.USER_PERFIS));
-  [['sugestaoImpacto', 'btnSugerirImpacto'], ['sugestaoFuncional', 'btnSugerirFuncional']].forEach(([caixa, botao]) => {
+  [['sugestaoImpacto', 'btnSugerirImpacto']].forEach(([caixa, botao]) => {
     descartarSugestaoIA(caixa);
     const btn = document.getElementById(botao);
     if (btn) btn.style.display = podeIA ? 'inline-block' : 'none';
@@ -5348,17 +5400,6 @@ window.sugerirImpactoComIA = () => {
 window.usarSugestaoImpacto = () => usarSugestaoIA('sugestaoImpacto');
 window.descartarSugestaoImpacto = () => descartarSugestaoIA('sugestaoImpacto');
 
-window.sugerirFuncionalComIA = () => {
-  const id = _idProcessoParaIA();
-  if (!id) return;
-  return _sugerirTextoComIA({
-    acao: 'sugerirTextoIA', corpo: { alvo: 'processo-funcional', id },
-    idBotao: 'btnSugerirFuncional', idCaixa: 'sugestaoFuncional', idCampo: 'fDescricaoFuncional',
-    carregando: 'A IA está escrevendo a descrição com o que o sistema sabe deste processo…',
-    nota: 'Escrita a partir da área, Serviços, dependências e levantamento do PCN. Confira antes de salvar.',
-  });
-};
-
 window.editarProcesso = (id) => {
   // Sem permissao de editar (Operador Administrativo): abre so o detalhe.
   if (!Perfis.podeEditarProcessos(window.USER_PERFIS)) return verDetalhesProcesso(id);
@@ -5386,6 +5427,15 @@ function _coletarFormularioProcesso() {
     tierManual: document.getElementById('fTierManual').value,
     bcpContatos: window._bcpContatos || [],
   };
+  // Herdados do Cadastro de Processos (29/10/2026): processo salvo nao grava a
+  // Descricao Funcional daqui (seria por cima do que foi editado la), e Nome e
+  // Area saem do registro aberto (os campos estao travados).
+  const aberto = window._processoAberto;
+  if (p.id && aberto && String(aberto.id) === String(p.id)) {
+    delete p.descricaoFuncional;
+    p.area = aberto.area || p.area;
+    p.processo = aberto.processo || p.processo;
+  }
   // RTO preenchido pela avaliacao continua "sugerido" ate alguem escolher outro.
   const salvoRto = window._processoAberto;
   p.rtoOrigem = p.rto && salvoRto && salvoRto.rtoOrigem === 'sugerido' && salvoRto.rto === p.rto ? 'sugerido' : (p.rto ? 'manual' : '');

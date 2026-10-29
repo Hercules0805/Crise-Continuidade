@@ -32,9 +32,11 @@ window.__rodar = async () => {
   zera(); abrirModalProcesso(pr()); await fecharDrawerProcesso();
   ok(n('salvarProcesso') === 0 && !aberto(), 'processo: sem mexer = 0 gravacoes');
 
-  zera(); abrirModalProcesso(pr()); set('fProcesso', 'Backup 2'); await fecharDrawerProcesso();
+  // Nome/Area/Descricao Funcional vem do Cadastro de Processos (29/10/2026):
+  // na Identificacao, o que ainda se edita aqui e a Criticidade (Pre-Avaliacao).
+  zera(); abrirModalProcesso(pr()); set('fTierManual', 'Tier 1 (Crítico)'); await fecharDrawerProcesso();
   ok(n('salvarProcesso') === 1 && !aberto(), 'processo: mexeu na identificacao = 1 gravacao');
-  pr().processo = 'Backup'; // desfaz o efeito otimista do teste anterior
+  pr().tierManual = ''; // desfaz o efeito otimista do teste anterior
 
   zera(); abrirModalProcesso(pr()); trocarAbaProcesso('avaliacao'); trocarAbaProcesso('bcp'); trocarAbaProcesso('identificacao');
   await fecharDrawerProcesso();
@@ -56,7 +58,7 @@ window.__rodar = async () => {
   zera(); abrirModalProcesso(); set('fArea', 'TI'); set('fProcesso', 'Novo proc'); await fecharDrawerProcesso();
   ok(n('salvarProcesso') === 1 && !aberto(), 'processo: novo preenchido + Fechar = 1 gravacao');
 
-  zera(); abrirModalProcesso(pr()); set('fProcesso', ''); await fecharDrawerProcesso();
-  ok(n('salvarProcesso') === 0 && aberto() && toasts.length === 1, 'processo: apagou o nome + Fechar = aviso e continua aberto');
+  zera(); abrirModalProcesso(); set('fArea', 'TI'); await fecharDrawerProcesso();
+  ok(n('salvarProcesso') === 0 && aberto() && toasts.length === 1, 'processo: novo sem nome + Fechar = aviso e continua aberto');
   return res;
 };
