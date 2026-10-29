@@ -64,6 +64,20 @@ test('processosQueDependemDe: direto, legado por nome, via componente e via serv
   assert.deepStrictEqual(CD.processosQueDependemDe('nao-existe', dados), []);
 });
 
+test('processosPorDependencia: a cadeia de cada processo invertida, os mesmos processos de processosQueDependemDe', () => {
+  const dados = { processos: [P1, P2, P3], servicos: SERVICOS, dependencias: DEPS };
+  const mapa = CD.processosPorDependencia(dados);
+  const ids = (k) => (mapa[k] || []).map((x) => x.processo.id);
+  assert.deepStrictEqual(ids('db'), ['p1', 'p3'], 'direto, via componente e legado por nome');
+  assert.deepStrictEqual(ids('api'), ['p2'], 'via servico (legado processoIds)');
+  assert.deepStrictEqual(ids('dc'), ['p1'], 'componente de componente');
+  assert.deepStrictEqual(ids('forn'), ['p1']);
+  assert.deepStrictEqual(mapa.db[0].origens, ['Direta (legado)', 'Componente de SRV-01']);
+  assert.ok(!('ana' in mapa) && !('s1' in mapa), 'pessoa e servico ficam fora');
+  DEPS.filter((d) => mapa[d.id]).forEach((d) => assert.deepStrictEqual(ids(d.id), CD.processosQueDependemDe(d.id, dados).map((x) => x.processo.id), d.id));
+  assert.deepStrictEqual(CD.processosPorDependencia({}), {});
+});
+
 test('servicosQueContem: sugestao de troca do item tecnico legado pelo servico que ja o contem', () => {
   assert.deepStrictEqual(CD.servicosQueContem('db', SERVICOS, DEPS).map((s) => s.id), ['s1']);
   assert.deepStrictEqual(CD.servicosQueContem('api', SERVICOS, DEPS).map((s) => s.id), ['s2']);

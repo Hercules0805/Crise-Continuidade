@@ -6564,7 +6564,10 @@ window.enviarConvite = async () => {
 // PÁGINA: DEPENDÊNCIAS (Catálogo)
 // ============================================================
 let dependenciasData = [];
-let dependenciasOrdenacao = criarOrdenacao('categoria', 'asc');
+// Ordem padrão (29/10/2026): a mais importante primeiro -- ver _importanciaDependencias.
+let dependenciasOrdenacao = criarOrdenacao('sustenta', 'asc');
+// Processos e Serviços da tela (para a coluna Sustenta); null quando não carregaram.
+let dependenciasRede = null;
 
 // As 7 categorias tecnicas -- absorveram o antigo catalogo de Componentes do
 // Servico (Servidor/Banco de Dados/etc. eram um "tipo" livre de Componentes;
@@ -6639,18 +6642,26 @@ async function dependencias() {
     ${_htmlCabecalhoLista({ titulo: 'Dependências', sub: 'Dependências críticas reutilizáveis nos processos.',
       primario: { rotulo: '+ Nova dependência', onclick: 'abrirDrawerDependencia()' } })}
     ${_htmlBarraLista({ busca: { id: 'buscaDep', placeholder: 'Buscar dependência…' }, aoMudar: 'filtrarDependencias', contadorId: 'dependenciasContador',
-      filtros: [{ id: 'filtroDepCategoria', rotulo: 'Categoria', opcoes: [] }] })}
+      filtros: [
+        { id: 'filtroDepSustenta', rotulo: 'Sustenta', opcoes: DEP_FILTRO_SUSTENTA },
+        { id: 'filtroDepDrp', rotulo: 'DRP', todos: 'Todos', opcoes: [['com', 'Com'], ['sem', 'Sem']] },
+        { id: 'filtroDepCategoria', rotulo: 'Categoria', opcoes: [] },
+      ] })}
+    <div id="dependenciasAlerta"></div>
+    <details class="lista-ajuda"><summary>Como a importância é medida</summary>
+      <p>Uma dependência importa tanto quanto o processo mais crítico que depende dela — direto, via Serviço ou como componente de outra dependência. A coluna <strong>Sustenta</strong> mostra esse Tier e quantos processos dependem dela; a lista já vem com as mais importantes no topo. <strong>Sem DRP</strong> fica em vermelho quando a dependência sustenta processo Tier 1 ou 2.</p></details>
     ${_seVeTela('fornecedores', `<details class="lista-ajuda"><summary>Fornecedores nesta lista</summary>
       <p>Os fornecedores aparecem neste catálogo, mas são editados e avaliados em <a href="#fornecedores">Fornecedores</a>. Clique num fornecedor para gerenciá-lo lá.</p></details>`)}
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table data-table--lista" id="listaDeps" style="display:none;">
       <table style="min-width:900px;">
-        <colgroup><col style="width:280px"><col style="width:180px"><col style="width:420px"><col style="width:92px"></colgroup>
+        <colgroup><col style="width:290px"><col style="width:200px"><col style="width:120px"><col style="width:180px"><col style="width:92px"></colgroup>
         <thead>
           <tr>
             <th onclick="ordenarDependencias('nome')" style="cursor:pointer;">Nome <span id="sort-dep-nome"></span></th>
+            <th onclick="ordenarDependencias('sustenta')" style="cursor:pointer;" title="Tier mais alto entre os processos que dependem dela e quantos são">Sustenta <span id="sort-dep-sustenta"></span></th>
+            <th onclick="ordenarDependencias('drp')" style="cursor:pointer;">DRP <span id="sort-dep-drp"></span></th>
             <th onclick="ordenarDependencias('categoria')" style="cursor:pointer;">Categoria <span id="sort-dep-categoria"></span></th>
-            <th>Papel</th>
             <th class="col-acoes">Ações</th>
           </tr>
         </thead>
@@ -6668,9 +6679,13 @@ async function dependencias() {
     // mostrar/editar uma linha de categoria "Pessoas" corretamente. O filtro
     // e aqui, e nao no banco, para que o catalogo continue inteiro -- e o
     // mesmo de que os processos dependem.
-    const [todas, areas] = await Promise.all([API.getDependencias(), API.getAreas()]);
+    // Processos e Serviços alimentam a coluna Sustenta: se falharem, a lista
+    // aparece assim mesmo, com "—" nela.
+    const [todas, areas, processos, servicos] = await Promise.all([API.getDependencias(), API.getAreas(),
+      API.getProcessos().catch(() => null), API.getServicos().catch(() => [])]);
     // Fornecedor inativo fica só na aba Inativos de Fornecedores (27/10/2026).
     dependenciasData = todas.filter(d => !['Pessoas', 'Pessoa'].includes(d.categoria) && _fornecedorAtivo(d));
+    dependenciasRede = processos ? { processos, servicos: servicos || [] } : null;
     // Fonte do select "Area Responsavel" na aba DRP -- mesmo catalogo que
     // Areas/Fornecedor ja usam.
     window.areasData = areas;
@@ -6687,14 +6702,87 @@ async function dependencias() {
   renderizarDependencias();
 }
 
+// Filtro "Sustenta" (29/10/2026): o Tier mais alto atendido; "Tier 1 ou 2" é o
+// recorte da Conformidade (dependência crítica).
+const DEP_FILTRO_SUSTENTA = [['t1', 'Tier 1'], ['t2', 'Tier 2'], ['t12', 'Tier 1 ou 2'], ['t3', 'Tier 3'],
+  ['pendente', 'Processo sem tier'], ['nenhum', 'Nenhum processo']];
+const _ORDEM_TIER_DEP = { [Criticidade.TIER.T1]: 1, [Criticidade.TIER.T2]: 2, [Criticidade.TIER.T3]: 3, [Criticidade.TIER.PENDENTE]: 4 };
+
+/**
+ * Importância de cada dependência (29/10/2026): o processo mais crítico que
+ * depende dela, por qualquer caminho da cadeia (direto, via Serviço ou
+ * componente -- CadeiaDependencias.processosPorDependencia, o mesmo da
+ * Conformidade), e quantos processos são. Derivado, nunca gravado.
+ * Devolve Map id -> { tier, ordem (1..4; 5 = nenhum), qtd, processos:[{processo, tier, origens}], temDrp, critica }.
+ * Sem a rede (processos não carregaram), devolve null.
+ */
+function _importanciaDependencias(deps, rede) {
+  if (!rede) return null;
+  const mapa = CadeiaDependencias.processosPorDependencia({ processos: rede.processos, servicos: rede.servicos, dependencias: deps });
+  const saida = new Map();
+  (deps || []).forEach((d) => {
+    const lista = (mapa[String(d.id)] || []).map((x) => ({ processo: x.processo, tier: Criticidade.tierDoProcesso(x.processo), origens: x.origens }))
+      .sort((a, b) => (_ORDEM_TIER_DEP[a.tier] - _ORDEM_TIER_DEP[b.tier]) || String(a.processo.processo || '').localeCompare(String(b.processo.processo || ''), 'pt-BR'));
+    const ordem = lista.length ? _ORDEM_TIER_DEP[lista[0].tier] : 5;
+    saida.set(String(d.id), {
+      tier: lista.length ? lista[0].tier : '', ordem, qtd: lista.length, processos: lista,
+      temDrp: ConformidadeContinuidade.temDRP(d), critica: ordem <= 2,
+    });
+  });
+  return saida;
+}
+
+/** Célula/selo "Tier 1 · 12 processos"; o title lista os processos (Tier 1 primeiro). */
+function _htmlSustentaDependencia(imp) {
+  if (!imp) return '<span class="muted">—</span>';
+  if (!imp.qtd) return '<span class="muted">Nenhum processo</span>';
+  const titulo = imp.processos.map((x) => `${x.processo.processo || '(sem nome)'} — ${Criticidade.tierCurto(x.tier)} · ${x.origens.join('; ')}`).join('\n');
+  return `<span title="${esc(titulo)}">${_htmlBadge(_nivelTierProcesso(imp.tier), Criticidade.tierCurto(imp.tier))} · ${imp.qtd} ${imp.qtd === 1 ? 'processo' : 'processos'}</span>`;
+}
+
+/** DRP: "Sem DRP" em vermelho só quando sustenta Tier 1/2 (a pendência da Conformidade). */
+function _htmlDrpDependencia(d, imp) {
+  if (ConformidadeContinuidade.temDRP(d)) return 'Com DRP';
+  if (imp && imp.critica) return `<span title="Sustenta processo Tier 1 ou 2 e não tem DRP gerado">${_htmlBadge('critical', 'Sem DRP')}</span>`;
+  return '<span class="muted">Sem DRP</span>';
+}
+
+function _casaFiltroSustenta(valor, imp) {
+  if (!valor) return true;
+  if (!imp) return false;
+  return { t1: imp.ordem === 1, t2: imp.ordem === 2, t12: imp.ordem <= 2, t3: imp.ordem === 3, pendente: imp.ordem === 4, nenhum: imp.ordem === 5 }[valor] || false;
+}
+
+/** Atalho do aviso: Tier 1 ou 2 sem DRP. */
+window.filtrarDependenciasCriticasSemDrp = () => {
+  const sus = document.getElementById('filtroDepSustenta');
+  const drp = document.getElementById('filtroDepDrp');
+  if (sus) { sus.value = 't12'; _marcarFiltroLista(sus); }
+  if (drp) { drp.value = 'sem'; _marcarFiltroLista(drp); }
+  filtrarDependencias();
+};
+
 function renderizarDependencias() {
   let data = [...dependenciasData];
+  const imp = _importanciaDependencias(dependenciasData, dependenciasRede);
+  const impDe = (d) => (imp ? imp.get(String(d.id)) : null);
+
+  const criticasSemDrp = imp ? dependenciasData.filter((d) => { const x = impDe(d); return x && x.critica && !x.temDrp; }).length : 0;
+  const alerta = document.getElementById('dependenciasAlerta');
+  if (alerta) {
+    alerta.innerHTML = criticasSemDrp ? `<div class="lista-alerta">⚠️ ${criticasSemDrp} ${criticasSemDrp === 1 ? 'dependência sustenta' : 'dependências sustentam'} processos Tier 1 ou 2 e ${criticasSemDrp === 1 ? 'está' : 'estão'} sem DRP.
+      <button type="button" class="link-acao" onclick="filtrarDependenciasCriticasSemDrp()">Ver quais</button></div>` : '';
+  }
 
   // Filtrar por categoria
   const filtro = document.getElementById('filtroDepCategoria');
   if (filtro && filtro.value) {
     data = data.filter(d => d.categoria === filtro.value);
   }
+  const filtroSus = document.getElementById('filtroDepSustenta');
+  if (filtroSus && filtroSus.value) data = data.filter((d) => _casaFiltroSustenta(filtroSus.value, impDe(d)));
+  const filtroDrp = document.getElementById('filtroDepDrp');
+  if (filtroDrp && filtroDrp.value) data = data.filter((d) => ConformidadeContinuidade.temDRP(d) === (filtroDrp.value === 'com'));
 
   // Filtrar por busca
   const busca = (document.getElementById('buscaDep') || {}).value || '';
@@ -6707,14 +6795,23 @@ function renderizarDependencias() {
     );
   }
 
-  data = dependenciasOrdenacao.aplicar(data);
-  dependenciasOrdenacao.atualizarSetas('sort-dep-', ['categoria', 'nome']);
+  // Sustenta: Tier mais alto, depois mais processos, depois nome. DRP: o que
+  // pede ação primeiro (crítica sem DRP, sem DRP, com DRP).
+  const porNome = (a, b) => String(a.nome || '').localeCompare(String(b.nome || ''), 'pt-BR');
+  const ordemDe = (d) => { const x = impDe(d); return x ? x.ordem : 6; };
+  const qtdDe = (d) => { const x = impDe(d); return x ? x.qtd : 0; };
+  const rankDrp = (d) => (ConformidadeContinuidade.temDRP(d) ? 2 : ((impDe(d) || {}).critica ? 0 : 1));
+  data = dependenciasOrdenacao.aplicar(data, {
+    sustenta: (a, b, dir) => dir * ((ordemDe(a) - ordemDe(b)) || (qtdDe(b) - qtdDe(a))) || porNome(a, b),
+    drp: (a, b, dir) => dir * ((rankDrp(a) - rankDrp(b)) || (ordemDe(a) - ordemDe(b))) || porNome(a, b),
+  });
+  dependenciasOrdenacao.atualizarSetas('sort-dep-', ['categoria', 'nome', 'sustenta', 'drp']);
 
   _atualizarBarraLista('dependenciasContador', data.length, ['dependência', 'dependências']);
   const pag = dependenciasPaginacao.aplicar(data);
   const pagEl = document.getElementById('dependenciasPaginacao');
   if (pagEl) pagEl.innerHTML = _htmlPaginacao(pag, 'irParaPaginaDependencias');
-  const filtrando = !!(busca.trim() || (filtro && filtro.value));
+  const filtrando = !!(busca.trim() || (filtro && filtro.value) || (filtroSus && filtroSus.value) || (filtroDrp && filtroDrp.value));
   document.getElementById('depRows').innerHTML = pag.itens.length
     ? pag.itens.map(d => {
         // Fornecedor e uma linha de /dependencias com categoria Fornecedores,
@@ -6729,14 +6826,17 @@ function renderizarDependencias() {
         const acoes = ehForn
           ? (veForn ? [{ icone: SVG_EDITAR, titulo: 'Gerenciar em Fornecedores', onclick: `irParaFornecedor('${id}')` }] : [])
           : [_acaoEditar(`editarDep('${id}')`), _acaoExcluir(`excluirDep('${id}')`)];
+        // Papel/detalhes cabem no title do nome (a coluna Papel saiu, 29/10/2026).
+        const tituloNome = [d.nome, ehForn ? 'Gerenciado em Fornecedores' : d.detalhes].filter((t) => t && String(t).trim()).join(' — ');
         return `<tr style="cursor:pointer;" onclick="${acao}">
-        ${_tdLista(d.nome, 'forte')}
-        <td title="${esc(d.categoria)}"><span class="badge badge-red">${esc(d.categoria)}</span></td>
-        ${ehForn ? '<td class="muted">Gerenciado em Fornecedores</td>' : _tdLista(d.detalhes)}
+        <td class="forte" title="${esc(tituloNome)}">${esc(d.nome)}</td>
+        <td>${_htmlSustentaDependencia(impDe(d))}</td>
+        <td>${_htmlDrpDependencia(d, impDe(d))}</td>
+        ${_tdLista(d.categoria)}
         ${_htmlAcoesLinha(acoes)}
       </tr>`;
       }).join('')
-    : `<tr><td colspan="4" class="vazio">${filtrando ? 'Nenhuma dependência encontrada com esses filtros.' : 'Nenhuma dependência cadastrada.'}</td></tr>`;
+    : `<tr><td colspan="5" class="vazio">${filtrando ? 'Nenhuma dependência encontrada com esses filtros.' : 'Nenhuma dependência cadastrada.'}</td></tr>`;
 }
 
 /** Fornecedor é linha de /dependencias, mas editado/avaliado na tela Fornecedores.
@@ -8065,7 +8165,10 @@ function _htmlDrawerDependencia() {
 function _atualizarTituloDrawerDependencia(d) {
   const titulo = (d && d.id) ? 'Editar Dependência' : 'Nova Dependência';
   const nome = d && d.nome ? String(d.nome).trim() : '';
-  const subtitulo = nome ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(nome)}</div>` : '';
+  // Importância (29/10/2026): o mesmo "Tier 1 · N processos" da grade, quando a tela carregou a rede.
+  const imp = d && d.id && document.getElementById('depRows') ? _importanciaDependencias(dependenciasData, dependenciasRede) : null;
+  const selo = imp && imp.get(String(d.id)) ? ` · ${_htmlSustentaDependencia(imp.get(String(d.id)))}` : '';
+  const subtitulo = nome ? `<div style="font-size:0.75em;color:#555;font-weight:400;margin-top:4px;">${esc(nome)}${selo}</div>` : '';
   document.getElementById('depDrawerTitulo').innerHTML = titulo + subtitulo;
 }
 

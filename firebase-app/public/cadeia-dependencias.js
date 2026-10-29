@@ -310,6 +310,28 @@
     return saida;
   }
 
+  /**
+   * Todas as dependencias de uma vez (29/10/2026, tela Dependencias): a
+   * cadeia de cada processo invertida -- o mesmo caminho da Conformidade.
+   * Sem varrer o catalogo por dependencia (processosQueDependemDe e por uma so).
+   *
+   * dados = { processos, servicos, dependencias }
+   * Devolve { [depId]: [{ processo, origens:[texto] }] }; dependencia que
+   * nenhum processo usa fica fora. Item legado sem cadastro (sem id) tambem.
+   */
+  function processosPorDependencia(dados) {
+    var d = dados || {};
+    var mapa = {};
+    (d.processos || []).forEach(function (p) {
+      if (!p) return;
+      cadeiaDoProcesso({ processo: p, servicos: d.servicos, dependencias: d.dependencias }).forEach(function (it) {
+        if (!it.id) return;
+        (mapa[it.id] = mapa[it.id] || []).push({ processo: p, origens: it.origens.slice() });
+      });
+    });
+    return mapa;
+  }
+
   /** Servicos cuja composicao contem a dependencia (direto ou por componentes) -- sugestao de troca do legado. */
   function servicosQueContem(depId, servicos, dependencias) {
     var idx = _indice(dependencias);
@@ -497,6 +519,7 @@
     processosDoServico: processosDoServico,
     cadeiaDoProcesso: cadeiaDoProcesso,
     processosQueDependemDe: processosQueDependemDe,
+    processosPorDependencia: processosPorDependencia,
     servicosQueContem: servicosQueContem,
   };
 }));
