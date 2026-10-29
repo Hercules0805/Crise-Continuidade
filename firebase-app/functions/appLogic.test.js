@@ -1685,6 +1685,87 @@ test('sugerirTextoIA processo-processos: so ids do catalogo, sem o proprio nem o
   assert.strictEqual(dados.processo.processo, 'Backup');
 });
 
+// ---- Questionario do BIA com pesquisa Google (29/10/2026) ----
+function capturarGeminiPesquisa(texto, chunks) {
+  const original = global.fetch;
+  const chamadas = [];
+  global.fetch = async (url, opts) => {
+    chamadas.push({ url, corpo: JSON.parse(opts.body) });
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: texto }] }, groundingMetadata: { groundingChunks: chunks || [] } }] }) };
+  };
+  return { chamadas, restaurar: () => { global.fetch = original; } };
+}
+
+async function pedirQuestionario(seedObj, texto, chunks) {
+  const db = makeDb(seedObj);
+  const g = capturarGeminiPesquisa(texto, chunks);
+  try {
+    const r = await WRITE_ACTIONS.sugerirTextoIA(db, { alvo: 'processo-questionario', id: 'ti__backup' }, ctx({ geminiApiKey: 'k' }));
+    return { r, g, db };
+  } finally { g.restaurar(); }
+}
+
+function seedQuestionario(perfil) {
+  const s = seedImpacto(perfil);
+  s.perguntas.q3 = { pergunta: 'Desativada?', categoria: 'Impacto Financeiro', ativa: false };
+  s.respostas_bia.r1.justificativas = { 'Afeta clientes?': 'Clientes restauram arquivos por ele' };
+  s.config_respostas = {
+    c1: { categoria: '_default', valor: '4', label: 'Alto' }, c2: { categoria: '_default', valor: '1', label: 'Baixo' },
+    c3: { categoria: 'Impacto Financeiro', valor: '3', label: 'Grave' }, c4: { categoria: 'Impacto Financeiro', valor: '0', label: 'Nenhum' },
+  };
+  return s;
+}
+
+test('sugerirTextoIA processo-questionario: quem edita pede; pesquisa Google; so pergunta ativa com valor da regua dela; fontes', async () => {
+  const vazio = JSON.stringify({ respostas: [] });
+  for (const [perfil, ok] of [[{ perfis: ['operador_processos'] }, true], [{ perfis: ['gestor'], area: 'TI' }, true], [{ perfis: ['gestor'], area: 'RH' }, false], [{ perfis: ['ti'] }, false]]) {
+    const p = pedirQuestionario(seedQuestionario(perfil), vazio);
+    if (ok) assert.deepStrictEqual((await p).r.respostas, []);
+    else await assert.rejects(() => p, /não pode editar este processo/, JSON.stringify(perfil));
+  }
+  const texto = 'Segue:\n```json\n' + JSON.stringify({ respostas: [
+    { id: 'q1', valor: '4', motivo: 'Clientes ficam sem restaurar arquivos', base: 'sistema' },
+    { id: 'q2', valor: '4', motivo: 'valor fora da regua da categoria' },
+    { id: 'q2', valor: '3', motivo: 'Multas da LGPD por perda de dados', base: 'externo' },
+    { id: 'q1', valor: '1', motivo: 'repetida' },
+    { id: 'q3', valor: '4', motivo: 'desativada' }, { id: 'inventada', valor: '4', motivo: 'x' },
+  ] }) + '\n```';
+  const chunks = [
+    { web: { uri: 'https://www.gov.br/lgpd', title: 'gov.br' } }, { web: { uri: 'https://www.gov.br/lgpd', title: 'gov.br' } },
+    { web: { uri: 'javascript:alert(1)', title: 'x' } }, { retrievedContext: {} },
+  ];
+  const { r, g, db } = await pedirQuestionario(seedQuestionario({ perfis: ['admin'] }), texto, chunks);
+  assert.strictEqual(JSON.stringify(r.respostas), JSON.stringify([
+    { pergunta: 'Afeta clientes?', categoria: 'Impacto em Clientes', valor: '4', rotulo: 'Alto', motivo: 'Clientes ficam sem restaurar arquivos', base: 'sistema' },
+    { pergunta: 'Perda financeira?', categoria: 'Impacto Financeiro', valor: '3', rotulo: 'Grave', motivo: 'Multas da LGPD por perda de dados', base: 'externo' },
+  ]));
+  assert.deepStrictEqual(r.fontes, [{ titulo: 'gov.br', url: 'https://www.gov.br/lgpd' }], 'sem repetida e sem link que nao e http');
+  const corpo = g.chamadas[0].corpo;
+  assert.deepStrictEqual(corpo.tools, [{ google_search: {} }]);
+  assert.strictEqual(corpo.generationConfig.responseMimeType, undefined, 'grounding nao aceita o modo JSON');
+  const { prompt, dados } = dadosDoPrompt(g, 'DADOS (JSON):');
+  assert.match(prompt, /NUNCA pesquise nomes de pessoas, clientes/);
+  assert.match(prompt, /Sem base nos dados nem na pesquisa para uma pergunta, NÃO a inclua/);
+  assert.deepStrictEqual(dados.perguntas.map((q) => q.id), ['q1', 'q2'], 'desativada fica fora');
+  const q1 = dados.perguntas[0];
+  assert.deepStrictEqual(q1.opcoes, [{ valor: '4', rotulo: 'Alto' }, { valor: '1', rotulo: 'Baixo' }], 'categoria sem regua usa _default');
+  assert.strictEqual(q1.atual, '4');
+  assert.strictEqual(q1.motivacaoAtual, 'Clientes restauram arquivos por ele');
+  assert.strictEqual(dados.perguntas[1].atual, '0', 'zero e resposta');
+  assert.strictEqual(dados.processo.impactoPorDimensao, undefined);
+  assert.strictEqual(dados.processo.processo, 'Backup');
+  assert.strictEqual(db._store.respostas_bia.r1.scores['Afeta clientes?'], 4, 'nada grava');
+});
+
+test('sugerirTextoIA processo-questionario: sem config_respostas usa a regua padrao da tela; texto fora do formato vira erro', async () => {
+  const s = seedQuestionario({ perfis: ['admin'] });
+  delete s.config_respostas;
+  const { r, g } = await pedirQuestionario(s, JSON.stringify({ respostas: [{ id: 'q2', valor: '2', motivo: 'm' }] }));
+  assert.strictEqual(r.respostas[0].rotulo, 'Médio (2)');
+  assert.deepStrictEqual(dadosDoPrompt(g, 'DADOS (JSON):').dados.perguntas[0].opcoes.map((o) => o.valor), ['4', '2', '1', '0']);
+  await assert.rejects(() => pedirQuestionario(seedQuestionario({ perfis: ['admin'] }), 'não sei responder'), /fora do formato/);
+});
+
 function seedDrp(perfis) {
   const s = seed();
   s.config_perfis['analista@fortestecnologia.com.br'] = { perfis };

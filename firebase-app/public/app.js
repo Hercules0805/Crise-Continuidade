@@ -1188,12 +1188,24 @@ window.renderAvaliacaoInline = () => {
                   <span style="color:${opCor};font-weight:600;font-size:0.85em;line-height:1.4;">${op.label}</span>
                 </label>`;}).join('')}
             </div>
+            <div class="aval-motivo">
+              <input type="text" id="avalMotivo${i}" class="aval-motivo__campo" maxlength="${MAX_MOTIVO_AVALIACAO}" placeholder="Motivação: por que esta nota?" aria-label="Motivação da nota" oninput="motivoAvaliacaoEditado(${i})">
+              <span class="aval-motivo__selo" id="avalMotivoSelo${i}" hidden title="Texto sugerido pela IA; editar o texto o torna seu">🤖 sugerido pela IA</span>
+            </div>
           </div>`;
         }).join('')}
       </div>
     </div>`;
   }).join('');
   
+  // Motivacao de cada nota (29/10/2026): a gravada na ultima resposta do BIA.
+  const motivos = (p && p.respostasJustificativas) || {};
+  const motivosIA = new Set((p && p.respostasJustificativasIA) || []);
+  window.processosPerguntas.forEach((perg, i) => {
+    if (motivos[perg.pergunta]) _definirMotivoAvaliacao(i, motivos[perg.pergunta], motivosIA.has(perg.pergunta));
+  });
+  if (window._sugestaoQuestionarioIA && window._sugestaoQuestionarioIA.processoId !== id) descartarSugestaoQuestionarioIA();
+
   // Pré-selecionar respostas anteriores
   if (p && p.respostas && Object.keys(p.respostas).length > 0) {
     window.processosPerguntas.forEach((perg, i) => {
@@ -1208,6 +1220,126 @@ window.renderAvaliacaoInline = () => {
     });
   }
   calcularScoreInline();
+};
+
+// ---- Motivação da nota (29/10/2026) ----
+// Cada nota pode ter uma breve motivação. A sugerida pela IA leva o selo
+// "🤖 sugerido pela IA" até alguém editar o texto. Grava junto com a resposta
+// do BIA (respostas_bia.justificativas; justificativasIA = as que ficaram da IA).
+const MAX_MOTIVO_AVALIACAO = 200;
+
+function _definirMotivoAvaliacao(i, texto, daIA) {
+  const campo = document.getElementById('avalMotivo' + i);
+  if (!campo) return;
+  campo.value = String(texto || '').slice(0, MAX_MOTIVO_AVALIACAO);
+  campo.dataset.origem = daIA ? 'ia' : '';
+  const selo = document.getElementById('avalMotivoSelo' + i);
+  if (selo) selo.hidden = !daIA;
+}
+
+window.motivoAvaliacaoEditado = (i) => {
+  const campo = document.getElementById('avalMotivo' + i);
+  if (campo) campo.dataset.origem = '';
+  const selo = document.getElementById('avalMotivoSelo' + i);
+  if (selo) selo.hidden = true;
+};
+
+// ---- Questionário sugerido pela IA (29/10/2026) ----
+// A IA lê o processo e pesquisa no Google o contexto de negócio; devolve nota e
+// motivo por pergunta. A caixa lista para revisar (checkbox): sem resposta vem
+// marcada, resposta diferente vem desmarcada, resposta igual não aparece.
+// "Aplicar" marca os rádios e preenche a Motivação; só grava ao Salvar.
+window._sugestaoQuestionarioIA = null;
+
+/** Valor marcado hoje na pergunta (ou null). */
+function _valorAtualAvaliacao(pergunta) {
+  const i = (window.processosPerguntas || []).findIndex((q) => q.pergunta === pergunta);
+  const cont = document.getElementById('avaliacaoPerguntas');
+  const sel = i !== -1 && cont ? cont.querySelector(`input[name="avalInline${i}"]:checked`) : null;
+  return sel ? { valor: String(sel.value), rotulo: sel.dataset.label || String(sel.value) } : null;
+}
+
+function _htmlSugestaoQuestionarioIA(s) {
+  if (!s) return '';
+  if (s.carregando) return _htmlSugestaoIACarregando('A IA está lendo o processo e pesquisando o contexto de negócio… pode levar até 1 minuto.');
+  const itens = (s.respostas || []).map((r, k) => ({ ...r, k, atual: _valorAtualAvaliacao(r.pergunta) }))
+    .filter((r) => !r.atual || r.atual.valor !== r.valor);
+  const fechar = `<button type="button" class="btn btn-ghost" onclick="descartarSugestaoQuestionarioIA()" style="${_ESTILO_ACAO_IA}">Fechar</button>`;
+  if (!itens.length) {
+    return `<div class="sugestao-ia" role="region" aria-label="Sugestão da IA">
+      <div class="sugestao-ia__titulo">🤖 ${(s.respostas || []).length ? 'A IA concorda com as respostas já marcadas' : 'A IA não encontrou base para sugerir notas a este processo'}</div>
+      <div class="sugestao-ia__acoes">${fechar}</div>
+    </div>`;
+  }
+  const categorias = [...new Set(itens.map((r) => r.categoria))];
+  const fontes = (s.fontes || []).filter((f) => /^https?:\/\//.test(f.url || ''));
+  return `<div class="sugestao-ia" role="region" aria-label="Sugestão da IA">
+      <div class="sugestao-ia__titulo">🤖 Notas sugeridas pela IA — marque o que aplicar</div>
+      ${categorias.map((cat) => `<div class="sugestao-ia__secao">
+        <div class="sugestao-ia__secao-titulo">${esc(cat)}</div>
+        ${itens.filter((r) => r.categoria === cat).map((r) => `<label class="sugestao-ia__item"><input type="checkbox" data-sugestao-questionario="${r.k}"${r.atual ? '' : ' checked'}><span>
+          <strong>${esc(r.pergunta)}</strong> → ${r.atual ? `<span class="sugestao-ia__de">atual: ${esc(r.atual.rotulo)}</span> → ` : ''}<strong>${esc(r.rotulo)}</strong>${r.base === 'externo' ? ' <span class="sugestao-ia__selo" title="Motivo apoiado na pesquisa externa">🌐 externo</span>' : ''}
+          ${r.motivo ? `<span class="sugestao-ia__motivo">${esc(r.motivo)}</span>` : ''}
+        </span></label>`).join('')}
+      </div>`).join('')}
+      <div class="sugestao-ia__acoes">
+        <button type="button" class="btn btn-ghost" onclick="aplicarSugestoesQuestionarioIA()" style="${_ESTILO_ACAO_IA}color:#2e7d32;border-color:#2e7d32;">Aplicar selecionadas</button>
+        <button type="button" class="btn btn-ghost" onclick="descartarSugestaoQuestionarioIA()" style="${_ESTILO_ACAO_IA}">Descartar</button>
+      </div>
+      ${fontes.length ? `<div class="sugestao-ia__nota">Fontes consultadas: ${fontes.map((f) => `<a href="${esc(f.url)}" target="_blank" rel="noopener noreferrer">${esc(f.titulo || f.url)}</a>`).join(' · ')}</div>` : ''}
+      <div class="sugestao-ia__nota">Revise: as notas mudam o Score e o Tier. A motivação vai junto com cada nota aplicada. Nada é gravado até Salvar.</div>
+    </div>`;
+}
+
+function _renderSugestaoQuestionarioIA() {
+  const caixa = document.getElementById('sugestaoQuestionarioIA');
+  if (caixa) caixa.innerHTML = _htmlSugestaoQuestionarioIA(window._sugestaoQuestionarioIA);
+}
+
+window.sugerirQuestionarioComIA = async () => {
+  const id = _idProcessoParaIA();
+  if (!id || (window._sugestaoQuestionarioIA && window._sugestaoQuestionarioIA.carregando)) return;
+  window._sugestaoQuestionarioIA = { carregando: true, processoId: id };
+  _renderSugestaoQuestionarioIA();
+  await comBotaoCarregando('btnSugerirQuestionarioIA', async () => {
+    try {
+      const r = await API.post('sugerirTextoIA', { alvo: 'processo-questionario', id });
+      // O drawer pode ter trocado de processo enquanto a IA respondia.
+      if ((document.getElementById('fId') || {}).value !== id) return;
+      window._sugestaoQuestionarioIA = { processoId: id, respostas: (r && r.respostas) || [], fontes: (r && r.fontes) || [] };
+    } catch (e) {
+      window._sugestaoQuestionarioIA = null;
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível gerar a sugestão. Tente de novo.'), '#c62828');
+    }
+    _renderSugestaoQuestionarioIA();
+  });
+};
+
+window.aplicarSugestoesQuestionarioIA = () => {
+  const s = window._sugestaoQuestionarioIA;
+  const cont = document.getElementById('avaliacaoPerguntas');
+  if (!s || !s.respostas || !cont) return;
+  const marcadas = [...document.querySelectorAll('#sugestaoQuestionarioIA input[data-sugestao-questionario]:checked')]
+    .map((cb) => s.respostas[Number(cb.dataset.sugestaoQuestionario)]).filter(Boolean);
+  if (!marcadas.length) return showToast('Marque ao menos uma pergunta.', '#e65100');
+  let aplicadas = 0;
+  marcadas.forEach((r) => {
+    const i = (window.processosPerguntas || []).findIndex((q) => q.pergunta === r.pergunta);
+    const radio = i !== -1 ? [...cont.querySelectorAll(`input[name="avalInline${i}"]`)].find((x) => x.value === String(r.valor)) : null;
+    if (!radio) return;
+    radio.checked = true;
+    atualizarEstiloOpcoes(radio);
+    if (r.motivo) _definirMotivoAvaliacao(i, r.motivo, true);
+    aplicadas++;
+  });
+  calcularScoreInline();
+  descartarSugestaoQuestionarioIA();
+  showToast(`✅ ${aplicadas} ${aplicadas === 1 ? 'nota aplicada' : 'notas aplicadas'} — salve o processo para gravar.`, '#2e7d32');
+};
+
+window.descartarSugestaoQuestionarioIA = () => {
+  window._sugestaoQuestionarioIA = null;
+  _renderSugestaoQuestionarioIA();
 };
 
 window.calcularScoreInline = () => {
@@ -1281,7 +1413,7 @@ window.fecharDrawerProcesso = () => _fecharComRastreador({
 // uma resposta contaria como "sem mudanca" e o Fechar a descartaria).
 const _edProcesso = criarRastreadorEdicao(() => {
   const c = _coletarFormularioProcesso();
-  return { p: c.p, aval: c.avalScores };
+  return { p: c.p, aval: c.avalScores, motivos: c.avalMotivos };
 });
 
 function renderizarConfigRespostas(config) {
@@ -4390,8 +4522,12 @@ async function processos() {
             </div>
             <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin:0;">Questionário</label>
-              <button type="button" class="btn btn-ghost" onclick="imprimirAvaliacao()">🖨️ Exportar PDF</button>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                ${_htmlBotaoSugerirIA('btnSugerirQuestionarioIA', 'sugerirQuestionarioComIA()', { titulo: 'A IA sugere a nota de cada pergunta, com o motivo, a partir do que o sistema sabe do processo e de pesquisa no Google; você marca o que aplicar' })}
+                <button type="button" class="btn btn-ghost" onclick="imprimirAvaliacao()">🖨️ Exportar PDF</button>
+              </div>
             </div>
+            <div id="sugestaoQuestionarioIA" style="margin-bottom:12px;"></div>
             <div id="avaliacaoProgresso" class="avaliacao-progresso"></div>
             <div id="avaliacaoScoreResumo" style="margin-bottom:20px;"></div>
             <div id="avaliacaoPerguntas"></div>
@@ -5801,6 +5937,9 @@ window.abrirModalProcesso = (p) => {
     const btn = document.getElementById(botao);
     if (btn) btn.style.display = podeIA ? 'inline-block' : 'none';
   });
+  descartarSugestaoQuestionarioIA();
+  const btnQuest = document.getElementById('btnSugerirQuestionarioIA');
+  if (btnQuest) btnQuest.style.display = podeIA ? 'inline-block' : 'none';
   // Mostrar/ocultar botão Abrir PCN
   const btnPcnSalvo = document.getElementById('btnPcnSalvo');
   if (btnPcnSalvo) btnPcnSalvo.style.display = (p && p.pcnSalvo) ? 'inline-block' : 'none';
@@ -5910,6 +6049,13 @@ function _respostasBiaMudaram(novas, salvo) {
   const ant = (salvo && salvo.respostas) || {};
   const val = (v) => (v === undefined || v === null || v === '' ? undefined : Number(v));
   return (window.processosPerguntas || []).some((q) => val(novas[q.pergunta]) !== val(ant[q.pergunta]));
+}
+
+/** Motivacoes do questionario mudaram em relacao as gravadas? */
+function _motivosBiaMudaram(novos, salvo) {
+  const ant = (salvo && salvo.respostasJustificativas) || {};
+  const txt = (v) => String(v || '').trim();
+  return (window.processosPerguntas || []).some((q) => txt(novos[q.pergunta]) !== txt(ant[q.pergunta]));
 }
 
 /** Depois de salvarRespostas: reflete Tier, contagem e RTO sugerido no registro e no formulario. */
@@ -6134,19 +6280,28 @@ function _coletarFormularioProcesso() {
   const avaliacaoEDesteProcesso = !!contAvaliacao
     && contAvaliacao.dataset.processoId !== undefined
     && contAvaliacao.dataset.processoId === idAberto;
+  // Motivacao so das perguntas respondidas; avalMotivosIA = as que ainda sao o texto da IA.
+  const avalMotivos = {};
+  const avalMotivosIA = [];
   (avaliacaoEDesteProcesso ? pergs : []).forEach((pg, i) => {
     const sel = contAvaliacao.querySelector(`input[name="avalInline${i}"]:checked`);
     if (sel) {
       avalScores[pg.pergunta] = parseInt(sel.value);
       avalTotal += parseInt(sel.value);
       temResposta = true;
+      const motivo = contAvaliacao.querySelector(`#avalMotivo${i}`);
+      const texto = motivo ? motivo.value.trim().slice(0, MAX_MOTIVO_AVALIACAO) : '';
+      if (texto) {
+        avalMotivos[pg.pergunta] = texto;
+        if (motivo.dataset.origem === 'ia') avalMotivosIA.push(pg.pergunta);
+      }
     }
   });
-  return { p, avalScores, avalTotal, temResposta };
+  return { p, avalScores, avalTotal, temResposta, avalMotivos, avalMotivosIA };
 }
 
 window.salvarProcesso = async () => {
-  const { p, avalScores, avalTotal, temResposta } = _coletarFormularioProcesso();
+  const { p, avalScores, avalTotal, temResposta, avalMotivos, avalMotivosIA } = _coletarFormularioProcesso();
 
   if (!p.area) return _avisarCampo('fArea', 'Selecione a área.');
   if (!p.processo) return _avisarCampo('fProcesso', 'Informe o processo.');
@@ -6165,7 +6320,7 @@ window.salvarProcesso = async () => {
   // cada Salvar com a aba aberta criava um respostas_bia e "renovava" o ciclo.
   const idxAnterior = p.id ? window.processosData.findIndex(x => x.id === p.id) : -1;
   const anterior = idxAnterior !== -1 ? window.processosData[idxAnterior] : null;
-  const respostasMudaram = temResposta && _respostasBiaMudaram(avalScores, anterior);
+  const respostasMudaram = temResposta && (_respostasBiaMudaram(avalScores, anterior) || _motivosBiaMudaram(avalMotivos, anterior));
 
   // Optimistic: atualiza a UI na hora, por cima do registro anterior -- senao
   // somem tier, revisoes, levantamento e papeis de crise ate recarregar.
@@ -6192,12 +6347,14 @@ window.salvarProcesso = async () => {
 
     // Salvar avaliação se respondida E mudou.
     if (respostasMudaram) {
-      const r = await API.post('salvarRespostas', { area: p.area, processo: p.processo, processoId: p.id || result.id, scores: avalScores });
+      const r = await API.post('salvarRespostas', { area: p.area, processo: p.processo, processoId: p.id || result.id, scores: avalScores, justificativas: avalMotivos, justificativasIA: avalMotivosIA });
       _aplicarResultadoRespostasBia(pEnriquecido, r && r.ultima, avalScores, avalTotal);
+      pEnriquecido.respostasJustificativas = avalMotivos;
+      pEnriquecido.respostasJustificativasIA = avalMotivosIA;
     }
     // Foto depois de refletir o RTO sugerido: o formulario volta a estar "limpo".
     const depois = _coletarFormularioProcesso();
-    _edProcesso.marcar({ p: { ...depois.p, id: p.id || result.id }, aval: depois.avalScores });
+    _edProcesso.marcar({ p: { ...depois.p, id: p.id || result.id }, aval: depois.avalScores, motivos: depois.avalMotivos });
     window._processoAberto = pEnriquecido;
     _renderSelosPlanos();
     _renderAcaoHomologacaoBia();
@@ -6346,7 +6503,13 @@ window.imprimirAvaliacao = () => {
               '<span style="color:' + op.cor + ';font-weight:' + (selecionada ? '700' : '600') + ';font-size:11px;">' + (selecionada ? '✔ ' : '') + op.label + '</span>' +
               '</div>';
           }).join('') +
-          '</div></div>';
+          '</div>' +
+          (() => {
+            const m = escopoAval.querySelector('#avalMotivo' + i);
+            const t = m && valSel !== null ? m.value.trim() : '';
+            return t ? '<div style="font-size:11.5px;color:#444;margin-top:8px;"><strong>Motivação:</strong> ' + esc(t) + (m.dataset.origem === 'ia' ? ' <span style="color:#2e7d32;">(sugerida pela IA)</span>' : '') + '</div>' : '';
+          })() +
+          '</div>';
       }).join('') +
       '</div></div>';
   }).join('');

@@ -649,3 +649,82 @@ test('Identificacao: processo novo (caminho antigo) continua editavel', async ()
   assert.ok(!doc.getElementById('fDescricaoFuncional').readOnly);
   assert.strictEqual(doc.getElementById('fHerdadoDica').style.display, 'none');
 });
+
+// ---- Questionario sugerido pela IA + motivacao da nota (29/10/2026) ----
+const PERGUNTAS_Q = [
+  { id: 'q1', pergunta: 'Afeta clientes?', categoria: 'Impacto em Clientes', ativa: true },
+  { id: 'q2', pergunta: 'Perda financeira?', categoria: 'Impacto Financeiro', ativa: true },
+  { id: 'q3', pergunta: 'Multa?', categoria: 'Impacto Financeiro', ativa: true },
+];
+const SUGESTAO_Q = { success: true, fontes: [{ titulo: 'gov.br', url: 'https://www.gov.br/lgpd' }, { titulo: 'mal', url: 'javascript:alert(1)' }], respostas: [
+  { pergunta: 'Afeta clientes?', categoria: 'Impacto em Clientes', valor: '4', rotulo: 'Alto (4)', motivo: 'Clientes da folha param', base: 'sistema' },
+  { pergunta: 'Perda financeira?', categoria: 'Impacto Financeiro', valor: '2', rotulo: 'Médio (2)', motivo: 'Atraso no faturamento', base: 'externo' },
+  { pergunta: 'Multa?', categoria: 'Impacto Financeiro', valor: '1', rotulo: 'Baixo (1)', motivo: 'igual', base: 'sistema' },
+] };
+
+test('Questionario: "Sugerir com IA" lista para revisar; aplicar marca notas e motivacao; salvar leva as justificativas', async () => {
+  const P = { ...P1, respostas: { 'Perda financeira?': 4, 'Multa?': 1 }, respostasJustificativas: { 'Multa?': 'Sem multa contratual' } };
+  const { w, doc, gravacoes } = await carregar(['seguranca'], { getProcessos: [P, P2], getPerguntas: PERGUNTAS_Q, 'post:sugerirTextoIA': SUGESTAO_Q });
+  w.editarProcesso('p1');
+  w.trocarAbaProcesso('bia');
+  assert.notStrictEqual(doc.getElementById('btnSugerirQuestionarioIA').style.display, 'none', 'botao visivel para quem edita');
+  assert.strictEqual(doc.getElementById('avalMotivo2').value, 'Sem multa contratual', 'motivacao gravada volta preenchida');
+  assert.ok(doc.getElementById('avalMotivoSelo2').hidden, 'escrita por pessoa: sem selo');
+
+  await w.sugerirQuestionarioComIA();
+  assert.strictEqual(JSON.stringify(gravacoes.find((x) => x.nome === 'post:sugerirTextoIA').arg), JSON.stringify({ alvo: 'processo-questionario', id: 'p1' }));
+  const caixa = doc.getElementById('sugestaoQuestionarioIA');
+  assert.match(caixa.textContent, /Afeta clientes\?[\s\S]*Alto \(4\)[\s\S]*Clientes da folha param/);
+  assert.match(caixa.textContent, /atual: Alto \(4\)[\s\S]*Médio \(2\)[\s\S]*🌐 externo/, 'resposta diferente mostra atual -> IA');
+  assert.doesNotMatch(caixa.textContent, /Multa\?/, 'resposta igual nao aparece');
+  assert.strictEqual(caixa.querySelector('[data-sugestao-questionario="0"]').checked, true, 'sem resposta: marcada');
+  assert.strictEqual(caixa.querySelector('[data-sugestao-questionario="1"]').checked, false, 'diferente: desmarcada');
+  const links = [...caixa.querySelectorAll('a')];
+  assert.deepStrictEqual(links.map((a) => a.getAttribute('href')), ['https://www.gov.br/lgpd'], 'so link http');
+  assert.strictEqual(links[0].getAttribute('rel'), 'noopener noreferrer');
+
+  w.aplicarSugestoesQuestionarioIA();
+  const marcado = (i) => { const r = doc.querySelector(`#avaliacaoPerguntas input[name="avalInline${i}"]:checked`); return r ? r.value : null; };
+  assert.deepStrictEqual([marcado(0), marcado(1), marcado(2)], ['4', '4', '1'], 'so a marcada foi aplicada');
+  assert.strictEqual(doc.getElementById('avalMotivo0').value, 'Clientes da folha param');
+  assert.strictEqual(doc.getElementById('avalMotivoSelo0').hidden, false, 'selo da IA');
+  assert.strictEqual(doc.getElementById('sugestaoQuestionarioIA').textContent.trim(), '', 'caixa fecha');
+  assert.match(doc.getElementById('avaliacaoScoreValor').textContent, /9/, 'score recalculado');
+
+  await w.salvarProcesso();
+  const resp = gravacoes.find((x) => x.nome === 'post:salvarRespostas').arg;
+  assert.deepStrictEqual(resp.scores, { 'Afeta clientes?': 4, 'Perda financeira?': 4, 'Multa?': 1 });
+  assert.deepStrictEqual(resp.justificativas, { 'Afeta clientes?': 'Clientes da folha param', 'Multa?': 'Sem multa contratual' });
+  assert.deepStrictEqual(resp.justificativasIA, ['Afeta clientes?']);
+});
+
+test('Questionario: editar o texto da IA tira o selo; mudar so a motivacao conta como edicao e grava resposta nova', async () => {
+  const P = { ...P1, respostas: { 'Afeta clientes?': 4 }, respostasJustificativas: { 'Afeta clientes?': 'Texto da IA' }, respostasJustificativasIA: ['Afeta clientes?'] };
+  const { w, doc, gravacoes } = await carregar(['seguranca'], { getProcessos: [P, P2], getPerguntas: PERGUNTAS_Q });
+  w.editarProcesso('p1');
+  w.trocarAbaProcesso('bia');
+  assert.strictEqual(doc.getElementById('avalMotivoSelo0').hidden, false, 'origem IA lembrada');
+  w.fecharDrawerProcesso();
+  assert.ok(!doc.getElementById('drawerProcesso').classList.contains('open'), 'sem mudanca fecha direto');
+
+  w.editarProcesso('p1');
+  w.trocarAbaProcesso('bia');
+  const campo = doc.getElementById('avalMotivo0');
+  campo.value = 'Revisado pelo dono';
+  w.motivoAvaliacaoEditado(0);
+  assert.ok(doc.getElementById('avalMotivoSelo0').hidden);
+  await w.salvarProcesso();
+  const resp = gravacoes.find((x) => x.nome === 'post:salvarRespostas').arg;
+  assert.deepStrictEqual(resp.justificativas, { 'Afeta clientes?': 'Revisado pelo dono' });
+  assert.deepStrictEqual(resp.justificativasIA, []);
+});
+
+test('Questionario: IA sem base mostra aviso e Fechar limpa a caixa', async () => {
+  const { w, doc } = await carregar(['seguranca'], { getPerguntas: PERGUNTAS_Q, 'post:sugerirTextoIA': { success: true, respostas: [], fontes: [] } });
+  w.editarProcesso('p1');
+  w.trocarAbaProcesso('bia');
+  await w.sugerirQuestionarioComIA();
+  assert.match(doc.getElementById('sugestaoQuestionarioIA').textContent, /não encontrou base/);
+  w.descartarSugestaoQuestionarioIA();
+  assert.strictEqual(doc.getElementById('sugestaoQuestionarioIA').textContent.trim(), '');
+});

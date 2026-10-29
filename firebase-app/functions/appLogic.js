@@ -1846,9 +1846,7 @@ function _textosResumo(v, max) {
  * application/json. Lanca AppError com mensagem legivel em qualquer falha.
  */
 async function _chamarGeminiJson(apiKey, prompt, rotulo, cfg) {
-  if (!apiKey) throw new AppError('API Key do Gemini não configurada.');
-  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
-  const payload = {
+  const body = await _postGemini(apiKey, {
     contents: [{ parts: [{ text: prompt }] }],
     generationConfig: Object.assign({
       temperature: 0.3,
@@ -1856,8 +1854,62 @@ async function _chamarGeminiJson(apiKey, prompt, rotulo, cfg) {
       responseMimeType: 'application/json',
       thinkingConfig: { thinkingBudget: 0 },
     }, cfg || {}),
-  };
+  }, rotulo);
+  return _jsonDoTextoIA(_textoDoGemini(body));
+}
 
+/** Texto da primeira resposta do Gemini (todas as partes); vazio vira erro. */
+function _textoDoGemini(body) {
+  const content = body && body.candidates && body.candidates[0] && body.candidates[0].content;
+  const texto = (content && Array.isArray(content.parts) ? content.parts : []).map((p) => (p && p.text) || '').join('');
+  if (!texto) throw new AppError('Resposta vazia do Gemini.');
+  return texto;
+}
+
+/** JSON da resposta: tira cercas ```json e, se vier texto em volta, pega do primeiro { ao ultimo }. */
+function _jsonDoTextoIA(texto) {
+  const limpo = String(texto).trim().replace(/^```(?:json)?\s*|\s*```$/g, '');
+  try {
+    return JSON.parse(limpo);
+  } catch (e) {
+    const ini = limpo.indexOf('{');
+    const fim = limpo.lastIndexOf('}');
+    if (ini !== -1 && fim > ini) {
+      try { return JSON.parse(limpo.slice(ini, fim + 1)); } catch (e2) { /* cai no erro abaixo */ }
+    }
+    throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
+  }
+}
+
+/**
+ * Chamada ao Gemini com pesquisa Google (grounding), para quando a sugestao
+ * precisa de contexto de fora do sistema (Questionario do BIA, 29/10/2026).
+ * O grounding nao aceita responseMimeType JSON: o prompt pede JSON e o texto
+ * e lido por _jsonDoTextoIA. Devolve tambem as fontes consultadas.
+ */
+const MAX_FONTES_IA = 8;
+
+async function _chamarGeminiComPesquisa(apiKey, prompt, rotulo, cfg) {
+  const body = await _postGemini(apiKey, {
+    contents: [{ parts: [{ text: prompt }] }],
+    tools: [{ google_search: {} }],
+    generationConfig: Object.assign({ temperature: 0.3, maxOutputTokens: 4096, thinkingConfig: { thinkingBudget: 0 } }, cfg || {}),
+  }, rotulo);
+  const json = _jsonDoTextoIA(_textoDoGemini(body));
+  const meta = body.candidates[0].groundingMetadata || {};
+  const vistas = new Set();
+  const fontes = (Array.isArray(meta.groundingChunks) ? meta.groundingChunks : [])
+    .map((c) => (c && c.web) || null)
+    .filter((w) => w && /^https?:\/\//.test(String(w.uri || '')) && !vistas.has(w.uri) && vistas.add(w.uri))
+    .slice(0, MAX_FONTES_IA)
+    .map((w) => ({ titulo: String(w.title || w.uri).slice(0, 120), url: String(w.uri) }));
+  return { json, fontes };
+}
+
+/** POST no Gemini (gemini-2.5-flash) com o limite de tempo; erro da API ou da rede vira AppError legivel. */
+async function _postGemini(apiKey, payload, rotulo) {
+  if (!apiKey) throw new AppError('API Key do Gemini não configurada.');
+  const url = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey;
   let body;
   try {
     const response = await fetch(url, {
@@ -1873,15 +1925,7 @@ async function _chamarGeminiJson(apiKey, prompt, rotulo, cfg) {
   } catch (err) {
     throw _erroChamadaIA(err, rotulo);
   }
-
-  const content = body.candidates && body.candidates[0] && body.candidates[0].content;
-  const texto = content && content.parts && content.parts[0] && content.parts[0].text;
-  if (!texto) throw new AppError('Resposta vazia do Gemini.');
-  try {
-    return JSON.parse(String(texto).replace(/^```(?:json)?\s*|\s*```$/g, ''));
-  } catch (e) {
-    throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
-  }
+  return body;
 }
 
 async function gerarResumoExecutivo(db, data, ctx) {
@@ -2045,6 +2089,7 @@ async function sugerirImpactoProcesso(db, data, ctx) {
 //   processo-funcional  Descricao Funcional do Processo (quem edita o processo)
 //   processo-impacto    Descricao do Impacto (= sugerirImpactoProcesso)
 //   processo-processos  Processos de que ele depende (aba Dependencias; ids do catalogo)
+//   processo-questionario  Notas do Questionario do BIA, com motivo (pesquisa Google)
 //   dependencia-drp     itens das listas dos Parametros DRP (Admin, SI, TI)
 //   servico-descricao   Descricao do Servico (Admin, SI -- regra de /servicos)
 //   servico-processos   Processos que o Servico suporta (Admin, SI; ids do catalogo)
@@ -2144,6 +2189,117 @@ async function _sugerirProcessosRelacionados(db, data, ctx) {
       return { id: c.id, nome: c.processo, area: c.area, motivo: String(x.motivo || '').trim().slice(0, 200) };
     });
   return { success: true, processos };
+}
+
+// ---- Questionario do BIA (29/10/2026) ----
+// A IA sugere a nota de cada pergunta com o que o sistema sabe do processo e
+// com o contexto de negocio pesquisado no Google, e diz o porque (motivo). As
+// notas viram Score e Tier: sem base, a pergunta fica sem sugestao. Volta so
+// pergunta cadastrada com valor da regua dela; a tela mostra para revisao.
+const MAX_MOTIVO_QUESTIONARIO = 200;
+
+/** Mesma regua padrao da tela (renderAvaliacaoInline) quando config_respostas esta vazia. */
+const OPCOES_RESPOSTA_PADRAO = {
+  Geral: [['4', 'Acontece o tempo todo'], ['2', 'Acontece com alguma frequência'], ['1', 'Acontece raramente'], ['0', 'Nunca aconteceu']],
+  _default: [['4', 'Alto (4)'], ['2', 'Médio (2)'], ['1', 'Baixo (1)'], ['0', 'N/A (0)']],
+};
+
+async function _opcoesRespostaPorCategoria(db) {
+  const snap = await db.collection('config_respostas').get().catch(() => ({ docs: [] }));
+  const docs = snap.docs.map((d) => d.data() || {}).sort((a, b) => (a.ordem || 0) - (b.ordem || 0));
+  if (!docs.length) {
+    const padrao = {};
+    Object.keys(OPCOES_RESPOSTA_PADRAO).forEach((cat) => { padrao[cat] = OPCOES_RESPOSTA_PADRAO[cat].map(([valor, rotulo]) => ({ valor, rotulo })); });
+    return padrao;
+  }
+  const config = {};
+  docs.forEach((d) => {
+    if (!d.categoria) return;
+    (config[d.categoria] = config[d.categoria] || []).push({ valor: String(d.valor), rotulo: d.label || String(d.valor) });
+  });
+  return config;
+}
+
+function _promptQuestionarioProcesso(dados) {
+  return `Você é um analista de continuidade de negócios (ISO 22301) da Fortes Tecnologia e ajuda o dono de um processo a responder o questionário do BIA.
+
+Para cada pergunta de "perguntas", sugira a nota do processo em "processo", com o motivo.
+
+COMO TRABALHAR:
+- Primeiro, use os dados do sistema em "processo": descrições, serviços, Produtos de Software Fortes, dependências, levantamento do PCN, RTO/RPO/MTD e riscos abertos.
+- Depois, pesquise no Google o contexto de negócio que os dados não trazem: o que a Fortes Tecnologia faz e o mercado em que atua, como esse tipo de processo pesa em empresas de software, e as obrigações legais e regulatórias ligadas a ele (por exemplo LGPD e prazos fiscais ou trabalhistas que os produtos atendem).
+- Na pesquisa, use SOMENTE termos genéricos: setor, tipo de processo, regulação e o nome da empresa. NUNCA pesquise nomes de pessoas, clientes, fornecedores ou trechos dos textos internos.
+- Avalie o impacto considerando a indisponibilidade ou falha do processo no momento em que ele é necessário, e o que piora com o tempo parado (RTO/MTD).
+
+REGRAS:
+- "valor" tem de ser um dos "valor" de "opcoes" daquela pergunta.
+- Sem base nos dados nem na pesquisa para uma pergunta, NÃO a inclua: a nota muda o Score e o Tier do processo.
+- "atual" e "motivacaoAtual" são o que o dono já respondeu: considere como informação de quem conhece o processo; mude só se os dados apontarem outra coisa.
+- "motivo": uma ou duas frases curtas (até ${MAX_MOTIVO_QUESTIONARIO} caracteres), em português do Brasil, dizendo por que essa nota. Não invente valores em R$, clientes, sistemas ou pessoas.
+- "base": "sistema" quando o motivo vem dos dados do processo; "externo" quando vem da pesquisa.
+- Responda SOMENTE o JSON, sem texto antes ou depois.
+
+FORMATO DA RESPOSTA (JSON):
+{"respostas": [{"id": "...", "valor": "...", "motivo": "...", "base": "sistema"}]}
+
+DADOS (JSON):
+${JSON.stringify(dados)}`;
+}
+
+async function _sugerirQuestionarioProcesso(db, data, ctx) {
+  const p = await _processoEditavelParaIA(db, data, ctx);
+  const [dados, pergSnap, opcoesPorCat, resposta] = await Promise.all([
+    _dadosProcessoIA(db, p),
+    db.collection('perguntas').get(),
+    _opcoesRespostaPorCategoria(db),
+    _ultimaRespostaBia(db, p, p.id),
+  ]);
+  // As notas antigas entram por pergunta (atual), nao como resumo por dimensao.
+  delete dados.impactoPorDimensao;
+  dados.descricaoImpacto = dados.descricaoAtual;
+  delete dados.descricaoAtual;
+
+  const atuais = (resposta && resposta.scores) || {};
+  const motivacoes = (resposta && resposta.justificativas) || {};
+  const perguntas = pergSnap.docs
+    .map((d) => ({ id: d.id, ...(d.data() || {}) }))
+    .filter((q) => q.ativa !== false && q.pergunta)
+    .sort((a, b) => (a.ordem || 0) - (b.ordem || 0))
+    .map((q) => {
+      const categoria = q.categoria || 'Geral';
+      const opcoes = opcoesPorCat[categoria] || opcoesPorCat._default || OPCOES_RESPOSTA_PADRAO._default.map(([valor, rotulo]) => ({ valor, rotulo }));
+      const linha = { id: q.id, categoria, pergunta: q.pergunta, descricao: String(q.descricao || '').slice(0, 300), opcoes };
+      if (atuais[q.pergunta] !== undefined && atuais[q.pergunta] !== null && atuais[q.pergunta] !== '') linha.atual = String(atuais[q.pergunta]);
+      if (motivacoes[q.pergunta]) linha.motivacaoAtual = String(motivacoes[q.pergunta]).slice(0, MAX_MOTIVO_QUESTIONARIO);
+      return linha;
+    });
+  if (!perguntas.length) return { success: true, respostas: [], fontes: [] };
+
+  const { json, fontes } = await _chamarGeminiComPesquisa(ctx.geminiApiKey, _promptQuestionarioProcesso({ processo: dados, perguntas }), 'a sugestão do questionário');
+  if (!json || typeof json !== 'object' || Array.isArray(json)) throw new AppError('A IA respondeu fora do formato esperado. Tente de novo.');
+  const porId = new Map(perguntas.map((q) => [String(q.id), q]));
+  const vistos = new Set();
+  const respostas = (Array.isArray(json.respostas) ? json.respostas : [])
+    .filter((x) => {
+      const q = x && porId.get(String(x.id));
+      if (!q || vistos.has(q.id)) return false;
+      if (!q.opcoes.some((o) => o.valor === String(x.valor))) return false;
+      vistos.add(q.id);
+      return true;
+    })
+    .map((x) => {
+      const q = porId.get(String(x.id));
+      const op = q.opcoes.find((o) => o.valor === String(x.valor));
+      return {
+        pergunta: q.pergunta,
+        categoria: q.categoria,
+        valor: op.valor,
+        rotulo: op.rotulo,
+        motivo: String(x.motivo || '').trim().slice(0, MAX_MOTIVO_QUESTIONARIO),
+        base: x.base === 'externo' ? 'externo' : 'sistema',
+      };
+    });
+  return { success: true, respostas, fontes };
 }
 
 // ---- Parametros DRP da dependencia ----
@@ -2536,6 +2692,7 @@ const ALVOS_SUGESTAO_IA = {
   'processo-funcional': _sugerirFuncionalProcesso,
   'processo-impacto': sugerirImpactoProcesso,
   'processo-processos': _sugerirProcessosRelacionados,
+  'processo-questionario': _sugerirQuestionarioProcesso,
   'dependencia-drp': _sugerirParametrosDrp,
   'servico-descricao': _sugerirDescricaoServico,
   'servico-processos': _sugerirProcessosDoServico,

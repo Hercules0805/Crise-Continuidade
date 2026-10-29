@@ -1575,6 +1575,9 @@ async function _lerRespostasIndexadas() {
       tier: r.tier || '',
       avaliado: true,
       respostas: r.scores || {},
+      // Motivacao de cada nota (29/10/2026); justificativasIA = as que vieram da IA.
+      justificativas: r.justificativas && typeof r.justificativas === 'object' ? r.justificativas : {},
+      justificativasIA: Array.isArray(r.justificativasIA) ? r.justificativasIA : [],
       timestamp: r.timestamp,
       respondente: r.respondente,
       // Questionario pela metade (27/10/2026): so as respostas novas guardam.
@@ -1660,6 +1663,8 @@ async function _lerProcessos() {
       score: resp ? resp.score : 0,
       avaliado: resp ? resp.avaliado : false,
       respostas: resp ? resp.respostas : [],
+      respostasJustificativas: resp ? resp.justificativas : {},
+      respostasJustificativasIA: resp ? resp.justificativasIA : [],
       // Ciclo de revisao (23/10/2026, ver conformidade-continuidade.js): a
       // resposta de BIA mais recente e as revisoes registradas de BIA/PCN.
       biaUltimaEm: resp && resp.timestamp ? resp.timestamp : '',
@@ -2330,6 +2335,16 @@ async function _salvarRespostas(payload) {
     });
     const tier = _calcularTier(score);
     const rto = _calcularRTO(tier);
+    // Motivacao so de pergunta ativa e respondida, curta.
+    const justificativas = {};
+    const justificativasIA = [];
+    perguntas.forEach((perg) => {
+      const t = resp.justificativas && Object.prototype.hasOwnProperty.call(resp.scores || {}, perg.pergunta)
+        ? String(resp.justificativas[perg.pergunta] || '').trim().slice(0, 200) : '';
+      if (!t) return;
+      justificativas[perg.pergunta] = t;
+      if (Array.isArray(resp.justificativasIA) && resp.justificativasIA.includes(perg.pergunta)) justificativasIA.push(perg.pergunta);
+    });
 
     await _db.collection(COLLECTION.respostas).add({
       timestamp: timestampIso,
@@ -2343,6 +2358,7 @@ async function _salvarRespostas(payload) {
       scores,
       score,
       tier,
+      ...(Object.keys(justificativas).length ? { justificativas, justificativasIA } : {}),
       // Quantas perguntas tiveram resposta: o BIA "em avaliacao" (parcial).
       respondidas,
       totalPerguntas: perguntas.length,
