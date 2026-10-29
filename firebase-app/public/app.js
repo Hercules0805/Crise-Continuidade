@@ -36,6 +36,7 @@ const pages = {
   conformidade,
   'threat-intel': threatIntel,
   'cadastro-processos': cadastroProcessos,
+  'processos-categorias': processosCategorias,
 };
 
 // Paleta rotativa de 10 cores para tags de categoria dinâmicas (dependências/BIA).
@@ -2724,6 +2725,209 @@ window.excluirPessoaCadastro = async (id) => {
 };
 
 // ============================================================
+// PÁGINA: CATEGORIAS DE PROCESSO (29/10/2026)
+//
+// Cadastro das categorias do Cadastro de Processos (coleção
+// categorias_processo): nome, finalidade, critérios de identificação e
+// exemplos. O processo guarda categoriaId. Categoria em uso não é excluída:
+// desativa (some das opções de processo novo e continua nos que a usam).
+// ============================================================
+let categoriasProcessoData = [];
+let _categoriasUsoProcessos = [];
+let categoriasProcessoOrdenacao = criarOrdenacao('ordem', 'asc');
+const categoriasProcessoPaginacao = criarPaginacao(20);
+window.filtrarCategoriasProcesso = () => { categoriasProcessoPaginacao.reiniciar(); renderizarCategoriasProcesso(); };
+window.irParaPaginaCategoriasProcesso = (d) => { categoriasProcessoPaginacao.mover(d); renderizarCategoriasProcesso(); };
+window.ordenarCategoriasProcesso = (coluna) => { categoriasProcessoOrdenacao.ordenar(coluna); categoriasProcessoPaginacao.reiniciar(); renderizarCategoriasProcesso(); };
+
+const _categoriaProcessoPorId = (id) => (categoriasProcessoData || []).find((c) => String(c.id) === String(id)) || null;
+/** Nome da categoria do processo; id que não existe mais vira "(categoria removida)". */
+function _nomeCategoriaProcesso(id) {
+  if (!id) return '';
+  const c = _categoriaProcessoPorId(id);
+  return c ? c.nome : '(categoria removida)';
+}
+const _usoCategoriaProcesso = (id) => _categoriasUsoProcessos.filter((p) => String(p.categoriaId) === String(id)).length;
+
+async function processosCategorias() {
+  const pode = Perfis.podeGerenciarCategoriasProcesso(window.USER_PERFIS);
+  app.innerHTML = `
+    ${_htmlCabecalhoLista({ titulo: 'Categorias de Processo', sub: 'Como os processos são classificados: a finalidade de cada categoria, como identificá-la e exemplos.',
+      primario: pode ? { rotulo: '+ Nova categoria', onclick: 'abrirDrawerCategoriaProcesso()', id: 'btnNovaCategoriaProcesso' } : null,
+      maisAcoes: [{ rotulo: 'Ir para o Cadastro de Processos', onclick: "location.hash='#cadastro-processos'" }] })}
+    ${_htmlBarraLista({ busca: { id: 'buscaCategoriaProcesso', placeholder: 'Buscar categoria…' }, aoMudar: 'filtrarCategoriasProcesso', contadorId: 'categoriasProcessoContador' })}
+    <div class="loading" id="loadingCategoriasProcesso">⏳ Carregando...</div>
+    <div id="listaCategoriasProcesso"></div>
+    ${_htmlDrawerCategoriaProcesso()}`;
+  try {
+    const [cats, procs] = await Promise.all([API.getCategoriasProcesso(), API.getProcessosCadastro().catch(() => [])]);
+    categoriasProcessoData = cats;
+    _categoriasUsoProcessos = procs;
+  } catch (e) {
+    console.error('Categorias de Processo: falha ao carregar', e);
+    document.getElementById('loadingCategoriasProcesso').style.display = 'none';
+    document.getElementById('listaCategoriasProcesso').innerHTML = _htmlErroCarga('Não foi possível carregar as categorias.', 'processosCategorias');
+    return;
+  }
+  document.getElementById('loadingCategoriasProcesso').style.display = 'none';
+  renderizarCategoriasProcesso();
+}
+
+function renderizarCategoriasProcesso() {
+  const pode = Perfis.podeGerenciarCategoriasProcesso(window.USER_PERFIS);
+  _renderGradeLista({
+    alvoId: 'listaCategoriasProcesso',
+    itens: categoriasProcessoData,
+    buscaId: 'buscaCategoriaProcesso',
+    camposBusca: ['nome', 'finalidade', 'criteriosIdentificacao', 'exemplos'],
+    ordenacao: categoriasProcessoOrdenacao,
+    comparadores: {
+      ordem: (a, b, dir) => dir * ((a.ordem - b.ordem) || a.nome.localeCompare(b.nome, 'pt-BR')),
+      uso: (a, b, dir) => dir * (_usoCategoriaProcesso(a.id) - _usoCategoriaProcesso(b.id)),
+      status: (a, b, dir) => dir * ((a.ativo ? 1 : 0) - (b.ativo ? 1 : 0)),
+    },
+    colunas: [
+      { rotulo: 'Categoria', w: 200, ordem: 'nome' },
+      { rotulo: 'Finalidade', w: 420 },
+      { rotulo: 'Processos', w: 100, ordem: 'uso' },
+      { rotulo: 'Status', w: 100, ordem: 'status' },
+    ],
+    linha: (c) => `
+      <tr style="cursor:pointer;${c.ativo ? '' : 'opacity:0.6;'}" onclick="abrirDrawerCategoriaProcesso('${escJs(c.id)}')">
+        ${_tdLista(c.nome, 'forte')}${_tdLista(c.finalidade || '–')}
+        <td>${_usoCategoriaProcesso(c.id)}</td>
+        <td>${_badgeAtivo(c.ativo, true)}</td>
+        ${pode ? _htmlAcoesLinha([_acaoEditar(`abrirDrawerCategoriaProcesso('${escJs(c.id)}')`), _acaoExcluir(`excluirCategoriaProcesso('${escJs(c.id)}')`)]) : '<td class="col-acoes"></td>'}
+      </tr>`,
+    paginacao: categoriasProcessoPaginacao,
+    fnPagina: 'irParaPaginaCategoriasProcesso',
+    fnOrdenar: 'ordenarCategoriasProcesso',
+    prefixoSeta: 'sort-catproc-',
+    contadorId: 'categoriasProcessoContador',
+    contador: ['categoria', 'categorias'],
+    vazio: 'Nenhuma categoria cadastrada ainda.',
+    vazioDetalhe: pode ? 'Use "+ Nova categoria" para cadastrar a primeira.' : '',
+  });
+}
+
+function _htmlDrawerCategoriaProcesso() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  const area = (id, rotulo, dica) => `
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}" for="${id}">${rotulo}</label>
+          <textarea id="${id}" rows="4" maxlength="2000" placeholder="${esc(dica)}" style="${inp}resize:vertical;font-family:inherit;"></textarea>
+        </div>`;
+  return `
+    <div class="drawer-overlay" id="drawerOverlayCategoriaProcesso" onclick="fecharDrawerCategoriaProcesso()"></div>
+    <div class="drawer" id="drawerCategoriaProcesso">
+      <div class="drawer-header">
+        <h3 id="catProcTitulo">Nova categoria</h3>
+        <button onclick="fecharDrawerCategoriaProcesso()" aria-label="Fechar" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <input type="hidden" id="catProcId">
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}" for="catProcNome">Categoria <span class="req" aria-hidden="true">*</span></label>
+          <input type="text" id="catProcNome" maxlength="100" placeholder="Ex: Intersetorial" style="${inp}">
+        </div>
+        ${area('catProcFinalidade', 'Finalidade', 'Para que serve esta categoria: que tipo de processo ela agrupa')}
+        ${area('catProcCriterios', 'Critérios de identificação', 'Como saber se um processo é desta categoria (um critério por linha)')}
+        ${area('catProcExemplos', 'Exemplos', 'Processos típicos desta categoria (um por linha)')}
+        <label class="check-label" style="margin-bottom:4px;"><input type="checkbox" id="catProcAtivo" checked> Categoria ativa</label>
+        <span style="font-size:0.75em;color:#888;display:block;">Inativa, a categoria não é oferecida para processos novos; quem já a usa continua com ela.</span>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerCategoriaProcesso()">Fechar</button>
+        <button class="btn btn-primary" id="btnSalvarCategoriaProcesso" onclick="salvarCategoriaProcesso()">Salvar</button>
+      </div>
+    </div>`;
+}
+
+function _coletarCategoriaProcesso() {
+  return {
+    id: document.getElementById('catProcId').value || null,
+    nome: document.getElementById('catProcNome').value.trim(),
+    finalidade: document.getElementById('catProcFinalidade').value.trim(),
+    criteriosIdentificacao: document.getElementById('catProcCriterios').value.trim(),
+    exemplos: document.getElementById('catProcExemplos').value.trim(),
+    ativo: document.getElementById('catProcAtivo').checked,
+  };
+}
+const _edCategoriaProcesso = criarRastreadorEdicao(() => _coletarCategoriaProcesso());
+
+window.abrirDrawerCategoriaProcesso = (id) => {
+  const c = id ? _categoriaProcessoPorId(id) : null;
+  const pode = Perfis.podeGerenciarCategoriasProcesso(window.USER_PERFIS);
+  document.getElementById('catProcTitulo').textContent = c ? 'Editar categoria' : 'Nova categoria';
+  document.getElementById('catProcId').value = c ? c.id : '';
+  document.getElementById('catProcNome').value = c ? c.nome : '';
+  document.getElementById('catProcFinalidade').value = c ? (c.finalidade || '') : '';
+  document.getElementById('catProcCriterios').value = c ? (c.criteriosIdentificacao || '') : '';
+  document.getElementById('catProcExemplos').value = c ? (c.exemplos || '') : '';
+  document.getElementById('catProcAtivo').checked = c ? c.ativo : true;
+  ['catProcNome', 'catProcFinalidade', 'catProcCriterios', 'catProcExemplos', 'catProcAtivo'].forEach((x) => { document.getElementById(x).disabled = !pode; });
+  document.getElementById('btnSalvarCategoriaProcesso').style.display = pode ? '' : 'none';
+  document.getElementById('drawerCategoriaProcesso').classList.add('open');
+  document.getElementById('drawerOverlayCategoriaProcesso').classList.add('open');
+  _edCategoriaProcesso.marcar();
+};
+
+function _fecharCategoriaProcessoSemSalvar() {
+  document.getElementById('drawerCategoriaProcesso').classList.remove('open');
+  document.getElementById('drawerOverlayCategoriaProcesso').classList.remove('open');
+}
+
+window.fecharDrawerCategoriaProcesso = () => _fecharComRastreador({
+  idDrawer: 'drawerCategoriaProcesso',
+  sujo: () => Perfis.podeGerenciarCategoriasProcesso(window.USER_PERFIS) && _edCategoriaProcesso.sujo(),
+  salvar: () => salvarCategoriaProcesso(),
+  fecharSemSalvar: _fecharCategoriaProcessoSemSalvar,
+});
+
+window.salvarCategoriaProcesso = async () => {
+  const dados = _coletarCategoriaProcesso();
+  if (!dados.nome) { _avisarCampo('catProcNome', 'Informe o nome da categoria.'); return false; }
+  let ok = false;
+  await comBotaoCarregando('btnSalvarCategoriaProcesso', async () => {
+    let r;
+    try {
+      r = await API.salvarCategoriaProcesso(dados);
+      categoriasProcessoData = await API.getCategoriasProcesso();
+    } catch (e) {
+      showToast('❌ ' + _mensagemErro(e, 'Não foi possível salvar.'), '#c62828');
+      return;
+    }
+    ok = true;
+    document.getElementById('catProcId').value = String(dados.id || (r && r.id) || '');
+    document.getElementById('catProcTitulo').textContent = 'Editar categoria';
+    _edCategoriaProcesso.marcar();
+    renderizarCategoriasProcesso();
+    showToast('✅ Salvo!', '#2e7d32');
+  });
+  return ok;
+};
+
+window.excluirCategoriaProcesso = async (id) => {
+  const c = _categoriaProcessoPorId(id);
+  if (!c) return;
+  const uso = _usoCategoriaProcesso(id);
+  if (uso) {
+    showToast(`⚠️ ${uso} processo${uso > 1 ? 's usam' : ' usa'} "${c.nome}". Desative a categoria em vez de excluir.`, '#e65100');
+    return;
+  }
+  if (!await confirmarAcao(`Excluir a categoria "${c.nome}"?`)) return;
+  try {
+    await API.excluirCategoriaProcesso(c.id);
+    categoriasProcessoData = await API.getCategoriasProcesso();
+    renderizarCategoriasProcesso();
+    showToast('🗑️ Excluída.', '#555');
+  } catch (e) {
+    showToast('❌ ' + _mensagemErro(e, 'Não foi possível excluir.'), '#c62828');
+  }
+};
+
+// ============================================================
 // PÁGINA: CADASTRO DE PROCESSOS (28/10/2026)
 //
 // Cadastro geral dos processos mapeados nas áreas -- a entidade principal de
@@ -2731,9 +2935,9 @@ window.excluirPessoaCadastro = async (id) => {
 // Negócio, BIA/BCP/DRP, Conformidade, Mapa...) é o recorte marcado "Avaliar
 // em Continuidade" (API.getProcessos); esta tela lê todos
 // (API.getProcessosCadastro). Criador e Aprovador são Pessoas do cadastro
-// (por id); Links são [{titulo, url}].
+// (por id); Links são [{titulo, url}]; a Categoria vem do cadastro
+// categorias_processo (por id, 29/10/2026).
 // ============================================================
-const CATEGORIAS_PROCESSO = ['Departamental', 'Intersetorial', 'Processo de Negócio'];
 let cadastroProcessosData = [];
 let cadastroProcessosOrdenacao = criarOrdenacao('area', 'asc');
 const cadastroProcessosPaginacao = criarPaginacao(20);
@@ -2747,7 +2951,7 @@ const _nomePessoaPorId = (id) => {
   return p ? p.nome : '(pessoa removida)';
 };
 const _badgeContinuidade = (sim) => sim ? '<span class="badge badge-green">Sim</span>' : '<span class="badge badge-gray">Não</span>';
-const _badgeCategoriaProcesso = (cat) => `<span class="badge badge-gray">${esc(cat || 'Processo de Negócio')}</span>`;
+const _badgeCategoriaProcesso = (id) => `<span class="badge badge-gray">${esc(_nomeCategoriaProcesso(id) || '–')}</span>`;
 /** Processo que já tem algo de Continuidade (BIA respondido, PCN, revisão ou homologação). */
 const _temDadosDeContinuidade = (p) => !!(p && (p.avaliado || p.pcnSalvo || p.biaRevisao || p.pcnRevisao || p.biaHomologacao));
 
@@ -2759,7 +2963,7 @@ async function cadastroProcessos() {
     ${_htmlBarraLista({ busca: { id: 'buscaCadastroProcesso', placeholder: 'Buscar processo…' }, aoMudar: 'filtrarCadastroProcessos', contadorId: 'cadastroProcessosContador',
       filtros: [
         { id: 'filtroCadProcArea', rotulo: 'Área', opcoes: [] },
-        { id: 'filtroCadProcCategoria', rotulo: 'Categoria', opcoes: CATEGORIAS_PROCESSO.map((c) => [c, c]) },
+        { id: 'filtroCadProcCategoria', rotulo: 'Categoria', opcoes: [] },
         { id: 'filtroCadProcContinuidade', rotulo: 'Continuidade', todos: 'Todos', opcoes: [['sim', 'Sim'], ['nao', 'Não']] },
       ] })}
     <div class="loading" id="loadingCadastroProcessos">⏳ Carregando...</div>
@@ -2768,13 +2972,15 @@ async function cadastroProcessos() {
 
   let areas;
   try {
-    const [procs, deps, as] = await Promise.all([
+    const [procs, deps, as, cats] = await Promise.all([
       API.getProcessosCadastro(),
       // Pessoas (Criador/Aprovador): sem elas a tela abre igual, sem os nomes.
       API.getDependencias().catch(() => null),
       API.getAreas(),
+      API.getCategoriasProcesso(),
     ]);
     cadastroProcessosData = procs;
+    categoriasProcessoData = cats;
     if (deps) pessoasData = deps.filter((d) => d.categoria === 'Pessoas');
     areas = as;
     window.areasDisponiveis = as;
@@ -2796,6 +3002,7 @@ async function cadastroProcessos() {
       .sort((a, b) => a.localeCompare(b, 'pt-BR'));
     _preencherFiltroLista('filtroCadProcArea', 'Área', nomes.map((n) => [n, n]));
   }
+  _preencherFiltroLista('filtroCadProcCategoria', 'Categoria', categoriasProcessoData.map((c) => [c.id, c.ativo ? c.nome : `${c.nome} (inativa)`]));
   renderizarCadastroProcessos();
 
   // "Editar no cadastro" (drawer de Processos de Negócio): #cadastro-processos?processo=<id>
@@ -2813,12 +3020,13 @@ function renderizarCadastroProcessos() {
     alvoId: 'listaCadastroProcessos',
     itens: visiveis,
     buscaId: 'buscaCadastroProcesso',
-    camposBusca: ['processo', 'area', (p) => _nomePessoaPorId(p.criadorId), (p) => _nomePessoaPorId(p.aprovadorId),
+    camposBusca: ['processo', 'area', (p) => _nomeCategoriaProcesso(p.categoriaId), (p) => _nomePessoaPorId(p.criadorId), (p) => _nomePessoaPorId(p.aprovadorId),
       (p) => (p.links || []).map((l) => `${l.titulo} ${l.url}`).join(' ')],
-    filtrar: (p) => (!area || p.area === area) && (!categoria || p.categoria === categoria)
+    filtrar: (p) => (!area || p.area === area) && (!categoria || String(p.categoriaId) === categoria)
       && (!cont || (cont === 'sim') === (p.continuidade !== false)),
     ordenacao: cadastroProcessosOrdenacao,
     comparadores: {
+      categoria: (a, b, dir) => dir * _nomeCategoriaProcesso(a.categoriaId).localeCompare(_nomeCategoriaProcesso(b.categoriaId), 'pt-BR'),
       criador: (a, b, dir) => dir * _nomePessoaPorId(a.criadorId).localeCompare(_nomePessoaPorId(b.criadorId), 'pt-BR'),
       aprovador: (a, b, dir) => dir * _nomePessoaPorId(a.aprovadorId).localeCompare(_nomePessoaPorId(b.aprovadorId), 'pt-BR'),
       continuidade: (a, b, dir) => dir * ((a.continuidade !== false ? 1 : 0) - (b.continuidade !== false ? 1 : 0)),
@@ -2835,7 +3043,7 @@ function renderizarCadastroProcessos() {
     linha: (p) => `
       <tr style="cursor:pointer;" onclick="abrirDrawerCadastroProcesso('${escJs(p.id)}')">
         ${_tdLista(p.area)}${_tdLista(p.processo, 'forte')}
-        <td>${_badgeCategoriaProcesso(p.categoria)}</td>
+        <td>${_badgeCategoriaProcesso(p.categoriaId)}</td>
         ${_tdLista(_nomePessoaPorId(p.criadorId) || '–')}${_tdLista(_nomePessoaPorId(p.aprovadorId) || '–')}
         <td title="${esc((p.links || []).map((l) => l.titulo || l.url).join(' · '))}">${(p.links || []).length || '–'}</td>
         <td>${_badgeContinuidade(p.continuidade !== false)}</td>
@@ -2874,7 +3082,9 @@ function _htmlDrawerCadastroProcesso() {
         </div>
         <div style="margin-bottom:16px;">
           <label style="${lbl}" for="cadProcCategoria">Categoria <span class="req" aria-hidden="true">*</span></label>
-          <select id="cadProcCategoria" style="${inp}">${CATEGORIAS_PROCESSO.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select>
+          <select id="cadProcCategoria" style="${inp}"></select>
+          <!-- Ajuda ao escolher (29/10/2026): finalidade, critérios e exemplos da categoria. -->
+          <div id="cadProcCategoriaAjuda" style="display:none;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:10px 14px;margin-top:8px;font-size:0.82em;color:#555;"></div>
         </div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
           <div>
@@ -2916,6 +3126,33 @@ function _popularSelectPessoaProcesso(idSelect, valor, area) {
   sel.value = valor || '';
 }
 
+/**
+ * Select de Categoria do processo: as ativas; a atual, se inativa ou removida,
+ * continua escolhível com o aviso. Processo novo começa em Processo de Negócio.
+ */
+function _popularSelectCategoriaProcesso(atual) {
+  const sel = document.getElementById('cadProcCategoria');
+  if (!sel) return;
+  const ativas = categoriasProcessoData.filter((c) => c.ativo);
+  const cat = atual ? _categoriaProcessoPorId(atual) : null;
+  const extra = atual && (!cat || !cat.ativo) ? `<option value="${esc(atual)}">${esc(cat ? `${cat.nome} (inativa)` : '(categoria removida)')}</option>` : '';
+  sel.innerHTML = '<option value="">Selecione...</option>' + ativas.map((c) => `<option value="${esc(c.id)}">${esc(c.nome)}</option>`).join('') + extra;
+  const padrao = ativas.find((c) => c.id === 'processo-de-negocio');
+  sel.value = atual || (padrao ? padrao.id : '');
+  sel.onchange = _renderAjudaCategoriaProcesso;
+  _renderAjudaCategoriaProcesso();
+}
+
+/** Finalidade, critérios e exemplos da categoria escolhida, para ajudar a classificar. */
+function _renderAjudaCategoriaProcesso() {
+  const caixa = document.getElementById('cadProcCategoriaAjuda');
+  if (!caixa) return;
+  const c = _categoriaProcessoPorId(document.getElementById('cadProcCategoria').value);
+  const partes = c ? [['Finalidade', c.finalidade], ['Critérios de identificação', c.criteriosIdentificacao], ['Exemplos', c.exemplos]].filter(([, t]) => t) : [];
+  caixa.style.display = partes.length ? '' : 'none';
+  caixa.innerHTML = partes.map(([rot, t]) => `<div style="margin-bottom:6px;"><b style="color:#333;">${rot}</b><div style="white-space:pre-line;">${esc(t)}</div></div>`).join('');
+}
+
 function _popularPessoasCadastroProcesso() {
   const area = document.getElementById('cadProcArea').value;
   _popularSelectPessoaProcesso('cadProcCriador', document.getElementById('cadProcCriador').value, area);
@@ -2927,7 +3164,7 @@ function _coletarCadastroProcesso() {
     id: document.getElementById('cadProcId').value || null,
     area: document.getElementById('cadProcArea').value,
     processo: document.getElementById('cadProcNome').value.trim(),
-    categoria: document.getElementById('cadProcCategoria').value,
+    categoriaId: document.getElementById('cadProcCategoria').value,
     criadorId: document.getElementById('cadProcCriador').value,
     aprovadorId: document.getElementById('cadProcAprovador').value,
     continuidade: document.getElementById('cadProcContinuidade').checked,
@@ -2951,7 +3188,7 @@ window.abrirDrawerCadastroProcesso = (id) => {
   selArea.value = areaAtual;
   selArea.onchange = _popularPessoasCadastroProcesso;
   document.getElementById('cadProcNome').value = p ? p.processo : '';
-  document.getElementById('cadProcCategoria').value = p ? (p.categoria || 'Processo de Negócio') : 'Processo de Negócio';
+  _popularSelectCategoriaProcesso(p ? p.categoriaId : '');
   _popularSelectPessoaProcesso('cadProcCriador', p ? p.criadorId : '', areaAtual);
   _popularSelectPessoaProcesso('cadProcAprovador', p ? p.aprovadorId : '', areaAtual);
   document.getElementById('cadProcContinuidade').checked = p ? p.continuidade !== false : false;
@@ -2979,6 +3216,7 @@ window.salvarCadastroProcesso = async () => {
   const dados = _coletarCadastroProcesso();
   if (!dados.area) { _avisarCampo('cadProcArea', 'Escolha a área do processo.'); return false; }
   if (!dados.processo) { _avisarCampo('cadProcNome', 'Informe o nome do processo.'); return false; }
+  if (!dados.categoriaId) { _avisarCampo('cadProcCategoria', 'Escolha a categoria do processo.'); return false; }
   const chave = (s) => String(s || '').trim().toLowerCase();
   if (cadastroProcessosData.some((p) => String(p.id) !== String(dados.id || '') && p.area === dados.area && chave(p.processo) === chave(dados.processo))) {
     _avisarCampo('cadProcNome', `Já existe o processo "${dados.processo}" na área ${dados.area}.`);
@@ -3454,7 +3692,11 @@ async function processos() {
 
   let processos, areas, perguntas;
   try {
-    [processos, areas, perguntas] = await Promise.all([API.getProcessos(), API.getAreas(), API.getPerguntas()]);
+    // Categorias (29/10/2026): só para o nome no resumo do cadastro; sem elas, "–".
+    let cats;
+    [processos, areas, perguntas, cats] = await Promise.all([API.getProcessos(), API.getAreas(), API.getPerguntas(),
+      API.getCategoriasProcesso().catch(() => null)]);
+    if (Array.isArray(cats)) categoriasProcessoData = cats;
   } catch (e) {
     console.error('processos: falha ao carregar', e);
     document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar os processos.', 'processos');
@@ -4660,7 +4902,7 @@ function _renderResumoCadastroProcesso(p) {
       <b style="color:#333;">Cadastro de Processos</b>
       ${Perfis.podeVerTela(window.USER_PERFIS, 'cadastro-processos') ? `<a href="#cadastro-processos?processo=${encodeURIComponent(p.id)}" style="color:#1565c0;font-weight:600;">Editar no cadastro</a>` : ''}
     </div>
-    <div>Categoria: <b>${esc(p.categoria || 'Processo de Negócio')}</b> · Criador: <b>${esc(pessoa(p.criadorId))}</b> · Aprovador: <b>${esc(pessoa(p.aprovadorId))}</b></div>
+    <div>Categoria: <b>${esc(_nomeCategoriaProcesso(p.categoriaId) || '–')}</b> · Criador: <b>${esc(pessoa(p.criadorId))}</b> · Aprovador: <b>${esc(pessoa(p.aprovadorId))}</b></div>
     <div style="margin-top:4px;">Links: ${links || '–'}</div>`;
 }
 

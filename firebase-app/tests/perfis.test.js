@@ -249,7 +249,7 @@ test('dependencias no banco liberam escrita para Admin, SI e TI (sem guarda de c
 // ============================================================
 
 const TODAS_AS_TELAS = [
-  'processos', 'cadastro-processos', 'pcns', 'drp', 'areas', 'pessoas', 'riscos', 'vulnerabilidades',
+  'processos', 'cadastro-processos', 'processos-categorias', 'pcns', 'drp', 'areas', 'pessoas', 'riscos', 'vulnerabilidades',
   'indicadores-dashboard', 'indicadores-cadastro', 'indicadores-lancamento', 'indicadores-matriz',
   'dependencias', 'componentes', 'perguntas', 'relatorios', 'servicos', 'catalogo-backup', 'catalogo-backup-ferramentas',
   'admin', 'perfis', 'produtos-software',
@@ -265,7 +265,7 @@ test('admin ve todas as telas', () => {
 });
 
 test('SI ve quase tudo, menos as tres telas proprias do Admin', () => {
-  ['processos', 'cadastro-processos', 'pcns', 'drp', 'riscos', 'vulnerabilidades', 'areas', 'pessoas', 'dependencias', 'relatorios', 'servicos', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
+  ['processos', 'cadastro-processos', 'processos-categorias', 'pcns', 'drp', 'riscos', 'vulnerabilidades', 'areas', 'pessoas', 'dependencias', 'relatorios', 'servicos', 'catalogo-backup', 'catalogo-backup-ferramentas', 'produtos-software',
     'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios', 'fornecedores-subcategorias', 'fornecedores-criticidade',
     'contratos', 'contratos-tipos', 'contratos-indexadores', 'contratos-status',
     'indicadores-dashboard', 'admin'].forEach((t) => {
@@ -359,10 +359,10 @@ test('categoriaDeFornecedor aceita as duas grafias em uso e recusa o resto', () 
 
 const TELAS_DO_OPERADOR = [
   'areas', 'cadastro-processos', 'contratos', 'contratos-indexadores', 'contratos-status', 'contratos-tipos', 'fornecedores', 'fornecedores-categorias', 'fornecedores-criterios',
-  'fornecedores-criticidade', 'fornecedores-subcategorias', 'pessoas', 'processos', 'relatorios',
+  'fornecedores-criticidade', 'fornecedores-subcategorias', 'pessoas', 'processos', 'processos-categorias', 'relatorios',
 ];
 
-test('operador ve exatamente as 14 telas combinadas, e nenhuma outra', () => {
+test('operador ve exatamente as 15 telas combinadas, e nenhuma outra', () => {
   const vistas = TODAS_AS_TELAS.filter((t) => Perfis.podeVerTela(Perfis.PERFIL.OPERADOR, t));
   assert.deepStrictEqual(vistas.sort(), TELAS_DO_OPERADOR);
 });
@@ -443,7 +443,7 @@ test('as regras limitam o operador em /dependencias a categoria de fornecedor', 
 // ============================================================
 
 const TELAS_DO_OPERADOR_PROCESSOS = [
-  'admin', 'areas', 'cadastro-processos', 'conformidade', 'dependencias', 'drp', 'pcns', 'pessoas', 'processos', 'relatorios',
+  'admin', 'areas', 'cadastro-processos', 'conformidade', 'dependencias', 'drp', 'pcns', 'pessoas', 'processos', 'processos-categorias', 'relatorios',
 ];
 
 test('operador de processos ve as telas de continuidade, e nenhuma outra', () => {
@@ -538,4 +538,9 @@ test('a regra de /dependencias deixa o operador de processos so criar o cadastro
   assert.ok(/allow create: if isOperadorProcessos\(\)[^;]*hasOnly\(\['categoria', 'nome', 'criadoEm', 'criadoPor'\]\)/s.test(corpo));
   assert.ok(!/allow (update|delete|write)[^;]*isOperadorProcessos/.test(corpo), 'nao edita nem exclui');
   Perfis.CATEGORIAS_CRIAVEIS_PELO_PROCESSO.forEach((c) => assert.ok(corpo.includes(`'${c}'`), c));
+});
+
+test('podeGerenciarCategoriasProcesso: Admin, SI e Operador de Processos; gestor, operador e TI nao', () => {
+  ['admin', 'seguranca', 'operador_processos'].forEach((p) => assert.strictEqual(Perfis.podeGerenciarCategoriasProcesso([p]), true, p));
+  ['gestor', 'operador', 'ti'].forEach((p) => assert.strictEqual(Perfis.podeGerenciarCategoriasProcesso([p]), false, p));
 });

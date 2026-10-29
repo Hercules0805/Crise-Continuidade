@@ -11,10 +11,16 @@ const PUB = path.join(__dirname, '..', 'public');
 
 const ANA = { id: 'ana', nome: 'Ana', categoria: 'Pessoas', areas: ['TI'] };
 const BRUNO = { id: 'bruno', nome: 'Bruno', categoria: 'Pessoas', areas: ['RH'] };
-const FOLHA = { id: 'ti__folha', area: 'TI', processo: 'Folha', categoria: 'Processo de Negócio', continuidade: true, criadorId: 'ana', aprovadorId: 'bruno',
+// Categorias de Processo (29/10/2026): cadastro proprio; o processo guarda categoriaId.
+const CATS = [
+  { id: 'departamental', nome: 'Departamental', ativo: true, ordem: 1, finalidade: 'Rotina de uma área só.', criteriosIdentificacao: 'Um responsável.', exemplos: 'Ponto.' },
+  { id: 'intersetorial', nome: 'Intersetorial', ativo: false, ordem: 2, finalidade: '', criteriosIdentificacao: '', exemplos: '' },
+  { id: 'processo-de-negocio', nome: 'Processo de Negócio', ativo: true, ordem: 3, finalidade: 'Valor ao cliente.', criteriosIdentificacao: '', exemplos: '' },
+];
+const FOLHA = { id: 'ti__folha', area: 'TI', processo: 'Folha', categoriaId: 'processo-de-negocio', continuidade: true, criadorId: 'ana', aprovadorId: 'bruno',
   links: [{ titulo: 'Fluxo', url: 'https://wiki/folha' }], avaliado: true };
-const PONTO = { id: 'rh__ponto', area: 'RH', processo: 'Ponto', categoria: 'Departamental', continuidade: false, criadorId: '', aprovadorId: '', links: [] };
-const COMPRAS = { id: 'ti__compras', area: 'TI', processo: 'Compras', categoria: 'Intersetorial', continuidade: false, criadorId: 'sumiu', aprovadorId: '', links: [] };
+const PONTO = { id: 'rh__ponto', area: 'RH', processo: 'Ponto', categoriaId: 'departamental', continuidade: false, criadorId: '', aprovadorId: '', links: [] };
+const COMPRAS = { id: 'ti__compras', area: 'TI', processo: 'Compras', categoriaId: 'intersetorial', continuidade: false, criadorId: 'sumiu', aprovadorId: '', links: [] };
 
 async function carregar(perfis, extra) {
   const dom = new JSDOM('<body><div id="app"></div><div id="toast"></div></body>', { runScripts: 'outside-only', url: 'https://x.test/' });
@@ -24,7 +30,7 @@ async function carregar(perfis, extra) {
   const gravacoes = [];
   const dados = Object.assign({
     getDependencias: [ANA, BRUNO], getAreas: [{ id: 'a1', nome: 'TI' }, { id: 'a2', nome: 'RH' }],
-    getProcessosCadastro: [FOLHA, PONTO, COMPRAS],
+    getProcessosCadastro: [FOLHA, PONTO, COMPRAS], getCategoriasProcesso: CATS,
   }, extra || {});
   w.API = new Proxy({}, {
     get: (_, nome) => async (arg) => {
@@ -61,7 +67,9 @@ test('lista todos os processos (dentro e fora de Continuidade), com categoria, p
 
 test('filtros de Categoria e Continuidade', async () => {
   const { w, doc } = await carregar(['admin']);
-  doc.getElementById('filtroCadProcCategoria').value = 'Departamental';
+  // Filtro pelo id, com as opções do cadastro (inativa marcada).
+  assert.ok([...doc.getElementById('filtroCadProcCategoria').options].some((o) => o.value === 'intersetorial' && /\(inativa\)/.test(o.textContent)));
+  doc.getElementById('filtroCadProcCategoria').value = 'departamental';
   w.filtrarCadastroProcessos();
   assert.deepStrictEqual(linhas(doc).map((t) => t.includes('Ponto')), [true]);
   doc.getElementById('filtroCadProcCategoria').value = '';
@@ -91,13 +99,15 @@ test('Operador Administrativo so consulta: sem "+ Novo processo" e formulario tr
 test('novo processo: grava area, nome, categoria, criador, aprovador, links e Continuidade', async () => {
   const { w, doc, gravacoes } = await carregar(['operador_processos']);
   w.abrirDrawerCadastroProcesso();
-  assert.strictEqual(doc.getElementById('cadProcCategoria').value, 'Processo de Negócio', 'categoria padrão');
+  assert.strictEqual(doc.getElementById('cadProcCategoria').value, 'processo-de-negocio', 'categoria padrão');
+  // Inativa não é oferecida para processo novo.
+  assert.ok(![...doc.getElementById('cadProcCategoria').options].some((o) => o.value === 'intersetorial'));
   assert.strictEqual(doc.getElementById('cadProcContinuidade').checked, false, 'novo nasce fora de Continuidade');
   mudar(doc, 'cadProcArea', 'RH');
   // Pessoas da área primeiro.
   assert.strictEqual(doc.querySelector('#cadProcCriador optgroup').label, 'Da área RH');
   doc.getElementById('cadProcNome').value = 'Admissão';
-  doc.getElementById('cadProcCategoria').value = 'Intersetorial';
+  doc.getElementById('cadProcCategoria').value = 'departamental';
   doc.getElementById('cadProcCriador').value = 'bruno';
   doc.getElementById('cadProcAprovador').value = 'ana';
   doc.getElementById('cadProcContinuidade').checked = true;
@@ -108,7 +118,7 @@ test('novo processo: grava area, nome, categoria, criador, aprovador, links e Co
   assert.strictEqual(await w.salvarCadastroProcesso(), true);
   const g = gravacoes.find((x) => x.nome === 'salvarProcesso').arg;
   assert.deepStrictEqual(g, {
-    id: null, area: 'RH', processo: 'Admissão', categoria: 'Intersetorial', criadorId: 'bruno', aprovadorId: 'ana',
+    id: null, area: 'RH', processo: 'Admissão', categoriaId: 'departamental', criadorId: 'bruno', aprovadorId: 'ana',
     continuidade: true, links: [{ titulo: 'Procedimento', url: 'https://wiki/admissao' }],
   });
 });
@@ -178,4 +188,27 @@ test('deep link #cadastro-processos?processo=<id> abre o processo', async () => 
   await dom.w.cadastroProcessos();
   assert.ok(dom.doc.getElementById('drawerCadastroProcesso').classList.contains('open'));
   assert.strictEqual(dom.doc.getElementById('cadProcNome').value, 'Ponto');
+});
+
+test('categoria: ajuda com finalidade, criterios e exemplos da escolhida; muda com a escolha', async () => {
+  const { w, doc } = await carregar(['admin']);
+  w.abrirDrawerCadastroProcesso();
+  const ajuda = doc.getElementById('cadProcCategoriaAjuda');
+  assert.match(ajuda.textContent, /Finalidade\s*Valor ao cliente\./);
+  assert.doesNotMatch(ajuda.textContent, /Critérios/, 'sem texto, a parte nao aparece');
+  mudar(doc, 'cadProcCategoria', 'departamental');
+  assert.match(ajuda.textContent, /Rotina de uma área só\.[\s\S]*Critérios de identificação\s*Um responsável\.[\s\S]*Exemplos\s*Ponto\./);
+  mudar(doc, 'cadProcCategoria', '');
+  assert.strictEqual(ajuda.style.display, 'none');
+});
+
+test('categoria inativa continua no processo que ja a usa, marcada; sem categoria nao salva', async () => {
+  const { w, doc, gravacoes } = await carregar(['admin']);
+  w.abrirDrawerCadastroProcesso('ti__compras');
+  const sel = doc.getElementById('cadProcCategoria');
+  assert.strictEqual(sel.value, 'intersetorial');
+  assert.match(sel.options[sel.selectedIndex].textContent, /Intersetorial \(inativa\)/);
+  sel.value = '';
+  assert.strictEqual(await w.salvarCadastroProcesso(), false);
+  assert.ok(!gravacoes.some((x) => x.nome === 'salvarProcesso'));
 });

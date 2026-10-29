@@ -61,6 +61,7 @@ const COLLECTION = {
   contratos: 'contratos',
   eventosContrato: 'eventos_contrato',
   tiposContrato: 'tipos_contrato',
+  categoriasProcesso: 'categorias_processo',
   indexadoresReajuste: 'indexadores_reajuste',
   statusContrato: 'status_contrato',
   configNotificacoes: 'config_notificacoes',
@@ -1649,7 +1650,8 @@ async function _lerProcessos() {
       // Cadastro de Processos (28/10/2026): a colecao e o cadastro geral de
       // processos das areas; Continuidade e o recorte continuidade !== false.
       // Ausente = legado, que era todo de Continuidade e Processo de Negocio.
-      categoria: _CATEGORIAS_PROCESSO.indexOf(d.categoria) !== -1 ? d.categoria : 'Processo de Negócio',
+      // Categoria pelo id (29/10/2026, cadastro categorias_processo).
+      categoriaId: _categoriaIdDoProcesso(d),
       criadorId: d.criadorId || '',
       aprovadorId: d.aprovadorId || '',
       links: _linksLidos(d.links),
@@ -1660,7 +1662,16 @@ async function _lerProcessos() {
   });
 }
 
-const _CATEGORIAS_PROCESSO = ['Departamental', 'Intersetorial', 'Processo de Negócio'];
+// Categorias de Processo (29/10/2026): cadastro proprio (categorias_processo);
+// o processo guarda categoriaId. Processo ainda com o nome antigo (`categoria`,
+// antes da migracao) cai no id fixo da categoria de partida; sem nada, no padrao.
+const CAMPOS_CATEGORIA_PROCESSO = ['finalidade', 'criteriosIdentificacao', 'exemplos'];
+const CATEGORIA_PROCESSO_PADRAO = 'processo-de-negocio';
+const _ID_CATEGORIA_LEGADA = { departamental: 'departamental', intersetorial: 'intersetorial', 'processo de negocio': CATEGORIA_PROCESSO_PADRAO };
+function _categoriaIdDoProcesso(d) {
+  if (d.categoriaId) return String(d.categoriaId);
+  return _ID_CATEGORIA_LEGADA[_nomeComparavel(d.categoria || '')] || CATEGORIA_PROCESSO_PADRAO;
+}
 
 // Links do processo: [{titulo, url}], so http(s) (mesmo formato de
 // contratos.documentos).
@@ -2189,7 +2200,7 @@ const _CAMPOS_PROCESSO = [
   'area', 'processo', 'descricao', 'dependencia', 'dependenciaItens', 'rto', 'rtoOrigem', 'rpo', 'mtd', 'tier',
   'descricaoFuncional', 'bcpContatos', 'biaHomologacao',
   'bcpPlanoBProvedores', 'bcpSlas', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual', 'tierManualPor', 'tierManualEm',
-  'categoria', 'criadorId', 'aprovadorId', 'links', 'continuidade',
+  'categoriaId', 'criadorId', 'aprovadorId', 'links', 'continuidade',
 ];
 
 // Localiza o docId de um processo por id explícito ou por área+processo.
@@ -2224,8 +2235,8 @@ async function _salvarProcesso(p) {
   if (Object.prototype.hasOwnProperty.call(data, 'bcpContatos')) data.bcpContatos = _listaContatos(data.bcpContatos);
   if (Object.prototype.hasOwnProperty.call(data, 'links')) data.links = _linksLidos(data.links);
   if (Object.prototype.hasOwnProperty.call(data, 'continuidade')) data.continuidade = data.continuidade !== false;
-  if (Object.prototype.hasOwnProperty.call(data, 'categoria') && _CATEGORIAS_PROCESSO.indexOf(data.categoria) === -1) {
-    throw new Error('Categoria de processo inválida.');
+  if (Object.prototype.hasOwnProperty.call(data, 'categoriaId') && !String(data.categoriaId || '').trim()) {
+    throw new Error('Escolha a categoria do processo.');
   }
 
   let docId = await _acharProcessoId(p);
@@ -2915,6 +2926,7 @@ const _GET_FIRESTORE = {
   getContratos: () => _lerContratos(),
   getEventosContrato: (params) => _lerEventosContrato(params),
   getTiposContrato: () => _lerListaContrato(COLLECTION.tiposContrato),
+  getCategoriasProcesso: () => _lerListaContrato(COLLECTION.categoriasProcesso, CAMPOS_CATEGORIA_PROCESSO),
   getIndexadoresReajuste: () => _lerListaContrato(COLLECTION.indexadoresReajuste),
   getStatusContrato: () => _lerListaContrato(COLLECTION.statusContrato, ['situacao']),
   getConfigNotificacoes: () => _lerConfigNotificacoes(),
@@ -2977,6 +2989,8 @@ const _POST_FIRESTORE = {
   salvarEventoContrato: (b) => _salvarEventoContrato(b),
   excluirEventoContrato: (b) => _db.collection(COLLECTION.eventosContrato).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarTipoContrato: (b) => _salvarListaContrato(COLLECTION.tiposContrato, [], b),
+  salvarCategoriaProcesso: (b) => _salvarListaContrato(COLLECTION.categoriasProcesso, CAMPOS_CATEGORIA_PROCESSO, b),
+  excluirCategoriaProcesso: (b) => _db.collection(COLLECTION.categoriasProcesso).doc(String(b.id)).delete().then(() => ({ success: true })),
   excluirTipoContrato: (b) => _db.collection(COLLECTION.tiposContrato).doc(String(b.id)).delete().then(() => ({ success: true })),
   salvarIndexadorReajuste: (b) => _salvarListaContrato(COLLECTION.indexadoresReajuste, [], b),
   excluirIndexadorReajuste: (b) => _db.collection(COLLECTION.indexadoresReajuste).doc(String(b.id)).delete().then(() => ({ success: true })),
@@ -3312,6 +3326,11 @@ const API = {
   excluirEventoContrato: (id) => API.post('excluirEventoContrato', { id })
     .then((r) => { API.invalidate('getEventosContrato'); return r; }),
   getTiposContrato: () => API.get('getTiposContrato'),
+  getCategoriasProcesso: () => API.get('getCategoriasProcesso'),
+  salvarCategoriaProcesso: (c) => API.post('salvarCategoriaProcesso', c)
+    .then((r) => { API.invalidate('getCategoriasProcesso'); return r; }),
+  excluirCategoriaProcesso: (id) => API.post('excluirCategoriaProcesso', { id })
+    .then((r) => { API.invalidate('getCategoriasProcesso'); return r; }),
   salvarTipoContrato: (t) => API.post('salvarTipoContrato', t)
     .then((r) => { API.invalidate('getTiposContrato'); return r; }),
   excluirTipoContrato: (id) => API.post('excluirTipoContrato', { id })

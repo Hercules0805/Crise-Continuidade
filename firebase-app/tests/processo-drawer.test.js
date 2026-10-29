@@ -611,8 +611,8 @@ test('Dependencias: "+ Criar" de nome que outra pessoa acabou de cadastrar vincu
 // Cadastro de Processos (28/10/2026): a aba Identificacao mostra o que vem do
 // cadastro geral (so leitura) e leva ate ele para editar.
 test('Identificacao: resumo do Cadastro de Processos com link "Editar no cadastro"', async () => {
-  const P = { ...P1, categoria: 'Intersetorial', criadorId: 'ana', aprovadorId: '', links: [{ titulo: 'Fluxo', url: 'https://wiki/folha' }] };
-  const { w, doc } = await carregar(['operador_processos'], { getProcessos: [P, P2] });
+  const P = { ...P1, categoriaId: 'intersetorial', criadorId: 'ana', aprovadorId: '', links: [{ titulo: 'Fluxo', url: 'https://wiki/folha' }] };
+  const { w, doc } = await carregar(['operador_processos'], { getProcessos: [P, P2], getCategoriasProcesso: [{ id: 'intersetorial', nome: 'Intersetorial', ativo: true }] });
   w.editarProcesso('p1');
   const resumo = doc.getElementById('fCadastroResumo');
   assert.notStrictEqual(resumo.style.display, 'none');

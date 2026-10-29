@@ -3,7 +3,7 @@
  * cadastro geral dos processos das areas, e Continuidade (BIA/BCP/DRP) e o
  * recorte `continuidade: true`. Este script classifica o que ja existe: todo
  * processo cadastrado ate aqui era de Continuidade, e entra como
- * categoria 'Processo de Negócio' e continuidade true.
+ * categoriaId 'processo-de-negocio' e continuidade true (categoria pelo id desde 29/10/2026).
  *
  * RODA NA MAO:
  *   cd firebase-app/functions
@@ -19,13 +19,14 @@
 
 'use strict';
 
-const CATEGORIA_PADRAO = 'Processo de Negócio';
+// Desde 29/10/2026 a categoria e um cadastro (categorias_processo) e o processo guarda o id.
+const CATEGORIA_PADRAO = 'processo-de-negocio';
 
 /** Puro: [{ processoId, dados }] com so os campos que faltam em cada processo. */
 function planejar(processos) {
   return (processos || []).map((p) => {
     const dados = {};
-    if (!p.categoria) dados.categoria = CATEGORIA_PADRAO;
+    if (!p.categoriaId && !p.categoria) dados.categoriaId = CATEGORIA_PADRAO;
     if (typeof p.continuidade !== 'boolean') dados.continuidade = true;
     return { processoId: String(p.id), dados };
   }).filter((g) => Object.keys(g.dados).length);

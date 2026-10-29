@@ -346,8 +346,13 @@ service cloud.firestore {
     // e o Operador de Processos escrevem em processos de qualquer area.
     // Cadastro de Processos (28/10/2026): a colecao e o cadastro geral; os
     // campos do cadastro, quando vierem, tem de ter o formato combinado.
-    function processoCadastroValido(d) {
-      return (!('categoria' in d) || d.categoria in ['Departamental', 'Intersetorial', 'Processo de Negócio'])
+    // Categorias de Processo (29/10/2026): o processo guarda categoriaId, que
+    // tem de existir em categorias_processo quando e gravado ou trocado (o que
+    // ja estava gravado nao e reconferido a cada edicao do processo).
+    function processoCadastroValido(d, antes) {
+      return (!('categoriaId' in d)
+          || (antes != null && antes.get('categoriaId', null) == d.categoriaId)
+          || (d.categoriaId is string && exists(/databases/$(database)/documents/categorias_processo/$(d.categoriaId))))
         && (!('continuidade' in d) || d.continuidade is bool)
         && (!('links' in d) || d.links is list)
         && (!('criadorId' in d) || d.criadorId is string)
@@ -359,9 +364,9 @@ service cloud.firestore {
       // Homologar o BIA (biaHomologacao, 27/10/2026) e de quem opera os
       // processos (Admin, SI, Operador de Processos): o Gestor avalia a
       // propria area, mas nao homologa a propria avaliacao.
-      allow create: if processoCadastroValido(request.resource.data) && (podeOperarProcessos()
+      allow create: if processoCadastroValido(request.resource.data, null) && (podeOperarProcessos()
         || (isGestorDaArea(request.resource.data.area) && !('biaHomologacao' in request.resource.data)));
-      allow update: if processoCadastroValido(request.resource.data) && (podeOperarProcessos()
+      allow update: if processoCadastroValido(request.resource.data, resource.data) && (podeOperarProcessos()
         || ((isGestorDaArea(request.resource.data.area) || isGestorDaArea(resource.data.area))
             && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['biaHomologacao'])));
       allow delete: if podeOperarProcessos() || isGestorDaArea(resource.data.area);
@@ -466,6 +471,13 @@ service cloud.firestore {
 
     // Listas configuraveis do contrato. Leitura para o dominio (o gestor
     // precisa dos nomes para ler os proprios contratos).
+    // Categorias de Processo (29/10/2026): cadastro de quem opera processos.
+    match /categorias_processo/{id} {
+      allow read: if isCorpUser();
+      allow write: if podeOperarProcessos()
+        && (request.resource == null || (request.resource.data.nome is string
+          && request.resource.data.nome.size() > 0 && request.resource.data.nome.size() <= 100));
+    }
     match /tipos_contrato/{id} {
       allow read: if isCorpUser();
       allow write: if podeGerenciarFornecedores();

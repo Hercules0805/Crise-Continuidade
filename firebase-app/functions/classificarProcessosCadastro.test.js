@@ -5,7 +5,7 @@ const { planejar } = require('./scripts/classificar-processos-cadastro');
 
 test('processo legado vira Processo de Negócio e de Continuidade', () => {
   assert.deepStrictEqual(planejar([{ id: 'ti__folha', area: 'TI', processo: 'Folha' }]), [
-    { processoId: 'ti__folha', dados: { categoria: 'Processo de Negócio', continuidade: true } },
+    { processoId: 'ti__folha', dados: { categoriaId: 'processo-de-negocio', continuidade: true } },
   ]);
 });
 
@@ -17,7 +17,7 @@ test('so grava o campo que falta; o que ja foi classificado fica como esta', () 
   ]);
   assert.deepStrictEqual(r, [
     { processoId: 'b', dados: { continuidade: true } },
-    { processoId: 'c', dados: { categoria: 'Processo de Negócio' } },
+    { processoId: 'c', dados: { categoriaId: 'processo-de-negocio' } },
   ]);
 });
 

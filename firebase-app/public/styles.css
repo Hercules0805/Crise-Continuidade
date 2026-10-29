@@ -108,6 +108,7 @@ body { font-family: 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; color: 
 .drawer#drawerInventarioIntel { width: 640px; }
 /* Cadastro de Processos (28/10/2026): formulário de coluna única. */
 .drawer#drawerCadastroProcesso { width: 560px; }
+.drawer#drawerCategoriaProcesso { width: 560px; }
 .drawer#drawerListaContrato { width: 480px; }
 .drawer#drawerNotificacao { width: 720px; }
 .drawer#drawerImportarFornecedores { width: 820px; }

@@ -41,6 +41,7 @@ async function seed() {
     await db.doc('perguntas/p1').set({ categoria: 'C', pergunta: 'Q?', ativa: true });
     await db.doc('processos/ti__proc').set({ area: 'TI', processo: 'Proc' });
     await db.doc('processos/rh__proc').set({ area: 'RH', processo: 'Proc' });
+    await db.doc('categorias_processo/departamental').set({ nome: 'Departamental', ativo: true });
   });
 }
 
@@ -172,15 +173,22 @@ describe('Security Rules — processos e respostas', () => {
   });
 
   // Cadastro de Processos (28/10/2026): campos do cadastro com formato fixo.
-  test('cadastro: categoria da lista, continuidade bool e links lista', async () => {
-    const ok = { area: 'TI', processo: 'Dep', categoria: 'Departamental', continuidade: false, links: [{ titulo: 'Wiki', url: 'https://x' }], criadorId: 'p1', aprovadorId: '' };
+  test('cadastro: categoriaId existente, continuidade bool e links lista', async () => {
+    const ok = { area: 'TI', processo: 'Dep', categoriaId: 'departamental', continuidade: false, links: [{ titulo: 'Wiki', url: 'https://x' }], criadorId: 'p1', aprovadorId: '' };
     await assertSucceeds(db(GESTOR).doc('processos/ti__dep').set(ok));
-    await assertSucceeds(db(ADMIN).doc('processos/rh__inter').set({ area: 'RH', processo: 'Inter', categoria: 'Intersetorial' }));
-    await assertFails(db(ADMIN).doc('processos/ti__x').set({ area: 'TI', processo: 'X', categoria: 'Outra' }));
+    await assertFails(db(ADMIN).doc('processos/ti__x').set({ area: 'TI', processo: 'X', categoriaId: 'nao-existe' }));
     await assertFails(db(ADMIN).doc('processos/ti__x').set({ area: 'TI', processo: 'X', continuidade: 'sim' }));
     await assertFails(db(ADMIN).doc('processos/ti__x').set({ area: 'TI', processo: 'X', links: 'https://x' }));
-    await assertFails(db(ADMIN).doc('processos/ti__proc').set({ categoria: 'Outra' }, { merge: true }));
+    await assertFails(db(ADMIN).doc('processos/ti__proc').set({ categoriaId: 'nao-existe' }, { merge: true }));
+    await assertSucceeds(db(ADMIN).doc('processos/ti__proc').set({ categoriaId: 'departamental' }, { merge: true }));
     await assertFails(db(GESTOR).doc('processos/rh__dep').set({ ...ok, area: 'RH' }));
+  });
+
+  test('categoria ja gravada nao e reconferida: processo segue editavel mesmo se a categoria sumir', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('processos/ti__orfao').set({ area: 'TI', processo: 'Orfao', categoriaId: 'apagada' });
+    });
+    await assertSucceeds(db(GESTOR).doc('processos/ti__orfao').set({ descricao: 'x' }, { merge: true }));
   });
 });
 
@@ -625,6 +633,19 @@ describe('Security Rules — Operador de Processos', () => {
   const OPP = { email: 'opprocessos@fortestecnologia.com.br' };
   beforeEach(async () => {
     await seedPerfil(OPP.email, { perfis: ['operador_processos'] });
+  });
+
+  // Categorias de Processo (29/10/2026).
+  test('categorias de processo: Op. Processos e SI cadastram; gestor so le; nome obrigatorio', async () => {
+    const SICAT = { email: 'si-cat@fortestecnologia.com.br' };
+    await seedPerfil(SICAT.email, { perfis: ['seguranca'] });
+    const cat = { nome: 'Estratégico', finalidade: 'f', criteriosIdentificacao: 'c', exemplos: 'e', ativo: true };
+    await assertSucceeds(db(OPP).doc('categorias_processo/estrategico').set(cat));
+    await assertSucceeds(db(SICAT).doc('categorias_processo/estrategico').set({ ativo: false }, { merge: true }));
+    await assertSucceeds(db(GESTOR).doc('categorias_processo/estrategico').get());
+    await assertFails(db(GESTOR).doc('categorias_processo/outra').set(cat));
+    await assertFails(db(OPP).doc('categorias_processo/vazia').set({ ...cat, nome: '' }));
+    await assertSucceeds(db(OPP).doc('categorias_processo/estrategico').delete());
   });
 
   test('escreve processos e cria respostas de BIA de QUALQUER área', async () => {
