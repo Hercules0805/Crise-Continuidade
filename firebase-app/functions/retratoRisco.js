@@ -24,9 +24,9 @@ function chaveDoDia(dataISO) {
   return new Date(dataISO).toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
 }
 
-/** Busca os cinco insumos que a reconstrucao precisa. */
+/** Busca os insumos que a reconstrucao precisa. */
 async function montarInsumos(db) {
-  const [medicoesSnap, riscosSnap, processosSnap, respostasBiaSnap, avaliacoesSnap] = await Promise.all([
+  const [medicoesSnap, riscosSnap, processosSnap, respostasBiaSnap, avaliacoesSnap, servicosSnap, dependenciasSnap] = await Promise.all([
     db.collection('medicoes').where('fonte', '==', 'risco').get(),
     db.collection('riscos').get(),
     db.collection('processos').get(),
@@ -36,6 +36,10 @@ async function montarInsumos(db) {
     // Pendente/peso 2 aqui, mesmo com BIA respondido).
     db.collection('respostas_bia').get(),
     db.collection('avaliacoes_fornecedor').get(),
+    // Criticidade automatica do fornecedor (29/10/2026): a cadeia
+    // processo -> servico -> componentes precisa do catalogo e dos servicos.
+    db.collection('servicos').get(),
+    db.collection('dependencias').get(),
   ]);
 
   const medicoesRisco = medicoesSnap.docs.map((d) => d.data());
@@ -65,9 +69,20 @@ async function montarInsumos(db) {
     const quando = String(a.avaliadoEm || '');
     if (!avaliadoEmPorFornecedor[fid] || quando > avaliadoEmPorFornecedor[fid]) {
       avaliadoEmPorFornecedor[fid] = quando;
-      criticidadePorFornecedor[fid] = a.scoreCriticidade === null || a.scoreCriticidade === undefined
-        ? null : Number(a.scoreCriticidade);
+      criticidadePorFornecedor[fid] = {
+        score: a.completaCriticidade === false || a.scoreCriticidade === null || a.scoreCriticidade === undefined
+          ? null : Number(a.scoreCriticidade),
+        scoreMaximo: Number(a.scoreMaximoCriticidade) || 0,
+        automatica: false,
+      };
     }
+  });
+
+  // Fornecedor de processo Tier 1 e Alta automatica (29/10/2026), com ou sem avaliacao.
+  const servicos = servicosSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+  const dependencias = dependenciasSnap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+  historicoRisco.fornecedoresDeProcessoCritico(processosPorId, servicos, dependencias).forEach((fid) => {
+    criticidadePorFornecedor[fid] = Object.assign({ score: null, scoreMaximo: 0 }, criticidadePorFornecedor[fid], { automatica: true });
   });
 
   return { medicoesRisco, vinculosPorRiscoId, processosPorId, criticidadePorFornecedor };

@@ -447,3 +447,9 @@ test('trilha das etapas NIST (Enquadrar, Avaliar, Responder, Monitorar)', () => 
   const r = { titulo: 'T', responsavel: 'Ana', probabilidade: 'Alta', impacto: 'Alto', estrategiaTratamento: 'Aceitar', justificativaAceite: 'ok', proximaReavaliacao: '2027-01-01' };
   assert.deepStrictEqual(RC.etapasNist(r), { enquadrar: true, avaliar: true, responder: true, monitorar: true });
 });
+
+test('risco de fornecedor com criticidade automatica (processo Tier 1) pesa 3, mesmo com questionario Baixo', () => {
+  const criticidade = { f1: { score: 1, scoreMaximo: 18, automatica: true } };
+  assert.strictEqual(RC.pesoDoRisco(riscoForn(), {}, criticidade), 3);
+  assert.strictEqual(RC.pesoDoRisco(riscoForn(), {}, { f1: { score: null, scoreMaximo: 0, automatica: true } }), 3);
+});

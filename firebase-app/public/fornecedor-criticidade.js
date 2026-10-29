@@ -211,6 +211,38 @@
     };
   }
 
+  /**
+   * Criticidade EFETIVA do fornecedor (DECISAO 29/10/2026): fornecedor de que
+   * depende um processo Tier 1 (Critico) -- direto ou via Servico/componente --
+   * e Alta automaticamente, qualquer que seja o questionario (que fica
+   * bloqueado na tela enquanto isso valer). Derivada, nunca gravada: vem do
+   * vinculo e do Tier de HOJE, e some sozinha quando o vinculo sai.
+   *
+   * `avaliacao` e a ultima avaliacao do fornecedor (ou null);
+   * `processosCriticos` e a lista [{processo, origens}] ja filtrada em Tier 1.
+   * Devolve o formato que risco-consolidado.js espera ({score, scoreMaximo})
+   * mais `automatica`, que vale peso 3.
+   */
+  function efetiva(avaliacao, processosCriticos) {
+    var av = avaliacao || null;
+    var completa = !!(av && av.completaCriticidade);
+    var score = completa && av.scoreCriticidade !== null && av.scoreCriticidade !== undefined ? Number(av.scoreCriticidade) : null;
+    var scoreMaximo = av ? (Number(av.scoreMaximoCriticidade) || 0) : 0;
+    var processos = processosCriticos || [];
+    var automatica = processos.length > 0;
+    var f = automatica ? FAIXA_AUTOMATICA : faixa(score, scoreMaximo);
+    return { score: score, scoreMaximo: scoreMaximo, completa: completa, faixa: f, automatica: automatica, processos: processos };
+  }
+
+  var FAIXA_AUTOMATICA = { rotulo: 'Alta', cor: 'var(--risk-critical)', fundo: 'var(--risk-critical-surface)', automatica: true };
+
+  /** Peso do risco a partir do resultado de efetiva(): automatica = Alta = 3. */
+  function pesoEfetivo(crit) {
+    if (!crit) return null;
+    if (crit.automatica) return PESO_POR_FAIXA['Alta'];
+    return pesoPorScore(crit.score, crit.scoreMaximo);
+  }
+
   return {
     SENTIDO: SENTIDO,
     PERGUNTAS_SEED: PERGUNTAS_SEED,
@@ -221,5 +253,7 @@
     faixa: faixa,
     pesoPorScore: pesoPorScore,
     calcular: calcular,
+    efetiva: efetiva,
+    pesoEfetivo: pesoEfetivo,
   };
 }));

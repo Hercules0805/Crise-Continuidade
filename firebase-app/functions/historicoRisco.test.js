@@ -348,3 +348,35 @@ test('resposta com processoId casa pelo id e vence a mais antiga por nome', () =
   assert.strictEqual(porId.p1.score, 5);
   assert.deepStrictEqual(HR.chavesBiaDoProcesso({ area: 'A', processo: 'B', nomesAnteriores: ['A||X', 'lixo', 'A||B'] }), ['A||B', 'A||X']);
 });
+
+// --- Criticidade do fornecedor: formato {score, scoreMaximo, automatica} (29/10/2026) ---
+test('pesoPorCriticidadeFornecedor: numero antigo usa os cortes fixos; objeto usa corte proporcional', () => {
+  assert.strictEqual(HR.pesoPorCriticidadeFornecedor(13), 3);
+  assert.strictEqual(HR.pesoPorCriticidadeFornecedor(null), null);
+  // 10 de 12 = 83% -> Alta (com o corte fixo 13 seria Media)
+  assert.strictEqual(HR.pesoPorCriticidadeFornecedor({ score: 10, scoreMaximo: 12 }), 3);
+  assert.strictEqual(HR.pesoPorCriticidadeFornecedor({ score: 1, scoreMaximo: 18 }), 1);
+  assert.strictEqual(HR.pesoPorCriticidadeFornecedor({ score: null, scoreMaximo: 18 }), null);
+});
+
+test('criticidade automatica (processo Tier 1) pesa 3 no risco do fornecedor', () => {
+  const crit = { f1: { score: 1, scoreMaximo: 18, automatica: true } };
+  assert.strictEqual(HR.pesoDoRisco({ fornecedor: 'f1' }, {}, crit), 3);
+});
+
+test('fornecedoresDeProcessoCritico: direto e via Servico contam; Tier 2 e processo fora da Continuidade nao', () => {
+  const dependencias = [
+    { id: 'fd', categoria: 'Fornecedores', nome: 'Direto' },
+    { id: 'fs', categoria: 'Fornecedores', nome: 'Via servico' },
+    { id: 'f2', categoria: 'Fornecedores', nome: 'So Tier 2' },
+    { id: 'fx', categoria: 'Fornecedores', nome: 'Fora da continuidade' },
+  ];
+  const servicos = [{ id: 's1', nome: 'SRV-01', dependenciaItens: [{ categoria: 'Fornecedores', id: 'fs', nome: 'Via servico' }] }];
+  const processosPorId = {
+    p1: { id: 'p1', processo: 'Folha', avaliado: true, score: 15, dependenciaItens: [{ categoria: 'Fornecedores', id: 'fd', nome: 'Direto' }, { categoria: 'Serviços', id: 's1', nome: 'SRV-01' }] },
+    p2: { id: 'p2', processo: 'Compras', avaliado: true, score: 8, dependenciaItens: [{ categoria: 'Fornecedores', id: 'f2', nome: 'So Tier 2' }] },
+    p3: { id: 'p3', processo: 'Interno', avaliado: true, score: 15, continuidade: false, dependenciaItens: [{ categoria: 'Fornecedores', id: 'fx', nome: 'Fora da continuidade' }] },
+  };
+  const ids = HR.fornecedoresDeProcessoCritico(processosPorId, servicos, dependencias);
+  assert.deepStrictEqual([...ids].sort(), ['fd', 'fs']);
+});

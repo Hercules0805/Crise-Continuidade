@@ -147,16 +147,59 @@ const PESO_PADRAO = 2;
 
 // --- Criticidade do fornecedor (copia de public/fornecedor-criticidade.js) -
 const PESO_POR_FAIXA_FORNECEDOR = { Baixa: 1, 'Média': 2, Alta: 3 };
+const LIMIAR_ALTA_PROPORCAO_FORNECEDOR = 13 / 18;
+const LIMIAR_MEDIA_PROPORCAO_FORNECEDOR = 7 / 18;
 
-function faixaCriticidadeFornecedor(score) {
+// Cortes proporcionais ao maximo congelado na avaliacao (como faixa() do
+// cliente). Sem maximo (formato antigo, so o numero), os cortes fixos 13/7.
+function faixaCriticidadeFornecedor(score, scoreMaximo) {
+  const maximo = Number(scoreMaximo) || 0;
+  if (maximo > 0) {
+    if (score >= maximo * LIMIAR_ALTA_PROPORCAO_FORNECEDOR) return 'Alta';
+    if (score >= maximo * LIMIAR_MEDIA_PROPORCAO_FORNECEDOR) return 'Média';
+    return 'Baixa';
+  }
   if (score >= 13) return 'Alta';
   if (score >= 7) return 'Média';
   return 'Baixa';
 }
 
-function pesoPorCriticidadeFornecedor(score) {
+/**
+ * Peso pela criticidade do fornecedor. Aceita o numero (formato antigo) ou
+ * {score, scoreMaximo, automatica} (29/10/2026, FornecedorCriticidade.efetiva):
+ * `automatica` -- dependencia de processo Tier 1 -- e Alta, peso 3.
+ */
+function pesoPorCriticidadeFornecedor(crit) {
+  if (crit && typeof crit === 'object') {
+    if (crit.automatica) return PESO_POR_FAIXA_FORNECEDOR.Alta;
+    return _pesoPorScoreFornecedor(crit.score, crit.scoreMaximo);
+  }
+  return _pesoPorScoreFornecedor(crit, 0);
+}
+
+function _pesoPorScoreFornecedor(score, scoreMaximo) {
   if (score === null || score === undefined || !Number.isFinite(Number(score))) return null;
-  return PESO_POR_FAIXA_FORNECEDOR[faixaCriticidadeFornecedor(Number(score))] || null;
+  return PESO_POR_FAIXA_FORNECEDOR[faixaCriticidadeFornecedor(Number(score), scoreMaximo)] || null;
+}
+
+const cadeiaDependencias = require('./cadeiaDependencias');
+
+/**
+ * Ids dos fornecedores de que depende algum processo Tier 1 -- direto, via
+ * Servico ou via componente (mesma regra do cliente: _processosCriticosDoFornecedor).
+ * So processos de Continuidade (continuidade !== false), como API.getProcessos.
+ */
+function fornecedoresDeProcessoCritico(processosPorId, servicos, dependencias) {
+  const processos = Object.values(processosPorId || {}).filter((p) => p && p.continuidade !== false);
+  const ids = new Set();
+  if (!processos.length) return ids;
+  const rede = { processos, servicos: servicos || [], dependencias: dependencias || [] };
+  (dependencias || []).forEach((d) => {
+    if (!d || !['Fornecedores', 'Fornecedor'].includes(d.categoria)) return;
+    const lista = cadeiaDependencias.processosQueDependemDe(d.id, rede);
+    if (lista.some((x) => tierDoProcesso(x.processo) === TIER.T1)) ids.add(String(d.id));
+  });
+  return ids;
 }
 
 /** Peso do risco: Tier do processo vinculado, OU criticidade do fornecedor vinculado, OU padrao. */
@@ -490,6 +533,7 @@ module.exports = {
   chavesBiaDoProcesso,
   faixaCriticidadeFornecedor,
   pesoPorCriticidadeFornecedor,
+  fornecedoresDeProcessoCritico,
   nivelDaMedicao,
   scoreDaMedicao,
   pesoDoRisco,

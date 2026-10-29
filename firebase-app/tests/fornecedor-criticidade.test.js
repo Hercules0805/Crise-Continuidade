@@ -182,3 +182,29 @@ test('o seed inicial tem exatamente 6 perguntas, cada uma com uma opcao de score
 test('o seed inicial soma 18 de score maximo (6 perguntas x 3)', () => {
   assert.strictEqual(FC.scoreMaximoDe(FC.PERGUNTAS_SEED.map((p, i) => Object.assign({ id: 'seed' + i }, p))), 18);
 });
+
+// --- Criticidade efetiva (29/10/2026): processo Tier 1 torna o fornecedor Alta ---
+test('efetiva: sem processo critico e a regra do questionario (completa ? score : null)', () => {
+  const av = { completaCriticidade: true, scoreCriticidade: 3, scoreMaximoCriticidade: 18 };
+  const e = FC.efetiva(av, []);
+  assert.strictEqual(e.automatica, false);
+  assert.strictEqual(e.score, 3);
+  assert.strictEqual(e.faixa.rotulo, 'Baixa');
+  assert.strictEqual(FC.pesoEfetivo(e), 1);
+  const incompleta = FC.efetiva({ completaCriticidade: false, scoreCriticidade: 15, scoreMaximoCriticidade: 18 }, []);
+  assert.strictEqual(incompleta.score, null);
+  assert.strictEqual(incompleta.faixa.rotulo, 'Não avaliado');
+  assert.strictEqual(FC.pesoEfetivo(incompleta), null);
+});
+
+test('efetiva: dependencia de processo Tier 1 e Alta automatica, mesmo Baixa ou sem avaliacao', () => {
+  const procs = [{ processo: { id: 'p1', processo: 'Folha' }, origens: ['Direta'] }];
+  const baixa = FC.efetiva({ completaCriticidade: true, scoreCriticidade: 1, scoreMaximoCriticidade: 18 }, procs);
+  assert.strictEqual(baixa.automatica, true);
+  assert.strictEqual(baixa.faixa.rotulo, 'Alta');
+  assert.strictEqual(baixa.score, 1); // o questionario fica como referencia
+  assert.strictEqual(FC.pesoEfetivo(baixa), 3);
+  const sem = FC.efetiva(null, procs);
+  assert.strictEqual(sem.automatica, true);
+  assert.strictEqual(FC.pesoEfetivo(sem), 3);
+});

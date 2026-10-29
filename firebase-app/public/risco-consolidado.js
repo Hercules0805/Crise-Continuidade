@@ -216,8 +216,10 @@
       // (perguntas de criticidade sao cadastraveis agora; sem o maximo da
       // epoca, pesoPorScore reclassificaria uma nota antiga contra um total
       // de perguntas diferente do que existia quando ela foi calculada).
+      // `automatica` (29/10/2026): fornecedor de processo Tier 1 pesa como Alta
+      // -- ver FornecedorCriticidade.efetiva.
       var crit = criticidadePorFornecedor[String(idFornecedor)];
-      var pesoForn = crit && FornecedorCriticidade.pesoPorScore(crit.score, crit.scoreMaximo);
+      var pesoForn = crit && FornecedorCriticidade.pesoEfetivo(crit);
       if (pesoForn) return pesoForn;
     }
     return PESO_PADRAO;

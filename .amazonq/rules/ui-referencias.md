@@ -276,6 +276,20 @@ Pedido do usuário: cadastros como Áreas e Pessoas seguiam padrões diferentes;
 - **Importação por planilha = drawer de prévia agrupada**: escolher o CSV (UTF-8, com nova leitura em Windows-1252), mostrar chips de contagem (novos, já existem, a revisar), as colunas reconhecidas e uma tabela uma linha por item (Novo / Já existe + qual / ⚠ motivo), e só então "Importar N…". O que já existe não é importado nem alterado.
 - **Dados de origem da planilha** ficam no registro como referência, num `<details>` "Dados importados" só leitura (aberto por padrão enquanto o item está inativo).
 
+### Fornecedor: criticidade automática e aba Processos (DECISÃO 29/10/2026)
+- **Criticidade automática** (valor derivado, nunca gravado): um fornecedor de que depende um processo **Tier 1**, direto ou via Serviço/componente, é Alta.
+  - Regra única: `FornecedorCriticidade.efetiva`, alimentada por `_processosCriticosDoFornecedor`.
+  - Na grade e no contrato aparece o selo Alta (`.crit-automatica`), sem número; o `title` diz o motivo e lista os processos.
+  - Na aba Criticidade:
+    - aviso vermelho (`#ffebee`/`#c62828`) "Criticidade Alta automática" com a lista "Processo · origem";
+    - questionário **bloqueado** (rádios desabilitados, com a resposta anterior marcada);
+    - prévia "Alta · Automática", com o score do questionário como referência.
+  - Salvar a conformidade regrava as respostas anteriores sem mudança.
+- **Aba Processos** do drawer do fornecedor, entre Criticidade e Conformidade:
+  - mesma tabela da aba Processos da Dependência (`_renderProcessosDaDependencia(d, { contId, rede, rotulo, vazio })`), com Tier 1 primeiro e a origem embaixo do nome;
+  - o contador "(N)" no botão é preenchido ao abrir o drawer;
+  - só leitura: o vínculo é feito no processo.
+
 ### Processo: status calculados, Homologar BIA e sugestão por IA (DECISÃO 27/10/2026)
 - **Status de BIA, BCP e DRP são calculados**, nunca escolhidos: `ConformidadeContinuidade.statusDosPlanos(p, { tier, cadeia, ciclos, hoje })` (cópia idêntica em `functions/`). Os antigos selects `biaHomologada` / `bcpStatus` / `drpStatus` saíram da tela e deixaram de ser lidos e gravados (os dados ficam no Firestore). A mesma conta alimenta a faixa do drawer, a coluna "Planos" da grade, o detalhe só-leitura, o relatório por área, a "Cobertura Tier 1" do Dashboard e o Dossiê.
   - BIA: Não avaliado · Em avaliação (questionário parcial, "x de y") · Avaliado (falta homologar) · Homologado · Revisão vencida. Reavaliar depois de homologar volta a "Avaliado".

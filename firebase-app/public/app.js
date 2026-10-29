@@ -6962,30 +6962,42 @@ function _processosVinculadosDiretos(dependencia, processos) {
  * dependência. Só faz sentido pra dependência já salva (sem id, nenhum
  * processo pode apontar pra ela ainda).
  */
-async function _renderProcessosDaDependencia(d) {
-  const cont = document.getElementById('depProcessosTabela');
+async function _renderProcessosDaDependencia(d, opcoes = {}) {
+  // opcoes (29/10/2026, aba Processos do fornecedor): contId, rede já
+  // carregada ({processos, servicos, dependencias}), rotulo e texto de vazio.
+  const cont = document.getElementById(opcoes.contId || 'depProcessosTabela');
+  const contador = opcoes.contId === 'fornProcessosTabela' ? document.getElementById('contFornProcessos') : null;
   if (!cont) return;
+  if (contador) contador.textContent = '';
   if (!d || !d.id) {
-    cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">Salve a dependência para ver os processos vinculados.</p>';
+    cont.innerHTML = `<p style="font-size:0.85em;color:#999;padding:8px 0;">Salve ${opcoes.rotulo || 'a dependência'} para ver os processos vinculados.</p>`;
     return;
   }
   cont.innerHTML = '<p style="font-size:0.85em;color:#999;padding:8px 0;">⏳ Carregando...</p>';
-  let processos, servicos;
-  try {
-    [processos, servicos] = await Promise.all([API.getProcessos(), API.getServicos().catch(() => [])]);
-  } catch (e) {
-    cont.innerHTML = '<p style="font-size:0.85em;color:#c62828;padding:8px 0;">Não foi possível carregar os processos.</p>';
-    return;
+  let processos, servicos, catalogo;
+  if (opcoes.rede) {
+    ({ processos, servicos, dependencias: catalogo } = opcoes.rede);
+  } else {
+    try {
+      [processos, servicos] = await Promise.all([API.getProcessos(), API.getServicos().catch(() => [])]);
+    } catch (e) {
+      cont.innerHTML = '<p style="font-size:0.85em;color:#c62828;padding:8px 0;">Não foi possível carregar os processos.</p>';
+      return;
+    }
+    catalogo = (dependenciasData && dependenciasData.length) ? dependenciasData : (window.dependenciasCatalogo || []);
   }
   // Pela cadeia (21/10/2026): direto, via Serviço ou via um item acima nos componentes.
-  const catalogo = (dependenciasData && dependenciasData.length) ? dependenciasData : (window.dependenciasCatalogo || []);
-  const comOrigem = catalogo.some((x) => String(x.id) === String(d.id))
+  const comOrigem = (catalogo || []).some((x) => String(x.id) === String(d.id))
     ? CadeiaDependencias.processosQueDependemDe(d.id, { processos, servicos, dependencias: catalogo })
     : _processosVinculadosDiretos(d, processos).map((p) => ({ processo: p, origens: ['Direta'] }));
-  const vinculados = comOrigem.map((x) => x.processo);
+  // Tier 1 primeiro: é o que pede atenção (e o que torna o fornecedor crítico).
+  const ordemTier = { [Criticidade.TIER.T1]: 1, [Criticidade.TIER.T2]: 2, [Criticidade.TIER.T3]: 3 };
+  const vinculados = comOrigem.map((x) => x.processo)
+    .sort((a, b) => (ordemTier[Criticidade.tierDoProcesso(a)] || 9) - (ordemTier[Criticidade.tierDoProcesso(b)] || 9));
   const origemDe = new Map(comOrigem.map((x) => [String(x.processo.id), x.origens.join('; ')]));
+  if (contador) contador.textContent = `(${vinculados.length})`;
   if (!vinculados.length) {
-    cont.innerHTML = '<p class="vazio-inline">Nenhum processo vinculado a esta dependência.</p>';
+    cont.innerHTML = `<p class="vazio-inline">${esc(opcoes.vazio || 'Nenhum processo vinculado a esta dependência.')}</p>`;
     return;
   }
   cont.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.9em;">
@@ -8347,8 +8359,7 @@ async function _dadosRelatorioExecutivoRiscos(opcoes) {
   ]);
   // _riscoComKriForaDaMeta lê o cadastro de indicadores carregado.
   if (inds) indicadoresData = inds;
-  const critForn = {};
-  (avals || []).forEach((av) => { if (av && av.fornecedorId) critForn[String(av.fornecedorId)] = av.scoreCriticidade; });
+  const critForn = await _carregarMapaCriticidadeFornecedores(avals, processos);
   const apetite = (cfg && cfg.apetite) || RiscoConsolidado.APETITE_PADRAO;
   // Escopo (filtros da tela, 20/10/2026).
   const filtros = opcoes.filtros || {};
@@ -15246,8 +15257,7 @@ async function riscosDashboard() {
     riscosProcessosCache = procs_;
     indicadoresData = inds_;
     riscosApetite = (cfgRiscos_ && cfgRiscos_.apetite) || RiscoConsolidado.APETITE_PADRAO;
-    riscosCriticidadePorFornecedorCache = {};
-    (avalsForn_ || []).forEach((av) => { if (av && av.fornecedorId) riscosCriticidadePorFornecedorCache[String(av.fornecedorId)] = av.scoreCriticidade; });
+    riscosCriticidadePorFornecedorCache = await _carregarMapaCriticidadeFornecedores(avalsForn_, procs_);
   } catch (e) {
     console.error('Dashboard de Riscos: falha ao carregar', e);
     document.querySelector('.loading').outerHTML = _htmlErroCarga('Não foi possível carregar o Dashboard de Riscos.', 'riscosDashboard');
@@ -15361,8 +15371,7 @@ async function riscos() {
     // Responsavel do risco escolhe uma Pessoa -- mesmo catalogo que Areas e
     // Fornecedores ja usam, sem requisicao nova (deps_ ja veio pro fornecedor).
     pessoasData = deps_.filter(d => d.categoria === 'Pessoas');
-    riscosCriticidadePorFornecedorCache = {};
-    (avalsForn_ || []).forEach((av) => { if (av && av.fornecedorId) riscosCriticidadePorFornecedorCache[String(av.fornecedorId)] = av.scoreCriticidade; });
+    riscosCriticidadePorFornecedorCache = await _carregarMapaCriticidadeFornecedores(avalsForn_, procs_, deps_);
   } catch (e) {
     // Antes este catch zerava a lista em silencio, e a tela dizia "Nenhum risco
     // cadastrado" — indistinguivel de registro vazio. Quem visse isso podia
@@ -21680,16 +21689,86 @@ function _dataCurtaForn(iso) {
   return isNaN(d.getTime()) ? '–' : d.toLocaleDateString('pt-BR');
 }
 
-/** Badge de criticidade (aba nova da avaliação) para as tabelas de Fornecedores. */
-function _badgeCriticidadeFornecedor(av) {
-  const score = av && av.completaCriticidade ? av.scoreCriticidade : null;
+/**
+ * Processos Tier 1 (Crítico) que dependem do fornecedor -- direto, via
+ * Serviço ou via componente (DECISÃO 29/10/2026). Lista não vazia = criticidade
+ * Alta automática (FornecedorCriticidade.efetiva). `rede` = { processos,
+ * servicos, dependencias }; sem rede, nada é automático.
+ */
+function _processosCriticosDoFornecedor(fid, rede) {
+  if (!fid || !rede || !(rede.processos || []).length) return [];
+  const noCatalogo = (rede.dependencias || []).some((d) => String(d.id) === String(fid));
+  const lista = noCatalogo
+    ? CadeiaDependencias.processosQueDependemDe(fid, rede)
+    : _processosVinculadosDiretos({ id: String(fid) }, rede.processos).map((p) => ({ processo: p, origens: ['Direta'] }));
+  return lista.filter((x) => Criticidade.ehTier(x.processo, Criticidade.TIER.T1));
+}
+
+/**
+ * Mapa fornecedorId -> criticidade efetiva ({score, scoreMaximo, automatica,
+ * ...}), no formato que RiscoConsolidado.pesoDoRisco espera. Único jeito de
+ * montar o mapa de criticidade para os cálculos de risco: antes cada tela
+ * passava só o número, e o peso do fornecedor nunca era aplicado.
+ */
+function _mapaCriticidadeFornecedores(avals, rede) {
+  const porId = new Map((avals || []).filter((av) => av && av.fornecedorId).map((av) => [String(av.fornecedorId), av]));
+  const ids = new Set(porId.keys());
+  ((rede && rede.dependencias) || []).forEach((d) => { if (Perfis.categoriaDeFornecedor(d.categoria)) ids.add(String(d.id)); });
+  const mapa = {};
+  ids.forEach((fid) => { mapa[fid] = FornecedorCriticidade.efetiva(porId.get(fid) || null, _processosCriticosDoFornecedor(fid, rede)); });
+  return mapa;
+}
+
+/**
+ * Mapa de criticidade para as telas de risco: completa a rede com serviços e
+ * catálogo (cache do API). Se não vierem, só o vínculo direto conta.
+ */
+async function _carregarMapaCriticidadeFornecedores(avals, processos, dependencias) {
+  const [servicos, deps] = await Promise.all([
+    API.getServicos().catch((e) => { console.error('Criticidade de fornecedor: serviços não carregaram', e); return []; }),
+    dependencias ? Promise.resolve(dependencias) : API.getDependencias().catch((e) => { console.error('Criticidade de fornecedor: catálogo não carregou', e); return []; }),
+  ]);
+  return _mapaCriticidadeFornecedores(avals, { processos: processos || [], servicos: servicos || [], dependencias: deps || [] });
+}
+
+/** Rede da tela de Fornecedores ({processos, servicos, dependencias}); null se não carregou. */
+let fornecedoresRede = null;
+// fornecedorId -> processos Tier 1 que dependem dele. Calculado na carga: a
+// grade re-renderiza a cada tecla da busca.
+let fornecedoresProcessosCriticos = new Map();
+
+function _recalcularProcessosCriticosFornecedores() {
+  fornecedoresProcessosCriticos = new Map();
+  if (!fornecedoresRede) return;
+  fornecedoresData.forEach((f) => {
+    const lista = _processosCriticosDoFornecedor(f.id, fornecedoresRede);
+    if (lista.length) fornecedoresProcessosCriticos.set(String(f.id), lista);
+  });
+}
+
+/** Criticidade efetiva do fornecedor na tela de Fornecedores. */
+function _criticidadeEfetivaFornecedor(id) {
+  return FornecedorCriticidade.efetiva(_avaliacaoDoFornecedor(id), fornecedoresProcessosCriticos.get(String(id)) || []);
+}
+
+const _nomesProcessosCriticos = (lista) => (lista || []).map((x) => x.processo.processo || x.processo.nome || '').filter(Boolean);
+
+/**
+ * Badge de criticidade para as tabelas de Fornecedores. `crit` é o resultado
+ * de FornecedorCriticidade.efetiva (a avaliação crua também serve, sem a
+ * automática). Automática: selo Alta com o motivo no tooltip.
+ */
+function _badgeCriticidadeFornecedor(crit) {
+  const c = crit && crit.faixa ? crit : FornecedorCriticidade.efetiva(crit, []);
+  if (c.automatica) {
+    const titulo = `Alta — automática: dependência de processo Tier 1 (${_nomesProcessosCriticos(c.processos).join(', ')})`;
+    return `<span class="crit-automatica" title="${esc(titulo)}">${_htmlBadge('critical', 'Alta')}</span>`;
+  }
   // scoreMaximoCriticidade vem congelado na própria avaliação (ver
   // _salvarAvaliacaoFornecedor/api.js) -- não o total de perguntas ATUAL,
   // que pode ter mudado desde que esta avaliação foi salva.
-  const scoreMaximo = av ? av.scoreMaximoCriticidade : 0;
-  const faixa = FornecedorCriticidade.faixa(score, scoreMaximo);
-  if (score === null) return '<span style="color:#999;font-weight:600;" title="Criticidade ainda não avaliada">–</span>';
-  return `<span title="${esc(faixa.rotulo)} — ${score} de ${scoreMaximo}">${_htmlBadge(_nivelCriticidadeFornecedor(faixa.rotulo), String(score))}</span>`;
+  if (c.score === null) return '<span style="color:#999;font-weight:600;" title="Criticidade ainda não avaliada">–</span>';
+  return `<span title="${esc(c.faixa.rotulo)} — ${c.score} de ${c.scoreMaximo}">${_htmlBadge(_nivelCriticidadeFornecedor(c.faixa.rotulo), String(c.score))}</span>`;
 }
 
 /** Resumo das pessoas da empresa: primeiro contato + quantos ficaram de fora. */
@@ -21918,12 +21997,16 @@ async function fornecedores() {
   fornecedoresAba = 'ativos';
 
   try {
-    const [deps, crits, avals, cfg, cats, subcats, critPerguntas, areasFornecedor, contratosList, statusContratoList] = await Promise.all([
+    const [deps, crits, avals, cfg, cats, subcats, critPerguntas, areasFornecedor, contratosList, statusContratoList, processosList, servicosList] = await Promise.all([
       API.getDependencias(), API.getCriteriosFornecedor(), API.getAvaliacoesFornecedor(), API.getConfigFornecedor(),
       API.getCategoriasFornecedor(), API.getSubcategoriasFornecedor(), API.getCriticidadeFornecedorPerguntas(), API.getAreas(),
       // Contratos (15/10/2026): só enriquecem a tela (aba Contratos, "sem contrato vigente").
       API.getContratos().catch((e) => { console.error('Fornecedores: contratos não carregaram', e); return null; }),
       API.getStatusContrato().catch(() => null),
+      // Processos e serviços (29/10/2026): criticidade automática e aba
+      // Processos. Sem eles, nada é automático e a tela segue.
+      API.getProcessos().catch((e) => { console.error('Fornecedores: processos não carregaram', e); return null; }),
+      API.getServicos().catch((e) => { console.error('Fornecedores: serviços não carregaram', e); return null; }),
     ]);
     window._fornContratosCarregados = !!(contratosList && statusContratoList);
     if (contratosList) contratosData = contratosList;
@@ -21939,6 +22022,8 @@ async function fornecedores() {
     categoriasFornecedorData = cats;
     subcategoriasFornecedorData = subcats;
     criticidadeFornecedorPerguntasData = critPerguntas;
+    fornecedoresRede = processosList ? { processos: processosList, servicos: servicosList || [], dependencias: deps } : null;
+    _recalcularProcessosCriticosFornecedores();
     // Montados uma vez so: renderizarFornecedores() roda a cada tecla da
     // busca, e remontar as opcoes toda hora apagaria o filtro escolhido.
     _preencherFiltroLista('filtroFornCadastroCategoria', 'Categoria', categoriasFornecedorData.filter((c) => c.ativo)
@@ -22050,7 +22135,14 @@ function renderizarFornecedores() {
     categoria: (a, b, dir) => dir * (a.categoriaFornecedor || '').localeCompare(b.categoriaFornecedor || '', 'pt-BR'),
     setor: (a, b, dir) => dir * (_areasDoFornecedor(a).join(', ')).localeCompare(_areasDoFornecedor(b).join(', '), 'pt-BR'),
     nota: comparadorNulavel((av) => (av && av.nota !== null ? av.nota : null)),
-    criticidade: comparadorNulavel((av) => (av && av.completaCriticidade ? av.scoreCriticidade : null)),
+    criticidade: (a, b, dir) => {
+      const valor = (f) => { const c = _criticidadeEfetivaFornecedor(f.id); return c.automatica ? Infinity : c.score; };
+      const vA = valor(a), vB = valor(b);
+      if (vA === null && vB === null) return 0;
+      if (vA === null) return 1;
+      if (vB === null) return -1;
+      return dir * (vA > vB ? 1 : vA < vB ? -1 : 0);
+    },
     avaliadoEm: comparadorNulavel((av) => (av && av.avaliadoEm ? av.avaliadoEm : null)),
   });
 
@@ -22096,7 +22188,7 @@ function renderizarFornecedores() {
                   ? `<span title="${esc(FornecedorScore.faixaNota(av.nota).rotulo)} — ${av.nota} de 100">${_htmlBadge(_nivelNotaFornecedor(FornecedorScore.faixaNota(av.nota).rotulo), String(av.nota))}</span>`
                   : '<span class="muted" title="Sem nota — não é o mesmo que nota zero">–</span>'}
               </td>
-              <td class="col-c">${_badgeCriticidadeFornecedor(av)}</td>
+              <td class="col-c">${_badgeCriticidadeFornecedor(_criticidadeEfetivaFornecedor(f.id))}</td>
               <td title="${esc([sit.aviso || sit.rotulo, av ? `Avaliado em ${_dataCurtaForn(av.avaliadoEm)}${av.avaliadoPor ? ' por ' + av.avaliadoPor : ''}` : ''].filter(Boolean).join(' — '))}">${_htmlBadge(_nivelSituacaoFornecedor(sit), sit.rotulo)}${sit.aviso ? ' <span style="color:#e65100;">⚠</span>' : ''}</td>
               ${_htmlAcoesLinha([{ icone: SVG_EDITAR, titulo: podeMexer ? 'Editar / avaliar fornecedor' : 'Visualizar', onclick: `abrirDrawerFornecedorCadastro('${escJs(f.id)}')` },
                 podeMexer && !_fornecedorAtivo(f) ? { icone: SVG_ATIVAR, titulo: 'Ativar fornecedor', onclick: `alternarSituacaoFornecedor('${escJs(f.id)}', true)` } : null,
@@ -22249,6 +22341,18 @@ window.atualizarPreviewCriticidadeFornecedor = () => {
   if (!box) return;
   const perguntasAtivas = _criticidadeFornecedorPerguntasAtivas();
   const calc = FornecedorCriticidade.calcular(perguntasAtivas, _coletarRespostasCriticidadeFornecedor());
+  const idForn = (document.getElementById('fornAvalId') || {}).value;
+  if (idForn && fornecedoresProcessosCriticos.has(String(idForn))) {
+    const auto = FornecedorCriticidade.efetiva(null, fornecedoresProcessosCriticos.get(String(idForn)));
+    box.innerHTML = `
+      <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+        <span style="font-size:2em;font-weight:800;line-height:1;color:${auto.faixa.cor};">Alta</span>
+        <span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:0.78em;font-weight:700;background:${auto.faixa.fundo};color:${auto.faixa.cor};">Automática</span>
+        ${calc.score === null ? '' : `<span style="font-size:0.78em;color:#888;">questionário: ${calc.score} de ${calc.scoreMaximo} (${esc(calc.faixa.rotulo)})</span>`}
+      </div>
+      <div style="font-size:0.72em;color:#888;margin-top:6px;">Usada como peso do risco automático deste fornecedor na carga de risco da empresa.</div>`;
+    return;
+  }
 
   box.innerHTML = `
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
@@ -23234,6 +23338,7 @@ function _htmlDrawerFornecedorCadastro() {
         <div style="display:flex;border-bottom:2px solid #fce8ea;background:white;flex-shrink:0;">
           <button id="tab-forn-dados" onclick="trocarAbaFornecedor('dados')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#d60014;border-bottom:3px solid #d60014;cursor:pointer;">Dados</button>
           <button id="tab-forn-criticidade" onclick="trocarAbaFornecedor('criticidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Criticidade</button>
+          <button id="tab-forn-processos" onclick="trocarAbaFornecedor('processos')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Processos <span id="contFornProcessos"></span></button>
           <button id="tab-forn-conformidade" onclick="trocarAbaFornecedor('conformidade')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Conformidade</button>
           <button id="tab-forn-contratos" onclick="trocarAbaFornecedor('contratos')" style="flex:1;padding:10px 20px;border:none;background:none;font-size:0.88em;font-weight:700;color:#999;border-bottom:3px solid transparent;cursor:pointer;">Contratos</button>
         </div>
@@ -23350,7 +23455,13 @@ function _htmlDrawerFornecedorCadastro() {
 
       <div id="painel-forn-criticidade" style="display:none;">
         <div id="fornCriticidadePreview" style="position:sticky;top:0;background:#fff;padding:0 0 14px;border-bottom:1px solid #eee;margin-bottom:16px;z-index:2;"></div>
+        <div id="fornCriticidadeAuto"></div>
         <div id="fornCriticidadeLista"></div>
+      </div>
+
+      <div id="painel-forn-processos" style="display:none;">
+        <div style="font-size:0.85em;color:#666;margin-bottom:12px;">Processos que dependem deste fornecedor — direto, via Serviço ou via componente. O vínculo é feito no processo.</div>
+        <div id="fornProcessosTabela"></div>
       </div>
 
       <div id="painel-forn-conformidade" style="display:none;">
@@ -23389,7 +23500,7 @@ function _htmlDrawerFornecedorCadastro() {
 
 /** Alterna as três abas do drawer unificado de fornecedor e o botão de salvar de cada uma. */
 window.trocarAbaFornecedor = (aba) => {
-  ['dados', 'criticidade', 'conformidade', 'contratos'].forEach((a) => {
+  ['dados', 'criticidade', 'processos', 'conformidade', 'contratos'].forEach((a) => {
     document.getElementById('painel-forn-' + a).style.display = a === aba ? 'block' : 'none';
     _marcarAba(document.getElementById('tab-forn-' + a), a === aba);
   });
@@ -23404,7 +23515,22 @@ window.trocarAbaFornecedor = (aba) => {
   const naAvaliacao = aba === 'criticidade' || aba === 'conformidade';
   if (btnAval) btnAval.style.display = (naAvaliacao && podeMexer && window._fornTemCriterios) ? 'inline-block' : 'none';
   if (aba === 'contratos') _renderContratosDoFornecedor(document.getElementById('fornCadId').value);
+  if (aba === 'processos') _renderProcessosDoFornecedor(document.getElementById('fornCadId').value);
 };
+
+/**
+ * Aba "Processos" do fornecedor (29/10/2026): a mesma tabela da aba Processos
+ * da Dependência, com a rede que a tela de Fornecedores já carregou.
+ */
+function _renderProcessosDoFornecedor(id) {
+  const f = id ? fornecedoresData.find((x) => String(x.id) === String(id)) : null;
+  _renderProcessosDaDependencia(f, {
+    contId: 'fornProcessosTabela',
+    rede: fornecedoresRede,
+    rotulo: 'o fornecedor',
+    vazio: 'Nenhum processo depende deste fornecedor.',
+  });
+}
 
 /** Título do drawer de fornecedor com a razão social como subtítulo -- espelha _atualizarTituloDrawerRisco. */
 function _atualizarTituloDrawerFornecedor(f) {
@@ -23821,9 +23947,14 @@ window.abrirDrawerFornecedorCadastro = (id, abaInicial) => {
   // (abrirDrawerRisco).
   // ---- Abas Criticidade/Conformidade (antes um drawer separado) ----
   _popularAvaliacaoFornecedor(f);
+  _renderProcessosDoFornecedor(f ? f.id : '');
 
   // Gating de perfil: desabilita campos de Dados E das abas de avaliação.
   document.querySelectorAll('#drawerFornecedorCadastro input, #drawerFornecedorCadastro select, #drawerFornecedorCadastro textarea').forEach((el) => { el.disabled = !podeMexer; });
+  // Criticidade automática: o questionário continua bloqueado mesmo para quem pode mexer.
+  if (f && fornecedoresProcessosCriticos.has(String(f.id))) {
+    document.querySelectorAll('#fornCriticidadeLista input[type="radio"]').forEach((el) => { el.disabled = true; });
+  }
   document.querySelectorAll('#drawerFornecedorCadastro .forn-rel-adicionar').forEach((el) => { el.style.display = podeMexer ? 'block' : 'none'; });
   document.getElementById('btnAdicionarPessoaForn').style.display = podeMexer ? 'inline-block' : 'none';
   document.getElementById('btnAdicionarCanalForn').style.display = podeMexer ? 'inline-block' : 'none';
@@ -24054,6 +24185,7 @@ function _popularAvaliacaoFornecedor(f) {
     document.getElementById('fornCriticidadeLista').innerHTML = `<div style="padding:24px;text-align:center;color:#888;background:#fafbff;border-radius:9px;">Salve os dados do fornecedor primeiro para poder avaliá-lo.</div>`;
     document.getElementById('fornNotaPreview').innerHTML = '';
     document.getElementById('fornCriticidadePreview').innerHTML = '';
+    document.getElementById('fornCriticidadeAuto').innerHTML = '';
     return;
   }
 
@@ -24108,10 +24240,24 @@ function _popularAvaliacaoFornecedor(f) {
 
   const respostasCriticidadeAnteriores = av ? (av.respostasCriticidade || {}) : {};
   const perguntasCriticidadeAtivas = _criticidadeFornecedorPerguntasAtivas();
+  // Criticidade automática (29/10/2026): dependência de processo Tier 1 é Alta e
+  // o questionário fica bloqueado. As respostas anteriores continuam marcadas
+  // (desabilitadas) e são regravadas iguais ao salvar a conformidade.
+  const processosCriticos = fornecedoresProcessosCriticos.get(String(f.id)) || [];
+  const bloqueada = processosCriticos.length > 0;
+  document.getElementById('fornCriticidadeAuto').innerHTML = bloqueada
+    ? `<div class="forn-crit-automatica" style="background:#ffebee;border:1px solid #f5c2c2;border-radius:9px;padding:12px 15px;margin-bottom:16px;">
+        <div style="font-weight:700;color:#c62828;font-size:0.9em;">Criticidade Alta automática — este fornecedor é dependência de processo Tier 1 (Crítico)</div>
+        <ul style="margin:8px 0 0;padding-left:18px;font-size:0.85em;color:#333;">
+          ${processosCriticos.map((x) => `<li>${esc(x.processo.processo || x.processo.nome || '')} <span style="color:#888;">· ${esc((x.origens || []).join('; '))}</span></li>`).join('')}
+        </ul>
+        <div style="font-size:0.78em;color:#666;margin-top:8px;">O questionário fica bloqueado enquanto o vínculo existir. Se o processo deixar de ser Tier 1 ou o vínculo sair, vale de novo o questionário.</div>
+      </div>`
+    : '';
   document.getElementById('fornCriticidadeLista').innerHTML = perguntasCriticidadeAtivas.length ? perguntasCriticidadeAtivas.map((p) => {
     const opcoes = p.opcoes.map((op, i) => `
-      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;font-size:0.88em;cursor:pointer;">
-        <input type="radio" name="fornCrit_${p.id}" value="${i}" ${Number(respostasCriticidadeAnteriores[p.id]) === i ? 'checked' : ''} onchange="atualizarPreviewCriticidadeFornecedor()" style="margin-top:3px;">
+      <label style="display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;font-size:0.88em;cursor:${bloqueada ? 'default' : 'pointer'};${bloqueada ? 'color:#999;' : ''}">
+        <input type="radio" name="fornCrit_${p.id}" value="${i}" ${Number(respostasCriticidadeAnteriores[p.id]) === i ? 'checked' : ''}${bloqueada ? ' disabled' : ''} onchange="atualizarPreviewCriticidadeFornecedor()" style="margin-top:3px;">
         <span>${esc(op.rotulo)} <span style="color:#888;font-weight:600;">(${op.score})</span></span>
       </label>`).join('');
     return `
@@ -25702,7 +25848,7 @@ function _renderVinculosContrato() {
     ? `<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;padding:12px 14px;border:1px solid #e0e0e0;border-radius:8px;">
         <div style="flex:1;min-width:200px;"><div style="font-weight:700;">${esc(forn.nome)}</div>
           <div class="muted" style="font-size:0.85em;">${esc([forn.categoriaFornecedor, (forn.areasRelacionadas || []).join(', ')].filter(Boolean).join(' · ') || '–')}${forn.tic !== false ? ' · TIC' : ''}</div></div>
-        <div style="text-align:center;"><div class="muted" style="font-size:0.75em;">Criticidade</div>${_badgeCriticidadeFornecedor(av)}</div>
+        <div style="text-align:center;"><div class="muted" style="font-size:0.75em;">Criticidade</div>${_badgeCriticidadeFornecedor(FornecedorCriticidade.efetiva(av, _processosCriticosDoFornecedor(forn.id, Object.assign({ processos: _contratoProcessos }, _redeContrato() || { servicos: [], dependencias: [] }))))}</div>
         <div style="text-align:center;"><div class="muted" style="font-size:0.75em;">Conformidade</div>${_htmlBadge(_nivelSituacaoFornecedor(sit), av && av.nota !== null ? `${av.nota} · ${sit.rotulo}` : sit.rotulo)}</div>
         ${Perfis.podeVerTela(window.USER_PERFIS, 'fornecedores') ? `<a href="#fornecedores" onclick="window._abrirFornecedorAoCarregar='${escJs(forn.id)}'" class="btn btn-ghost" style="padding:6px 12px;font-size:0.85em;">Abrir fornecedor</a>` : ''}
       </div>`
