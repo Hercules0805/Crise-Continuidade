@@ -250,8 +250,17 @@
     return negativo ? -n : n;
   }
 
+  /**
+   * Texto para comparar em busca (29/10/2026): minúsculas, sem acento, espaços
+   * colapsados -- "João  Silva" e "joao silva" batem.
+   */
+  function normalizarBusca(t) {
+    return String(t === null || t === undefined ? '' : t).normalize('NFD').replace(/[̀-ͯ]/g, '')
+      .toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+
   return {
-    esc: esc, escJs: escJs, escScript: escScript,
+    esc: esc, escJs: escJs, escScript: escScript, normalizarBusca: normalizarBusca,
     comBotaoCarregando: comBotaoCarregando, criarOrdenacao: criarOrdenacao, criarPaginacao: criarPaginacao,
     criarRastreadorEdicao: criarRastreadorEdicao,
     formatarCNPJ: formatarCNPJ, formatarTelefoneBR: formatarTelefoneBR,

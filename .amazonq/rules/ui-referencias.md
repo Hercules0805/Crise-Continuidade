@@ -373,3 +373,10 @@ Pedido do usuário: cadastros como Áreas e Pessoas seguiam padrões diferentes;
 - **Gestor**: enxerga e edita a área dele **e as de baixo** (`config_perfis.areasGeridas`, calculado por Cloud Function; o próprio usuário não grava o campo nem troca a área já definida). Com áreas abaixo, o filtro de Área dele deixa de ser travado e lista só o escopo; com uma área só, continua travado.
 - **Relatório Processos por Área**: checklist em árvore (marcar uma área marca as de baixo; dá para desmarcar uma a uma) e título de cada bloco com o caminho.
 - **PCN**: `**Área:** Diretoria › TI`. **Mapa**: ligação área → área ("área acima" / "área abaixo").
+
+### Campo de escolha com busca — `data-busca` (DECISÃO 29/10/2026)
+- **Quando usar**: todo `<select>` que escolhe um registro de **cadastro** (Pessoas, Áreas, Processos, Fornecedores, Serviços, Produtos, itens de Dependência) — de "adicionar" ("Adicionar pessoa…", "Buscar pessoa…") ou de valor único (Líder imediato, Responsável, Criador/Aprovador, Gestor do contrato, Processo/Fornecedor do risco…). Basta marcar o select com **`data-busca`**.
+- **Quando NÃO usar**: lista curta e fixa (Papel, Categoria, Status, Tipo, unidades) — continua select nativo.
+- **Comportamento** (`public/combobox-busca.js`): campo de digitar no lugar do select, com o placeholder da opção vazia; filtro **sem acento e por qualquer parte** do texto (inclui o que vem depois de " — ", mostrado em cinza à direita); `optgroup` vira cabeçalho de grupo; trecho digitado destacado (`<mark>`); ↑/↓, Enter escolhe, Esc fecha e restaura; até 50 resultados + "continue digitando". Campo de valor único mostra o escolhido e um **"×"** para limpar; campo de "adicionar" limpa o texto depois de escolher e mantém o foco.
+- **O `<select>` continua sendo a fonte da verdade**: fica no DOM (escondido, mesmo id); as funções de popular, os coletores (`select.value`), o `option.dataset` e os `onchange` não mudam. Repopular o select ou fazer `sel.value = x` atualiza o campo sozinho. Opções de legado ("(pessoa removida)", "(inativo)") continuam aparecendo.
+- Estilo: classes `.combo-busca*` (`styles.css`), no molde de `.deps-busca*`.

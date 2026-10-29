@@ -138,7 +138,7 @@ async function carregar(perfis, extra) {
       return Promise.resolve(JSON.parse(JSON.stringify(dados[nome] || [])));
     },
   });
-  ['util.js', 'dependencia-duplicidade.js', 'areas-hierarquia.js', 'processos-indicadores.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
+  ['util.js', 'dependencia-duplicidade.js', 'areas-hierarquia.js', 'combobox-busca.js', 'processos-indicadores.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
     'cvss31.js', 'risco-consolidado.js', 'sanitizar-pcn.js', 'contrato-ciclo.js', 'cadeia-dependencias.js', 'inventario-csv.js', 'importacao-fornecedores.js']
     .forEach((f) => { if (fs.existsSync(path.join(PUB, f))) w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')); });
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = (m) => { window.__toasts = (window.__toasts || []).concat(m); };');

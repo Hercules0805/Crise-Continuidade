@@ -351,6 +351,11 @@ function _casaFiltroArea(valor, area) {
   return f.abaixo ? AreasHierarquia.descendentes(_areasCarregadas(), f.area).includes(area) : area === f.area;
 }
 
+// Campo de escolha com busca (29/10/2026): todo <select data-busca> que
+// aparecer (telas, drawers, modais) ganha o campo de digitar para filtrar.
+// O select continua sendo a fonte da verdade -- ver combobox-busca.js.
+if (typeof ComboboxBusca !== 'undefined' && document.body) ComboboxBusca.observar(document.body);
+
 /** Primeira tela que este perfil ve — e onde ele cai quando nao pede nada. */
 function _paginaInicialDoPerfil() {
   const inicial = Perfis.paginaInicial(window.USER_PERFIS);
@@ -1571,11 +1576,11 @@ function _htmlModalArea() {
       <label>Nome da Área</label>
       <input type="text" id="fNome" placeholder="Ex: Segurança da Informação">
       <label for="fAreaPai">Pertence a</label>
-      <select id="fAreaPai"></select>
+      <select id="fAreaPai" data-busca></select>
       <span style="font-size:0.75em;color:#888;display:block;margin-top:2px;margin-bottom:8px;">Área de cima na hierarquia. O gestor de uma área enxerga também as que ficam abaixo dela.</span>
       <label>Responsável</label>
       <div style="display:flex;gap:6px;align-items:center;">
-        <select id="fResponsavel" onchange="_preencherContatoResponsavelArea()" style="flex:1;"><option value="">Selecione...</option></select>
+        <select id="fResponsavel" data-busca onchange="_preencherContatoResponsavelArea()" style="flex:1;"><option value="">Selecione...</option></select>
         <button type="button" class="btn-icon" onclick="_recarregarPessoasArea()" title="Atualizar lista de pessoas">🔄</button>
         <button type="button" class="btn-icon" id="btnEditarPessoaArea" onclick="_editarPessoaResponsavelArea()" title="Editar esta pessoa" style="display:none;">${SVG_EDITAR}</button>
       </div>
@@ -1753,12 +1758,12 @@ function _htmlDrawerPessoa() {
         <div style="margin-bottom:16px;">
           <label style="${lbl}">Áreas</label>
           <div id="pessoaAreasTabela"></div>
-          <select id="pessoaAreaAdd" onchange="adicionarPessoaArea()" style="${inp}margin-top:4px;"><option value="">Selecione para adicionar...</option></select>
+          <select id="pessoaAreaAdd" data-busca onchange="adicionarPessoaArea()" style="${inp}margin-top:4px;"><option value="">Selecione para adicionar...</option></select>
           <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Uma pessoa pode pertencer a mais de uma área. A primeira é a principal.</span>
         </div>
         <div style="margin-bottom:16px;">
           <label style="${lbl}">Líder Imediato</label>
-          <select id="pessoaLider" style="${inp}"><option value="">Selecione...</option></select>
+          <select id="pessoaLider" data-busca style="${inp}"><option value="">Selecione...</option></select>
         </div>
         <div style="margin-bottom:16px;">
           <label style="${lbl}" for="pessoaInstalacao">Instalação (lotação)</label>
@@ -3608,7 +3613,7 @@ function _htmlDrawerCadastroProcesso() {
         <input type="hidden" id="cadProcId">
         <div style="margin-bottom:16px;">
           <label style="${lbl}" for="cadProcArea">Área <span class="req" aria-hidden="true">*</span></label>
-          <select id="cadProcArea" style="${inp}"></select>
+          <select id="cadProcArea" data-busca style="${inp}"></select>
           <!-- Dono (29/10/2026): o responsável da Área, só leitura. -->
           <label style="${lbl}margin-top:10px;" for="cadProcDono">Dono do processo</label>
           <input type="text" id="cadProcDono" readonly placeholder="Responsável pela área" style="${inp}background:#f9f9f9;color:#555;">
@@ -3636,11 +3641,11 @@ function _htmlDrawerCadastroProcesso() {
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
           <div>
             <label style="${lbl}" for="cadProcCriador">Criador</label>
-            <select id="cadProcCriador" style="${inp}"></select>
+            <select id="cadProcCriador" data-busca style="${inp}"></select>
           </div>
           <div>
             <label style="${lbl}" for="cadProcAprovador">Aprovador</label>
-            <select id="cadProcAprovador" style="${inp}"></select>
+            <select id="cadProcAprovador" data-busca style="${inp}"></select>
           </div>
         </div>
         <label class="check-label" style="margin-bottom:4px;"><input type="checkbox" id="cadProcContinuidade"> Avaliar em Continuidade</label>
@@ -4047,7 +4052,7 @@ async function processos() {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
                 <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área <span class="req" aria-hidden="true">*</span></label>
-                <select id="fArea" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;"></select>
+                <select id="fArea" data-busca style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;"></select>
               </div>
               <div>
                 <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Dono do Processo</label>
@@ -7634,7 +7639,7 @@ function _htmlDrawerDependencia() {
             </div>
             <div style="margin-bottom:14px;">
               <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área Responsável</label>
-              <select id="depResponsavel" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
+              <select id="depResponsavel" data-busca style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;">
                 <option value="">Selecione...</option>
               </select>
             </div>
@@ -8173,7 +8178,7 @@ async function relatorios() {
     <div class="modal-overlay" id="modalSelecaoPessoaRelatorio"><div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
       <h3>Relatório de Vínculos da Pessoa</h3>
       <label style="display:block;font-size:0.82em;font-weight:600;color:#555;margin:14px 0 5px;">Pessoa</label>
-      <select id="relatorioPessoaSelect" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;">
+      <select id="relatorioPessoaSelect" data-busca style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;">
         <option value="">Selecione...</option>
       </select>
       <div class="modal-footer">
@@ -10826,7 +10831,7 @@ function _htmlDrawerServico() {
               </div>
               <div id="servicoConsumidoresAreasBloco" style="display:none;margin-bottom:8px;">
                 <div id="servicoConsumidoresAreasChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
-                <select id="servicoConsumidorAreaAdd" onchange="adicionarAreaConsumidoraServico()" style="${inp}"><option value="">Adicionar área...</option></select>
+                <select id="servicoConsumidorAreaAdd" data-busca onchange="adicionarAreaConsumidoraServico()" style="${inp}"><option value="">Adicionar área...</option></select>
                 ${Perfis.podeMexerNaArea(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaAreaDeServico()">+ Nova área</button>' : ''}
               </div>
               <label class="check-label" style="margin:0;"><input type="checkbox" id="servicoConsumidoresClientes"> Clientes da empresa</label>
@@ -10838,7 +10843,7 @@ function _htmlDrawerServico() {
               </div>
               <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Processos de Negócio acima do serviço na hierarquia (Processo → Serviço → Dependências).</span>
               <div id="servicoProcessosChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
-              <select id="servicoProcessoAdd" onchange="adicionarProcessoServico()" style="${inp}"><option value="">Adicionar processo...</option></select>
+              <select id="servicoProcessoAdd" data-busca onchange="adicionarProcessoServico()" style="${inp}"><option value="">Adicionar processo...</option></select>
               <div id="sugestaoProcessosServico"></div>
               <details id="servicoImpactadosDetalhe" style="margin-top:10px;">
                 <summary style="cursor:pointer;font-size:0.85em;color:#555;font-weight:600;">Processos impactados <span id="servicoImpactadosContagem" style="color:#888;font-weight:400;"></span></summary>
@@ -10854,7 +10859,7 @@ function _htmlDrawerServico() {
                 <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">${esc(r.dica)}</span>
                 <div id="servicoResp${r.sufixo}Chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
                 ${r.papel === 'sustentacao' ? '<div id="servicoSustentacaoMigrados" style="display:none;font-size:0.75em;color:#1565c0;font-weight:600;margin-bottom:6px;">Trazidos dos antigos stakeholders deste serviço — salve para confirmar.</div>' : ''}
-                <select id="servicoResp${r.sufixo}Add" onchange="adicionarResponsavelServico('${r.papel}')" style="${inp}"><option value="">Adicionar pessoa...</option></select>
+                <select id="servicoResp${r.sufixo}Add" data-busca onchange="adicionarResponsavelServico('${r.papel}')" style="${inp}"><option value="">Adicionar pessoa...</option></select>
                 ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? `<button type="button" class="link-acao" onclick="novaPessoaDeServico('${r.papel}')">+ Nova pessoa</button>` : ''}
               </div>`).join('')}
             </div>
@@ -12515,7 +12520,7 @@ function _htmlDrawerBackup() {
               <span style="font-size:0.72em;color:#888;display:block;margin-bottom:6px;">Todos os serviços que este backup protege.</span>
               <div id="backupServicosChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>
               <div style="display:flex;gap:8px;align-items:center;">
-                <select id="backupServicoAdd" onchange="adicionarServicoBackup()" style="${inp}flex:1;"><option value="">Adicionar serviço...</option></select>
+                <select id="backupServicoAdd" data-busca onchange="adicionarServicoBackup()" style="${inp}flex:1;"><option value="">Adicionar serviço...</option></select>
                 <button type="button" onclick="abrirDrawerServicoDeBackup()" title="Cadastrar novo serviço" style="white-space:nowrap;padding:9px 14px;border:1.5px solid #d60014;border-radius:7px;background:white;color:#d60014;font-size:0.85em;font-weight:600;cursor:pointer;">+ Novo</button>
               </div>
             </div>
@@ -14577,7 +14582,7 @@ function _htmlDrawerVulnerabilidadeLote() {
           </div>
           <div>
             <label style="${lbl}">Responsável</label>
-            <select id="loteVulnResponsavel" style="${inp}"></select>
+            <select id="loteVulnResponsavel" data-busca style="${inp}"></select>
           </div>
           <div>
             <label style="${lbl}">Equipe Responsável</label>
@@ -14752,7 +14757,7 @@ function _htmlDrawerVulnerabilidade() {
               <div>
                 <label style="${lbl}">Produto de Software</label>
                 <div style="display:flex;gap:6px;align-items:center;">
-                  <select id="vulnProdutoSoftware" style="${inp}flex:1;" onchange="_sugerirResponsavelPeloProdutoVuln()"><option value="">Selecione...</option></select>
+                  <select id="vulnProdutoSoftware" data-busca style="${inp}flex:1;" onchange="_sugerirResponsavelPeloProdutoVuln()"><option value="">Selecione...</option></select>
                   <button type="button" class="btn-icon" onclick="_recarregarProdutosVulnerabilidade()" title="Atualizar lista de produtos">🔄</button>
                 </div>
                 ${Perfis.podeGerenciarProdutosSoftware(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novoProdutoDeVulnerabilidade()">+ Novo produto</button>' : ''}
@@ -14769,7 +14774,7 @@ function _htmlDrawerVulnerabilidade() {
                   <option value="">Categoria...</option>
                   ${VULN_CATEGORIAS_DEPENDENCIA.map((c) => `<option value="${esc(c)}">${DEPENDENCIA_CAT_ICONES[c] || '📦'} ${esc(c)}</option>`).join('')}
                 </select>
-                <select id="vulnDepItem" style="${inp}" disabled><option value="">Escolha a categoria primeiro</option></select>
+                <select id="vulnDepItem" data-busca style="${inp}" disabled><option value="">Escolha a categoria primeiro</option></select>
                 <button type="button" class="btn btn-ghost" onclick="adicionarDependenciaVuln()" style="white-space:nowrap;">Adicionar</button>
                 <button type="button" class="btn-icon" onclick="_recarregarDependenciasVulnerabilidade()" title="Atualizar lista de dependências">🔄</button>
               </div>
@@ -14905,13 +14910,13 @@ function _htmlDrawerVulnerabilidade() {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px;">
               <div>
                 <label style="${lbl}">Equipe Responsável pela Correção</label>
-                <select id="vulnEquipeResponsavel" style="${inp}"><option value="">Selecione...</option></select>
+                <select id="vulnEquipeResponsavel" data-busca style="${inp}"><option value="">Selecione...</option></select>
                 <div id="vulnEquipeDica" style="font-size:0.74em;color:#888;margin-top:4px;">Vem da área da pessoa responsável; pode ser trocada.</div>
               </div>
               <div>
                 <label style="${lbl}">Responsável</label>
                 <div style="display:flex;gap:6px;align-items:center;">
-                  <select id="vulnResponsavel" style="${inp}flex:1;" onchange="_equipePelaPessoaVuln()"><option value="">Selecione...</option></select>
+                  <select id="vulnResponsavel" data-busca style="${inp}flex:1;" onchange="_equipePelaPessoaVuln()"><option value="">Selecione...</option></select>
                   <button type="button" class="btn-icon" onclick="_recarregarPessoasVulnerabilidade()" title="Atualizar lista de pessoas e áreas">🔄</button>
                 </div>
                 ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaPessoaDeVulnerabilidade()">+ Nova pessoa</button>' : ''}
@@ -17049,21 +17054,21 @@ function _htmlDrawerRisco() {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
                 <label style="${lbl}">Área</label>
-                <select id="rArea" style="${inp}"></select>
+                <select id="rArea" data-busca style="${inp}"></select>
               </div>
               <div>
                 <label style="${lbl}">Processo Relacionado (opcional)</label>
-                <select id="rProcesso" style="${inp}"><option value="">-- Nenhum (risco corporativo) --</option></select>
+                <select id="rProcesso" data-busca style="${inp}"><option value="">-- Nenhum (risco corporativo) --</option></select>
               </div>
             </div>
             <div style="margin-bottom:16px;">
               <label style="${lbl}">Fornecedor Relacionado (opcional)</label>
-              <select id="rFornecedor" style="${inp}"><option value="">-- Nenhum --</option></select>
+              <select id="rFornecedor" data-busca style="${inp}"><option value="">-- Nenhum --</option></select>
               <span style="${dica}">Use quando o risco foi reportado por (ou envolve) um fornecedor do catálogo de Dependências. Indicadores agora ficam na aba Monitoramento, como KRIs.</span>
             </div>
             <div style="margin-bottom:16px;">
               <label style="${lbl}" for="rProdutoSoftware">Produto de Software (opcional)</label>
-              <select id="rProdutoSoftware" style="${inp}"><option value="">-- Nenhum --</option></select>
+              <select id="rProdutoSoftware" data-busca style="${inp}"><option value="">-- Nenhum --</option></select>
               <span style="${dica}" id="rProdutoSoftwareDica">Produto do catálogo de Produtos de Software ao qual o risco se refere.</span>
             </div>
             <input type="hidden" id="rIndicador">
@@ -17080,11 +17085,11 @@ function _htmlDrawerRisco() {
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
               <div>
                 <label style="${lbl}">Responsável (Owner)</label>
-                <select id="rResponsavel" style="${inp}" onchange="_atualizarEtapasNist()"><option value="">Selecione...</option></select>
+                <select id="rResponsavel" data-busca style="${inp}" onchange="_atualizarEtapasNist()"><option value="">Selecione...</option></select>
               </div>
               <div>
                 <label style="${lbl}">Reportado por</label>
-                <select id="rReportadoPor" style="${inp}"><option value="">Selecione...</option></select>
+                <select id="rReportadoPor" data-busca style="${inp}"><option value="">Selecione...</option></select>
               </div>
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px;">
@@ -17188,7 +17193,7 @@ function _htmlDrawerRisco() {
               </div>
               <div>
                 <label style="${lbl}">Aprovador do aceite</label>
-                <select id="rAprovadorAceite" style="${inp}"><option value="">Selecione...</option></select>
+                <select id="rAprovadorAceite" data-busca style="${inp}"><option value="">Selecione...</option></select>
               </div>
             </div>
             <div id="rBlocoPlano" style="margin-bottom:18px;">
@@ -17207,7 +17212,7 @@ function _htmlDrawerRisco() {
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
                   <div><label style="${lbl}">Por quê</label><input type="text" id="paPorque" placeholder="Motivo da ação" style="${inp}"></div>
-                  <div><label style="${lbl}">Responsável (quem)</label><select id="paResponsavel" style="${inp}"><option value="">Selecione...</option></select></div>
+                  <div><label style="${lbl}">Responsável (quem)</label><select id="paResponsavel" data-busca style="${inp}"><option value="">Selecione...</option></select></div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
                   <div><label style="${lbl}">Onde</label><input type="text" id="paOnde" placeholder="Local ou sistema" style="${inp}"></div>
@@ -18357,7 +18362,7 @@ function _htmlModalImportarRiscosPCN() {
     <div class="modal-overlay" id="modalImportarRiscosPCN"><div class="modal" onclick="event.stopPropagation()" style="max-width:720px;">
       <h3>Importar Riscos de um PCN</h3>
       <label style="display:block;font-size:0.82em;font-weight:600;color:#555;margin:14px 0 5px;">Processo</label>
-      <select id="importPcnProcesso" onchange="onProcessoImportRiscoChange()" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;">
+      <select id="importPcnProcesso" data-busca onchange="onProcessoImportRiscoChange()" style="width:100%;padding:9px 12px;border:1px solid #ddd;border-radius:7px;font-size:0.92em;">
         <option value="">Selecione um processo com PCN gerado...</option>
       </select>
       <div id="importPcnVersaoWrap" style="display:none;">
@@ -23452,7 +23457,7 @@ function _htmlModalProdutoSoftware() {
         </div>
         <div style="margin-bottom:16px;">
           <label style="${lbl}" for="prodSoftArea">Área responsável</label>
-          <select id="prodSoftArea" onchange="_renderPessoasDoProduto()" style="${inp}"><option value="">Nenhuma</option></select>
+          <select id="prodSoftArea" data-busca onchange="_renderPessoasDoProduto()" style="${inp}"><option value="">Nenhuma</option></select>
         </div>
         <label class="check-label" style="margin-bottom:4px;"><input type="checkbox" id="prodSoftAtivo" checked> Produto ativo</label>
         <span style="font-size:0.75em;color:#888;display:block;margin-bottom:18px;">Desativar tira o produto das listas para novas associações. Quem já está associado continua vendo o produto marcado como inativo.</span>
@@ -23507,7 +23512,7 @@ window._renderPessoasDoProduto = () => {
     const opt = (p) => `<option value="${esc(p.id)}">${esc(p.nome)}${_areaPrincipalPessoa(p) ? ` — ${esc(_areaPrincipalPessoa(p))}` : ''}</option>`;
     const daArea = area ? livres.filter((p) => (p.areas || [p.setor]).includes(area)) : [];
     const outras = livres.filter((p) => !daArea.includes(p));
-    const select = pode ? `<select class="prod-soft-add" data-funcao="${funcao}" onchange="adicionarPessoaAoProduto('${funcao}', this.value)" style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.88em;margin-top:6px;">
+    const select = pode ? `<select class="prod-soft-add" data-busca data-funcao="${funcao}" onchange="adicionarPessoaAoProduto('${funcao}', this.value)" style="width:100%;padding:7px 10px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.88em;margin-top:6px;">
         <option value="">Adicionar pessoa…</option>
         ${daArea.length ? `<optgroup label="Da área ${esc(area)}">${daArea.map(opt).join('')}</optgroup><optgroup label="Outras pessoas">${outras.map(opt).join('')}</optgroup>` : outras.map(opt).join('')}
       </select>` : '';
@@ -23867,7 +23872,7 @@ async function perfis() {
       <input type="hidden" id="perfEmailOriginal">
       <div id="perfPessoaBox">
         <label>Pessoa</label>
-        <select id="perfPessoa" onchange="aoEscolherPessoaPerfil()"></select>
+        <select id="perfPessoa" data-busca onchange="aoEscolherPessoaPerfil()"></select>
         <div style="font-size:0.75em;color:#999;margin-top:4px;">
           Só aparecem pessoas com e-mail cadastrado na tela de Pessoas.
           Não achou quem procura? <button type="button" class="link-acao" onclick="novaPessoaDePerfil()">+ Nova pessoa</button>
@@ -24293,7 +24298,7 @@ function _htmlDrawerFornecedorCadastro() {
       <div id="fornAreasRelChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;"></div>
       <div class="forn-rel-adicionar" style="margin-bottom:16px;">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <select id="fornAreaRelAdd" style="${inp}flex:1;min-width:180px;"><option value="">Adicionar área...</option></select>
+          <select id="fornAreaRelAdd" data-busca style="${inp}flex:1;min-width:180px;"><option value="">Adicionar área...</option></select>
           <button type="button" class="btn btn-ghost" onclick="adicionarAreaRelFornecedor()" style="padding:9px 14px;white-space:nowrap;">+ Adicionar</button>
           <button type="button" class="btn-icon" onclick="_recarregarAreasFornecedor()" title="Atualizar lista de áreas">🔄</button>
         </div>
@@ -24304,7 +24309,7 @@ function _htmlDrawerFornecedorCadastro() {
       <div id="fornPessoasRelTabela"></div>
       <div class="forn-rel-adicionar" style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;margin-bottom:16px;">
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <select id="fornPessoaRelAdd" style="${inp}flex:2;min-width:180px;"><option value="">Buscar pessoa...</option></select>
+          <select id="fornPessoaRelAdd" data-busca style="${inp}flex:2;min-width:180px;"><option value="">Buscar pessoa...</option></select>
           <select id="fornPessoaRelPapel" style="${inp}flex:1;min-width:160px;">
             <option value="">Papel...</option>
             ${PAPEIS_RELACAO_FORNECEDOR.map((p) => `<option value="${esc(p)}">${esc(p)}</option>`).join('')}
@@ -25811,7 +25816,7 @@ function _htmlDrawerContrato() {
               <input type="text" id="contratoObjeto" placeholder="Ex.: Link de internet dedicado 500 Mbps — matriz" style="${inp}"></div>
             <div style="${grid('1fr 1fr')}">
               <div><label style="${lbl}">Fornecedor ${req}</label>
-                <select id="contratoFornecedor" style="${inp}" onchange="_popularSelectGestorContrato()"></select>
+                <select id="contratoFornecedor" data-busca style="${inp}" onchange="_popularSelectGestorContrato()"></select>
                 ${Perfis.podeGerenciarFornecedores(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novoFornecedorDeContrato()">+ Novo fornecedor</button>' : ''}</div>
               <div><label style="${lbl}">Tipo do contrato ${req}</label>
                 <select id="contratoTipo" style="${inp}"></select>
@@ -25822,11 +25827,11 @@ function _htmlDrawerContrato() {
                 <select id="contratoStatus" style="${inp}" onchange="_atualizarAlertasDrawerContrato()"></select>
                 ${Perfis.podeEditarContratos(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novoItemListaDeContrato(\'status\')">+ Novo status</button>' : ''}</div>
               <div><label style="${lbl}">Área responsável ${req}</label>
-                <select id="contratoArea" style="${inp}"></select></div>
+                <select id="contratoArea" data-busca style="${inp}"></select></div>
             </div>
             <div style="${grid('1fr 1fr')}">
               <div><label style="${lbl}">Gestor do contrato</label>
-                <select id="contratoGestor" style="${inp}" onchange="_atualizarAlertasDrawerContrato()"></select>
+                <select id="contratoGestor" data-busca style="${inp}" onchange="_atualizarAlertasDrawerContrato()"></select>
                 ${dica('Pessoas cadastradas. Os gestores informados no fornecedor aparecem primeiro.')}</div>
               <div><label style="${lbl}">Contrato rateado entre áreas</label>
                 ${simNao('contratoRateado')}</div>
@@ -25839,7 +25844,7 @@ function _htmlDrawerContrato() {
                   <option value="">Categoria...</option>
                   ${VULN_CATEGORIAS_DEPENDENCIA.map((c) => `<option value="${esc(c)}">${DEPENDENCIA_CAT_ICONES[c] || '📦'} ${esc(c)}</option>`).join('')}
                 </select>
-                <select id="contratoDepItem" style="${inp}" disabled><option value="">Escolha a categoria primeiro</option></select>
+                <select id="contratoDepItem" data-busca style="${inp}" disabled><option value="">Escolha a categoria primeiro</option></select>
                 <button type="button" class="btn btn-ghost" onclick="adicionarDependenciaContrato()" style="white-space:nowrap;">Adicionar</button>
               </div>
               <div id="contratoDepChips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;"></div>
@@ -28225,7 +28230,7 @@ window.abrirDrawerAcaoIntel = (id) => {
         <span style="font-size:0.72em;color:#888;display:block;margin-top:4px;">A notícia, os softwares, os hosts e a análise entram na descrição da vulnerabilidade automaticamente.</span></div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;">
         <div><label style="${_lblIntel}" for="intelVulnResponsavel">Responsável <span class="req" aria-hidden="true">*</span></label>
-          <select id="intelVulnResponsavel" style="${_inpIntel}" onchange="_equipePelaPessoaIntel()"><option value="">Selecione...</option>${[...(pessoasData || [])].sort((x, y) => (x.nome || '').localeCompare(y.nome || '', 'pt-BR')).map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('')}</select></div>
+          <select id="intelVulnResponsavel" data-busca style="${_inpIntel}" onchange="_equipePelaPessoaIntel()"><option value="">Selecione...</option>${[...(pessoasData || [])].sort((x, y) => (x.nome || '').localeCompare(y.nome || '', 'pt-BR')).map((p) => `<option value="${esc(p.nome)}">${esc(p.nome)}</option>`).join('')}</select></div>
         <div><label style="${_lblIntel}" for="intelVulnEquipe">Equipe</label>
           <select id="intelVulnEquipe" style="${_inpIntel}"><option value="">Selecione...</option>${[...new Set((window.areasData || []).map((x) => x.nome).filter(Boolean))].sort((x, y) => x.localeCompare(y, 'pt-BR')).map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('')}</select></div>
         <div><label style="${_lblIntel}" for="intelVulnPrazo">Prazo de correção</label>

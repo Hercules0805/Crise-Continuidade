@@ -8,7 +8,7 @@ const { criarPaginacao } = require('../public/util.js');
 
 const PUB = path.join(__dirname, '..', 'public');
 const APP = fs.readFileSync(path.join(PUB, 'app.js'), 'utf8');
-const SCRIPTS = ['util.js', 'dependencia-duplicidade.js', 'areas-hierarquia.js', 'processos-indicadores.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js',
+const SCRIPTS = ['util.js', 'dependencia-duplicidade.js', 'areas-hierarquia.js', 'combobox-busca.js', 'processos-indicadores.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js',
   'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js', 'app.js'];
 
 function carregar(dados, perfis = ['admin']) {

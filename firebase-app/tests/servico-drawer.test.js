@@ -52,7 +52,7 @@ async function carregar(perfis, extra) {
       return JSON.parse(JSON.stringify(dados[nome] === undefined ? [] : dados[nome]));
     },
   });
-  ['util.js', 'dependencia-duplicidade.js', 'areas-hierarquia.js', 'processos-indicadores.js', 'perfis.js', 'criticidade.js', 'cadeia-dependencias.js', 'fornecedor-score.js', 'fornecedor-criticidade.js',
+  ['util.js', 'dependencia-duplicidade.js', 'areas-hierarquia.js', 'combobox-busca.js', 'processos-indicadores.js', 'perfis.js', 'criticidade.js', 'cadeia-dependencias.js', 'fornecedor-score.js', 'fornecedor-criticidade.js',
     'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js',
     'sanitizar-pcn.js', 'contrato-ciclo.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
