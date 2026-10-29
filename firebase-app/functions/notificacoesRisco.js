@@ -74,6 +74,13 @@ function _perfisDe(d) {
   return lista.map((p) => String(p || '').trim().toLowerCase());
 }
 
+/** Áreas do gestor: a dele e as de baixo (areasGeridas, calculado pelo gatilho). */
+function _geridas(d) {
+  const area = String(d.area || '');
+  if (!area) return [];
+  return [area, ...(Array.isArray(d.areasGeridas) ? d.areasGeridas.map(String) : [])];
+}
+
 /**
  * [{ email, motivos[] }] do risco, sem repetir endereco.
  * ctx: { pessoas: [{nome, email}], areas: [{nome, email}], perfis: config_perfis[], config }.
@@ -98,7 +105,8 @@ function resolverDestinatariosRisco(risco, ctx) {
     const a = (x.areas || []).find((aa) => aa.nome === r.area);
     if (a) add(a.email, 'area');
     (x.perfis || []).forEach((d) => {
-      if (_perfisDe(d).includes('gestor') && String(d.area || '') === r.area) add(d.email || d.id, 'gestor');
+      // Areas hierarquicas (29/10/2026): o gestor da area de cima tambem.
+      if (_perfisDe(d).includes('gestor') && _geridas(d).includes(r.area)) add(d.email || d.id, 'gestor');
     });
   }
   if (cfg.seguranca) {

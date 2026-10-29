@@ -29,6 +29,7 @@ const notificacoes = require('./notificacoes');
 const notificacoesRisco = require('./notificacoesRisco');
 const notificacoesContinuidade = require('./notificacoesContinuidade');
 const notificacoesIntel = require('./notificacoesIntel');
+const areasGeridas = require('./areasGeridas');
 const threatIntelServico = require('./threatIntelServico');
 const { criarEnviador } = require('./transporteEmail');
 const {
@@ -436,6 +437,36 @@ async function sincronizarRiscoDaVulnerabilidade(id, dados, excluida, cache) {
   }
   return decisao;
 }
+
+// Areas hierarquicas (29/10/2026): config_perfis.areasGeridas = a area do
+// perfil e as de baixo, que as regras usam para o escopo do Gestor. Area
+// criada, renomeada, movida ou excluida recalcula todos; perfil com a area
+// trocada recalcula so ele. Grava so o que muda (sem laco com o gatilho).
+exports.areasGeridasDeArea = onDocumentWritten(
+  { region: 'us-central1', document: 'areas/{id}' },
+  async (event) => {
+    try {
+      const n = await areasGeridas.recalcularTodos(db);
+      if (n) logger.info('areasGeridasDeArea: perfis recalculados', { areaId: event.params.id, perfis: n });
+    } catch (err) {
+      logger.error('areasGeridasDeArea: falha ao recalcular', { areaId: event.params.id, erro: err.message });
+    }
+  }
+);
+
+exports.areasGeridasDePerfil = onDocumentWritten(
+  { region: 'us-central1', document: 'config_perfis/{email}' },
+  async (event) => {
+    const depois = event.data && event.data.after && event.data.after.exists ? event.data.after.data() : null;
+    try {
+      if (await areasGeridas.recalcularPerfil(db, event.params.email, depois)) {
+        logger.info('areasGeridasDePerfil: escopo recalculado', { email: event.params.email });
+      }
+    } catch (err) {
+      logger.error('areasGeridasDePerfil: falha ao recalcular', { email: event.params.email, erro: err.message });
+    }
+  }
+);
 
 exports.riscoDeVulnerabilidade = onDocumentWritten(
   { region: 'us-central1', document: 'vulnerabilidades/{id}' },

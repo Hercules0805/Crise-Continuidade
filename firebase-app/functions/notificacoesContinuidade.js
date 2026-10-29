@@ -101,7 +101,9 @@ function resolverDestinatariosContinuidade(pendencias, ctx) {
     if (cfg.operadoresProcessos && perfis.includes(PERFIL_OPERADOR_PROCESSOS)) add(email, 'operadorProcessos', pendencias || []);
     const area = String(d.area || '');
     if (cfg.gestores && perfis.includes('gestor') && area) {
-      add(email, 'gestor', (pendencias || []).filter((p) => p.alvo === 'processo' && p.area === area));
+      // Areas hierarquicas (29/10/2026): a area dele e as de baixo.
+      const geridas = [...new Set([area, ...(Array.isArray(d.areasGeridas) ? d.areasGeridas.map(String) : [])])];
+      add(email, 'gestor', (pendencias || []).filter((p) => p.alvo === 'processo' && geridas.includes(p.area)));
     }
   });
   // Ordem da conformidade (vencido primeiro) mesmo quando um destinatario junta dois motivos.

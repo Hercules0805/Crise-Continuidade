@@ -41,7 +41,7 @@ test('Gestor sem area comeca em Processos (o Dashboard fica bloqueado para ele)'
   w.firebase = { auth: () => ({ currentUser: null }) };
   w.GRC360 = {};
   w.API = new Proxy({}, { get: () => async () => [] });
-  ['util.js', 'dependencia-duplicidade.js', 'subareas.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js',
+  ['util.js', 'dependencia-duplicidade.js', 'areas-hierarquia.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js',
     'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js', 'app.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.USER_PERFIS = ['gestor'];
@@ -113,7 +113,7 @@ test('todas as rotas tem item de menu e vice-versa', () => {
   w.firebase = { auth: () => ({ currentUser: null }) };
   w.GRC360 = {};
   w.API = new Proxy({}, { get: () => async () => [] });
-  ['util.js', 'dependencia-duplicidade.js', 'subareas.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js',
+  ['util.js', 'dependencia-duplicidade.js', 'areas-hierarquia.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js',
     'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   // `pages` e const do app.js: so e alcancavel dentro do mesmo eval.
@@ -129,7 +129,7 @@ test('titulo da aba do navegador acompanha a tela', () => {
   w.firebase = { auth: () => ({ currentUser: null }) };
   w.GRC360 = {};
   w.API = new Proxy({}, { get: () => async () => [] });
-  ['util.js', 'dependencia-duplicidade.js', 'subareas.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js',
+  ['util.js', 'dependencia-duplicidade.js', 'areas-hierarquia.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js',
     'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js', 'app.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.USER_PERFIS = ['admin'];

@@ -136,3 +136,10 @@ test('envio: remetenteNome do documento da fila prevalece sobre o da configuraca
   await N.processarEnvio(Object.assign({}, doc, { remetenteNome: '' }), { modo: 'ativo' }, async (m) => { msg = m; });
   assert.strictEqual(msg.de, 'BIA · Contratos');
 });
+
+test('areas hierarquicas: o gestor da area de cima (areasGeridas) tambem recebe', () => {
+  const ctxH = Object.assign({}, CTX, { perfis: CTX.perfis.concat([{ id: 'diretor@fortestecnologia.com.br', perfis: ['gestor'], area: 'Diretoria', areasGeridas: ['Diretoria', 'Financeiro'] }]) });
+  const emails = R.resolverDestinatariosRisco(RISCO, ctxH).map((x) => x.email);
+  assert.ok(emails.includes('diretor@fortestecnologia.com.br'));
+  assert.ok(!emails.includes('outro@fortestecnologia.com.br'), 'gestor de outra area continua fora');
+});

@@ -957,3 +957,40 @@ describe('Security Rules — Operador de Processos cria dependencia basica (28/1
     await assertFails(db(GESTOR).collection('dependencias').add({ categoria: 'Pessoas', nome: 'X', criadoEm: 'x', criadoPor: 'y' }));
   });
 });
+
+// Áreas hierárquicas (29/10/2026): o gestor vale para as áreas de baixo
+// (areasGeridas, calculado no servidor) e não grava o próprio escopo.
+describe('Security Rules — gestor com áreas abaixo (areasGeridas)', () => {
+  beforeEach(async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const fs_ = ctx.firestore();
+      await fs_.doc('config_perfis/gestor@fortestecnologia.com.br').set({ areasGeridas: ['TI', 'Infraestrutura'] }, { merge: true });
+      await fs_.doc('processos/infra__proc').set({ area: 'Infraestrutura', processo: 'Proc' });
+      await fs_.doc('riscos/r-infra').set({ area: 'Infraestrutura', titulo: 'x' });
+      await fs_.doc('riscos/r-corp').set({ area: '', titulo: 'corporativo' });
+    });
+  });
+
+  test('gestor da área de cima escreve processo e lê risco da área de baixo', async () => {
+    await assertSucceeds(db(GESTOR).doc('processos/infra__proc').set({ area: 'Infraestrutura', processo: 'Proc' }, { merge: true }));
+    await assertSucceeds(db(GESTOR).doc('riscos/r-infra').get());
+    await assertSucceeds(db(GESTOR).collection('riscos').where('area', '==', 'Infraestrutura').get());
+  });
+
+  test('continua sem acesso a outra área e a risco corporativo (área vazia)', async () => {
+    await assertFails(db(GESTOR).doc('processos/rh__proc').set({ area: 'RH', processo: 'Proc' }, { merge: true }));
+    await assertFails(db(GESTOR).doc('riscos/r-corp').get());
+  });
+
+  test('gestor não grava o próprio areasGeridas nem troca a própria área já definida', async () => {
+    await assertFails(db(GESTOR).doc(`config_perfis/${GESTOR.email}`).set({ areasGeridas: ['TI', 'RH'] }, { merge: true }));
+    await assertFails(db(GESTOR).doc(`config_perfis/${GESTOR.email}`).set({ area: 'RH' }, { merge: true }));
+  });
+
+  test('primeiro login: gestor sem área grava a própria área (preenchimento automático)', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await ctx.firestore().doc('config_perfis/novo-gestor@fortestecnologia.com.br').set({ email: 'novo-gestor@fortestecnologia.com.br', perfil: 'gestor' });
+    });
+    await assertSucceeds(db({ email: 'novo-gestor@fortestecnologia.com.br' }).doc('config_perfis/novo-gestor@fortestecnologia.com.br').set({ area: 'RH' }, { merge: true }));
+  });
+});

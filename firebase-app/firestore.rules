@@ -149,8 +149,18 @@ service cloud.firestore {
         ? perfilDoc().data.area : null;
     }
 
+    // Áreas hierárquicas (29/10/2026): o gestor vale também para as áreas
+    // ABAIXO da dele. A lista (areasGeridas = a área dele e as de baixo) é
+    // calculada por Cloud Function a partir de areas.areaPaiId; o próprio
+    // usuário não grava esse campo (ver config_perfis). Área vazia continua
+    // não sendo área (riscos corporativos).
     function isGestorDaArea(area) {
-      return isCorpUser() && gestorArea() != null && gestorArea() == area;
+      return isCorpUser() && gestorArea() != null
+        && (gestorArea() == area
+            || (area != null && area != ''
+                && ('areasGeridas' in perfilDoc().data)
+                && perfilDoc().data.areasGeridas is list
+                && area in perfilDoc().data.areasGeridas));
     }
 
     // ---- Catálogos e configurações: leitura p/ domínio, escrita p/ admin ----
@@ -329,15 +339,23 @@ service cloud.firestore {
       // login, porque as regras do gestor dependem do campo area). Ele não
       // pode tocar em perfis/perfil (a lista de acessos) nem no documento de
       // outra pessoa.
+      //
+      // 29/10/2026: areasGeridas (escopo do gestor, calculado no servidor)
+      // também é proibido, e a própria `area` só pode ser gravada enquanto
+      // está vazia (o preenchimento do primeiro login) -- antes o gestor podia
+      // trocar a própria área e virar gestor de qualquer outra.
       allow update: if isAdmin()
         || (isCorpUser()
             && email == emailKey()
-            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['perfil', 'perfis']));
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['perfil', 'perfis', 'areasGeridas'])
+            && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['area'])
+                || !('area' in resource.data) || resource.data.area == null || resource.data.area == ''));
       allow create: if isAdmin()
         || (isCorpUser()
             && email == emailKey()
             && !('perfil' in request.resource.data)
-            && !('perfis' in request.resource.data));
+            && !('perfis' in request.resource.data)
+            && !('areasGeridas' in request.resource.data));
       allow delete: if isAdmin();
     }
 

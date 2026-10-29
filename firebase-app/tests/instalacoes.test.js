@@ -34,7 +34,7 @@ async function carregar(perfis, extra) {
       return JSON.parse(JSON.stringify(dados[nome] === undefined ? [] : dados[nome]));
     },
   });
-  ['util.js', 'dependencia-duplicidade.js', 'subareas.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
+  ['util.js', 'dependencia-duplicidade.js', 'areas-hierarquia.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
     'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = (m) => { window.__toasts = (window.__toasts || []).concat(m); };');
@@ -139,7 +139,6 @@ function extrair(nome) {
 function ambienteApi(docs) {
   const banco = Object.assign({}, docs);
   const ctx = {
-    Subareas: require('../public/subareas.js'),
     COLLECTION: { dependencias: 'dependencias' },
     _getAll: async () => Object.keys(banco).map((id) => Object.assign({ id }, banco[id])),
     _db: { collection: () => ({
@@ -149,7 +148,7 @@ function ambienteApi(docs) {
     window: {},
   };
   vm.createContext(ctx);
-  ['_minutosOuNull', '_refsDependencia', '_subareaPessoa', '_lerDependencias', '_salvarDependencia'].forEach((f) => vm.runInContext(extrair(f) + `\nthis.${f} = ${f};`, ctx));
+  ['_minutosOuNull', '_refsDependencia', '_lerDependencias', '_salvarDependencia'].forEach((f) => vm.runInContext(extrair(f) + `\nthis.${f} = ${f};`, ctx));
   return { ctx, banco };
 }
 

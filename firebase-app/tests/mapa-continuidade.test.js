@@ -63,21 +63,13 @@ test('papel da dependencia no servico entra no rotulo exibido, sem mudar a relac
   assert.deepStrictEqual(semPapel.rels, ['usa']);
 });
 
-test('subareas: lider ligado a area com as subareas que lidera; subarea vira detalhe de processo->area e pessoa->area', () => {
+test('areas hierarquicas: area ligada a area de cima ("área acima" / "área abaixo")', () => {
   const dados = JSON.parse(JSON.stringify(DADOS));
-  dados.areas[0].subareas = [
-    { id: 'sa1', nome: 'Contas a Pagar', lider: { id: 'pBeto', nome: 'Beto Lima' } },
-    { id: 'sa2', nome: 'Tesouraria', lider: { id: 'pBeto', nome: 'Beto Lima' } },
-  ];
-  dados.processos[0].subarea = { id: 'sa1', nome: 'nome antigo' };
-  dados.dependencias[0].subarea = { area: 'Financeiro', id: 'sa2', nome: 'Tesouraria' };
+  dados.areas.push({ id: 'a0', nome: 'Diretoria' });
+  dados.areas[0].areaPaiId = 'a0';
   const i = MC.montarIndice(dados, OPCOES);
-  assert.deepStrictEqual(rels(i, 'area:financeiro', 'pessoa:pBeto'), ['líder de subárea']);
-  const viz = (de, para) => MC.vizinhos(i, de).flatMap((g) => g.itens).find((x) => x.id === para).rels;
-  assert.deepStrictEqual(viz('area:financeiro', 'pessoa:pBeto'), ['líder de subárea — Contas a Pagar, Tesouraria']);
-  assert.deepStrictEqual(viz('processo:p1', 'area:financeiro'), ['pertence à área — Contas a Pagar'], 'nome atual, pelo id');
-  assert.deepStrictEqual([...viz('pessoa:pAna', 'area:financeiro')].sort(), ['membro da área — Tesouraria', 'responsável pela área']);
-  assert.deepStrictEqual(rels(i, 'processo:p1', 'area:financeiro'), ['pertence à área'], 'rel semantico intacto');
+  assert.deepStrictEqual(rels(i, 'area:financeiro', 'area:diretoria'), ['área acima']);
+  assert.deepStrictEqual(rels(i, 'area:diretoria', 'area:financeiro'), ['área abaixo']);
 });
 
 test('vinculos do processo: area, dependencia por id, fornecedor por nome (legado), processo interno e contato de crise', () => {

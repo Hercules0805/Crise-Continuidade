@@ -191,15 +191,15 @@
   <script src="risco-relatorio.js?v=4"></script>
   <script src="contrato-ciclo.js?v=5"></script>
   <script src="dependencia-duplicidade.js?v=1"></script>
-  <script src="subareas.js?v=1"></script>
+  <script src="areas-hierarquia.js?v=1"></script>
   <script src="servico-composicao.js?v=4"></script>
-  <script src="mapa-continuidade.js?v=13"></script>
+  <script src="mapa-continuidade.js?v=14"></script>
   <script src="conformidade-continuidade.js?v=3"></script>
   <script src="continuidade-relatorio.js?v=1"></script>
   <script src="inventario-csv.js?v=3"></script>
   <script src="importacao-fornecedores.js?v=1"></script>
   <script src="api-legacy.js?v=6"></script>
-  <script src="api.js?v=99"></script>
+  <script src="api.js?v=100"></script>
   <script src="menu-lateral.js?v=1"></script>
   <script>
     if (!firebase.apps || !firebase.apps.length) firebase.initializeApp(FIREBASE_CONFIG);
@@ -299,12 +299,14 @@
         window.USER_PERFIS = Perfis.normalizarLista(perfil.perfis != null ? perfil.perfis : perfil.perfil);
         window.USER_PERFIL = window.USER_PERFIS[0];
         window.USER_AREA = perfil.area || null;
+        window.USER_AREAS = perfil.areasGeridas || [];
       } catch(e) {
         // Falha ao ler o perfil cai no MENOR acesso, nunca no maior.
         console.error('Falha ao carregar perfil, assumindo o menor acesso:', e);
         window.USER_PERFIS = [Perfis.PERFIL_PADRAO];
         window.USER_PERFIL = Perfis.PERFIL_PADRAO;
         window.USER_AREA = null;
+        window.USER_AREAS = [];
       }
       // Aplicar restricoes de perfil.
       //
@@ -338,6 +340,6 @@
       if (window._routePendente) route();
     });
   </script>
-  <script src="app.js?v=265"></script>
+  <script src="app.js?v=266"></script>
 </body>
 </html>

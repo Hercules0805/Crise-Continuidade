@@ -39,7 +39,7 @@ async function carregar(perfis, extra) {
       return JSON.parse(JSON.stringify(dados[nome] === undefined ? [] : dados[nome]));
     },
   });
-  ['util.js', 'dependencia-duplicidade.js', 'subareas.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
+  ['util.js', 'dependencia-duplicidade.js', 'areas-hierarquia.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
     'cvss31.js', 'risco-consolidado.js', 'cadeia-dependencias.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js', 'contrato-ciclo.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = (m) => { window.__toasts = (window.__toasts || []).concat(m); };');
@@ -118,7 +118,7 @@ test('novo processo: grava area, nome, categoria, criador, aprovador, links e Co
   assert.strictEqual(await w.salvarCadastroProcesso(), true);
   const g = gravacoes.find((x) => x.nome === 'salvarProcesso').arg;
   assert.deepStrictEqual(g, {
-    id: null, area: 'RH', subarea: null, processo: 'Admissão', categoriaId: 'departamental', criadorId: 'bruno', aprovadorId: 'ana',
+    id: null, area: 'RH', processo: 'Admissão', categoriaId: 'departamental', criadorId: 'bruno', aprovadorId: 'ana',
     continuidade: true, links: [{ titulo: 'Procedimento', url: 'https://wiki/admissao' }],
   });
 });

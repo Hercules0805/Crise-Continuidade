@@ -37,7 +37,6 @@ function ambiente(docs) {
     _getAll: async () => Object.entries(store.processos).map(([id, d]) => ({ id, ...d })),
     _lerRespostasIndexadas: async () => ({}),
     _respostaDoProcesso: () => null,
-    Subareas: require('../public/subareas.js'),
   };
   vm.createContext(ctx);
   const src = [constante('_CAMPOS_PROCESSO'), constante('CATEGORIA_PROCESSO_PADRAO'), constante('_ID_CATEGORIA_LEGADA'),
@@ -123,15 +122,4 @@ test('categorias: grava finalidade, criterios e exemplos; nome repetido (sem cai
     atualizadoEm: store.categorias_processo.n1.atualizadoEm, finalidade: 'F', criteriosIdentificacao: 'C', exemplos: 'E',
   });
   await assert.rejects(() => ctx.salvar({ nome: 'processo de negocio' }), /Já existe/);
-});
-
-test('subarea (29/10/2026): grava {id, nome} normalizado, vazia vira null; leitura tolerante', async () => {
-  const { ctx, store } = ambiente({ ti__folha: { area: 'TI', processo: 'Folha', categoriaId: 'processo-de-negocio' } });
-  await ctx._salvarProcesso({ id: 'ti__folha', subarea: { id: ' sa1 ', nome: ' Infra ', lixo: 1 } });
-  assert.deepStrictEqual(JSON.parse(JSON.stringify(store.processos.ti__folha.subarea)), { id: 'sa1', nome: 'Infra' });
-  await ctx._salvarProcesso({ id: 'ti__folha', subarea: { nome: 'sem id' } });
-  assert.strictEqual(store.processos.ti__folha.subarea, null);
-  store.processos.ti__folha.subarea = 'texto antigo';
-  const [p] = await ctx._lerProcessos();
-  assert.strictEqual(p.subarea, null);
 });

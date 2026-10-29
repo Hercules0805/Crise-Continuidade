@@ -140,24 +140,13 @@
       }
       return areaPorNome[n];
     }
-    // Subareas (29/10/2026): sem no proprio; o nome entra como detalhe da
-    // ligacao com a area ("pertence à área — Infraestrutura").
-    var subareaPorArea = {};
     (d.areas || []).forEach(function (a) {
       var n = normalizar(a.nome);
       if (!n) return;
       var id = 'area:' + n;
       no(id, 'area', a.nome, { ref: a.id, ausente: false });
       areaPorNome[n] = id;
-      subareaPorArea[n] = {};
-      _lista(a.subareas).forEach(function (sa) { if (sa && sa.id) subareaPorArea[n][String(sa.id)] = sa; });
     });
-    /** Nome atual da subarea do vinculo {id, nome} na area (o copiado, se ela saiu). */
-    function nomeSubarea(nomeArea, ref) {
-      if (!ref || !ref.id) return '';
-      var sa = (subareaPorArea[normalizar(nomeArea)] || {})[String(ref.id)];
-      return _texto(sa ? sa.nome : ref.nome);
-    }
 
     // ---- Dependencias por categoria ----
     var depPorId = {}, depPorNome = {}, pessoaPorNome = {};
@@ -249,7 +238,7 @@
     (d.processos || []).forEach(function (p) {
       var id = procPorId[String(p.id)];
       if (!id) return;
-      ligar(id, areaId(p.area), 'pertence à área', 'processo da área', nomeSubarea(p.area, p.subarea));
+      ligar(id, areaId(p.area), 'pertence à área', 'processo da área');
       var tecnicasDiretas = 0;
       _lista(p.dependenciaItens).forEach(function (it) {
         if (!it) return;
@@ -281,15 +270,11 @@
 
     (d.areas || []).forEach(function (a) {
       ligar(areaId(a.nome), pessoaPor(a.responsavel), 'responsável', 'responsável pela área');
-      // Lider de subarea: uma ligacao por pessoa, com as subareas que ela lidera.
-      var porLider = {}, ordem = [];
-      _lista(a.subareas).forEach(function (sa) {
-        if (!sa || !sa.lider || !sa.lider.id) return;
-        var k = String(sa.lider.id);
-        if (!porLider[k]) { porLider[k] = []; ordem.push(k); }
-        porLider[k].push(_texto(sa.nome));
-      });
-      ordem.forEach(function (k) { ligar(areaId(a.nome), pessoaPor(k), 'líder de subárea', 'lidera subárea', porLider[k].join(', ')); });
+      // Hierarquia (29/10/2026): area -> area de cima.
+      if (a.areaPaiId) {
+        var paiA = (d.areas || []).filter(function (x) { return x && String(x.id) === String(a.areaPaiId); })[0];
+        if (paiA) ligar(areaId(a.nome), areaId(paiA.nome), 'área acima', 'área abaixo');
+      }
     });
 
     deps.forEach(function (x) {
@@ -298,10 +283,7 @@
       var tipo = tipoDoId(id);
       if (tipo === 'pessoa') {
         var areasP = (x.areas && x.areas.length ? x.areas : [x.setor]).filter(Boolean);
-        areasP.forEach(function (a) {
-          var sub = x.subarea && normalizar(x.subarea.area) === normalizar(a) ? nomeSubarea(a, x.subarea) : '';
-          ligar(id, areaId(a), 'membro da área', 'membro', sub);
-        });
+        areasP.forEach(function (a) { ligar(id, areaId(a), 'membro da área', 'membro'); });
         ligar(id, pessoaPor(x.liderImediato), 'líder imediato', 'liderado');
         if (x.instalacao && x.instalacao.id) ligar(id, depPorId[String(x.instalacao.id)], 'lotada em', 'pessoa lotada');
       } else if (tipo === 'fornecedor') {
