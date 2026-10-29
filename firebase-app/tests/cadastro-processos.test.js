@@ -232,3 +232,56 @@ test('Descricao Funcional: abre com a existente e e gravada pelo cadastro princi
   assert.strictEqual(await w.salvarCadastroProcesso(), true);
   assert.strictEqual(gravacoes.find((g) => g.nome === 'salvarProcesso').arg.descricaoFuncional, 'Calcula e paga a folha.');
 });
+
+// Atalho para Continuidade (29/10/2026): processo salvo e em Continuidade abre a
+// ficha em Processos de Negocio (#processos?editar=<id>); fora dela, sem atalho.
+const linhaDe = (doc, nome) => [...doc.querySelectorAll('#listaCadastroProcessos tbody tr')].find((tr) => tr.textContent.includes(nome));
+
+test('grade: atalho (selo "Sim" e icone) so na linha em Continuidade, e leva a ficha', async () => {
+  const { w, doc } = await carregar(['admin']);
+  const folha = linhaDe(doc, 'Folha');
+  assert.ok(folha.querySelector('button[title="Abrir em Continuidade"]'));
+  assert.ok(folha.querySelector('button[title="Abrir em Processos de Negócio"]'));
+  const ponto = linhaDe(doc, 'Ponto');
+  assert.strictEqual(ponto.querySelector('button[title="Abrir em Continuidade"]'), null);
+  assert.strictEqual(ponto.querySelector('button[title="Abrir em Processos de Negócio"]'), null);
+  // onclick inline nao roda no jsdom (outside-only): confere o atributo e chama a funcao.
+  const selo = folha.querySelector('button[title="Abrir em Processos de Negócio"]').getAttribute('onclick');
+  assert.match(selo, /^event\.stopPropagation\(\);abrirProcessoEmContinuidade\('ti__folha'\)$/, 'o clique no selo nao abre o cadastro');
+  await w.abrirProcessoEmContinuidade('ti__folha');
+  assert.strictEqual(w.location.hash, '#processos?editar=ti__folha');
+});
+
+test('drawer: link so para processo salvo e em Continuidade pelo que esta gravado', async () => {
+  const { w, doc } = await carregar(['admin']);
+  const link = () => doc.getElementById('cadProcLinkContinuidade').style.display !== 'none';
+  w.abrirDrawerCadastroProcesso('ti__folha');
+  assert.ok(link());
+  w.abrirDrawerCadastroProcesso('rh__ponto');
+  assert.ok(!link(), 'Departamental fora de Continuidade');
+  doc.getElementById('cadProcContinuidade').checked = true;
+  w.abrirDrawerCadastroProcesso();
+  assert.ok(!link(), 'processo novo');
+});
+
+test('drawer: com alteracao nao salva, o atalho pergunta; continuar editando nao sai da tela', async () => {
+  const { w, doc } = await carregar(['admin']);
+  w.abrirDrawerCadastroProcesso('ti__folha');
+  doc.getElementById('cadProcNome').value = 'Folha nova';
+  w._perguntarAlteracoesNaoSalvas = async () => 'continuar';
+  await w.abrirProcessoEmContinuidade('ti__folha');
+  assert.notStrictEqual(w.location.hash, '#processos?editar=ti__folha');
+  assert.ok(doc.getElementById('drawerCadastroProcesso').classList.contains('open'));
+  // Descartar: fecha e vai.
+  w._perguntarAlteracoesNaoSalvas = async () => 'descartar';
+  await w.abrirProcessoEmContinuidade('ti__folha');
+  assert.strictEqual(w.location.hash, '#processos?editar=ti__folha');
+  assert.ok(!doc.getElementById('drawerCadastroProcesso').classList.contains('open'));
+});
+
+test('perfil sem a tela de Processos de Negocio nao ve o atalho', async () => {
+  const { doc, w } = await carregar(['admin']);
+  w.Perfis.podeVerTela = (perfis, tela) => tela !== 'processos';
+  w.renderizarCadastroProcessos();
+  assert.strictEqual(linhaDe(doc, 'Folha').querySelector('button[title="Abrir em Continuidade"]'), null);
+});

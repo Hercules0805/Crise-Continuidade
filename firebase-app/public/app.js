@@ -3040,6 +3040,18 @@ const _nomePessoaPorId = (id) => {
   return p ? p.nome : '(pessoa removida)';
 };
 const _badgeContinuidade = (sim) => sim ? '<span class="badge badge-green">Sim</span>' : '<span class="badge badge-gray">Não</span>';
+
+// Atalho para Continuidade (29/10/2026): processo salvo e marcado "Avaliar em
+// Continuidade" abre a ficha dele em Processos de Negócio (deep link
+// #processos?editar=<id>). Fora de Continuidade ele não está lá -- sem atalho.
+const _temAtalhoContinuidade = (p) => !!(p && p.id && p.continuidade !== false && Perfis.podeVerTela(window.USER_PERFIS, 'processos'));
+const SVG_CONTINUIDADE = _svgAcao('#1565c0', '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M9 12l2 2 4-4"/>');
+window.abrirProcessoEmContinuidade = async (id) => {
+  const drawer = document.getElementById('drawerCadastroProcesso');
+  // Drawer aberto: fecha pela regra de sempre (pergunta se há alteração não salva).
+  if (drawer && drawer.classList.contains('open') && !await fecharDrawerCadastroProcesso()) return;
+  window.location.hash = '#processos?editar=' + encodeURIComponent(id);
+};
 const _badgeCategoriaProcesso = (id) => `<span class="badge badge-gray">${esc(_nomeCategoriaProcesso(id) || '–')}</span>`;
 /** Processo que já tem algo de Continuidade (BIA respondido, PCN, revisão ou homologação). */
 const _temDadosDeContinuidade = (p) => !!(p && (p.avaliado || p.pcnSalvo || p.biaRevisao || p.pcnRevisao || p.biaHomologacao));
@@ -3136,8 +3148,14 @@ function renderizarCadastroProcessos() {
         <td>${_badgeCategoriaProcesso(p.categoriaId)}</td>
         ${_tdLista(_nomePessoaPorId(p.criadorId) || '–')}${_tdLista(_nomePessoaPorId(p.aprovadorId) || '–')}
         <td title="${esc((p.links || []).map((l) => l.titulo || l.url).join(' · '))}">${(p.links || []).length || '–'}</td>
-        <td>${_badgeContinuidade(p.continuidade !== false)}</td>
-        ${pode ? _htmlAcoesLinha([_acaoEditar(`abrirDrawerCadastroProcesso('${escJs(p.id)}')`), _acaoExcluir(`excluirCadastroProcesso('${escJs(p.id)}')`)]) : '<td class="col-acoes"></td>'}
+        <td>${_temAtalhoContinuidade(p)
+          ? `<button type="button" class="badge badge-green" style="cursor:pointer;border:none;font:inherit;" title="Abrir em Processos de Negócio" onclick="event.stopPropagation();abrirProcessoEmContinuidade('${escJs(p.id)}')">Sim</button>`
+          : _badgeContinuidade(p.continuidade !== false)}</td>
+        ${_htmlAcoesLinha([
+          _temAtalhoContinuidade(p) ? { icone: SVG_CONTINUIDADE, titulo: 'Abrir em Continuidade', onclick: `abrirProcessoEmContinuidade('${escJs(p.id)}')` } : null,
+          pode ? _acaoEditar(`abrirDrawerCadastroProcesso('${escJs(p.id)}')`) : null,
+          pode ? _acaoExcluir(`excluirCadastroProcesso('${escJs(p.id)}')`) : null,
+        ])}
       </tr>`,
     paginacao: cadastroProcessosPaginacao,
     fnPagina: 'irParaPaginaCadastroProcessos',
@@ -3200,7 +3218,9 @@ function _htmlDrawerCadastroProcesso() {
           </div>
         </div>
         <label class="check-label" style="margin-bottom:4px;"><input type="checkbox" id="cadProcContinuidade"> Avaliar em Continuidade</label>
-        <span style="font-size:0.75em;color:#888;display:block;margin-bottom:18px;">Marcado, o processo aparece em Processos de Negócio e passa por BIA, PCN e DRP.</span>
+        <span style="font-size:0.75em;color:#888;display:block;margin-bottom:6px;">Marcado, o processo aparece em Processos de Negócio e passa por BIA, PCN e DRP.</span>
+        <a href="#" id="cadProcLinkContinuidade" onclick="abrirProcessoEmContinuidade(document.getElementById('cadProcId').value);return false;" style="display:none;font-size:0.85em;color:#1565c0;font-weight:600;margin-bottom:6px;">Abrir em Processos de Negócio →</a>
+        <div style="margin-bottom:12px;"></div>
         <div style="border-top:1px solid #f0f0f0;padding-top:14px;">
           <label style="${lbl}">Links</label>
           <p style="font-size:0.78em;color:#888;margin:0 0 10px;">Documentos, fluxogramas, procedimentos e sistemas do processo.</p>
@@ -3254,6 +3274,13 @@ function _renderAjudaCategoriaProcesso() {
   const partes = c ? [['Finalidade', c.finalidade], ['Critérios de identificação', c.criteriosIdentificacao], ['Exemplos', c.exemplos]].filter(([, t]) => t) : [];
   caixa.style.display = partes.length ? '' : 'none';
   caixa.innerHTML = partes.map(([rot, t]) => `<div style="margin-bottom:6px;"><b style="color:#333;">${rot}</b><div style="white-space:pre-line;">${esc(t)}</div></div>`).join('');
+}
+
+/** Link "Abrir em Processos de Negócio": pelo que está GRAVADO (marcar a caixa e não salvar ainda não leva o processo para lá). */
+function _atualizarLinkContinuidadeCadastro() {
+  const id = document.getElementById('cadProcId').value;
+  const salvo = id ? cadastroProcessosData.find((x) => String(x.id) === String(id)) : null;
+  document.getElementById('cadProcLinkContinuidade').style.display = _temAtalhoContinuidade(salvo) ? 'inline-block' : 'none';
 }
 
 /** Dono do processo = responsável da Área escolhida (só leitura). */
@@ -3328,6 +3355,7 @@ window.abrirDrawerCadastroProcesso = (id) => {
   ['cadProcArea', 'cadProcNome', 'cadProcCategoria', 'cadProcDescricaoFuncional', 'cadProcCriador', 'cadProcAprovador', 'cadProcContinuidade'].forEach((c) => { document.getElementById(c).disabled = !pode; });
   document.getElementById('btnSalvarCadastroProcesso').style.display = pode ? '' : 'none';
   _atualizarIACadastroProcesso(pode);
+  _atualizarLinkContinuidadeCadastro();
   document.getElementById('drawerCadastroProcesso').classList.add('open');
   document.getElementById('drawerOverlayCadastroProcesso').classList.add('open');
   _edCadastroProcesso.marcar();
@@ -3375,6 +3403,7 @@ window.salvarCadastroProcesso = async () => {
     document.getElementById('cadProcId').value = String(dados.id || (r && r.id) || '');
     document.getElementById('cadProcTitulo').textContent = 'Editar processo';
     _atualizarIACadastroProcesso(true);
+    _atualizarLinkContinuidadeCadastro();
     _edCadastroProcesso.marcar();
     renderizarCadastroProcessos();
     showToast('✅ Salvo!', '#2e7d32');
