@@ -25,6 +25,7 @@ const transporteEmail = require('./transporteEmail');
 const historicoRisco = require('./historicoRisco');
 const retratoRisco = require('./retratoRisco');
 const cadeiaDependencias = require('./cadeiaDependencias');
+const subareas = require('./subareas');
 const conformidadeContinuidade = require('./conformidadeContinuidade');
 const threatIntel = require('./threatIntel');
 const threatIntelServico = require('./threatIntelServico');
@@ -43,6 +44,7 @@ const COLLECTION = {
   servicos: 'servicos',
   produtosSoftware: 'produtos_software',
   statusContrato: 'status_contrato',
+  areas: 'areas',
 };
 
 /**
@@ -449,6 +451,23 @@ function _instalacoesDoProcessoPCN(p, dependencias) {
 }
 
 /** Instalacoes do PCN por papel: [[titulo, lista]], so os grupos com itens (site com dois papeis aparece nos dois). */
+/**
+ * Subárea do processo para o PCN (29/10/2026): rótulo "Área › Subárea" e o
+ * líder com o contato da Pessoa. Sem subárea, só a área.
+ */
+async function _areaESubareaPCN(db, p, dependencias) {
+  const ref = subareas.normalizarRef(p.subarea);
+  if (!ref || !p.area) return { rotulo: p.area || '', lider: null };
+  const snap = await db.collection(COLLECTION.areas).where('nome', '==', p.area).get();
+  const areas = snap.docs.map((d) => ({ nome: (d.data() || {}).nome, subareas: subareas.normalizarSubareas((d.data() || {}).subareas) }));
+  const sa = subareas.resolverSubarea(areas, p.area, ref);
+  const pessoa = sa && sa.lider ? dependencias.find((d) => String(d.id) === String(sa.lider.id)) : null;
+  return {
+    rotulo: subareas.rotuloArea(p.area, sa),
+    lider: sa && sa.lider ? { nome: pessoa ? pessoa.nome : sa.lider.nome, telefone: pessoa ? pessoa.telefone || '' : '', email: pessoa ? pessoa.email || '' : '' } : null,
+  };
+}
+
 function _gruposInstalacoesPCN(instalacoes) {
   const grupos = cadeiaDependencias.PAPEIS_INSTALACAO.map(([papel, titulo]) => [titulo, instalacoes.filter((i) => (i.papeis || []).includes(papel))]);
   grupos.push(['Não classificadas', instalacoes.filter((i) => !(i.papeis || []).length)]);
@@ -511,6 +530,7 @@ async function gerarPCN(db, data, ctx) {
   // instalação do processo: tipo, endereço, quantas pessoas estão lotadas nela
   // e a instalação alternativa (contingência) -- ou a ausência dela.
   const instalacoesPCN = _instalacoesDoProcessoPCN(p, dependencias);
+  const areaPCN = await _areaESubareaPCN(db, p, dependencias);
 
   const contatosIds = listaDeContatos(p.bcpContatos);
   const contatosDetalhados = contatosIds.map((cid) => {
@@ -537,8 +557,8 @@ Onde houver dados disponíveis, preencha com informações reais. Onde não houv
 ## DADOS COLETADOS DO PROCESSO
 
 **Processo:** ${p.processo}
-**Área:** ${p.area}
-**Descrição Funcional:** ${p.descricaoFuncional || 'Não informada'}
+**Área:** ${areaPCN.rotulo}
+${areaPCN.lider ? `**Líder da subárea:** ${areaPCN.lider.nome} | Tel: ${areaPCN.lider.telefone || '-'} | Email: ${areaPCN.lider.email || '-'}\n` : ''}**Descrição Funcional:** ${p.descricaoFuncional || 'Não informada'}
 **Score de Criticidade:** ${score} (${tier})
 **RTO Esperado:** ${p.rto || 'Não definido'}
 **RPO Esperado:** ${p.rpo || 'Não definido'}

@@ -33,13 +33,14 @@ function ambienteApi(docsIniciais) {
     add: async (data) => { const id = 'novo' + (++seq); store[nome] = store[nome] || {}; store[nome][id] = data; return { id }; },
   });
   const ctx = {
+    Subareas: require('../public/subareas.js'),
     COLLECTION: { produtosSoftware: 'produtos_software', dependencias: 'dependencias' },
     window: { USER_EMAIL: 'Adm@fortestecnologia.com.br' },
     _db: { collection: col },
     _getAll: async (nome) => Object.entries(store[nome] || {}).map(([id, d]) => ({ id, ...d })),
   };
   vm.createContext(ctx);
-  ['_lerProdutosSoftware', '_endpointsLidos', '_nomeComparavel', '_salvarProdutoSoftware', '_minutosOuNull', '_refsDependencia', '_lerDependencias', '_salvarDependencia'].forEach((f) => {
+  ['_lerProdutosSoftware', '_endpointsLidos', '_nomeComparavel', '_salvarProdutoSoftware', '_minutosOuNull', '_refsDependencia', '_subareaPessoa', '_lerDependencias', '_salvarDependencia'].forEach((f) => {
     vm.runInContext(extrair(f) + `\nthis.${f} = ${f};`, ctx);
   });
   vm.runInContext('const _CAMPOS_PRODUTO_SOFTWARE = ["nome", "area", "descricao", "endpoints", "ativo", "ordem"]; this._CAMPOS_PRODUTO_SOFTWARE = _CAMPOS_PRODUTO_SOFTWARE;', ctx);
@@ -163,7 +164,7 @@ async function abrirPagina(perfis, extra) {
     if (retornos[nome] !== undefined) return JSON.parse(JSON.stringify(retornos[nome]));
     return /^salvar/.test(nome) ? { success: true, id: 'novo' } : [];
   } });
-  ['util.js', 'dependencia-duplicidade.js', 'perfis.js', 'criticidade.js', 'cadeia-dependencias.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js']
+  ['util.js', 'dependencia-duplicidade.js', 'subareas.js', 'perfis.js', 'criticidade.js', 'cadeia-dependencias.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   const toasts = [];
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8')
@@ -233,7 +234,7 @@ async function montarRelatorio(pessoa, produtos, extraDados) {
   w.firebase = { auth: () => ({ currentUser: { getIdToken: async () => 't' } }) };
   w.GRC360 = {}; w.APP_API_URL = ''; w.USER_PERFIS = ['admin'];
   w.API = new Proxy({}, { get: () => async () => [] });
-  ['util.js', 'dependencia-duplicidade.js', 'perfis.js', 'criticidade.js', 'cadeia-dependencias.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js']
+  ['util.js', 'dependencia-duplicidade.js', 'subareas.js', 'perfis.js', 'criticidade.js', 'cadeia-dependencias.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;window.__montar = (p, d) => _buildRelatorioPessoaPage(p, d);');
   const base = { processos: [], deps: [{ id: pessoa.id, categoria: 'Pessoas', nome: pessoa.nome }], riscos: [], indicadores: [], backups: [], perfis: [], areas: [], produtos };
@@ -310,7 +311,7 @@ test('relatorio: gerarRelatorioPessoa busca o catalogo e o repassa ao relatorio'
     if (nome === 'getDependencias') return [{ id: 'pe1', categoria: 'Pessoas', nome: 'Ana' }];
     return [];
   } });
-  ['util.js', 'dependencia-duplicidade.js', 'perfis.js', 'criticidade.js', 'cadeia-dependencias.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js']
+  ['util.js', 'dependencia-duplicidade.js', 'subareas.js', 'perfis.js', 'criticidade.js', 'cadeia-dependencias.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js', 'cvss31.js', 'risco-consolidado.js', 'servico-composicao.js', 'mapa-continuidade.js', 'conformidade-continuidade.js', 'sanitizar-pcn.js']
     .forEach((f) => w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')));
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;window.__gerar = (p) => gerarRelatorioPessoa(p);');
   await w.__gerar({ id: 'pe1', nome: 'Ana', techLead: true, techLeadProdutos: ['ps1'] });
@@ -423,6 +424,7 @@ test('produto: area responsavel grava e le; produto antigo vem sem area', async 
 test('vinculos pela tela de Produtos: um lote; vincular liga a funcao, desvincular so tira o produto; funcao fora da lista recusa', async () => {
   const sets = [];
   const ctx = {
+    Subareas: require('../public/subareas.js'),
     COLLECTION: { dependencias: 'dependencias' },
     window: { USER_EMAIL: 'Adm@X' },
     firebase: { firestore: { FieldValue: { arrayUnion: (v) => ({ union: v }), arrayRemove: (v) => ({ remove: v }) } } },

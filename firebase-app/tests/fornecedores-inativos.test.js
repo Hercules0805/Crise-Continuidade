@@ -39,6 +39,7 @@ function ambienteApi(docsIniciais) {
     add: async (data) => { const id = 'novo' + (++seq); gravar(nome, id, data); return { id }; },
   });
   const ctx = {
+    Subareas: require('../public/subareas.js'),
     COLLECTION: { dependencias: 'dependencias' },
     window: { USER_EMAIL: 'Op@fortestecnologia.com.br' },
     _db: {
@@ -52,7 +53,7 @@ function ambienteApi(docsIniciais) {
     _getAll: async (nome) => Object.entries(store[nome] || {}).map(([id, d]) => ({ id, ...d })),
   };
   vm.createContext(ctx);
-  ['_minutosOuNull', '_lerDependencias', '_salvarDependencia', '_alterarSituacaoFornecedor', '_importarFornecedoresInativos'].forEach((f) => {
+  ['_minutosOuNull', '_subareaPessoa', '_lerDependencias', '_salvarDependencia', '_alterarSituacaoFornecedor', '_importarFornecedoresInativos'].forEach((f) => {
     vm.runInContext(extrair(f) + `\nthis.${f} = ${f};`, ctx);
   });
   return { ctx, store, lotes };
@@ -138,7 +139,7 @@ async function carregar(perfis, extra) {
       return Promise.resolve(JSON.parse(JSON.stringify(dados[nome] || [])));
     },
   });
-  ['util.js', 'dependencia-duplicidade.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
+  ['util.js', 'dependencia-duplicidade.js', 'subareas.js', 'perfis.js', 'criticidade.js', 'fornecedor-score.js', 'fornecedor-criticidade.js', 'vulnerabilidade-severidade.js',
     'cvss31.js', 'risco-consolidado.js', 'sanitizar-pcn.js', 'contrato-ciclo.js', 'cadeia-dependencias.js', 'inventario-csv.js', 'importacao-fornecedores.js']
     .forEach((f) => { if (fs.existsSync(path.join(PUB, f))) w.eval(fs.readFileSync(path.join(PUB, f), 'utf8')); });
   w.eval(fs.readFileSync(path.join(PUB, 'app.js'), 'utf8') + '\n;showToast = (m) => { window.__toasts = (window.__toasts || []).concat(m); };');

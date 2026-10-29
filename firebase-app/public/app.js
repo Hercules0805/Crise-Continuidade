@@ -1403,12 +1403,13 @@ async function areas() {
     <div class="loading">⏳ Carregando...</div>
     <div class="data-table data-table--lista" id="lista" style="display:none;">
       <table style="min-width:840px;">
-        <colgroup><col style="width:240px"><col style="width:220px"><col style="width:300px"><col style="width:160px"><col style="width:92px"></colgroup>
+        <colgroup><col style="width:220px"><col style="width:200px"><col style="width:260px"><col style="width:240px"><col style="width:140px"><col style="width:92px"></colgroup>
         <thead>
           <tr>
             <th onclick="ordenarAreas('nome')" style="cursor:pointer;">Área <span id="sort-nome"></span></th>
             <th onclick="ordenarAreas('responsavel')" style="cursor:pointer;">Responsável <span id="sort-responsavel"></span></th>
             <th onclick="ordenarAreas('email')" style="cursor:pointer;">E-mail <span id="sort-email"></span></th>
+            <th>Subáreas</th>
             <th onclick="ordenarAreas('telefone')" style="cursor:pointer;">Telefone <span id="sort-telefone"></span></th>
             <th class="col-acoes">Ações</th>
           </tr>
@@ -1445,7 +1446,9 @@ function renderizarAreas() {
     data = data.filter(a => 
       (a.nome || '').toLowerCase().includes(termo) ||
       (a.responsavel || '').toLowerCase().includes(termo) ||
-      (a.email || '').toLowerCase().includes(termo)
+      (a.email || '').toLowerCase().includes(termo) ||
+      // Subáreas (29/10/2026): acha pelo nome da subárea e do líder.
+      (a.subareas || []).some((sa) => `${sa.nome} ${sa.lider ? sa.lider.nome : ''}`.toLowerCase().includes(termo))
     );
   }
   
@@ -1461,10 +1464,90 @@ function renderizarAreas() {
   const filtrando = !!busca.trim();
   document.getElementById('rows').innerHTML = pag.itens.length
     ? pag.itens.map((a) => `<tr ${soLeituraAreas ? '' : `style="cursor:pointer;" onclick="editarArea('${escJs(a.id)}')"`}>
-        ${_tdLista(a.nome, 'forte')}${_tdLista(a.responsavel)}${_tdLista(a.email)}${_tdLista(a.telefone)}
+        ${_tdLista(a.nome, 'forte')}${_tdLista(a.responsavel)}${_tdLista(a.email)}<td>${_htmlChipsSubareasLista(a)}</td>${_tdLista(a.telefone)}
         ${soLeituraAreas ? '<td class="col-acoes"></td>' : _htmlAcoesLinha([_acaoEditar(`editarArea('${escJs(a.id)}')`), _acaoExcluir(`excluirArea('${escJs(a.id)}')`)])}
       </tr>`).join('')
-    : `<tr><td colspan="5" class="vazio">${filtrando ? 'Nenhuma área encontrada com essa busca.' : 'Nenhuma área cadastrada.'}</td></tr>`;
+    : `<tr><td colspan="6" class="vazio">${filtrando ? 'Nenhuma área encontrada com essa busca.' : 'Nenhuma área cadastrada.'}</td></tr>`;
+}
+
+/** Chips cinza das subáreas na lista de Áreas: até 3 e "+N". */
+function _htmlChipsSubareasLista(a) {
+  const lista = a.subareas || [];
+  if (!lista.length) return '<span style="color:#bbb;">—</span>';
+  const chip = (t, titulo) => `<span class="badge badge-gray" title="${esc(titulo)}" style="margin:0 4px 2px 0;">${esc(t)}</span>`;
+  return lista.slice(0, 3).map((sa) => chip(sa.nome, sa.lider ? 'Líder: ' + sa.lider.nome : 'Sem líder')).join('')
+    + (lista.length > 3 ? chip('+' + (lista.length - 3), lista.slice(3).map((sa) => sa.nome).join(', ')) : '');
+}
+
+// ---- Subárea nos cadastros (29/10/2026): Processo, Risco e Pessoa ----
+// Select "Subárea" dependente do select de Área, escondido quando a área não
+// tem subárea. O vínculo guarda {id, nome}; o nome exibido é o atual (pelo id)
+// e o id que sumiu da área aparece "(subárea removida)".
+
+/** Áreas carregadas na tela (com as subáreas). */
+function _areasComSubareas() { return window.areasDisponiveis || window.areasData || []; }
+
+/** "Área › Subárea" com o nome atual da subárea. */
+function _rotuloAreaSubarea(area, ref) {
+  return Subareas.rotuloArea(area, Subareas.resolverSubarea(_areasComSubareas(), area, ref));
+}
+
+function _htmlCampoSubarea(idSelect, lbl, inp) {
+  return `<div id="${idSelect}Box" style="display:none;margin-top:10px;">
+      <label style="${lbl}" for="${idSelect}">Subárea</label>
+      <select id="${idSelect}" style="${inp}"></select>
+      <div id="${idSelect}Lider" style="font-size:0.75em;color:#888;margin-top:3px;"></div>
+    </div>`;
+}
+
+function _preencherSelectSubarea(idSelect, nomeArea, ref) {
+  const sel = document.getElementById(idSelect);
+  if (!sel) return;
+  const areas = _areasComSubareas();
+  const lista = Subareas.subareasDaArea(areas, nomeArea);
+  const atual = Subareas.resolverSubarea(areas, nomeArea, ref);
+  sel.innerHTML = '<option value="">— Nenhuma —</option>' + lista.map((sa) => `<option value="${esc(sa.id)}">${esc(sa.nome)}</option>`).join('')
+    + (atual && atual.removida ? `<option value="${esc(atual.id)}">${esc(atual.nome)} (subárea removida)</option>` : '');
+  sel.value = atual ? atual.id : '';
+  sel.dataset.area = nomeArea || '';
+  sel.dataset.removida = atual && atual.removida ? JSON.stringify({ id: atual.id, nome: atual.nome }) : '';
+  document.getElementById(idSelect + 'Box').style.display = lista.length || (atual && atual.removida) ? '' : 'none';
+  sel.onchange = () => _atualizarLiderSubarea(idSelect);
+  _atualizarLiderSubarea(idSelect);
+}
+
+/** {id, nome} escolhido no select (o nome atual), ou null. */
+function _lerSelectSubarea(idSelect) {
+  const sel = document.getElementById(idSelect);
+  if (!sel || !sel.value) return null;
+  const sa = Subareas.subareasDaArea(_areasComSubareas(), sel.dataset.area).find((x) => String(x.id) === sel.value);
+  if (sa) return { id: sa.id, nome: sa.nome };
+  const removida = sel.dataset.removida ? JSON.parse(sel.dataset.removida) : null;
+  return removida && removida.id === sel.value ? removida : null;
+}
+
+function _atualizarLiderSubarea(idSelect) {
+  const el = document.getElementById(idSelect + 'Lider');
+  if (!el) return;
+  const ref = _lerSelectSubarea(idSelect);
+  const sa = ref ? Subareas.resolverSubarea(_areasComSubareas(), document.getElementById(idSelect).dataset.area, ref) : null;
+  el.textContent = sa && !sa.removida ? (sa.lider ? `Líder: ${sa.lider.nome}` : 'Subárea sem líder') : '';
+}
+
+// Filtro de Área com as subáreas recuadas embaixo de cada área: o valor da
+// subárea é "Área||sub:<id>"; escolher a área continua trazendo todas.
+const _SEP_FILTRO_SUBAREA = '||sub:';
+function _opcoesFiltroAreaComSubareas(nomes) {
+  const areas = _areasComSubareas();
+  return nomes.flatMap((n) => [[n, n], ...Subareas.subareasDaArea(areas, n).map((sa) => [n + _SEP_FILTRO_SUBAREA + sa.id, '\u00a0\u00a0\u00a0↳ ' + sa.nome])]);
+}
+function _partesFiltroArea(valor) {
+  const [area, subId] = String(valor || '').split(_SEP_FILTRO_SUBAREA);
+  return { area: area || '', subId: subId || '' };
+}
+function _casaFiltroArea(valor, area, ref) {
+  const f = _partesFiltroArea(valor);
+  return !f.area || (area === f.area && (!f.subId || !!(ref && String(ref.id) === f.subId)));
 }
 
 const areasPaginacao = criarPaginacao(20);
@@ -1496,6 +1579,8 @@ window.abrirModalArea = (a) => {
     _preencherContatoResponsavelArea();
   }
   _atualizarBotaoEditarPessoaArea();
+  window._areaSubareas = a && Array.isArray(a.subareas) ? a.subareas.map((sa) => ({ ...sa })) : [];
+  cancelarEdicaoSubareaArea();
   document.getElementById('modalTitulo').textContent = a ? 'Editar Área' : 'Nova Área';
   document.getElementById('modal').classList.add('open');
 };
@@ -1519,6 +1604,20 @@ function _htmlModalArea() {
       <input type="email" id="fEmail" placeholder="Preenchido pela Pessoa" readonly style="background:#f5f6fa;color:#555;">
       <label>Telefone</label>
       <input type="text" id="fTelefone" placeholder="Preenchido pela Pessoa" readonly style="background:#f5f6fa;color:#555;">
+      <label>Subáreas</label>
+      <span style="font-size:0.75em;color:#888;display:block;margin-top:2px;margin-bottom:8px;">Divisões da área, cada uma com um líder. Processos, riscos e pessoas da área podem indicar a subárea.</span>
+      <div id="areaSubareasLista"></div>
+      <div style="background:#fafbff;border:1px solid #fce8ea;border-radius:8px;padding:12px;margin-top:8px;">
+        <div id="subareaEdicaoAviso" style="display:none;font-size:0.8em;color:#1565c0;font-weight:600;margin-bottom:8px;">
+          ✎ Editando subárea — <a href="#" onclick="cancelarEdicaoSubareaArea();return false;" style="color:#1565c0;">cancelar edição</a>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:center;">
+          <input type="text" id="subareaNome" placeholder="Nome da subárea" maxlength="120" style="margin:0;">
+          <select id="subareaLider" style="margin:0;" aria-label="Líder da subárea"><option value="">Líder...</option></select>
+          <button type="button" class="btn btn-ghost" id="btnAdicionarSubarea" onclick="adicionarSubareaArea()" style="white-space:nowrap;">+ Adicionar</button>
+        </div>
+        ${Perfis.podeEditarPessoas(window.USER_PERFIS) ? '<button type="button" class="link-acao" onclick="novaPessoaLiderSubarea()" style="margin-top:6px;font-size:0.8em;">+ Nova pessoa</button>' : ''}
+      </div>
       <div class="modal-footer">
         <button class="btn btn-ghost" onclick="fecharModalArea()">Cancelar</button>
         <button class="btn btn-primary" id="btnSalvarArea" onclick="salvarArea()">Salvar</button>
@@ -1576,6 +1675,128 @@ window._recarregarPessoasArea = async () => {
 
 window.editarArea = (id) => abrirModalArea(window.areasData.find(a => a.id === id));
 
+// ============================================================
+// Subáreas da Área (29/10/2026) -- mini-CRUD no molde dos "Canais de suporte".
+// Item: {id, nome, lider: {id, nome}|null}. O id é estável (Subareas.novoIdSubarea):
+// processos, riscos e pessoas guardam {id, nome} e o nome atual vem daqui.
+// Nada grava até o Salvar da Área.
+// ============================================================
+window._areaSubareas = [];
+window._subareaEditandoIndex = null;
+
+function _popularSelectLiderSubarea(valor) {
+  const sel = document.getElementById('subareaLider');
+  if (!sel) return;
+  const pessoas = [...(pessoasData || [])].sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR'));
+  sel.innerHTML = '<option value="">Líder...</option>' + pessoas.map((p) => `<option value="${esc(p.id)}">${esc(p.nome)}</option>`).join('');
+  // Líder que não está mais em Pessoas continua escolhido (não some em silêncio).
+  if (valor && valor.id && !pessoas.some((p) => String(p.id) === String(valor.id))) {
+    sel.add(new Option(`${valor.nome || valor.id} (pessoa removida)`, valor.id));
+  }
+  sel.value = valor && valor.id ? String(valor.id) : '';
+}
+
+function _renderSubareasArea() {
+  const cont = document.getElementById('areaSubareasLista');
+  if (!cont) return;
+  const itens = window._areaSubareas || [];
+  if (!itens.length) { cont.innerHTML = '<p class="vazio-inline">Nenhuma subárea.</p>'; return; }
+  cont.innerHTML = `<table class="data-table" style="box-shadow:none;"><tbody>` + itens.map((sa, i) => {
+    const pessoa = sa.lider ? (pessoasData || []).find((p) => String(p.id) === String(sa.lider.id)) : null;
+    const lider = !sa.lider
+      ? '<span style="color:#e65100;font-size:0.82em;">sem líder</span>'
+      : `<span style="font-size:0.85em;color:#333;">👤 ${esc(pessoa ? pessoa.nome : sa.lider.nome)}${pessoa ? (pessoa.email ? ` <span style="color:#888;">· ${esc(pessoa.email)}</span>` : '') : ' <span style="color:#999;">(pessoa removida)</span>'}</span>`;
+    return `<tr class="subarea-linha">
+        <td><span style="font-weight:600;color:#222;">${esc(sa.nome)}</span></td>
+        <td>${lider}</td>
+        <td style="text-align:center;white-space:nowrap;width:1%;">
+          <button type="button" class="btn-icon" onclick="editarSubareaArea(${i})" title="Editar">${SVG_EDITAR}</button>
+          <button type="button" class="btn-icon" onclick="removerSubareaArea(${i})" title="Remover" style="color:#c62828;font-weight:700;">&times;</button>
+        </td>
+      </tr>`;
+  }).join('') + `</tbody></table>`;
+}
+
+window.adicionarSubareaArea = () => {
+  const nome = document.getElementById('subareaNome').value.trim();
+  if (!nome) return showToast('Informe o nome da subárea.', '#e65100');
+  const lista = window._areaSubareas || (window._areaSubareas = []);
+  const editando = window._subareaEditandoIndex;
+  const chave = Subareas.normalizarNome(nome);
+  if (lista.some((sa, i) => i !== editando && Subareas.normalizarNome(sa.nome) === chave)) {
+    return showToast(`Já existe a subárea "${nome}" nesta área.`, '#e65100');
+  }
+  const idLider = document.getElementById('subareaLider').value;
+  const pessoa = idLider ? (pessoasData || []).find((p) => String(p.id) === String(idLider)) : null;
+  const anterior = editando != null ? lista[editando] : null;
+  const lider = pessoa ? { id: String(pessoa.id), nome: pessoa.nome }
+    : (idLider && anterior && anterior.lider && String(anterior.lider.id) === idLider ? anterior.lider : null);
+  if (anterior) lista[editando] = { ...anterior, nome, lider };
+  else lista.push({ id: Subareas.novoIdSubarea(), nome, lider });
+  cancelarEdicaoSubareaArea();
+};
+
+window.editarSubareaArea = (idx) => {
+  const sa = (window._areaSubareas || [])[idx];
+  if (!sa) return;
+  window._subareaEditandoIndex = idx;
+  document.getElementById('subareaNome').value = sa.nome;
+  _popularSelectLiderSubarea(sa.lider);
+  document.getElementById('subareaEdicaoAviso').style.display = 'block';
+  document.getElementById('btnAdicionarSubarea').textContent = 'Salvar alteração';
+};
+
+window.cancelarEdicaoSubareaArea = () => {
+  window._subareaEditandoIndex = null;
+  const nome = document.getElementById('subareaNome');
+  if (!nome) return;
+  nome.value = '';
+  _popularSelectLiderSubarea(null);
+  document.getElementById('subareaEdicaoAviso').style.display = 'none';
+  document.getElementById('btnAdicionarSubarea').textContent = '+ Adicionar';
+  _renderSubareasArea();
+};
+
+/** Quantos processos, riscos e pessoas apontam a subárea (para o aviso ao remover). */
+async function _usoSubarea(nomeArea, idSub) {
+  const mesma = (ref) => ref && String(ref.id) === String(idSub);
+  const [processos, riscos] = await Promise.all([
+    API.getProcessos().catch(() => []),
+    API.getRiscos().catch(() => []),
+  ]);
+  return {
+    processos: (processos || []).filter((p) => p.area === nomeArea && mesma(p.subarea)).length,
+    riscos: (riscos || []).filter((r) => r.area === nomeArea && mesma(r.subarea)).length,
+    pessoas: (pessoasData || []).filter((p) => p.subarea && p.subarea.area === nomeArea && mesma(p.subarea)).length,
+  };
+}
+
+window.removerSubareaArea = async (idx) => {
+  const sa = (window._areaSubareas || [])[idx];
+  if (!sa) return;
+  const idArea = document.getElementById('fId').value;
+  const area = idArea ? (window.areasData || []).find((x) => String(x.id) === String(idArea)) : null;
+  const uso = area ? await _usoSubarea(area.nome, sa.id) : { processos: 0, riscos: 0, pessoas: 0 };
+  const partes = [[uso.processos, 'processo', 'processos'], [uso.riscos, 'risco', 'riscos'], [uso.pessoas, 'pessoa', 'pessoas']]
+    .filter(([n]) => n).map(([n, um, varios]) => `${n} ${n === 1 ? um : varios}`);
+  const msg = partes.length
+    ? `A subárea "${sa.nome}" está em uso por ${partes.join(', ')}. Eles continuam com o nome, marcado como "(subárea removida)". Remover?`
+    : `Remover a subárea "${sa.nome}"?`;
+  if (!await confirmarAcao(msg)) return;
+  window._areaSubareas.splice(idx, 1);
+  if (window._subareaEditandoIndex === idx) cancelarEdicaoSubareaArea();
+  else {
+    if (window._subareaEditandoIndex != null && window._subareaEditandoIndex > idx) window._subareaEditandoIndex--;
+    _renderSubareasArea();
+  }
+};
+
+/** "+ Nova pessoa" do líder: cadastro rápido por cima do modal; volta já escolhida. */
+window.novaPessoaLiderSubarea = () => _cadastroRapidoPessoa('modal', null, (pe) => {
+  if (!(pessoasData || []).some((p) => String(p.id) === String(pe.id))) pessoasData = [...(pessoasData || []), pe];
+  _popularSelectLiderSubarea({ id: pe.id, nome: pe.nome });
+});
+
 window.salvarArea = async () => {
   const idAtual = document.getElementById('fId').value || null;
   const existente = idAtual ? (window.areasData || []).find((x) => String(x.id) === String(idAtual)) : null;
@@ -1588,6 +1809,7 @@ window.salvarArea = async () => {
     // "Solução" saiu da tela mas o dado antigo é preservado (não-destrutivo):
     // reenvia o que já estava gravado em vez de apagar no próximo merge.
     solucao: existente ? (existente.solucao || '') : '',
+    subareas: (window._areaSubareas || []).map((sa) => ({ id: sa.id, nome: sa.nome, lider: sa.lider || null })),
   };
   if (!a.nome) return showToast('Informe o nome da área.', '#e65100');
   await comBotaoCarregando('btnSalvarArea', async () => {
@@ -1664,6 +1886,10 @@ function _htmlDrawerPessoa() {
           <div id="pessoaAreasTabela"></div>
           <select id="pessoaAreaAdd" onchange="adicionarPessoaArea()" style="${inp}margin-top:4px;"><option value="">Selecione para adicionar...</option></select>
           <span style="font-size:0.72em;color:#888;display:block;margin-top:6px;">Uma pessoa pode pertencer a mais de uma área. A primeira é a principal.</span>
+          <div id="pessoaSubareaBox" style="display:none;margin-top:10px;">
+            <label style="${lbl}" for="pessoaSubarea">Subárea</label>
+            <select id="pessoaSubarea" style="${inp}"></select>
+          </div>
         </div>
         <div style="margin-bottom:16px;">
           <label style="${lbl}">Líder Imediato</label>
@@ -1987,11 +2213,50 @@ function renderPessoaAreas() {
   const cont = document.getElementById('pessoaAreasTabela');
   if (!cont) return;
   const itens = window._pessoaAreas || [];
-  if (!itens.length) { cont.innerHTML = '<p class="vazio-inline">Nenhuma área vinculada.</p>'; _popularSelectAreaPessoaAdd(); return; }
+  if (!itens.length) { cont.innerHTML = '<p class="vazio-inline">Nenhuma área vinculada.</p>'; _popularSelectAreaPessoaAdd(); _popularSelectSubareaPessoa(); return; }
   cont.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin:4px 0;">` +
     itens.map((a, i) => `<span style="display:inline-flex;align-items:center;gap:6px;background:${i === 0 ? '#d60014' : '#fce8ea'};color:${i === 0 ? '#fff' : '#d60014'};padding:4px 8px 4px 12px;border-radius:14px;font-size:0.85em;font-weight:500;">${esc(a)}${i === 0 ? ' <span style="opacity:0.8;font-size:0.85em;">(principal)</span>' : ''}<button onclick="removerPessoaArea(${i})" style="background:none;border:none;cursor:pointer;font-size:1.05em;color:${i === 0 ? 'rgba(255,255,255,0.75)' : '#c62828'};line-height:1;padding:0 3px;" title="Remover">&times;</button></span>`).join('') +
     `</div>`;
   _popularSelectAreaPessoaAdd();
+  _popularSelectSubareaPessoa();
+}
+
+// Subárea da Pessoa (29/10/2026): uma só, de uma das áreas dela; {area, id, nome}.
+// Estado em window._pessoaSubarea (sobrevive a adicionar/remover área).
+window._pessoaSubarea = null;
+const _SEP_SUBAREA_PESSOA = '||';
+
+function _popularSelectSubareaPessoa() {
+  const sel = document.getElementById('pessoaSubarea');
+  const box = document.getElementById('pessoaSubareaBox');
+  if (!sel || !box) return;
+  const areas = window.areasData || window.areasDisponiveis || [];
+  const minhas = window._pessoaAreas || [];
+  let atual = window._pessoaSubarea;
+  // Saiu a área da subárea: a subárea sai junto.
+  if (atual && !minhas.includes(atual.area)) atual = window._pessoaSubarea = null;
+  const grupos = minhas.map((a) => [a, Subareas.subareasDaArea(areas, a)]).filter(([, l]) => l.length);
+  const resolvida = atual ? Subareas.resolverSubarea(areas, atual.area, atual) : null;
+  const valor = (a, id) => esc(a + _SEP_SUBAREA_PESSOA + id);
+  sel.innerHTML = '<option value="">— Nenhuma —</option>'
+    + grupos.map(([a, l]) => `<optgroup label="${esc(a)}">${l.map((sa) => `<option value="${valor(a, sa.id)}">${esc(sa.nome)}</option>`).join('')}</optgroup>`).join('')
+    + (resolvida && resolvida.removida ? `<option value="${valor(atual.area, atual.id)}">${esc(atual.area)} › ${esc(atual.nome)} (subárea removida)</option>` : '');
+  sel.value = atual ? atual.area + _SEP_SUBAREA_PESSOA + atual.id : '';
+  sel.onchange = () => { window._pessoaSubarea = _lerSubareaPessoa(); };
+  box.style.display = grupos.length || (resolvida && resolvida.removida) ? '' : 'none';
+}
+
+/** {area, id, nome} escolhido (nome atual), ou null. */
+function _lerSubareaPessoa() {
+  const sel = document.getElementById('pessoaSubarea');
+  if (!sel || !sel.value) return null;
+  const i = sel.value.lastIndexOf(_SEP_SUBAREA_PESSOA);
+  const area = sel.value.slice(0, i);
+  const id = sel.value.slice(i + _SEP_SUBAREA_PESSOA.length);
+  const sa = Subareas.subareasDaArea(window.areasData || window.areasDisponiveis || [], area).find((x) => String(x.id) === id);
+  if (sa) return { area, id: sa.id, nome: sa.nome };
+  const antes = window._pessoaSubarea;
+  return antes && antes.area === area && String(antes.id) === id ? { area, id, nome: antes.nome } : null;
 }
 
 window.adicionarPessoaArea = () => {
@@ -2068,6 +2333,7 @@ window.abrirModalPessoa = (id) => {
   window._pessoaAreas = p && Array.isArray(p.areas) && p.areas.length
     ? [...p.areas]
     : (p && p.setor ? [p.setor] : []);
+  window._pessoaSubarea = p && p.subarea ? { ...p.subarea } : null;
   renderPessoaAreas();
   _popularSelectLiderPessoa(p ? (p.liderImediato || '') : '', p ? p.id : null);
   _popularSelectInstalacaoPessoa(p && p.instalacao ? p.instalacao.id : '');
@@ -2154,6 +2420,7 @@ function _coletarFormularioPessoa() {
     nome: document.getElementById('pessoaNome').value.trim(),
     detalhes: document.getElementById('pessoaDetalhes').value.trim(),
     areas: window._pessoaAreas || [],
+    subarea: _lerSubareaPessoa(),
     liderImediato: document.getElementById('pessoaLider').value,
     instalacao: _instalacaoEscolhidaPessoa(),
     techLead: !!window._pessoaLideranca.techLead,
@@ -2265,6 +2532,9 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
 
   // Áreas onde é responsável (por nome -- o campo é um <select> do catálogo de Pessoas).
   const areasDaPessoa = areas.filter((a) => (a.responsavel || '').trim() === nome);
+  // Subáreas que lidera (29/10/2026, por id) e a subárea de lotação.
+  const subareasLideradas = Subareas.subareasLideradas(areas, pessoa.id);
+  const subareaDaPessoa = pessoa.subarea ? Subareas.resolverSubarea(areas, pessoa.subarea.area, pessoa.subarea) : null;
 
   // Processos: Dono do Processo + Contato de Crise (bcpContatos) + Dependência
   // Crítica (dependenciaItens), deduplicados (um processo com mais de um vínculo
@@ -2371,6 +2641,7 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
     + '<b>Nome:</b> ' + esc(nome) + '<br>'
     + '<b>Cargo:</b> ' + esc(pessoa.detalhes || '-') + '<br>'
     + '<b>Área(s):</b> ' + esc((Array.isArray(pessoa.areas) && pessoa.areas.length ? pessoa.areas : [pessoa.setor]).filter(Boolean).join(', ') || '-') + '<br>'
+    + (subareaDaPessoa ? '<b>Subárea:</b> ' + esc(Subareas.rotuloArea(pessoa.subarea.area, subareaDaPessoa)) + '<br>' : '')
     + '<b>Instalação (lotação):</b> ' + esc(pessoa.instalacao && pessoa.instalacao.nome ? pessoa.instalacao.nome : '-') + '<br>'
     + '<b>Telefone:</b> ' + esc(pessoa.telefone || '-') + '<br>'
     + '<b>E-mail:</b> ' + esc(pessoa.email || '-')
@@ -2386,6 +2657,11 @@ function _buildRelatorioPessoaPage(pessoa, dados) {
     + '<b>Líder imediato:</b> ' + esc(lider ? lider.nome : '-') + '<br>'
     + '<b>Subordinados diretos:</b> ' + esc(subordinados.length ? subordinados.map((p) => p.nome).join(', ') : '-')
     + '</p>';
+  if (subareasLideradas.length) {
+    html += '<h2>Líder de subárea</h2><table><tr><th>Área</th><th>Subárea</th></tr>'
+      + subareasLideradas.map((x) => '<tr><td>' + esc(x.area) + '</td><td><b>' + esc(x.subarea.nome) + '</b></td></tr>').join('')
+      + '</table>';
+  }
 
   if (!temVinculoOperacional) {
     html += '<h2>Vínculos Operacionais</h2><p style="color:#999;">Nenhum vínculo operacional encontrado.</p>';
@@ -2638,6 +2914,8 @@ window.salvarPessoaCadastro = async () => {
         // por compat com quem lê a área única (filtros, organograma, gestor).
         areas: window._pessoaAreas || [],
         setor: (window._pessoaAreas && window._pessoaAreas[0]) || '',
+        // Subárea (29/10/2026): {area, id, nome} ou null.
+        subarea: estadoDoFormulario.subarea,
         // Líder imediato -- id de outra Pessoa (base do organograma).
         liderImediato: document.getElementById('pessoaLider').value,
         // Lotação (Instalações, 21/10/2026): {id, nome} ou null.
@@ -3000,7 +3278,7 @@ async function cadastroProcessos() {
   } else {
     const nomes = [...new Set([...areas.map((a) => a.nome), ...cadastroProcessosData.map((p) => p.area)].filter(Boolean))]
       .sort((a, b) => a.localeCompare(b, 'pt-BR'));
-    _preencherFiltroLista('filtroCadProcArea', 'Área', nomes.map((n) => [n, n]));
+    _preencherFiltroLista('filtroCadProcArea', 'Área', _opcoesFiltroAreaComSubareas(nomes));
   }
   _preencherFiltroLista('filtroCadProcCategoria', 'Categoria', categoriasProcessoData.map((c) => [c.id, c.ativo ? c.nome : `${c.nome} (inativa)`]));
   renderizarCadastroProcessos();
@@ -3020,9 +3298,9 @@ function renderizarCadastroProcessos() {
     alvoId: 'listaCadastroProcessos',
     itens: visiveis,
     buscaId: 'buscaCadastroProcesso',
-    camposBusca: ['processo', 'area', (p) => _nomeCategoriaProcesso(p.categoriaId), (p) => _nomePessoaPorId(p.criadorId), (p) => _nomePessoaPorId(p.aprovadorId),
+    camposBusca: ['processo', 'area', (p) => (p.subarea ? _rotuloAreaSubarea(p.area, p.subarea) : ''), (p) => _nomeCategoriaProcesso(p.categoriaId), (p) => _nomePessoaPorId(p.criadorId), (p) => _nomePessoaPorId(p.aprovadorId),
       (p) => (p.links || []).map((l) => `${l.titulo} ${l.url}`).join(' ')],
-    filtrar: (p) => (!area || p.area === area) && (!categoria || String(p.categoriaId) === categoria)
+    filtrar: (p) => _casaFiltroArea(area, p.area, p.subarea) && (!categoria || String(p.categoriaId) === categoria)
       && (!cont || (cont === 'sim') === (p.continuidade !== false)),
     ordenacao: cadastroProcessosOrdenacao,
     comparadores: {
@@ -3042,7 +3320,7 @@ function renderizarCadastroProcessos() {
     ],
     linha: (p) => `
       <tr style="cursor:pointer;" onclick="abrirDrawerCadastroProcesso('${escJs(p.id)}')">
-        ${_tdLista(p.area)}${_tdLista(p.processo, 'forte')}
+        ${_tdLista(_rotuloAreaSubarea(p.area, p.subarea))}${_tdLista(p.processo, 'forte')}
         <td>${_badgeCategoriaProcesso(p.categoriaId)}</td>
         ${_tdLista(_nomePessoaPorId(p.criadorId) || '–')}${_tdLista(_nomePessoaPorId(p.aprovadorId) || '–')}
         <td title="${esc((p.links || []).map((l) => l.titulo || l.url).join(' · '))}">${(p.links || []).length || '–'}</td>
@@ -3075,6 +3353,7 @@ function _htmlDrawerCadastroProcesso() {
         <div style="margin-bottom:16px;">
           <label style="${lbl}" for="cadProcArea">Área <span class="req" aria-hidden="true">*</span></label>
           <select id="cadProcArea" style="${inp}"></select>
+          ${_htmlCampoSubarea('cadProcSubarea', lbl, inp)}
         </div>
         <div style="margin-bottom:16px;">
           <label style="${lbl}" for="cadProcNome">Processo <span class="req" aria-hidden="true">*</span></label>
@@ -3163,6 +3442,7 @@ function _coletarCadastroProcesso() {
   return {
     id: document.getElementById('cadProcId').value || null,
     area: document.getElementById('cadProcArea').value,
+    subarea: _lerSelectSubarea('cadProcSubarea'),
     processo: document.getElementById('cadProcNome').value.trim(),
     categoriaId: document.getElementById('cadProcCategoria').value,
     criadorId: document.getElementById('cadProcCriador').value,
@@ -3186,14 +3466,15 @@ window.abrirDrawerCadastroProcesso = (id) => {
   const selArea = document.getElementById('cadProcArea');
   selArea.innerHTML = (_limitadoAArea() ? '' : '<option value="">Selecione...</option>') + nomes.map((n) => `<option value="${esc(n)}">${esc(n)}</option>`).join('') + fora;
   selArea.value = areaAtual;
-  selArea.onchange = _popularPessoasCadastroProcesso;
+  _preencherSelectSubarea('cadProcSubarea', areaAtual, p ? p.subarea : null);
+  selArea.onchange = () => { _preencherSelectSubarea('cadProcSubarea', selArea.value, null); _popularPessoasCadastroProcesso(); };
   document.getElementById('cadProcNome').value = p ? p.processo : '';
   _popularSelectCategoriaProcesso(p ? p.categoriaId : '');
   _popularSelectPessoaProcesso('cadProcCriador', p ? p.criadorId : '', areaAtual);
   _popularSelectPessoaProcesso('cadProcAprovador', p ? p.aprovadorId : '', areaAtual);
   document.getElementById('cadProcContinuidade').checked = p ? p.continuidade !== false : false;
   _edLinksProcesso.carregar(p ? p.links : [], pode);
-  ['cadProcArea', 'cadProcNome', 'cadProcCategoria', 'cadProcCriador', 'cadProcAprovador', 'cadProcContinuidade'].forEach((c) => { document.getElementById(c).disabled = !pode; });
+  ['cadProcArea', 'cadProcSubarea', 'cadProcNome', 'cadProcCategoria', 'cadProcCriador', 'cadProcAprovador', 'cadProcContinuidade'].forEach((c) => { document.getElementById(c).disabled = !pode; });
   document.getElementById('btnSalvarCadastroProcesso').style.display = pode ? '' : 'none';
   document.getElementById('drawerCadastroProcesso').classList.add('open');
   document.getElementById('drawerOverlayCadastroProcesso').classList.add('open');
@@ -3362,6 +3643,8 @@ const processosPaginacao = criarPaginacao(20);
 window.filtrarProcessos = () => { processosPaginacao.reiniciar(); renderizarProcessos(); };
 window.irParaPaginaProcessos = (delta) => { processosPaginacao.mover(delta); renderizarProcessos(); };
 let processosFiltroArea = '';
+// Subárea escolhida no mesmo filtro de Área (29/10/2026): id, '' = todas da área.
+let processosFiltroSubarea = '';
 let processosFiltroTier = '';
 // Edição em lote -- ids marcados na tabela (reset a cada carga da tela).
 let processosSelecionados = new Set();
@@ -3457,6 +3740,7 @@ async function processos() {
               <div>
                 <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Área <span class="req" aria-hidden="true">*</span></label>
                 <select id="fArea" style="width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;"></select>
+                ${_htmlCampoSubarea('fSubarea', 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;', 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;')}
               </div>
               <div>
                 <label style="display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;">Dono do Processo</label>
@@ -3738,7 +4022,8 @@ async function processos() {
     }
     return;
   } else {
-    _preencherFiltroLista('filtroArea', 'Área', areasUnicas.map((a) => [a, a]));
+    window.areasDisponiveis = areas;
+    _preencherFiltroLista('filtroArea', 'Área', _opcoesFiltroAreaComSubareas(areasUnicas));
   }
   
   // Enriquecer processos com dados da área
@@ -3767,6 +4052,9 @@ function renderizarProcessos() {
   if (processosFiltroArea) {
     data = data.filter(p => p.area === processosFiltroArea);
   }
+  if (processosFiltroSubarea) {
+    data = data.filter(p => p.subarea && String(p.subarea.id) === processosFiltroSubarea);
+  }
 
   // Filtrar por busca
   const buscaProc = (document.getElementById('buscaProcesso') || {}).value || '';
@@ -3775,6 +4063,7 @@ function renderizarProcessos() {
     data = data.filter(p => 
       (p.processo || '').toLowerCase().includes(termo) ||
       (p.area || '').toLowerCase().includes(termo) ||
+      (p.subarea ? _rotuloAreaSubarea(p.area, p.subarea) : '').toLowerCase().includes(termo) ||
       (p.descricaoFuncional || '').toLowerCase().includes(termo)
     );
   }
@@ -3815,7 +4104,7 @@ function renderizarProcessos() {
         const statusColor = Criticidade.corDoTier(status);
         return `<tr style="cursor:pointer;" onclick="${soLeituraProcessos ? 'verDetalhesProcesso' : 'editarProcesso'}('${p.id}')">
         ${soLeituraProcessos ? '<td></td>' : `<td style="text-align:center;padding-left:6px;padding-right:6px;" onclick="event.stopPropagation();"><input type="checkbox" class="chk-processo" data-id="${esc(p.id)}" ${processosSelecionados.has(p.id) ? 'checked' : ''} onchange="toggleProcessoSelecionado('${p.id}', this.checked)"></td>`}
-        ${_tdLista(p.area)}${_tdLista(p.processo, 'forte')}${_tdLista(p.responsavelArea || p.responsavel)}
+        ${_tdLista(_rotuloAreaSubarea(p.area, p.subarea))}${_tdLista(p.processo, 'forte')}${_tdLista(p.responsavelArea || p.responsavel)}
         <td title="${esc(status + (p.avaliado || p.score > 0 ? ' — score ' + p.score : ' — ainda sem avaliação'))}">${_htmlBadge(_nivelTierProcesso(status), Criticidade.tierCurto(p) + (p.avaliado || p.score > 0 ? ' · ' + p.score : ''))}</td>
         <td>${_htmlPlanosProcesso(p)}</td>
         ${soLeituraProcessos ? _htmlAcoesLinha([{ icone: SVG_VER, titulo: 'Ver detalhes', onclick: `verDetalhesProcesso('${escJs(p.id)}')` }]) : _htmlAcoesLinha([
@@ -4098,6 +4387,7 @@ function _htmlPlanosProcesso(p) {
 
 window.filtrarPorArea = (area) => {
   processosFiltroArea = area;
+  processosFiltroSubarea = '';
   filtrarProcessos();
 };
 
@@ -4109,7 +4399,9 @@ window.filtrarPorTier = (tier) => {
 // Barra única de Processos: Área e Tier moram em variáveis (o Gestor tem a área travada).
 window.filtrarProcessosBarra = () => {
   const area = document.getElementById('filtroArea');
-  processosFiltroArea = area ? area.value : '';
+  const f = _partesFiltroArea(area ? area.value : '');
+  processosFiltroArea = f.area;
+  processosFiltroSubarea = f.subId;
   processosFiltroTier = (document.getElementById('filtroTier') || {}).value || '';
   filtrarProcessos();
 };
@@ -4917,6 +5209,7 @@ window.abrirModalProcesso = (p) => {
   
   document.getElementById('fId').value = p ? p.id : '';
   document.getElementById('fArea').value = p ? p.area : '';
+  _preencherSelectSubarea('fSubarea', p ? p.area : '', p ? p.subarea : null);
   document.getElementById('fProcesso').value = p ? p.processo : '';
   document.getElementById('fDescricao').value = p ? p.descricao : '';
   document.getElementById('fDescricaoFuncional').value = p ? (p.descricaoFuncional || '') : '';
@@ -4940,7 +5233,10 @@ window.abrirModalProcesso = (p) => {
     const areaObj = window.areasDisponiveis.find(a => a.nome === areaSel);
     document.getElementById('fDono').value = areaObj ? (areaObj.responsavel || '') : '';
   };
-  document.getElementById('fArea').onchange = atualizarDono;
+  document.getElementById('fArea').onchange = () => {
+    atualizarDono();
+    _preencherSelectSubarea('fSubarea', document.getElementById('fArea').value, null);
+  };
   atualizarDono();
   
   _atualizarTituloDrawerProcesso(p);
@@ -5270,6 +5566,7 @@ function _coletarFormularioProcesso() {
   const p = {
     id: document.getElementById('fId').value || null,
     area: document.getElementById('fArea').value.trim(),
+    subarea: _lerSelectSubarea('fSubarea'),
     processo: document.getElementById('fProcesso').value.trim(),
     descricao: document.getElementById('fDescricao').value.trim(),
     // dependencia (string) e mantida pro que ainda le so ela (tokenLogic.js,
@@ -7661,12 +7958,12 @@ window._relatorioAreasContexto = null;
 function _gruposRelatorioAreas(areas, processos) {
   const porNome = new Map();
   (areas || []).forEach((a) => {
-    if (a && a.nome) porNome.set(a.nome, { nome: a.nome, responsavel: (a.responsavel || '').trim(), foraDoCadastro: false, processos: [] });
+    if (a && a.nome) porNome.set(a.nome, { nome: a.nome, responsavel: (a.responsavel || '').trim(), foraDoCadastro: false, subareas: a.subareas || [], processos: [] });
   });
   (processos || []).forEach((p) => {
     const nome = (p.area || '').trim();
     if (!nome) return;
-    if (!porNome.has(nome)) porNome.set(nome, { nome, responsavel: '', foraDoCadastro: true, processos: [] });
+    if (!porNome.has(nome)) porNome.set(nome, { nome, responsavel: '', foraDoCadastro: true, subareas: [], processos: [] });
     porNome.get(nome).processos.push(p);
   });
   return [...porNome.values()].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
@@ -7817,6 +8114,19 @@ function _htmlRelatorioProcessosPorArea(grupos, opcoes) {
     const linhas = g.processos
       .map((p) => ({ p, tier: Criticidade.tierDoProcesso(p) }))
       .sort((a, b) => (ORDEM_TIER.indexOf(a.tier) - ORDEM_TIER.indexOf(b.tier)) || (a.p.processo || '').localeCompare(b.p.processo || '', 'pt-BR'));
+    // Subáreas (29/10/2026): com alguma, a tabela se divide -- sem subárea
+    // primeiro, depois cada subárea na ordem do cadastro (removida no fim).
+    const chaveSub = (p) => (p.subarea && p.subarea.id ? String(p.subarea.id) : '');
+    const blocosSub = [];
+    if (linhas.some((l) => chaveSub(l.p))) {
+      const subs = g.subareas || [];
+      const removidas = [...new Map(linhas.filter((l) => chaveSub(l.p) && !subs.some((sa) => String(sa.id) === chaveSub(l.p)))
+        .map((l) => [chaveSub(l.p), { id: chaveSub(l.p), nome: `${l.p.subarea.nome} (subárea removida)`, lider: null }])).values()];
+      [{ id: '', nome: 'Sem subárea', lider: null }, ...subs, ...removidas].forEach((sa) => {
+        const doBloco = linhas.filter((l) => chaveSub(l.p) === String(sa.id));
+        if (doBloco.length) blocosSub.push({ sa, linhas: doBloco });
+      });
+    }
     const contagem = ORDEM_TIER
       .map((t) => ({ t, n: linhas.filter((l) => l.tier === t).length }))
       .filter((x) => x.n);
@@ -7831,13 +8141,15 @@ function _htmlRelatorioProcessosPorArea(grupos, opcoes) {
         <table>
           <thead><tr><th>Processo</th><th>Tier</th><th class="c">Score</th><th>RTO</th><th>RPO</th><th>BIA</th><th>BCP</th><th>DRP</th></tr></thead>
           <tbody>
-            ${linhas.map(({ p, tier }) => `<tr${comDescricoes ? ' class="com-descricoes"' : ''}>
+            ${(blocosSub.length ? blocosSub : [{ sa: null, linhas }]).map((b) => (b.sa
+              ? `<tr class="subarea-titulo"><td colspan="8">${esc(b.sa.nome)}${b.sa.lider ? ` <span class="subarea-lider">· Líder: ${esc(b.sa.lider.nome)}</span>` : ''}</td></tr>`
+              : '') + b.linhas.map(({ p, tier }) => `<tr${comDescricoes ? ' class="com-descricoes"' : ''}>
               <td><strong>${esc(p.processo)}</strong></td>
               <td><span class="tier-badge" style="background:${Criticidade.corDoTier(tier)};">${esc(tier)}</span></td>
               <td class="c">${p.avaliado || p.score > 0 ? esc(String(p.score)) : '–'}</td>
               <td>${vazio(p.rto)}</td><td>${vazio(p.rpo)}</td>
               ${(() => { const st = _statusPlanosDoProcesso(p, Object.assign({ tier }, o.contexto || {})); return `<td>${esc(st.bia.rotulo)}</td><td>${esc(st.bcp.rotulo)}</td><td>${esc(st.drp.rotulo)}</td>`; })()}
-            </tr>${comDescricoes ? linhaDescricoes(p) : ''}`).join('')}
+            </tr>${comDescricoes ? linhaDescricoes(p) : ''}`).join('')).join('')}
           </tbody>
         </table>` : '<p class="vazio">Nenhum processo cadastrado nesta área.</p>'}
     </div>`;
@@ -7861,6 +8173,8 @@ body{font-family:'Segoe UI',Arial,sans-serif;color:#222;background:#f5f6fa;paddi
 .area-bloco{background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.08);padding:20px;margin-bottom:20px;page-break-inside:avoid}
 .area-bloco h2{font-size:13pt;color:#d60014;margin-bottom:6px}
 .aviso-cadastro{font-size:8.5pt;font-weight:400;color:#e65100}
+.subarea-titulo td{background:#fafafa;font-weight:700;color:#444;font-size:9pt;border-top:2px solid #eee}
+.subarea-lider{font-weight:400;color:#888}
 .area-meta{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center;font-size:9.5pt;color:#555;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid #fce8ea}
 .area-meta .resumo{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center}
 table{width:100%;border-collapse:collapse;font-size:9.5pt}
@@ -15609,6 +15923,7 @@ async function riscos() {
     ]).then((r) => { if (r[7]) produtosSoftwareData = r[7]; return r; });
     riscosApetite = (cfgRiscos_ && cfgRiscos_.apetite) || RiscoConsolidado.APETITE_PADRAO;
     riscosData = riscos_; riscosAreasCache = areas_; indicadoresData = inds_; riscosProcessosCache = procs_;
+    window.areasDisponiveis = areas_; // subáreas (select do drawer, rótulo da lista)
     riscosFornecedoresCache = deps_.filter(d => ['Fornecedores', 'Fornecedor'].includes(d.categoria));
     // Responsavel do risco escolhe uma Pessoa -- mesmo catalogo que Areas e
     // Fornecedores ja usam, sem requisicao nova (deps_ ja veio pro fornecedor).
@@ -15626,7 +15941,7 @@ async function riscos() {
   document.querySelector('.loading').style.display = 'none';
   document.getElementById('listaRiscos').style.display = 'block';
 
-  _preencherFiltroLista('filtroRiscoArea', 'Área', riscosAreasCache.map((a) => [a.nome, a.nome]));
+  _preencherFiltroLista('filtroRiscoArea', 'Área', _opcoesFiltroAreaComSubareas(riscosAreasCache.map((a) => a.nome)));
   _preencherFiltroLista('filtroRiscoFornecedor', 'Fornecedor', [['_qualquer_', 'Só riscos de fornecedores'], ...riscosFornecedoresCache.map((f) => [f.id, f.nome])], 'Todos');
   _popularFiltroProdutoRisco();
   // Veio de um número do Dashboard de Riscos: abre já filtrado.
@@ -16192,7 +16507,7 @@ function renderizarRiscos() {
   const isAdmin = Perfis.podeEditarRiscos(window.USER_PERFIS);
 
   const filtroArea = document.getElementById('filtroRiscoArea');
-  if (filtroArea && filtroArea.value) data = data.filter(r => r.area === filtroArea.value);
+  if (filtroArea && filtroArea.value) data = data.filter(r => _casaFiltroArea(filtroArea.value, r.area, r.subarea));
 
   const filtroStatus = document.getElementById('filtroRiscoStatus');
   if (filtroStatus && filtroStatus.value) data = data.filter(r => r.status === filtroStatus.value);
@@ -16261,7 +16576,7 @@ function renderizarRiscos() {
     ? pag.itens.map(r => `<tr style="cursor:pointer;" onclick="editarRisco('${escJs(r.id)}')">
         <td class="num">${r.dataIdentificacao ? new Date(r.dataIdentificacao + 'T00:00:00').toLocaleDateString('pt-BR') : '–'}</td>
         <td class="title forte" title="${esc(_dicaTituloRisco(r))}">${esc(r.titulo)}</td>
-        ${_tdLista(r.area || '–')}${_tdLista(r.responsavel || '–')}
+        ${_tdLista(r.area ? _rotuloAreaSubarea(r.area, r.subarea) : '–')}${_tdLista(r.responsavel || '–')}
         <td title="${esc([r.status, ..._textosSelosRisco(r)].filter(Boolean).join(' · '))}">${_badgeStatusRisco(r.status)}${_selosGovernancaRisco(r)}</td>
         <td class="col-c" title="${esc(`Probabilidade: ${r.probabilidade || '–'} · Impacto: ${r.impacto || '–'}`)}">${_badgeScoreRisco(r)}</td>
         <td class="col-c">${_badgeResidualRisco(r)}</td>
@@ -16429,6 +16744,7 @@ function _htmlDrawerRisco() {
               <div>
                 <label style="${lbl}">Área</label>
                 <select id="rArea" style="${inp}"></select>
+                ${_htmlCampoSubarea('rSubarea', lbl, inp)}
               </div>
               <div>
                 <label style="${lbl}">Processo Relacionado (opcional)</label>
@@ -16745,7 +17061,12 @@ window.abrirDrawerRisco = async (r) => {
     const sel = document.getElementById('rProcesso');
     const op = sel.options[sel.selectedIndex];
     const area = op ? op.dataset.area : '';
-    if (area) document.getElementById('rArea').value = area;
+    if (area) {
+      document.getElementById('rArea').value = area;
+      // A subárea vem junto com a do processo (29/10/2026).
+      const proc = riscosProcessosCache.find((x) => String(x.id) === sel.value);
+      _preencherSelectSubarea('rSubarea', area, proc ? proc.subarea : null);
+    }
     // O BIA ja mediu o quanto dói se este processo parar. Usar isso como ponto
     // de partida do impacto e o que liga os dois modulos — antes o analista
     // digitava do zero, ignorando um numero que o sistema ja tinha.
@@ -16772,6 +17093,8 @@ window.abrirDrawerRisco = async (r) => {
 
   _limparSugestoes();
   document.getElementById('rArea').value = r ? r.area : '';
+  _preencherSelectSubarea('rSubarea', r ? r.area : '', r ? r.subarea : null);
+  document.getElementById('rArea').onchange = () => _preencherSelectSubarea('rSubarea', document.getElementById('rArea').value, null);
   document.getElementById('rProcesso').value = r && r.processoId ? r.processoId : '';
   document.getElementById('rFornecedor').value = r && r.fornecedor ? r.fornecedor : '';
   await _popularProdutoSoftwareRisco(r);
@@ -16922,6 +17245,7 @@ function _coletarFormularioRisco() {
   return {
     id: document.getElementById('rId').value || null,
     area: document.getElementById('rArea').value.trim(),
+    subarea: _lerSelectSubarea('rSubarea'),
     processoId: procSel.value || null,
     processo: procSel.value && procOpt ? procOpt.textContent.split(' — ').slice(1).join(' — ') : null,
     fornecedor: fornSel.value || null,

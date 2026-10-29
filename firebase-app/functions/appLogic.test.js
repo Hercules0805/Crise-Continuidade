@@ -179,6 +179,26 @@ test('gerarPCN calcula score/tier a partir da resposta mais recente e devolve o 
   } finally { restore(); }
 });
 
+test('gerarPCN: area com subarea e o contato do lider; sem subarea, so a area', async () => {
+  const s = seed();
+  s.processos.ti__backup.subarea = { id: 'sa1', nome: 'Infra (nome antigo)' };
+  s.areas = { a1: { nome: 'TI', subareas: [{ id: 'sa1', nome: 'Infraestrutura', lider: { id: 'pe1', nome: 'Ana' } }] } };
+  s.dependencias = { pe1: { categoria: 'Pessoas', nome: 'Ana Souza', telefone: '(85) 9999-0000', email: 'ana@fortestecnologia.com.br' } };
+  const original = global.fetch;
+  let prompt = '';
+  global.fetch = async (_url, req) => {
+    prompt = JSON.parse(req.body).contents[0].parts[0].text;
+    return { ok: true, status: 200, json: async () => ({ candidates: [{ content: { parts: [{ text: '<h1>ok</h1>' }] } }] }) };
+  };
+  try {
+    await WRITE_ACTIONS.gerarPCN(makeDb(s), { id: 'ti__backup' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.match(prompt, /\*\*Área:\*\* TI › Infraestrutura\n/);
+    assert.match(prompt, /\*\*Líder da subárea:\*\* Ana Souza \| Tel: \(85\) 9999-0000 \| Email: ana@fortestecnologia\.com\.br\n\*\*Descrição Funcional:\*\*/);
+    await WRITE_ACTIONS.gerarPCN(makeDb(seed()), { id: 'ti__backup' }, ctx({ geminiApiKey: 'chave-teste' }));
+    assert.match(prompt, /\*\*Área:\*\* TI\n\*\*Descrição Funcional:\*\*/);
+  } finally { global.fetch = original; }
+});
+
 test('gerarPCN recusa sem a chave do Gemini configurada', async () => {
   const db = makeDb(seed());
   await assert.rejects(() => WRITE_ACTIONS.gerarPCN(db, { id: 'ti__backup' }, ctx({ geminiApiKey: '' })), AppError);

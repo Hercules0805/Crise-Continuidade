@@ -29,6 +29,7 @@ function ambiente() {
   const ctx = {
     COLLECTION: { riscos: 'riscos' },
     window: { USER_EMAIL: 'Ana@fortestecnologia.com.br' },
+    Subareas: require('../public/subareas.js'),
     _db: { collection: () => ({
       doc: (id) => ({ set: async (data) => { store[id] = Object.assign(store[id] || {}, data); } }),
       add: async (data) => { const id = 'r' + (++seq); store[id] = data; return { id }; },

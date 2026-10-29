@@ -164,6 +164,8 @@ async function _lerAreas() {
     email: d.email || '',
     telefone: d.telefone || '',
     solucao: d.solucao || '',
+    // Subáreas (29/10/2026): [{id, nome, lider: {id, nome}|null}] -- ver subareas.js.
+    subareas: Subareas.normalizarSubareas(d.subareas),
   }));
 }
 
@@ -340,6 +342,12 @@ function _refsDependencia(lista) {
     .map((x) => ({ id: String(x.id), nome: x.nome || '', categoria: x.categoria || '' }));
 }
 
+/** Subárea da Pessoa {area, id, nome} (a área vai junto: a pessoa pode ter várias), ou null. */
+function _subareaPessoa(x) {
+  const ref = Subareas.normalizarRef(x);
+  return ref && x.area ? { area: String(x.area), ...ref } : null;
+}
+
 async function _lerDependencias() {
   const docs = await _getAll(COLLECTION.dependencias);
   return docs.map((d) => ({
@@ -353,6 +361,9 @@ async function _lerDependencias() {
     // So usado por Pessoas: áreas às quais a pessoa pertence (multi). setor
     // acima segue como a área "principal" (= areas[0]) por compat.
     areas: Array.isArray(d.areas) ? d.areas.filter(Boolean) : [],
+    // So usado por Pessoas (29/10/2026): subárea de lotação {area, id, nome}, uma
+    // só, de uma das áreas da pessoa; null quando não há.
+    subarea: _subareaPessoa(d.subarea),
     // So usado por Pessoas: id da Pessoa que é o líder imediato (organograma).
     liderImediato: d.liderImediato || '',
     // So usado por Pessoas: Tech Lead / Team Lead / Product Owner / Lideranca de Suporte (27/10/2026),
@@ -769,6 +780,8 @@ async function _lerRiscos() {
   return docs.map((d) => ({
     id: d.id,
     area: d.area || '',
+    // Subárea (29/10/2026) {id, nome}, dentro de `area`; risco corporativo não tem.
+    subarea: d.area ? Subareas.normalizarRef(d.subarea) : null,
     processoId: d.processoId || null,
     processo: d.processo || '',
     fornecedor: d.fornecedor || null,
@@ -1599,6 +1612,8 @@ async function _lerProcessos() {
     return {
       id: d.id,
       area: d.area || '',
+      // Subárea (29/10/2026) {id, nome}, dentro de `area`; null quando não há.
+      subarea: Subareas.normalizarRef(d.subarea),
       processo: d.processo || '',
       descricao: d.descricao || '',
       dependencia: d.dependencia || '',
@@ -1764,6 +1779,7 @@ async function _salvarArea(a) {
     // solucao saiu da tela de Áreas, mas continua gravado quando enviado
     // (compat com dados antigos); não é mais editado pela UI.
     solucao: a.solucao || '',
+    subareas: Subareas.normalizarSubareas(a.subareas),
   };
   if (a.id) {
     await _db.collection(COLLECTION.areas).doc(String(a.id)).set(data, { merge: true });
@@ -1831,6 +1847,7 @@ async function _salvarDependencia(d) {
     detalhes: d.detalhes || '',
     setor: d.setor || '',
     areas: Array.isArray(d.areas) ? d.areas.filter(Boolean) : [],
+    subarea: _subareaPessoa(d.subarea),
     // Perfil de Sistema (RBAC) como atributo da Pessoa -- espelho de
     // config_perfis/{email}, gravado por conveniencia de exibicao/edicao na
     // ficha dela. Quem realmente concede poder no sistema continua sendo
@@ -2137,7 +2154,7 @@ async function _salvarIndicadorSeguranca(ind) {
 // sem necessidade de JSON.stringify — diferente de processos, que carrega essa
 // convenção da época em que o backend era uma planilha do Sheets).
 const _CAMPOS_RISCO = [
-  'area', 'processoId', 'processo', 'fornecedor', 'fornecedorNome', 'indicadorId', 'titulo', 'descricao', 'categorias', 'responsavel',
+  'area', 'subarea', 'processoId', 'processo', 'fornecedor', 'fornecedorNome', 'indicadorId', 'titulo', 'descricao', 'categorias', 'responsavel',
   'reportadoPor', 'dataIdentificacao', 'status', 'origem',
   'probabilidade', 'impacto', 'impactoFinanceiro', 'impactoFinanceiroDescricao', 'score', 'prioridade',
   'estrategiaTratamento', 'estrategiaDescricao', 'planoAcao', 'kris', 'impactoFinanceiroComponentes',
@@ -2159,6 +2176,7 @@ async function _salvarRisco(r) {
       data[campo] = r[campo];
     }
   });
+  if ('subarea' in data) data.subarea = data.area === '' ? null : Subareas.normalizarRef(data.subarea);
   data.atualizadoEm = new Date().toISOString();
   // Quem gravou (22/10/2026): o aviso por e-mail separa o que uma pessoa fez
   // (e-mail na hora) do que a automacao fez (resumo diario). `r.automacao`
@@ -2197,7 +2215,7 @@ function _marcarTierManual(dados, anterior) {
 }
 
 const _CAMPOS_PROCESSO = [
-  'area', 'processo', 'descricao', 'dependencia', 'dependenciaItens', 'rto', 'rtoOrigem', 'rpo', 'mtd', 'tier',
+  'area', 'subarea', 'processo', 'descricao', 'dependencia', 'dependenciaItens', 'rto', 'rtoOrigem', 'rpo', 'mtd', 'tier',
   'descricaoFuncional', 'bcpContatos', 'biaHomologacao',
   'bcpPlanoBProvedores', 'bcpSlas', 'bcpPapeisCrise', 'pcnSalvo', 'tierManual', 'tierManualPor', 'tierManualEm',
   'categoriaId', 'criadorId', 'aprovadorId', 'links', 'continuidade',
@@ -2232,6 +2250,7 @@ async function _salvarProcesso(p) {
     }
   });
 
+  if (Object.prototype.hasOwnProperty.call(data, 'subarea')) data.subarea = Subareas.normalizarRef(data.subarea);
   if (Object.prototype.hasOwnProperty.call(data, 'bcpContatos')) data.bcpContatos = _listaContatos(data.bcpContatos);
   if (Object.prototype.hasOwnProperty.call(data, 'links')) data.links = _linksLidos(data.links);
   if (Object.prototype.hasOwnProperty.call(data, 'continuidade')) data.continuidade = data.continuidade !== false;
