@@ -88,7 +88,7 @@ test('Áreas: excluir área com filhas sobe as filhas um nível', async () => {
 test('Cadastro de Processos: filtro em árvore com "com as áreas abaixo"', async () => {
   const { w, $, doc } = await carregar();
   await w.cadastroProcessos();
-  const nomes = () => [...doc.querySelectorAll('#listaCadastroProcessos tbody tr')].map((tr) => tr.children[1].textContent.trim()).sort();
+  const nomes = () => [...doc.querySelectorAll('#listaCadastroProcessos tbody tr')].map((tr) => tr.children[2].textContent.trim()).sort(); // [0] = selecao (lote)
   assert.ok(opcoes($('filtroCadProcArea')).includes('↳ TI (com as áreas abaixo)'));
   $('filtroCadProcArea').value = 'TI';
   w.filtrarCadastroProcessos();
@@ -101,7 +101,7 @@ test('Cadastro de Processos: filtro em árvore com "com as áreas abaixo"', asyn
 test('Gestor de TI (com Infraestrutura abaixo): vê e edita as duas; filtro lista só o escopo', async () => {
   const { w, $, doc } = await carregar({ perfis: ['gestor'], area: 'TI', areas: ['TI', 'Infraestrutura'] });
   await w.cadastroProcessos();
-  const nomes = [...doc.querySelectorAll('#listaCadastroProcessos tbody tr')].map((tr) => tr.children[1].textContent.trim()).sort();
+  const nomes = [...doc.querySelectorAll('#listaCadastroProcessos tbody tr')].map((tr) => tr.children[2].textContent.trim()).sort(); // [0] = selecao (lote)
   assert.deepStrictEqual(nomes, ['Backup', 'Deploy']);
   assert.ok(!$('filtroCadProcArea').disabled);
   assert.deepStrictEqual(opcoes($('filtroCadProcArea')), ['Todas', 'TI', 'TI (com as áreas abaixo)', '↳ Infraestrutura']);

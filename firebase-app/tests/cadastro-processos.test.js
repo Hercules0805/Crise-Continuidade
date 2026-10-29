@@ -285,3 +285,84 @@ test('perfil sem a tela de Processos de Negocio nao ve o atalho', async () => {
   w.renderizarCadastroProcessos();
   assert.strictEqual(linhaDe(doc, 'Folha').querySelector('button[title="Abrir em Continuidade"]'), null);
 });
+
+// Selecao e edicao em lote (29/10/2026): mesmo padrao de Processos de Negocio.
+const marcar = (w, ...ids) => ids.forEach((id) => w.toggleCadastroProcessoSelecionado(id, true));
+const visivel = (doc, id) => doc.getElementById(id).style.display !== 'none';
+
+test('lote: checkbox so para quem edita; "todos" marca a pagina e os botoes mostram a contagem', async () => {
+  const leitor = await carregar(['operador']);
+  assert.strictEqual(leitor.doc.querySelectorAll('.chk-cadproc').length, 0);
+  assert.strictEqual(leitor.doc.getElementById('btnEditarCadProcLote'), null);
+  const { w, doc } = await carregar(['admin']);
+  const chks = doc.querySelectorAll('#listaCadastroProcessos .chk-cadproc');
+  assert.strictEqual(chks.length, 3);
+  assert.match(chks[0].closest('td').getAttribute('onclick'), /stopPropagation/, 'nao abre o drawer');
+  assert.ok(!visivel(doc, 'btnEditarCadProcLote'));
+  w.toggleTodosCadastroProcessos(true);
+  assert.strictEqual(doc.getElementById('btnEditarCadProcLote').textContent, 'Editar selecionados (3)');
+  assert.strictEqual(doc.getElementById('btnExcluirCadProcLote').textContent, 'Excluir selecionados (3)');
+  w.toggleCadastroProcessoSelecionado('ti__folha', false);
+  assert.ok(doc.getElementById('chkTodosCadProc').indeterminate);
+  // Re-render (filtro) mantem a selecao.
+  w.renderizarCadastroProcessos();
+  assert.strictEqual(doc.querySelectorAll('.chk-cadproc:checked').length, 2);
+});
+
+test('lote: so os campos alterados vao no payload; "Ninguém (limpar)" grava vazio', async () => {
+  const { w, doc, gravacoes } = await carregar(['admin']);
+  w.confirm = () => true;
+  marcar(w, 'rh__ponto', 'ti__compras');
+  w.abrirDrawerCadastroProcessoLote();
+  assert.match(doc.getElementById('loteCadProcTitulo').textContent, /Editar 2 processo/);
+  await w.aplicarEdicaoLoteCadastroProcessos();
+  assert.ok(w.__toasts.some((t) => /ao menos um campo/.test(t)));
+  assert.strictEqual(gravacoes.length, 0);
+  assert.deepStrictEqual([...doc.getElementById('loteCadProcCategoria').options].map((o) => o.value), ['__manter__', 'departamental', 'processo-de-negocio'], 'so ativas');
+  doc.getElementById('loteCadProcContinuidade').value = 'sim';
+  doc.getElementById('loteCadProcCriador').value = '';
+  await w.aplicarEdicaoLoteCadastroProcessos();
+  const salvos = gravacoes.filter((g) => g.nome === 'salvarProcesso').map((g) => g.arg);
+  assert.deepStrictEqual(salvos, [{ id: 'rh__ponto', continuidade: true, criadorId: '' }, { id: 'ti__compras', continuidade: true, criadorId: '' }]);
+  assert.ok(!visivel(doc, 'btnEditarCadProcLote'), 'selecao zerada');
+});
+
+test('lote: troca de area pula quem ja tem o mesmo nome no destino', async () => {
+  const OUTRA_FOLHA = { id: 'rh__folha', area: 'RH', processo: 'folha', categoriaId: 'departamental', continuidade: false, links: [] };
+  const { w, doc, gravacoes } = await carregar(['admin'], { getProcessosCadastro: [FOLHA, PONTO, COMPRAS, OUTRA_FOLHA] });
+  const perguntas = [];
+  w.confirm = (m) => { perguntas.push(m); return true; };
+  marcar(w, 'ti__folha', 'ti__compras');
+  w.abrirDrawerCadastroProcessoLote();
+  doc.getElementById('loteCadProcArea').value = 'RH';
+  await w.aplicarEdicaoLoteCadastroProcessos();
+  assert.match(perguntas[0], /Aplicar as alterações a 1 processo[\s\S]*1 fica\(m\) de fora/);
+  assert.deepStrictEqual(gravacoes.filter((g) => g.nome === 'salvarProcesso').map((g) => g.arg), [{ id: 'ti__compras', area: 'RH' }]);
+  assert.ok(w.__toasts.some((t) => /Folha \(já existe em RH\)/.test(t)));
+});
+
+test('lote: tirar de Continuidade processo com BIA pede confirmacao extra; recusar nao grava', async () => {
+  const { w, doc, gravacoes } = await carregar(['admin']);
+  const perguntas = [];
+  w.confirm = (m) => { perguntas.push(m); return false; };
+  marcar(w, 'ti__folha', 'rh__ponto');
+  w.abrirDrawerCadastroProcessoLote();
+  doc.getElementById('loteCadProcContinuidade').value = 'nao';
+  await w.aplicarEdicaoLoteCadastroProcessos();
+  assert.match(perguntas[0], /1 processo\(s\) com BIA\/PCN vão sair de Continuidade/);
+  assert.strictEqual(gravacoes.length, 0);
+});
+
+test('excluir selecionados: pula quem tem dados de Continuidade e exclui os demais', async () => {
+  const { w, gravacoes } = await carregar(['admin']);
+  const perguntas = [];
+  w.confirm = (m) => { perguntas.push(m); return true; };
+  marcar(w, 'ti__folha');
+  await w.excluirCadastroProcessosSelecionados();
+  assert.ok(w.__toasts.some((t) => /têm dados de Continuidade/.test(t)));
+  assert.strictEqual(gravacoes.length, 0);
+  marcar(w, 'rh__ponto', 'ti__compras');
+  await w.excluirCadastroProcessosSelecionados();
+  assert.match(perguntas[0], /Excluir 2 processo\(s\)\?[\s\S]*1 com dados de Continuidade[\s\S]*Folha \(TI\)/);
+  assert.deepStrictEqual(gravacoes.map((g) => [g.nome, g.arg]), [['excluirProcesso', 'rh__ponto'], ['excluirProcesso', 'ti__compras']]);
+});

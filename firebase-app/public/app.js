@@ -889,20 +889,27 @@ function _renderGradeLista(o) {
   data = o.ordenacao.aplicar(data, o.comparadores);
   _atualizarBarraLista(o.contadorId, data.length, o.contador);
   const pag = o.paginacao.aplicar(data);
-  const largura = o.colunas.reduce((s, c) => s + c.w, 0) + 92;
+  // Seleção (edição em lote, 29/10/2026): o.selecao = { conjunto: Set de ids,
+  // classe, fnToggle, fnTodos, idTodos }. "Todos" cobre a página visível; o
+  // clique no checkbox não abre o drawer da linha.
+  const sel = o.selecao;
+  const marcados = sel ? pag.itens.filter((x) => sel.conjunto.has(String(x.id))).length : 0;
+  const tdSel = (x) => `<td class="col-c" onclick="event.stopPropagation();"><input type="checkbox" class="${sel.classe}" data-id="${esc(x.id)}" ${sel.conjunto.has(String(x.id)) ? 'checked' : ''} onchange="${sel.fnToggle}('${escJs(x.id)}', this.checked)" aria-label="Selecionar"></td>`;
+  const largura = o.colunas.reduce((s, c) => s + c.w, 0) + 92 + (sel ? 40 : 0);
   alvo.innerHTML = `
     <div class="data-table data-table--lista">
       <table style="min-width:${largura}px;">
-        <colgroup>${o.colunas.map((c) => `<col style="width:${c.w}px">`).join('')}<col style="width:92px"></colgroup>
-        <thead><tr>${o.colunas.map((c) => c.ordem
+        <colgroup>${sel ? '<col style="width:40px">' : ''}${o.colunas.map((c) => `<col style="width:${c.w}px">`).join('')}<col style="width:92px"></colgroup>
+        <thead><tr>${sel ? `<th class="col-c"><input type="checkbox" id="${sel.idTodos}" ${pag.itens.length && marcados === pag.itens.length ? 'checked' : ''} onchange="${sel.fnTodos}(this.checked)" title="Selecionar todos desta página" aria-label="Selecionar todos desta página"></th>` : ''}${o.colunas.map((c) => c.ordem
           ? `<th onclick="${o.fnOrdenar}('${c.ordem}')" style="cursor:pointer;">${c.rotulo} <span id="${o.prefixoSeta}${c.ordem}"></span></th>`
           : `<th>${c.rotulo}</th>`).join('')}<th class="col-acoes">Ações</th></tr></thead>
-        <tbody>${pag.itens.length ? pag.itens.map(o.linha).join('')
-          : `<tr><td colspan="${o.colunas.length + 1}" class="vazio">Nada encontrado com essa busca.</td></tr>`}</tbody>
+        <tbody>${pag.itens.length ? pag.itens.map((x) => (sel ? o.linha(x).replace(/<tr([^>]*)>/, (m) => m + tdSel(x)) : o.linha(x))).join('')
+          : `<tr><td colspan="${o.colunas.length + 1 + (sel ? 1 : 0)}" class="vazio">Nada encontrado com essa busca.</td></tr>`}</tbody>
       </table>
     </div>
     ${_htmlPaginacao(pag, o.fnPagina)}
     ${o.depois || ''}`;
+  if (sel) { const t = document.getElementById(sel.idTodos); if (t) t.indeterminate = marcados > 0 && marcados < pag.itens.length; }
   o.ordenacao.atualizarSetas(o.prefixoSeta, o.colunas.filter((c) => c.ordem).map((c) => c.ordem));
 }
 const _badgeAtivo = (ativo, fem) => ativo ? `<span class="badge badge-green">${fem ? 'Ativa' : 'Ativo'}</span>` : `<span class="badge badge-gray">${fem ? 'Inativa' : 'Inativo'}</span>`;
@@ -3451,6 +3458,8 @@ window.excluirCategoriaProcesso = async (id) => {
 // categorias_processo (por id, 29/10/2026).
 // ============================================================
 let cadastroProcessosData = [];
+// Edição em lote (29/10/2026): ids marcados na grade (zera a cada carga da tela).
+let cadastroProcessosSelecionados = new Set();
 let cadastroProcessosOrdenacao = criarOrdenacao('area', 'asc');
 const cadastroProcessosPaginacao = criarPaginacao(20);
 window.filtrarCadastroProcessos = () => { cadastroProcessosPaginacao.reiniciar(); renderizarCadastroProcessos(); };
@@ -3484,6 +3493,8 @@ async function cadastroProcessos() {
   app.innerHTML = `
     ${_htmlCabecalhoLista({ titulo: 'Cadastro de Processos', sub: 'Todos os processos mapeados nas áreas; os marcados "Avaliar em Continuidade" seguem para BIA, PCN e DRP.',
       primario: pode ? { rotulo: '+ Novo processo', onclick: 'abrirDrawerCadastroProcesso()', id: 'btnNovoCadastroProcesso' } : null,
+      extra: pode ? `<button class="btn btn-ghost" onclick="abrirDrawerCadastroProcessoLote()" id="btnEditarCadProcLote" style="display:none;">Editar selecionados</button>
+        <button class="btn btn-ghost" onclick="excluirCadastroProcessosSelecionados()" id="btnExcluirCadProcLote" style="display:none;color:#c62828;border-color:#c62828;">Excluir selecionados</button>` : '',
       maisAcoes: [_seVeTela('processos-relatorios', 'x') ? { rotulo: 'Relatórios de Processos', onclick: "location.hash='#processos-relatorios'" } : null] })}
     ${_htmlBarraLista({ busca: { id: 'buscaCadastroProcesso', placeholder: 'Buscar processo…' }, aoMudar: 'filtrarCadastroProcessos', contadorId: 'cadastroProcessosContador',
       filtros: [
@@ -3495,7 +3506,9 @@ async function cadastroProcessos() {
       ] })}
     <div class="loading" id="loadingCadastroProcessos">⏳ Carregando...</div>
     <div id="listaCadastroProcessos"></div>
-    ${_htmlDrawerCadastroProcesso()}`;
+    ${_htmlDrawerCadastroProcesso()}
+    ${pode ? _htmlDrawerCadastroProcessoLote() : ''}`;
+  cadastroProcessosSelecionados = new Set();
 
   let areas;
   try {
@@ -3588,6 +3601,7 @@ function renderizarCadastroProcessos() {
           pode ? _acaoExcluir(`excluirCadastroProcesso('${escJs(p.id)}')`) : null,
         ])}
       </tr>`,
+    selecao: pode ? { conjunto: cadastroProcessosSelecionados, classe: 'chk-cadproc', fnToggle: 'toggleCadastroProcessoSelecionado', fnTodos: 'toggleTodosCadastroProcessos', idTodos: 'chkTodosCadProc' } : null,
     paginacao: cadastroProcessosPaginacao,
     fnPagina: 'irParaPaginaCadastroProcessos',
     fnOrdenar: 'ordenarCadastroProcessos',
@@ -3597,6 +3611,7 @@ function renderizarCadastroProcessos() {
     vazio: 'Nenhum processo cadastrado ainda.',
     vazioDetalhe: pode ? 'Use "+ Novo processo" para cadastrar o primeiro.' : '',
   });
+  _sincronizarSelecaoCadastroProcessos();
 }
 
 function _htmlDrawerCadastroProcesso() {
@@ -3698,10 +3713,10 @@ function _popularSelectCategoriaProcesso(atual) {
 }
 
 /** Finalidade, critérios e exemplos da categoria escolhida, para ajudar a classificar. */
-function _renderAjudaCategoriaProcesso() {
-  const caixa = document.getElementById('cadProcCategoriaAjuda');
+function _renderAjudaCategoriaProcesso(idSelect, idCaixa) {
+  const caixa = document.getElementById(typeof idCaixa === 'string' ? idCaixa : 'cadProcCategoriaAjuda');
   if (!caixa) return;
-  const c = _categoriaProcessoPorId(document.getElementById('cadProcCategoria').value);
+  const c = _categoriaProcessoPorId(document.getElementById(typeof idSelect === 'string' ? idSelect : 'cadProcCategoria').value);
   const partes = c ? [['Finalidade', c.finalidade], ['Critérios de identificação', c.criteriosIdentificacao], ['Exemplos', c.exemplos]].filter(([, t]) => t) : [];
   caixa.style.display = partes.length ? '' : 'none';
   caixa.innerHTML = partes.map(([rot, t]) => `<div style="margin-bottom:6px;"><b style="color:#333;">${rot}</b><div style="white-space:pre-line;">${esc(t)}</div></div>`).join('');
@@ -3840,6 +3855,211 @@ window.salvarCadastroProcesso = async () => {
     showToast('✅ Salvo!', '#2e7d32');
   });
   return ok;
+};
+
+// ============================================================
+// SELEÇÃO E EDIÇÃO EM LOTE DO CADASTRO DE PROCESSOS (29/10/2026) -- mesmo
+// padrão de Processos de Negócio/Vulnerabilidades: cada campo começa em
+// "Não alterar" e só o que mudou vai no payload. Excluir em lote pula quem
+// tem dados de Continuidade (BIA, PCN, revisões): esses saem um por um.
+// ============================================================
+const _MANTER = '__manter__';
+
+function _htmlDrawerCadastroProcessoLote() {
+  const lbl = 'display:block;font-size:0.78em;font-weight:700;color:#444;text-transform:uppercase;letter-spacing:0.4px;margin-bottom:5px;';
+  const inp = 'width:100%;padding:9px 12px;border:1.5px solid #e0e0e0;border-radius:7px;font-size:0.93em;box-sizing:border-box;';
+  return `
+    <div class="drawer-overlay" id="drawerOverlayCadastroProcessoLote" onclick="fecharDrawerCadastroProcessoLote()"></div>
+    <div class="drawer" id="drawerCadastroProcessoLote">
+      <div class="drawer-header">
+        <h3 id="loteCadProcTitulo">Editar processos selecionados</h3>
+        <button onclick="fecharDrawerCadastroProcessoLote()" aria-label="Fechar" style="background:none;border:none;font-size:1.4em;cursor:pointer;color:#999;line-height:1;">&times;</button>
+      </div>
+      <div class="drawer-body">
+        <p style="font-size:0.82em;color:#888;margin-bottom:16px;">Só os campos alterados abaixo são aplicados aos processos selecionados — deixe em "Não alterar" o que não deve mudar.</p>
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}" for="loteCadProcContinuidade">Avaliar em Continuidade</label>
+          <select id="loteCadProcContinuidade" style="${inp}">
+            <option value="${_MANTER}">— Não alterar —</option><option value="sim">Sim</option><option value="nao">Não</option>
+          </select>
+        </div>
+        <div style="margin-bottom:16px;">
+          <label style="${lbl}" for="loteCadProcCategoria">Categoria</label>
+          <select id="loteCadProcCategoria" style="${inp}"></select>
+          <div id="loteCadProcCategoriaAjuda" style="display:none;background:#fafafa;border:1px solid #eee;border-radius:8px;padding:10px 14px;margin-top:8px;font-size:0.82em;color:#555;"></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
+          <div>
+            <label style="${lbl}" for="loteCadProcCriador">Criador</label>
+            <select id="loteCadProcCriador" data-busca style="${inp}"></select>
+          </div>
+          <div>
+            <label style="${lbl}" for="loteCadProcAprovador">Aprovador</label>
+            <select id="loteCadProcAprovador" data-busca style="${inp}"></select>
+          </div>
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="${lbl}" for="loteCadProcArea">Área</label>
+          <select id="loteCadProcArea" data-busca style="${inp}"></select>
+          <span style="font-size:0.75em;color:#888;display:block;margin-top:4px;">Processo com o mesmo nome já na área de destino fica de fora.</span>
+        </div>
+      </div>
+      <div class="drawer-footer">
+        <button class="btn btn-ghost" onclick="fecharDrawerCadastroProcessoLote()">Cancelar</button>
+        <button class="btn btn-primary" id="btnAplicarCadProcLote" onclick="aplicarEdicaoLoteCadastroProcessos()">Aplicar</button>
+      </div>
+    </div>`;
+}
+
+function _sincronizarSelecaoCadastroProcessos() {
+  // Some da seleção o que não existe mais (excluído/recarregado); o que só
+  // está escondido por filtro continua marcado.
+  const ids = new Set(cadastroProcessosData.map((p) => String(p.id)));
+  [...cadastroProcessosSelecionados].forEach((id) => { if (!ids.has(id)) cadastroProcessosSelecionados.delete(id); });
+  const chks = [...document.querySelectorAll('#listaCadastroProcessos .chk-cadproc')];
+  const todos = document.getElementById('chkTodosCadProc');
+  if (todos) {
+    const marcados = chks.filter((el) => cadastroProcessosSelecionados.has(el.dataset.id)).length;
+    todos.checked = chks.length > 0 && marcados === chks.length;
+    todos.indeterminate = marcados > 0 && marcados < chks.length;
+  }
+  const n = cadastroProcessosSelecionados.size;
+  [['btnEditarCadProcLote', 'Editar selecionados'], ['btnExcluirCadProcLote', 'Excluir selecionados']].forEach(([id, rotulo]) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.style.display = n > 0 ? 'inline-block' : 'none';
+    btn.textContent = n > 0 ? `${rotulo} (${n})` : rotulo;
+  });
+}
+
+window.toggleCadastroProcessoSelecionado = (id, checked) => {
+  if (checked) cadastroProcessosSelecionados.add(String(id)); else cadastroProcessosSelecionados.delete(String(id));
+  _sincronizarSelecaoCadastroProcessos();
+};
+
+window.toggleTodosCadastroProcessos = (checked) => {
+  document.querySelectorAll('#listaCadastroProcessos .chk-cadproc').forEach((el) => {
+    if (checked) cadastroProcessosSelecionados.add(el.dataset.id); else cadastroProcessosSelecionados.delete(el.dataset.id);
+    el.checked = checked;
+  });
+  _sincronizarSelecaoCadastroProcessos();
+};
+
+const _cadastroProcessosSelecionadosLista = () => cadastroProcessosData.filter((p) => cadastroProcessosSelecionados.has(String(p.id)));
+
+window.abrirDrawerCadastroProcessoLote = () => {
+  const n = cadastroProcessosSelecionados.size;
+  if (!n) return;
+  document.getElementById('loteCadProcTitulo').textContent = `Editar ${n} processo(s) selecionado(s)`;
+  document.getElementById('loteCadProcContinuidade').value = _MANTER;
+  const manter = `<option value="${_MANTER}">— Não alterar —</option>`;
+  const selCat = document.getElementById('loteCadProcCategoria');
+  selCat.innerHTML = manter + categoriasProcessoData.filter((c) => c.ativo).map((c) => `<option value="${esc(c.id)}">${esc(c.nome)}</option>`).join('');
+  selCat.value = _MANTER;
+  selCat.onchange = () => _renderAjudaCategoriaProcesso('loteCadProcCategoria', 'loteCadProcCategoriaAjuda');
+  _renderAjudaCategoriaProcesso('loteCadProcCategoria', 'loteCadProcCategoriaAjuda');
+  ['loteCadProcCriador', 'loteCadProcAprovador'].forEach((id) => {
+    _popularSelectPessoaProcesso(id, '', '');
+    const sel = document.getElementById(id);
+    // "Ninguém" do select individual vira "limpar" aqui.
+    sel.innerHTML = manter + sel.innerHTML.replace('<option value="">Ninguém</option>', '<option value="">Ninguém (limpar)</option>');
+    sel.value = _MANTER;
+  });
+  const nomes = _limitadoAArea() ? _minhasAreas()
+    : (window.areasDisponiveis || []).map((a) => a.nome).filter(Boolean).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  const selArea = document.getElementById('loteCadProcArea');
+  selArea.innerHTML = manter + nomes.map((nome) => `<option value="${esc(nome)}">${esc(nome)}</option>`).join('');
+  selArea.value = _MANTER;
+  document.getElementById('drawerCadastroProcessoLote').classList.add('open');
+  document.getElementById('drawerOverlayCadastroProcessoLote').classList.add('open');
+};
+
+window.fecharDrawerCadastroProcessoLote = () => {
+  document.getElementById('drawerCadastroProcessoLote').classList.remove('open');
+  document.getElementById('drawerOverlayCadastroProcessoLote').classList.remove('open');
+};
+
+window.aplicarEdicaoLoteCadastroProcessos = async () => {
+  const selecionados = _cadastroProcessosSelecionadosLista();
+  if (!selecionados.length) return;
+  const val = (id) => document.getElementById(id).value;
+  const campos = {};
+  if (val('loteCadProcContinuidade') !== _MANTER) campos.continuidade = val('loteCadProcContinuidade') === 'sim';
+  if (val('loteCadProcCategoria') !== _MANTER) campos.categoriaId = val('loteCadProcCategoria');
+  if (val('loteCadProcCriador') !== _MANTER) campos.criadorId = val('loteCadProcCriador');
+  if (val('loteCadProcAprovador') !== _MANTER) campos.aprovadorId = val('loteCadProcAprovador');
+  if (val('loteCadProcArea') !== _MANTER) campos.area = val('loteCadProcArea');
+  if (!Object.keys(campos).length) return showToast('Escolha ao menos um campo para alterar.', '#e65100');
+
+  // Troca de área: o mesmo nome já na área de destino fica de fora (a mesma
+  // regra do salvar individual).
+  const chave = (s) => String(s || '').trim().toLowerCase();
+  const pulados = [];
+  const alvos = selecionados.filter((p) => {
+    if (campos.area === undefined || p.area === campos.area) return true;
+    const conflito = cadastroProcessosData.some((o) => String(o.id) !== String(p.id) && o.area === campos.area && chave(o.processo) === chave(p.processo));
+    if (conflito) pulados.push(`${p.processo} (já existe em ${campos.area})`);
+    return !conflito;
+  });
+  if (!alvos.length) return showToast(`⚠️ Nada a aplicar. ${pulados.join('; ')}`, '#e65100');
+
+  const saindo = campos.continuidade === false ? alvos.filter((p) => p.continuidade !== false && _temDadosDeContinuidade(p)) : [];
+  if (saindo.length && !await confirmarAcao(`${saindo.length} processo(s) com BIA/PCN vão sair de Continuidade.\n\nOs dados de continuidade são mantidos; eles só saem das telas de Continuidade até serem marcados de novo.`, { rotulo: 'Tirar de Continuidade' })) return;
+  const avisoPulados = pulados.length ? `\n\n${pulados.length} fica(m) de fora: mesmo nome já na área de destino.` : '';
+  if (!await confirmarAcao(`Aplicar as alterações a ${alvos.length} processo(s)?${avisoPulados}`)) return;
+
+  await comBotaoCarregando('btnAplicarCadProcLote', async () => {
+    let sucesso = 0;
+    const erros = [];
+    for (const p of alvos) {
+      const payload = { id: p.id, ...campos };
+      if (campos.area === p.area) delete payload.area;
+      try {
+        await API.salvarProcesso(payload);
+        sucesso++;
+      } catch (e) {
+        erros.push(`${p.processo}: ${_mensagemErro(e, 'erro desconhecido')}`);
+      }
+    }
+    API.invalidate('getProcessos', 'getProcessosPorArea');
+    try { cadastroProcessosData = await API.getProcessosCadastro(); } catch (e) { /* mantém a lista anterior */ }
+    cadastroProcessosSelecionados.clear();
+    fecharDrawerCadastroProcessoLote();
+    renderizarCadastroProcessos();
+    const problemas = [...erros, ...pulados];
+    if (!problemas.length) showToast(`✅ ${sucesso} processo(s) atualizado(s)!`, '#2e7d32');
+    else showToast(`⚠️ ${sucesso} de ${selecionados.length} atualizado(s). Fora: ${problemas.join('; ')}`, '#e65100');
+  });
+};
+
+window.excluirCadastroProcessosSelecionados = async () => {
+  const selecionados = _cadastroProcessosSelecionadosLista();
+  if (!selecionados.length) return;
+  const ficam = selecionados.filter(_temDadosDeContinuidade);
+  const vao = selecionados.filter((p) => !_temDadosDeContinuidade(p));
+  const listaFicam = ficam.map((p) => `• ${p.processo} (${p.area})`).join('\n');
+  if (!vao.length) {
+    return showToast(`⚠️ Os ${ficam.length} selecionado(s) têm dados de Continuidade (BIA/PCN) — exclua um por um.`, '#e65100');
+  }
+  const aviso = ficam.length ? `\n\n${ficam.length} com dados de Continuidade (BIA/PCN) ficam — exclua um por um:\n${listaFicam}` : '';
+  const emCont = vao.filter((p) => p.continuidade !== false).length;
+  const avisoCont = emCont ? `\n\n${emCont} deles também sai(em) de Continuidade.` : '';
+  if (!await confirmarAcao(`Excluir ${vao.length} processo(s)?${avisoCont}${aviso}`, { rotulo: 'Excluir' })) return;
+  let sucesso = 0;
+  const erros = [];
+  for (const p of vao) {
+    try {
+      await API.excluirProcesso(p.id);
+      sucesso++;
+    } catch (e) {
+      erros.push(`${p.processo}: ${_mensagemErro(e, 'erro desconhecido')}`);
+    }
+  }
+  API.invalidate('getProcessos', 'getProcessosPorArea');
+  try { cadastroProcessosData = await API.getProcessosCadastro(); } catch (e) { /* mantém a lista anterior */ }
+  renderizarCadastroProcessos();
+  if (!erros.length) showToast(`🗑️ ${sucesso} processo(s) excluído(s).${ficam.length ? ` ${ficam.length} ficaram (dados de Continuidade).` : ''}`, '#555');
+  else showToast(`⚠️ ${sucesso} de ${vao.length} excluído(s). Erro em: ${erros.join('; ')}`, '#e65100');
 };
 
 window.excluirCadastroProcesso = async (id) => {
