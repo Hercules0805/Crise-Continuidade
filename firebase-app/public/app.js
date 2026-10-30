@@ -3016,12 +3016,21 @@ async function processosDashboard() {
   const catsComProcesso = r.porCategoria.filter((c) => c.n || c.ativo);
   const colunasCat = categorias.filter((c) => c.ativo);
   const nomePessoa = (email) => esc(String(email || '').split('@')[0] || '–');
+  // Processos críticos (30/10/2026): Tier 1 dos que estão em Continuidade, pela
+  // mesma regra de Processos de Negócio (score do BIA ou a pré-avaliação).
+  const criticos = processos.filter((p) => ProcessosIndicadores.emContinuidade(p) && Criticidade.tierDoProcesso(p) === Criticidade.TIER.T1).length;
+  const tituloCriticos = 'Tier 1 (Crítico) pelo BIA ou, sem BIA, pela pré-avaliação';
+  const cardCriticos = _seVeTela('processos', 'x')
+    ? _htmlMetricCardFiltro({ label: 'Processos críticos (Tier 1)', value: criticos, cor: criticos ? '#c62828' : undefined, ativo: false,
+      titulo: `${tituloCriticos} — abrir em Processos de Negócio`, onclick: `_abrirListaFiltrada('processos', ${esc(JSON.stringify({ filtroTier: 'Tier 1' }))})` })
+    : `<div title="${esc(tituloCriticos)}">${_htmlMetricCard({ label: 'Processos críticos (Tier 1)', value: criticos, level: criticos ? 'critical' : null })}</div>`;
 
   document.getElementById('processosPainel').innerHTML = !r.total ? _htmlVazio('Nenhum processo cadastrado ainda.', 'Os indicadores aparecem quando houver processos no Cadastro de Processos.') : `
     <div class="painel-secao">Totais</div>
     <div class="painel-metricas painel-metricas--auto metricas-filtro">
       ${cardFiltro('Processos cadastrados', r.total, {})}
       ${cardFiltro(`Em Continuidade (${r.pctContinuidade}%)`, r.emContinuidade, { filtroCadProcContinuidade: 'sim' })}
+      ${cardCriticos}
       ${catsComProcesso.map((c) => cardFiltro(c.nome, c.n, { filtroCadProcCategoria: c.id })).join('')}
     </div>
     <div class="painel-card" style="margin-top:16px;">
@@ -4711,6 +4720,15 @@ async function processos() {
   window.processosData = processosEnriquecidos;
   window.areasDisponiveis = areas;
   processosSelecionados = new Set();
+  // Vindo de um Dashboard (ex.: "Processos críticos (Tier 1)"): Área e Tier
+  // moram em variáveis, então copia o que o filtro inicial pôs nos selects.
+  if (window._filtroInicialLista && window._filtroInicialLista.tela === 'processos') {
+    _aplicarFiltroInicialLista('processos');
+    const f = _partesFiltroArea((document.getElementById('filtroArea') || {}).value || '');
+    processosFiltroArea = f.area;
+    processosFiltroAbaixo = f.abaixo;
+    processosFiltroTier = (document.getElementById('filtroTier') || {}).value || '';
+  }
   renderizarProcessos();
 }
 

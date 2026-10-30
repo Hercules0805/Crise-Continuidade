@@ -134,3 +134,32 @@ test('Relatorios: CSV com BOM, ";" e aspas; pendencias so os incompletos; por pe
   const pes = w._csvRelatorioProcessos('pessoas', procs, ctx);
   assert.deepStrictEqual(JSON.parse(JSON.stringify(pes.linhas.slice(0, 3))), [['Ana', 'Criador', 'Infra', 'Backup'], ['Ana', 'Criador', 'TI', 'Folha; "TI"'], ['Bia', 'Aprovador', 'TI', 'Folha; "TI"']]);
 });
+
+test('Dashboard: Processos criticos (Tier 1) conta so os de Continuidade e abre Processos de Negocio filtrado', async () => {
+  const procs = [
+    { id: 'c1', area: 'TI', processo: 'Licenca', categoriaId: 'processo-de-negocio', continuidade: true, tierManual: 'Tier 1 (Crítico)' },
+    { id: 'c2', area: 'TI', processo: 'Nuvem', categoriaId: 'processo-de-negocio', continuidade: true, avaliado: true, score: 99, tierManual: 'Tier 3 (Suporte)' },
+    { id: 'c3', area: 'TI', processo: 'Fora', categoriaId: 'departamental', continuidade: false, tierManual: 'Tier 1 (Crítico)' },
+    { id: 'c4', area: 'TI', processo: 'Pendente', categoriaId: 'departamental', continuidade: true },
+  ];
+  const { w, doc } = await carregar(['admin'], { getProcessosCadastro: procs });
+  await w.processosDashboard();
+  const card = [...doc.querySelectorAll('#processosPainel .bia-metric--filtro')].find((b) => /Processos críticos/.test(b.textContent));
+  const esperado = w.Criticidade.tierDoProcesso(procs[1]) === w.Criticidade.TIER.T1 ? 2 : 1;
+  assert.strictEqual(card.textContent.replace(/\s+/g, ' ').trim(), `Processos críticos (Tier 1) ${esperado}`);
+  assert.match(card.getAttribute('onclick'), /_abrirListaFiltrada\('processos'.*filtroTier.*Tier 1/);
+});
+
+test('Processos de Negocio abre com o filtro de Tier vindo do Dashboard', async () => {
+  const procs = [
+    { id: 'c1', area: 'TI', processo: 'Licenca', categoriaId: 'processo-de-negocio', continuidade: true, tierManual: 'Tier 1 (Crítico)' },
+    { id: 'c4', area: 'TI', processo: 'Pendente', categoriaId: 'departamental', continuidade: true },
+  ];
+  const { w, doc } = await carregar(['admin'], { getProcessos: procs, getProcessosCadastro: procs });
+  w._filtroInicialLista = { tela: 'processos', filtros: { filtroTier: 'Tier 1' } };
+  await w.processos();
+  assert.strictEqual(doc.getElementById('filtroTier').value, 'Tier 1');
+  const nomes = [...doc.querySelectorAll('#rows tr')].map((tr) => tr.textContent);
+  assert.strictEqual(nomes.length, 1);
+  assert.match(nomes[0], /Licenca/);
+});
